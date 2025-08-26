@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>MarooWell 지도</title>
+  <style>
+    :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto}
+    header{display:flex;gap:12px;align-items:center;padding:12px 16px;height:var(--headerH);
+      background:#161a22;border-bottom:1px solid #232838;position:sticky;top:0;z-index:5}
+    header h1{font-size:16px;margin:0}
+    #app{display:grid;grid-template-columns:360px 1fr;min-height:calc(100dvh - var(--headerH))}
+    #panel{padding:14px;border-right:1px solid #232838;background:#10141b}
+    #mapWrap{position:relative}
+    #map{position:absolute;inset:0}
+    label{display:block;margin:10px 0 6px;color:#9aa6b2}
+    input,textarea,button{font:inherit}
+    textarea{width:100%;background:#0c0f14;border:1px solid #2a3142;color:var(--text);padding:10px;border-radius:10px;min-height:90px}
+    button{background:#1b2230;border:1px solid #2a3142;color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer}
+    button:hover{border-color:#3a4561}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .muted{color:#8b95a7;font-size:12px}
+    .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+    .chip{border:1px solid #2a3142;border-radius:999px;padding:6px 10px;background:#0c0f14;display:inline-flex;align-items:center;gap:6px}
+    .chip button{border:none;background:transparent;color:#94a3b8;cursor:pointer}
+    #gate{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:99}
+    #gateCard{background:#0e131a;border:1px solid #2a3142;border-radius:16px;padding:22px;width:360px}
+    #gateCard h2{margin:0 0 12px}
+    .ok{color:#9FE870} .err{color:#ff7b7b}
+    @media (max-width: 900px){
+      #app{grid-template-columns:1fr}
+      #panel{order:2}
+    }
+  </style>
+
+  <!-- Daum 우편번호 -->
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <!-- Kakao 지도 SDK: 제공하신 JS 키 그대로 사용 -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
+</head>
+<body>
+  <header><h1>MarooWell 지도</h1><span class="muted">다중 우편번호 권역 표시 · 카카오지도 + GeoJSON</span></header>
+
+  <!-- 임시 로그인(접속코드: maroowell) -->
+  <div id="gate">
+    <div id="gateCard">
+      <h2>접속 코드</h2>
+      <p class="muted">임시 보호용. 배포 전 정식 인증으로 교체 권장</p>
+      <label>Access Code</label>
+      <input id="code" type="password" placeholder="예: maroowell" />
+      <div class="row" style="margin-top:12px">
+        <button id="enterBtn">입장</button>
+        <span id="gateMsg" class="muted"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <aside id="panel">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="muted">우편번호 여러 개 동시 조회</div>
+          <div class="muted">쉼표/공백/줄바꿈 모두 가능</div>
+        </div>
+        <button id="openAddr">주소검색 추가</button>
+      </div>
+
+      <label style="margin-top:12px">우편번호 목록</label>
+      <textarea id="zipInput" placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button id="addBtn">추가</button>
+        <button id="clearBtn">초기화</button>
+        <button id="searchBtn">지도표시</button>
+      </div>
+      <div class="list" id="zipList"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="shareBtn">공유링크 복사</button>
+        <button id="fitBtn">영역맞춤</button>
+      </div>
+      <p class="muted" style="margin-top:10px">
+        • 지도에 표시되려면 <code>/geojson/우편번호.json</code> 파일이 있어야 합니다. (예: <code>07420.json</code>)<br>
+        • 없는 우편번호는 미탑재로 안내합니다.
+      </p>
+    </aside>
+    <div id="mapWrap"><div id="map"></div></div>
+  </div>
+
+  <script>
+    const state = { map:null, polygons:new Map(), selectedZips:new Set(),
+      colors:['#6aa9ff','#9FE870','#fbbf24','#fb7185','#22d3ee','#c084fc','#f472b6','#60a5fa','#34d399','#f59e0b'] };
+    const $ = s => document.querySelector(s);
+    const parseZips = raw => [...new Set((raw||"").match(/\d{5}/g)||[])];
+
+    function createMap(){
+      if (!(window.kakao && kakao.maps)) { alert('카카오 SDK 미로딩'); return; }
+      state.map = new kakao.maps.Map(document.getElementById('map'), {
+        center: new kakao.maps.LatLng(37.5665,126.9780), level: 8
+      });
+      window.addEventListener('resize', ()=>{ const c = state.map.getCenter(); state.map.relayout(); state.map.setCenter(c); });
+    }
+
+    function gateBind(){
+      $('#enterBtn').onclick = () => {
+        const ok = ($('#code').value.trim()==='maroowell');
+        $('#gateMsg').textContent = ok ? 'OK' : '코드가 올바르지 않습니다.';
+        $('#gateMsg').className = ok ? 'ok' : 'err';
+        if (ok){ $('#gate').style.display='none'; $('#app').style.display='grid'; createMap(); bindUI(); }
+      };
+    }
+
+    function bindUI(){
+      $('#addBtn').onclick = () => { parseZips($('#zipInput').value).forEach(z=>state.selectedZips.add(z)); $('#zipInput').value=''; renderZipChips(); };
+      $('#clearBtn').onclick = () => { state.selectedZips.clear(); clearPolygons(); renderZipChips(); };
+      $('#searchBtn').onclick = async () => { await drawSelected(); fitBoundsAll(); };
+      $('#fitBtn').onclick = fitBoundsAll;
+      $('#shareBtn').onclick = async () => { const u=new URL(location.href); u.searchParams.set('zips', [...state.selectedZips].join(',')); await navigator.clipboard.writeText(u.toString()); alert('공유 링크 복사됨'); };
+      $('#openAddr').onclick = () => { new daum.Postcode({ oncomplete: d => { if (d.zonecode){ state.selectedZips.add(d.zonecode); renderZipChips(); }}}).open(); };
+
+      const preset = parseZips(new URLSearchParams(location.search).get('zips')); 
+      preset.forEach(z=>state.selectedZips.add(z)); 
+      renderZipChips();
+      if (preset.length){ drawSelected().then(fitBoundsAll); }
+    }
+
+    function renderZipChips(){
+      const list=$('#zipList'); list.innerHTML='';
+      [...state.selectedZips].sort().forEach(z=>{
+        const div=document.createElement('div'); div.className='chip';
+        div.innerHTML=`<b>${z}</b><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${pickColor(z)}"></span><button title="삭제">✕</button>`;
+        div.querySelector('button').onclick=()=>{ state.selectedZips.delete(z); removePolygon(z); renderZipChips(); };
+        list.appendChild(div);
+      });
+    }
+
+    const pickColor = zip => { let h=0; for (let i=0;i<zip.length;i++) h=(h*31+zip.charCodeAt(i))>>>0; return state.colors[h%state.colors.length]; };
+
+    function clearPolygons(){ for (const L of state.polygons.values()) L.forEach(p=>p.setMap(null)); state.polygons.clear(); }
+    function removePolygon(z){ if(!state.polygons.has(z))return; state.polygons.get(z).forEach(p=>p.setMap(null)); state.polygons.delete(z); }
+
+    async function drawSelected(){
+      const targets=[...state.selectedZips].filter(z=>!state.polygons.has(z)); if(!targets.length) return;
+      const notFound=[];
+      for (const zip of targets){
+        try{ const res=await fetch(`./geojson/${zip}.json`, {cache:'no-store'}); if(!res.ok) throw new Error('404');
+             const gj=await res.json(); const created=geojsonToPolygons(gj, pickColor(zip)); if(created.length) state.polygons.set(zip, created); else notFound.push(zip);
+        }catch{ notFound.push(zip); }
+      }
+      if (notFound.length) alert(`GeoJSON 미탑재: ${notFound.join(', ')}`);
+    }
+
+    function geojsonToPolygons(geojson, color){
+      const feats = geojson.type==='FeatureCollection'?geojson.features:geojson.type==='Feature'?[geojson]:[];
+      const polys=[]; 
+      const make=rings=>{
+        const path=rings[0].map(([lng,lat])=>new kakao.maps.LatLng(lat,lng));
+        const holes=rings.slice(1).map(h=>h.map(([lng,lat])=>new kakao.maps.LatLng(lat,lng)));
+        const poly=new kakao.maps.Polygon({ map:state.map, path:[path,...holes], strokeWeight:2, strokeColor:color, strokeOpacity:.9, fillColor:color, fillOpacity:.25 });
+        polys.push(poly);
+      };
+      for (const f of feats){ const g=f.geometry||{}; if(g.type==='Polygon') make(g.coordinates); else if(g.type==='MultiPolygon') for (const r of g.coordinates) make(r); }
+      return polys;
+    }
+
+    function fitBoundsAll(){
+      const b=new kakao.maps.LatLngBounds(); let has=false;
+      for (const arr of state.polygons.values()){
+        for (const poly of arr){
+          poly.getPath().forEach(line=>{
+            for(let i=0;i<line.getLength();i++){ b.extend(line.getAt(i)); has=true; }
+          });
+        }
+      }
+      if(has) state.map.setBounds(b);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => { gateBind(); });
+  </script>
+</body>
+</html>

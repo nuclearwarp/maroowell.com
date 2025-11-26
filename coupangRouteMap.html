@@ -2,47 +2,383 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>MarooWell Coupang Route Map - Test</title>
+  <title>MarooWell Coupang Route Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 100%;
       height: 100%;
-      overflow: hidden;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+      overflow: hidden;
+    }
+
+    .page {
+      display: flex;
+      height: 100%;
+      width: 100%;
+    }
+
+    .side {
+      width: 320px;
+      max-width: 100%;
+      padding: 16px;
+      background: #020617;
+      border-right: 1px solid #1f2937;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .side-header-title {
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .side-header-sub {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 130px;
+      resize: vertical;
+      border-radius: 8px;
+      border: 1px solid #1f2937;
+      background: #020617;
+      color: #e5e7eb;
+      padding: 8px 10px;
+      font-size: 0.8rem;
+    }
+    textarea::placeholder {
+      color: #4b5563;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border-radius: 999px;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.primary {
+      background: #111827;
+      border-color: #111827;
+    }
+    button:hover {
+      background: #111827;
+    }
+
+    .hint {
+      margin-top: 4px;
+      font-size: 0.72rem;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+
+    .map-wrapper {
+      flex: 1;
+      position: relative;
     }
     #map {
       width: 100%;
       height: 100%;
     }
+
+    .map-overlay-info {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.85);
+      border: 1px solid #1f2937;
+      font-size: 0.75rem;
+      pointer-events: none;
+    }
+
+    .selected-list {
+      font-size: 0.78rem;
+      color: #9ca3af;
+    }
+
+    @media (max-width: 768px) {
+      .page {
+        flex-direction: column;
+      }
+      .side {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid #1f2937;
+      }
+    }
   </style>
-  <!-- 여기 JavaScript 키만 그대로 유지 -->
+
+  <!-- Kakao Maps JavaScript API : JS 키만 너 키로 유지 -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false"></script>
 </head>
 <body>
-  <div id="map"></div>
+  <div class="page">
+    <aside class="side">
+      <div>
+        <div class="side-header-title">MarooWell 지도</div>
+        <div class="side-header-sub">다중 우편번호 권역 표시 · 카카오맵 + GeoJSON</div>
+      </div>
+
+      <div class="btn-row">
+        <!-- 나중에 주소검색 기능 붙일 자리 (지금은 버튼만 껍데기) -->
+        <button id="addrSearchBtn">주소검색 추가(추후)</button>
+      </div>
+
+      <label style="font-size:0.78rem; margin-top:4px;">우편번호 목록</label>
+      <textarea id="zipInput" placeholder="예: 07420, 07421 07422
+쉼표 / 공백 / 줄바꿈 아무렇게나 섞어서 입력해도 됩니다."></textarea>
+
+      <div class="btn-row">
+        <button class="primary" id="showBtn">지도표시</button>
+        <button id="fitBtn">영역맞춤</button>
+        <button id="clearBtn">초기화</button>
+      </div>
+
+      <div class="hint">
+        · 지도에 표시되려면 <code>/public/geojson/우편번호.json</code> 파일이 있어야 합니다.<br />
+        · 예: <code>07420.json</code> → <code>/public/geojson/07420.json</code><br />
+        · 없는 우편번호는 미탐지로 안내합니다.
+      </div>
+
+      <div class="selected-list" id="selectedInfo"></div>
+    </aside>
+
+    <div class="map-wrapper">
+      <div id="map"></div>
+      <div class="map-overlay-info" id="overlayInfo">
+        지도 준비 중...
+      </div>
+    </div>
+  </div>
 
   <script>
-    // SDK가 안 불러지면 바로 알 수 있게 체크
-    if (!window.kakao) {
-      alert("카카오 SDK 로딩 실패 (window.kakao 없음)");
-    } else {
-      kakao.maps.load(function () {
-        var container = document.getElementById("map");
-        var center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울 시청
+    // ---------- 전역 상태 ----------
+    let map;
+    let polygons = [];          // 현재 지도에 그려진 polygon들
+    let selectedZips = [];      // 현재 선택된 우편번호들
+    const GEOJSON_BASE = "/public/geojson";  // GeoJSON 파일 경로 기본값
 
-        var map = new kakao.maps.Map(container, {
-          center: center,
-          level: 5
-        });
-
-        var marker = new kakao.maps.Marker({
-          position: center
-        });
-        marker.setMap(map);
-      });
+    // ---------- 유틸 ----------
+    function parseZipInput(text) {
+      return Array.from(
+        new Set(
+          text
+            .split(/[\s,]+/)
+            .map(v => v.trim())
+            .filter(v => v.length > 0)
+        )
+      );
     }
+
+    function clearPolygons() {
+      polygons.forEach(p => p.setMap(null));
+      polygons = [];
+    }
+
+    function updateSelectedInfo() {
+      const el = document.getElementById("selectedInfo");
+      if (!selectedZips.length) {
+        el.textContent = "표시 중인 우편번호 없음";
+      } else {
+        el.textContent = "표시 중인 우편번호: " + selectedZips.join(", ");
+      }
+    }
+
+    function setOverlayMessage(msg) {
+      document.getElementById("overlayInfo").textContent = msg;
+    }
+
+    function colorForZip(zip) {
+      // 간단 컬러 해시 (우편번호별 다른 색)
+      const colors = [
+        "#22c55e","#3b82f6","#eab308","#f97316",
+        "#ec4899","#a855f7","#2dd4bf","#f97316"
+      ];
+      let sum = 0;
+      for (let i = 0; i < zip.length; i++) sum += zip.charCodeAt(i);
+      return colors[sum % colors.length];
+    }
+
+    function polygonsFromGeometry(geometry, zip) {
+      const type = geometry.type;
+      const coords = geometry.coordinates;
+      const result = [];
+
+      if (!type || !coords) return result;
+
+      const makePolygon = (rings) => {
+        if (!rings || !rings.length) return null;
+        const outer = rings[0]; // 첫 번째 링만 사용 (외곽)
+        const path = outer.map(function (pt) {
+          // GeoJSON: [lng, lat]
+          return new kakao.maps.LatLng(pt[1], pt[0]);
+        });
+
+        const color = colorForZip(zip);
+
+        return new kakao.maps.Polygon({
+          path: path,
+          strokeWeight: 2,
+          strokeColor: color,
+          strokeOpacity: 0.9,
+          strokeStyle: "solid",
+          fillColor: color,
+          fillOpacity: 0.3
+        });
+      };
+
+      if (type === "Polygon") {
+        const poly = makePolygon(coords);
+        if (poly) result.push(poly);
+      } else if (type === "MultiPolygon") {
+        coords.forEach(rings => {
+          const poly = makePolygon(rings);
+          if (poly) result.push(poly);
+        });
+      }
+
+      return result;
+    }
+
+    async function loadGeoJsonForZip(zip) {
+      const url = `${GEOJSON_BASE}/${zip}.json`;
+      const resp = await fetch(url);
+
+      if (!resp.ok) {
+        throw new Error("GeoJSON not found: " + zip);
+      }
+
+      const gj = await resp.json();
+      const polys = [];
+
+      if (gj.type === "FeatureCollection" && Array.isArray(gj.features)) {
+        gj.features.forEach(f => {
+          polys.push(...polygonsFromGeometry(f.geometry, zip));
+        });
+      } else if (gj.type === "Feature") {
+        polys.push(...polygonsFromGeometry(gj.geometry, zip));
+      } else {
+        polys.push(...polygonsFromGeometry(gj, zip));
+      }
+
+      return polys;
+    }
+
+    async function showZipAreas() {
+      const raw = document.getElementById("zipInput").value;
+      const zips = parseZipInput(raw);
+
+      if (!zips.length) {
+        alert("우편번호를 하나 이상 입력해주세요.");
+        return;
+      }
+
+      clearPolygons();
+      selectedZips = zips;
+      updateSelectedInfo();
+      setOverlayMessage("GeoJSON 로딩 중...");
+
+      const bounds = new kakao.maps.LatLngBounds();
+      let hasAny = false;
+      const missing = [];
+
+      for (const zip of zips) {
+        try {
+          const polys = await loadGeoJsonForZip(zip);
+          if (!polys.length) {
+            missing.push(zip);
+            continue;
+          }
+
+          polys.forEach(poly => {
+            poly.setMap(map);
+            polygons.push(poly);
+
+            const path = poly.getPath();
+            for (let i = 0; i < path.length; i++) {
+              bounds.extend(path.getAt(i));
+            }
+          });
+
+          hasAny = true;
+        } catch (e) {
+          missing.push(zip);
+        }
+      }
+
+      if (hasAny) {
+        map.setBounds(bounds);
+        setOverlayMessage("표시 중인 우편번호: " + selectedZips.join(", "));
+      } else {
+        setOverlayMessage("표시할 영역이 없습니다.");
+      }
+
+      if (missing.length) {
+        alert("다음 우편번호는 GeoJSON 파일을 찾지 못했습니다:\n" + missing.join(", "));
+      }
+    }
+
+    function fitBoundsToPolygons() {
+      if (!polygons.length) {
+        alert("지도에 표시 중인 영역이 없습니다.");
+        return;
+      }
+      const bounds = new kakao.maps.LatLngBounds();
+      polygons.forEach(poly => {
+        const path = poly.getPath();
+        for (let i = 0; i < path.length; i++) {
+          bounds.extend(path.getAt(i));
+        }
+      });
+      map.setBounds(bounds);
+    }
+
+    function clearAll() {
+      clearPolygons();
+      selectedZips = [];
+      document.getElementById("zipInput").value = "";
+      updateSelectedInfo();
+      setOverlayMessage("지도 초기화됨");
+    }
+
+    // ---------- 초기화 ----------
+    kakao.maps.load(function () {
+      const container = document.getElementById("map");
+      const center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울시청 근처
+      map = new kakao.maps.Map(container, {
+        center: center,
+        level: 7
+      });
+
+      setOverlayMessage("지도 준비 완료. 우편번호를 입력하고 [지도표시]를 눌러주세요.");
+      updateSelectedInfo();
+
+      document.getElementById("showBtn").addEventListener("click", showZipAreas);
+      document.getElementById("fitBtn").addEventListener("click", fitBoundsToPolygons);
+      document.getElementById("clearBtn").addEventListener("click", clearAll);
+
+      // 주소검색 버튼은 아직 미구현
+      document.getElementById("addrSearchBtn").addEventListener("click", function () {
+        alert("주소검색 기능은 추후 구현 예정입니다.");
+      });
+    });
   </script>
 </body>
 </html>

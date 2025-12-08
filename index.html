@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-  <title>마루웰1</title>
+  <title>마루웰2</title>
   <style>
     :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; }
     *{box-sizing:border-box}
@@ -113,7 +113,7 @@
 </head>
 <body>
   <header>
-    <h1>MarooWell 지도</h1>
+    <h1>Maroowell 지도</h1>
     <span class="muted">다중 우편번호 권역 표시 · 향안부 ZIP API · Kakao Map</span>
   </header>
 
@@ -177,15 +177,14 @@
       polygons: new Map(),    // zipcode -> [Polygon, ...]
       selectedZips: new Set(),
       colors: [
-        '#6aa9ff','#9FE870','#fbbf24','#fb7185',
+        '#ff4b4b','#22c55e','#fbbf24','#3b82f6',
         '#22d3ee','#c084fc','#f472b6','#60a5fa',
-        '#34d399','#f59e0b'
+        '#34d399','#f97316'
       ]
     };
 
     const ZIP_API = 'https://zip.maroowell.com/?zipcode=';
     const $ = sel => document.querySelector(sel);
-
     const parseZips = raw =>
       [...new Set((raw || '').match(/\d{5}/g) || [])];
 
@@ -207,10 +206,27 @@
       '+proj=longlat +datum=WGS84 +no_defs'
     );
 
-    const toWgs84 = (x, y) => {
-      const [lon, lat] = proj4('EPSG:5179', 'EPSG:4326', [x, y]);
+    // 5179 → WGS84 변환 (안되면 fallback)
+    function convertPoint(x, y) {
+      let lon, lat;
+
+      try {
+        const out = proj4('EPSG:5179', 'EPSG:4326', [x, y]);
+        lon = out[0];
+        lat = out[1];
+      } catch (e) {
+        console.warn('proj4 변환 실패, 원본 좌표 사용 시도', x, y, e);
+      }
+
+      // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용
+      if (!isFinite(lat) || !isFinite(lon) ||
+          lat < 30 || lat > 45 || lon < 120 || lon > 135) {
+        lon = x;
+        lat = y;
+      }
+
       return { lat, lon };
-    };
+    }
 
     // ------- 지도 초기화 ------- //
     function createMap() {
@@ -223,7 +239,6 @@
         level: 8
       });
 
-      // 리사이즈 시 지도 재배치
       window.addEventListener('resize', () => {
         const c = state.map.getCenter();
         state.map.relayout();
@@ -262,8 +277,8 @@
       };
 
       $('#searchBtn').onclick = async () => {
-        await drawSelected();
-        fitBoundsAll();
+        await drawSelected();      // 새 폴리곤 그리기
+        // drawSelected 안에서 새 폴리곤 기준으로 setBounds 해 줌
       };
 
       $('#fitBtn').onclick = fitBoundsAll;
@@ -286,7 +301,6 @@
         }).open();
       };
 
-      // URL 쿼리에서 미리 선택
       const preset = parseZips(new URLSearchParams(location.search).get('zips'));
       preset.forEach(z => state.selectedZips.add(z));
       renderZipChips();
@@ -330,10 +344,10 @@
     }
 
     // zip API -> Polygon 생성
-    function polygonsFrom5179(polygon5179, color) {
+    function polygonsFrom5179(polygon5179, color, zip) {
       if (!Array.isArray(polygon5179) || !polygon5179.length) return [];
 
-      // polygon5179 가 [[x,y], ...] 형식이라고 가정
+      // polygon5179 가 [[x,y], ...] 형식
       const rings = (
         Array.isArray(polygon5179[0]) &&
         typeof polygon5179[0][0] === 'number'
@@ -341,44 +355,77 @@
 
       const polys = [];
 
-      for (const ring of rings) {
+      rings.forEach((ring, idx) => {
         const path = [];
-        for (const pt of ring) {
-          if (!Array.isArray(pt) || pt.length < 2) continue;
+        ring.forEach((pt, i) => {
+          if (!Array.isArray(pt) || pt.length < 2) return;
           const x = Number(pt[0]);
           const y = Number(pt[1]);
-          if (!isFinite(x) || !isFinite(y)) continue;
+          if (!isFinite(x) || !isFinite(y)) return;
 
-          const { lat, lon } = toWgs84(x, y);
-          if (!isFinite(lat) || !isFinite(lon)) continue;
+          const { lat, lon } = convertPoint(x, y);
+          if (!isFinite(lat) || !isFinite(lon)) return;
 
           path.push(new kakao.maps.LatLng(lat, lon));
-        }
 
-        if (path.length < 3) continue;
+          // 디버그: 첫 몇 개 좌표만 찍기
+          if (idx === 0 && i < 3) {
+            console.log(`[ZIP ${zip}] sample point`, { x, y, lat, lon });
+          }
+        });
+
+        console.log(`[ZIP ${zip}] ring ${idx} path length`, path.length);
+
+        if (path.length < 3) return;
 
         const poly = new kakao.maps.Polygon({
           map: state.map,
           path,
-          strokeWeight: 2,
+          strokeWeight: 4,
           strokeColor: color,
-          strokeOpacity: 0.9,
+          strokeOpacity: 1,
           strokeStyle: 'solid',
           fillColor: color,
-          fillOpacity: 0.25
+          fillOpacity: 0.45
         });
         polys.push(poly);
-      }
+      });
 
       return polys;
     }
 
-    // 선택된 우편번호들 ZIP API 호출해서 그리기
+    // path 에서 LatLng 전부 뽑기
+    function collectLatLngsFromPath(path) {
+      const out = [];
+
+      const walk = (p) => {
+        if (!p) return;
+
+        // LatLngPath
+        if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
+          for (let i = 0; i < p.getLength(); i++) {
+            out.push(p.getAt(i));
+          }
+          return;
+        }
+
+        // 배열 (LatLng[], 또는 그 배열의 배열)
+        if (Array.isArray(p)) {
+          p.forEach(walk);
+        }
+      };
+
+      walk(path);
+      return out;
+    }
+
+    // 선택된 우편번호들 ZIP API 호출해서 그리기 + 새 영역으로 이동
     async function drawSelected() {
       const targets = [...state.selectedZips].filter(z => !state.polygons.has(z));
       if (!targets.length) return;
 
       const notFound = [];
+      const newlyAdded = [];
 
       for (const zip of targets) {
         try {
@@ -393,17 +440,29 @@
           }
 
           const color = pickColor(zip);
-          const polys = polygonsFrom5179(data.polygon5179, color);
+          const polys = polygonsFrom5179(data.polygon5179, color, zip);
           if (!polys.length) {
+            console.warn('[ZIP] 폴리곤 생성 실패', zip);
             notFound.push(zip);
             continue;
           }
 
           state.polygons.set(zip, polys);
+          newlyAdded.push(...polys);
         } catch (e) {
           console.error('[ZIP] 로드 실패', zip, e);
           notFound.push(zip);
         }
+      }
+
+      // 새로 추가된 폴리곤 기준으로 지도 이동
+      if (newlyAdded.length && state.map) {
+        const b = new kakao.maps.LatLngBounds();
+        newlyAdded.forEach(poly => {
+          const latlngs = collectLatLngsFromPath(poly.getPath());
+          latlngs.forEach(ll => b.extend(ll));
+        });
+        state.map.setBounds(b);
       }
 
       if (notFound.length) {
@@ -411,34 +470,7 @@
       }
     }
 
-    // ------- path 에서 LatLng 전부 뽑아내기 ------- //
-    function collectLatLngsFromPath(path) {
-      const out = [];
-
-      const walk = (p) => {
-        if (!p) return;
-
-        // LatLngPath 형태 (getLength / getAt 있음)
-        if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
-          for (let i = 0; i < p.getLength(); i++) {
-            out.push(p.getAt(i));
-          }
-          return;
-        }
-
-        // 배열인 경우 (다중 링 또는 그냥 LatLng[])
-        if (Array.isArray(p)) {
-          for (const item of p) {
-            walk(item);
-          }
-        }
-      };
-
-      walk(path);
-      return out;
-    }
-
-    // ------- 화면 영역 맞추기 ------- //
+    // ------- 전체 폴리곤 기준 영역맞춤 (버튼용) ------- //
     function fitBoundsAll() {
       const b = new kakao.maps.LatLngBounds();
       let has = false;
@@ -446,10 +478,10 @@
       for (const arr of state.polygons.values()) {
         for (const poly of arr) {
           const latlngs = collectLatLngsFromPath(poly.getPath());
-          for (const ll of latlngs) {
+          latlngs.forEach(ll => {
             b.extend(ll);
             has = true;
-          }
+          });
         }
       }
 

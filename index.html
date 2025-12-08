@@ -4,16 +4,29 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-  <title>마루웰3</title>
+  <title>마루웰4</title>
   <style>
-    :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; }
+    :root {
+      --headerH: 52px;
+      --bg:#0f1115;
+      --card:#161a22;
+      --muted:#8b95a7;
+      --text:#e6e9ef;
+    }
     *{box-sizing:border-box}
-    body{
+    html,body{
       margin:0;
+      padding:0;
+      height:100%;
       background:var(--bg);
       color:var(--text);
-      font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto
+      font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto;
     }
+
+    body {
+      overflow:hidden;
+    }
+
     header{
       display:flex;
       gap:12px;
@@ -24,21 +37,37 @@
       border-bottom:1px solid #232838;
       position:sticky;
       top:0;
-      z-index:5
+      z-index:5;
     }
     header h1{font-size:16px;margin:0}
+    header .sub{
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
     #app{
       display:grid;
       grid-template-columns:360px 1fr;
-      min-height:calc(100dvh - var(--headerH))
+      min-height:calc(100dvh - var(--headerH));
     }
     #panel{
       padding:14px;
       border-right:1px solid #232838;
-      background:#10141b
+      background:#10141b;
+      overflow:auto;
     }
-    #mapWrap{position:relative}
-    #map{position:absolute;inset:0}
+    #mapWrap{
+      position:relative;
+      overflow:hidden;
+    }
+    #map{
+      position:absolute;
+      inset:0;
+    }
+
     label{display:block;margin:10px 0 6px;color:#9aa6b2}
     input,textarea,button{font:inherit}
     textarea{
@@ -48,7 +77,7 @@
       color:var(--text);
       padding:10px;
       border-radius:10px;
-      min-height:90px
+      min-height:90px;
     }
     button{
       background:#1b2230;
@@ -56,7 +85,8 @@
       color:var(--text);
       padding:8px 12px;
       border-radius:10px;
-      cursor:pointer
+      cursor:pointer;
+      white-space:nowrap;
     }
     button:hover{border-color:#3a4561}
     .row{display:flex;gap:8px;flex-wrap:wrap}
@@ -69,13 +99,13 @@
       background:#0c0f14;
       display:inline-flex;
       align-items:center;
-      gap:6px
+      gap:6px;
     }
     .chip button{
       border:none;
       background:transparent;
       color:#94a3b8;
-      cursor:pointer
+      cursor:pointer;
     }
     #gate{
       position:fixed;
@@ -84,21 +114,56 @@
       display:flex;
       align-items:center;
       justify-content:center;
-      z-index:99
+      z-index:99;
     }
     #gateCard{
       background:#0e131a;
       border:1px solid #2a3142;
       border-radius:16px;
       padding:22px;
-      width:360px
+      width:360px;
     }
     #gateCard h2{margin:0 0 12px}
     .ok{color:#9FE870}
     .err{color:#ff7b7b}
+
+    /* 이미지 모드: 스크린샷용 전체 화면 지도 */
+    body.image-mode header,
+    body.image-mode #panel {
+      display:none;
+    }
+    body.image-mode #app{
+      grid-template-columns:1fr;
+      min-height:100dvh;
+    }
+    body.image-mode #mapWrap{
+      height:100dvh;
+    }
+
+    /* 모바일 레이아웃 */
     @media (max-width: 900px){
-      #app{grid-template-columns:1fr}
-      #panel{order:2}
+      body{overflow:auto;}
+
+      #app{
+        display:flex;
+        flex-direction:column;
+        min-height:calc(100dvh - var(--headerH));
+      }
+      #mapWrap{
+        order:1;
+        height:60vh;
+        min-height:320px;
+      }
+      #panel{
+        order:2;
+        border-right:none;
+        border-top:1px solid #232838;
+        max-height:none;
+      }
+
+      body.image-mode #app{
+        flex-direction:column;
+      }
     }
   </style>
 
@@ -113,8 +178,8 @@
 </head>
 <body>
   <header>
-    <h1>Maroowell 지도</h1>
-    <span class="muted">다중 우편번호 권역 표시 · 향안부 ZIP API · Kakao Map</span>
+    <h1>마루웰4</h1>
+    <span class="sub">다중 우편번호 권역 검색기 · Kakao Map</span>
   </header>
 
   <!-- 임시 게이트 (코드: maroowell) -->
@@ -154,14 +219,15 @@
       <div class="list" id="zipList"></div>
 
       <div class="row" style="margin-top:10px">
-        <button id="shareBtn">공유링크 복사</button>
+        <button id="imgModeBtn">이미지모드 (스크린샷용)</button>
         <button id="fitBtn">영역맞춤</button>
       </div>
 
       <p class="muted" style="margin-top:10px">
         • 각 우편번호는 <code>https://zip.maroowell.com/?zipcode=XXXXX</code> 에서<br>
         &nbsp;&nbsp;폴리곤(5179 좌표)을 받아와서 카카오 지도에 표시합니다.<br>
-        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
+        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.<br>
+        • 이미지모드에서 UI를 숨긴 뒤, 단말 스크린샷으로 캡처해서 카톡에 전송하면 됩니다.
       </p>
     </aside>
 
@@ -185,6 +251,7 @@
 
     const ZIP_API = 'https://zip.maroowell.com/?zipcode=';
     const $ = sel => document.querySelector(sel);
+
     const parseZips = raw =>
       [...new Set((raw || '').match(/\d{5}/g) || [])];
 
@@ -277,17 +344,19 @@
       };
 
       $('#searchBtn').onclick = async () => {
-        await drawSelected();      // 새 폴리곤 그리기
-        // drawSelected 안에서 새 폴리곤 기준으로 setBounds 해 줌
+        await drawSelected();
+        fitBoundsAll();
       };
 
       $('#fitBtn').onclick = fitBoundsAll;
 
-      $('#shareBtn').onclick = async () => {
-        const u = new URL(location.href);
-        u.searchParams.set('zips', [...state.selectedZips].join(','));
-        await navigator.clipboard.writeText(u.toString());
-        alert('공유 링크 복사됨');
+      // 이미지 모드 토글 (UI 숨기고 전체 화면 지도 → 스샷용)
+      $('#imgModeBtn').onclick = () => {
+        document.body.classList.toggle('image-mode');
+        // 이미지 모드 켜질 때 현재 폴리곤 기준으로 한 번 맞춰주기
+        if (document.body.classList.contains('image-mode')) {
+          fitBoundsAll();
+        }
       };
 
       $('#openAddr').onclick = () => {
@@ -368,7 +437,7 @@
 
           path.push(new kakao.maps.LatLng(lat, lon));
 
-          // 디버그: 첫 몇 개 좌표만 찍기
+          // 디버그용 샘플 포인트
           if (idx === 0 && i < 3) {
             console.log(`[ZIP ${zip}] sample point`, { x, y, lat, lon });
           }
@@ -394,45 +463,12 @@
       return polys;
     }
 
-// path 에서 LatLng 전부 뽑기 (수정 버전)
-function collectLatLngsFromPath(path) {
-  const out = [];
-
-  const walk = (p) => {
-    if (!p) return;
-
-    // 1) kakao.maps.LatLng 한 점
-    if (p instanceof kakao.maps.LatLng ||
-        (typeof p.getLat === 'function' && typeof p.getLng === 'function')) {
-      out.push(p);
-      return;
-    }
-
-    // 2) LatLngPath (getLength / getAt 가진 객체)
-    if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
-      for (let i = 0; i < p.getLength(); i++) {
-        walk(p.getAt(i));
-      }
-      return;
-    }
-
-    // 3) 배열 (LatLng[] 이거나 그 배열의 배열)
-    if (Array.isArray(p)) {
-      p.forEach(walk);
-    }
-  };
-
-  walk(path);
-  return out;
-}
-
-    // 선택된 우편번호들 ZIP API 호출해서 그리기 + 새 영역으로 이동
+    // 선택된 우편번호들 ZIP API 호출해서 그리기
     async function drawSelected() {
       const targets = [...state.selectedZips].filter(z => !state.polygons.has(z));
       if (!targets.length) return;
 
       const notFound = [];
-      const newlyAdded = [];
 
       for (const zip of targets) {
         try {
@@ -455,21 +491,10 @@ function collectLatLngsFromPath(path) {
           }
 
           state.polygons.set(zip, polys);
-          newlyAdded.push(...polys);
         } catch (e) {
           console.error('[ZIP] 로드 실패', zip, e);
           notFound.push(zip);
         }
-      }
-
-      // 새로 추가된 폴리곤 기준으로 지도 이동
-      if (newlyAdded.length && state.map) {
-        const b = new kakao.maps.LatLngBounds();
-        newlyAdded.forEach(poly => {
-          const latlngs = collectLatLngsFromPath(poly.getPath());
-          latlngs.forEach(ll => b.extend(ll));
-        });
-        state.map.setBounds(b);
       }
 
       if (notFound.length) {
@@ -477,27 +502,48 @@ function collectLatLngsFromPath(path) {
       }
     }
 
-// ------- 화면 영역 맞추기 ------- //
-function fitBoundsAll() {
-  if (!state.map) return;
+    // path 에서 LatLng 전부 뽑기
+    function collectLatLngsFromPath(path) {
+      const out = [];
 
-  const b = new kakao.maps.LatLngBounds();
-  let has = false;
+      const walk = (p) => {
+        if (!p) return;
 
-  for (const arr of state.polygons.values()) {
-    for (const poly of arr) {
-      const latlngs = collectLatLngsFromPath(poly.getPath());
-      latlngs.forEach(ll => {
-        b.extend(ll);
-        has = true;
-      });
+        // LatLngPath
+        if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
+          for (let i = 0; i < p.getLength(); i++) {
+            out.push(p.getAt(i));
+          }
+          return;
+        }
+
+        // 배열 (LatLng[], 또는 그 배열의 배열)
+        if (Array.isArray(p)) {
+          p.forEach(walk);
+        }
+      };
+
+      walk(path);
+      return out;
     }
-  }
 
-  if (has) {
-    state.map.setBounds(b);
-  }
-}
+    // ------- 화면 영역 맞추기 ------- //
+    function fitBoundsAll() {
+      const b = new kakao.maps.LatLngBounds();
+      let has = false;
+
+      for (const arr of state.polygons.values()) {
+        for (const poly of arr) {
+          const latlngs = collectLatLngsFromPath(poly.getPath());
+          latlngs.forEach(ll => {
+            b.extend(ll);
+            has = true;
+          });
+        }
+      }
+
+      if (has) state.map.setBounds(b);
+    }
 
     // ------- DOM 로드 ------- //
     document.addEventListener('DOMContentLoaded', () => {

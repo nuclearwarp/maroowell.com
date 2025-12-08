@@ -4,31 +4,93 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-  <title>MarooWell 지도</title>
+  <title>마루웰 지도</title>
   <style>
     :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; }
-    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto}
-    header{display:flex;gap:12px;align-items:center;padding:12px 16px;height:var(--headerH);
-      background:#161a22;border-bottom:1px solid #232838;position:sticky;top:0;z-index:5}
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto
+    }
+    header{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      padding:12px 16px;
+      height:var(--headerH);
+      background:#161a22;
+      border-bottom:1px solid #232838;
+      position:sticky;
+      top:0;
+      z-index:5
+    }
     header h1{font-size:16px;margin:0}
-    #app{display:grid;grid-template-columns:360px 1fr;min-height:calc(100dvh - var(--headerH))}
-    #panel{padding:14px;border-right:1px solid #232838;background:#10141b}
+    #app{
+      display:grid;
+      grid-template-columns:360px 1fr;
+      min-height:calc(100dvh - var(--headerH))
+    }
+    #panel{
+      padding:14px;
+      border-right:1px solid #232838;
+      background:#10141b
+    }
     #mapWrap{position:relative}
     #map{position:absolute;inset:0}
     label{display:block;margin:10px 0 6px;color:#9aa6b2}
     input,textarea,button{font:inherit}
-    textarea{width:100%;background:#0c0f14;border:1px solid #2a3142;color:var(--text);padding:10px;border-radius:10px;min-height:90px}
-    button{background:#1b2230;border:1px solid #2a3142;color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer}
+    textarea{
+      width:100%;
+      background:#0c0f14;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:10px;
+      border-radius:10px;
+      min-height:90px
+    }
+    button{
+      background:#1b2230;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:8px 12px;
+      border-radius:10px;
+      cursor:pointer
+    }
     button:hover{border-color:#3a4561}
     .row{display:flex;gap:8px;flex-wrap:wrap}
     .muted{color:#8b95a7;font-size:12px}
     .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
-    .chip{border:1px solid #2a3142;border-radius:999px;padding:6px 10px;background:#0c0f14;display:inline-flex;align-items:center;gap:6px}
+    .chip{
+      border:1px solid #2a3142;
+      border-radius:999px;
+      padding:6px 10px;
+      background:#0c0f14;
+      display:inline-flex;
+      align-items:center;
+      gap:6px
+    }
     .chip button{border:none;background:transparent;color:#94a3b8;cursor:pointer}
-    #gate{position:fixed;inset:0;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;z-index:99}
-    #gateCard{background:#0e131a;border:1px solid #2a3142;border-radius:16px;padding:22px;width:360px}
+    #gate{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.8);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:99
+    }
+    #gateCard{
+      background:#0e131a;
+      border:1px solid #2a3142;
+      border-radius:16px;
+      padding:22px;
+      width:360px
+    }
     #gateCard h2{margin:0 0 12px}
-    .ok{color:#9FE870} .err{color:#ff7b7b}
+    .ok{color:#9FE870}
+    .err{color:#ff7b7b}
     @media (max-width: 900px){
       #app{grid-template-columns:1fr}
       #panel{order:2}
@@ -37,11 +99,15 @@
 
   <!-- Daum 우편번호 -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-  <!-- Kakao 지도 SDK: 제공하신 JS 키 그대로 사용 -->
+
+  <!-- proj4: EPSG 5179 -> WGS84 변환용 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.1/proj4.js"></script>
+
+  <!-- Kakao 지도 SDK (JS 키 그대로 사용) -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
 </head>
 <body>
-  <header><h1>MarooWell 지도</h1><span class="muted">다중 우편번호 권역 표시 · 카카오지도 + GeoJSON</span></header>
+  <header><h1>MarooWell 지도</h1><span class="muted">다중 우편번호 권역 표시 · 행안부 ZIP API + Kakao Map</span></header>
 
   <!-- 임시 로그인(접속코드: maroowell) -->
   <div id="gate">
@@ -80,102 +146,245 @@
         <button id="fitBtn">영역맞춤</button>
       </div>
       <p class="muted" style="margin-top:10px">
-        • 지도에 표시되려면 <code>/geojson/우편번호.json</code> 파일이 있어야 합니다. (예: <code>07420.json</code>)<br>
-        • 없는 우편번호는 미탑재로 안내합니다.
+        • 각 우편번호는 <code>https://zip.maroowell.com/?zipcode=XXXXX</code> 에서<br>
+        &nbsp;&nbsp;폴리곤(5179 좌표)을 받아와서 카카오 지도에 표시합니다.<br>
+        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
       </p>
     </aside>
     <div id="mapWrap"><div id="map"></div></div>
   </div>
 
   <script>
-    const state = { map:null, polygons:new Map(), selectedZips:new Set(),
-      colors:['#6aa9ff','#9FE870','#fbbf24','#fb7185','#22d3ee','#c084fc','#f472b6','#60a5fa','#34d399','#f59e0b'] };
+    // ===== proj4: EPSG:5179 정의 & 변환 함수 =====
+    proj4.defs(
+      "EPSG:5179",
+      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+      "+x_0=1000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs"
+    );
+    const toWgs84From5179 = (x, y) => proj4("EPSG:5179", "WGS84", [x, y]); // [lng, lat]
+
+    // ===== 전역 상태 =====
+    const state = {
+      map: null,
+      polygons: new Map(),   // zip -> Polygon 배열
+      selectedZips: new Set(),
+      colors: ['#6aa9ff','#9FE870','#fbbf24','#fb7185','#22d3ee','#c084fc','#f472b6','#60a5fa','#34d399','#f59e0b'],
+      apiBase: "https://zip.maroowell.com"
+    };
+
     const $ = s => document.querySelector(s);
     const parseZips = raw => [...new Set((raw||"").match(/\d{5}/g)||[])];
 
+    // ===== 지도 생성 =====
     function createMap(){
-      if (!(window.kakao && kakao.maps)) { alert('카카오 SDK 미로딩'); return; }
+      if (!(window.kakao && kakao.maps)) {
+        alert('카카오 SDK 로딩 실패');
+        return;
+      }
       state.map = new kakao.maps.Map(document.getElementById('map'), {
-        center: new kakao.maps.LatLng(37.5665,126.9780), level: 8
+        center: new kakao.maps.LatLng(37.5665,126.9780),
+        level: 8
       });
-      window.addEventListener('resize', ()=>{ const c = state.map.getCenter(); state.map.relayout(); state.map.setCenter(c); });
+      window.addEventListener('resize', ()=>{
+        const c = state.map.getCenter();
+        state.map.relayout();
+        state.map.setCenter(c);
+      });
     }
 
+    // ===== 게이트 =====
     function gateBind(){
       $('#enterBtn').onclick = () => {
-        const ok = ($('#code').value.trim()==='maroowell');
+        const ok = ($('#code').value.trim() === 'maroowell');
         $('#gateMsg').textContent = ok ? 'OK' : '코드가 올바르지 않습니다.';
         $('#gateMsg').className = ok ? 'ok' : 'err';
-        if (ok){ $('#gate').style.display='none'; $('#app').style.display='grid'; createMap(); bindUI(); }
+        if (ok){
+          $('#gate').style.display = 'none';
+          $('#app').style.display = 'grid';
+          createMap();
+          bindUI();
+        }
       };
     }
 
+    // ===== UI 바인딩 =====
     function bindUI(){
-      $('#addBtn').onclick = () => { parseZips($('#zipInput').value).forEach(z=>state.selectedZips.add(z)); $('#zipInput').value=''; renderZipChips(); };
-      $('#clearBtn').onclick = () => { state.selectedZips.clear(); clearPolygons(); renderZipChips(); };
-      $('#searchBtn').onclick = async () => { await drawSelected(); fitBoundsAll(); };
-      $('#fitBtn').onclick = fitBoundsAll;
-      $('#shareBtn').onclick = async () => { const u=new URL(location.href); u.searchParams.set('zips', [...state.selectedZips].join(',')); await navigator.clipboard.writeText(u.toString()); alert('공유 링크 복사됨'); };
-      $('#openAddr').onclick = () => { new daum.Postcode({ oncomplete: d => { if (d.zonecode){ state.selectedZips.add(d.zonecode); renderZipChips(); }}}).open(); };
+      $('#addBtn').onclick = () => {
+        parseZips($('#zipInput').value).forEach(z => state.selectedZips.add(z));
+        $('#zipInput').value = '';
+        renderZipChips();
+      };
 
-      const preset = parseZips(new URLSearchParams(location.search).get('zips')); 
-      preset.forEach(z=>state.selectedZips.add(z)); 
+      $('#clearBtn').onclick = () => {
+        state.selectedZips.clear();
+        clearPolygons();
+        renderZipChips();
+      };
+
+      $('#searchBtn').onclick = async () => {
+        await drawSelected();
+        fitBoundsAll();
+      };
+
+      $('#fitBtn').onclick = fitBoundsAll;
+
+      $('#shareBtn').onclick = async () => {
+        const u = new URL(location.href);
+        u.searchParams.set('zips', [...state.selectedZips].join(','));
+        await navigator.clipboard.writeText(u.toString());
+        alert('공유 링크 복사됨');
+      };
+
+      $('#openAddr').onclick = () => {
+        new daum.Postcode({
+          oncomplete: d => {
+            if (d.zonecode){
+              state.selectedZips.add(d.zonecode);
+              renderZipChips();
+            }
+          }
+        }).open();
+      };
+
+      const preset = parseZips(new URLSearchParams(location.search).get('zips'));
+      preset.forEach(z => state.selectedZips.add(z));
       renderZipChips();
-      if (preset.length){ drawSelected().then(fitBoundsAll); }
+      if (preset.length){
+        drawSelected().then(fitBoundsAll);
+      }
     }
 
+    // ===== ZIP 칩 렌더링 =====
     function renderZipChips(){
-      const list=$('#zipList'); list.innerHTML='';
-      [...state.selectedZips].sort().forEach(z=>{
-        const div=document.createElement('div'); div.className='chip';
-        div.innerHTML=`<b>${z}</b><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${pickColor(z)}"></span><button title="삭제">✕</button>`;
-        div.querySelector('button').onclick=()=>{ state.selectedZips.delete(z); removePolygon(z); renderZipChips(); };
+      const list = $('#zipList');
+      list.innerHTML = '';
+      [...state.selectedZips].sort().forEach(z => {
+        const div = document.createElement('div');
+        div.className = 'chip';
+        div.innerHTML =
+          `<b>${z}</b>` +
+          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${pickColor(z)}"></span>` +
+          `<button title="삭제">✕</button>`;
+        div.querySelector('button').onclick = () => {
+          state.selectedZips.delete(z);
+          removePolygon(z);
+          renderZipChips();
+        };
         list.appendChild(div);
       });
     }
 
-    const pickColor = zip => { let h=0; for (let i=0;i<zip.length;i++) h=(h*31+zip.charCodeAt(i))>>>0; return state.colors[h%state.colors.length]; };
+    const pickColor = zip => {
+      let h = 0;
+      for (let i = 0; i < zip.length; i++) h = (h * 31 + zip.charCodeAt(i)) >>> 0;
+      return state.colors[h % state.colors.length];
+    };
 
-    function clearPolygons(){ for (const L of state.polygons.values()) L.forEach(p=>p.setMap(null)); state.polygons.clear(); }
-    function removePolygon(z){ if(!state.polygons.has(z))return; state.polygons.get(z).forEach(p=>p.setMap(null)); state.polygons.delete(z); }
-
-    async function drawSelected(){
-      const targets=[...state.selectedZips].filter(z=>!state.polygons.has(z)); if(!targets.length) return;
-      const notFound=[];
-      for (const zip of targets){
-        try{ const res=await fetch(`./geojson/${zip}.json`, {cache:'no-store'}); if(!res.ok) throw new Error('404');
-             const gj=await res.json(); const created=geojsonToPolygons(gj, pickColor(zip)); if(created.length) state.polygons.set(zip, created); else notFound.push(zip);
-        }catch{ notFound.push(zip); }
+    // ===== 폴리곤 관리 =====
+    function clearPolygons(){
+      for (const arr of state.polygons.values()) {
+        arr.forEach(p => p.setMap(null));
       }
-      if (notFound.length) alert(`GeoJSON 미탑재: ${notFound.join(', ')}`);
+      state.polygons.clear();
     }
 
-    function geojsonToPolygons(geojson, color){
-      const feats = geojson.type==='FeatureCollection'?geojson.features:geojson.type==='Feature'?[geojson]:[];
-      const polys=[]; 
-      const make=rings=>{
-        const path=rings[0].map(([lng,lat])=>new kakao.maps.LatLng(lat,lng));
-        const holes=rings.slice(1).map(h=>h.map(([lng,lat])=>new kakao.maps.LatLng(lat,lng)));
-        const poly=new kakao.maps.Polygon({ map:state.map, path:[path,...holes], strokeWeight:2, strokeColor:color, strokeOpacity:.9, fillColor:color, fillOpacity:.25 });
+    function removePolygon(z){
+      if (!state.polygons.has(z)) return;
+      state.polygons.get(z).forEach(p => p.setMap(null));
+      state.polygons.delete(z);
+    }
+
+    // ===== 행안부 ZIP Worker API 호출 & 폴리곤 생성 =====
+    async function drawSelected(){
+      const targets = [...state.selectedZips].filter(z => !state.polygons.has(z));
+      if (!targets.length) return;
+
+      const notFound = [];
+
+      for (const zip of targets){
+        try {
+          const url = `${state.apiBase}/?zipcode=${encodeURIComponent(zip)}`;
+          const res = await fetch(url, { cache: 'no-store' });
+          if (!res.ok) throw new Error('API 응답 오류');
+
+          const data = await res.json();
+          if (!data.polygon5179 || !data.polygon5179.length) {
+            throw new Error('polygon5179 없음');
+          }
+
+          const created = polygonsFrom5179(data, pickColor(zip));
+          if (created.length) {
+            state.polygons.set(zip, created);
+          } else {
+            notFound.push(zip);
+          }
+        } catch (e) {
+          console.error('ZIP 로딩 실패', zip, e);
+          notFound.push(zip);
+        }
+      }
+
+      if (notFound.length){
+        alert(`폴리곤 미탑재 또는 오류: ${notFound.join(', ')}`);
+      }
+    }
+
+    function polygonsFrom5179(data, color){
+      const polys = [];
+      const ringsArray = data.polygon5179 || [];
+
+      // polygon5179: [ [ [x,y], [x,y], ... ], [ ... ], ... ]
+      for (const ring of ringsArray){
+        if (!Array.isArray(ring) || !ring.length) continue;
+
+        const path5179 = ring.map(([x, y]) => {
+          const [lng, lat] = toWgs84From5179(x, y);
+          return new kakao.maps.LatLng(lat, lng);
+        });
+
+        // Kakao Polygon: path를 [path] 형태로 넣어서 multi-ring 구조 유지
+        const poly = new kakao.maps.Polygon({
+          map: state.map,
+          path: [path5179],
+          strokeWeight: 2,
+          strokeColor: color,
+          strokeOpacity: 0.9,
+          fillColor: color,
+          fillOpacity: 0.25
+        });
+
         polys.push(poly);
-      };
-      for (const f of feats){ const g=f.geometry||{}; if(g.type==='Polygon') make(g.coordinates); else if(g.type==='MultiPolygon') for (const r of g.coordinates) make(r); }
+      }
+
       return polys;
     }
 
+    // ===== 전체 폴리곤에 맞춰 bounds 설정 =====
     function fitBoundsAll(){
-      const b=new kakao.maps.LatLngBounds(); let has=false;
+      const b = new kakao.maps.LatLngBounds();
+      let has = false;
+
       for (const arr of state.polygons.values()){
         for (const poly of arr){
-          poly.getPath().forEach(line=>{
-            for(let i=0;i<line.getLength();i++){ b.extend(line.getAt(i)); has=true; }
-          });
+          // path는 [outerRing, ...] 형태의 MVCArray
+          const paths = poly.getPath();
+          for (let li = 0; li < paths.getLength(); li++){
+            const line = paths.getAt(li);
+            for (let i = 0; i < line.getLength(); i++){
+              b.extend(line.getAt(i));
+              has = true;
+            }
+          }
         }
       }
-      if(has) state.map.setBounds(b);
+
+      if (has) state.map.setBounds(b);
     }
 
-    document.addEventListener('DOMContentLoaded', () => { gateBind(); });
+    // ===== 시작 =====
+    document.addEventListener('DOMContentLoaded', () => {
+      gateBind();
+    });
   </script>
 </body>
 </html>

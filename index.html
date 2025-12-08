@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-  <title>마루웰</title>
+  <title>마루웰1</title>
   <style>
     :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; }
     *{box-sizing:border-box}
@@ -457,27 +457,54 @@
     }
   }
 
-  // ------------ 화면 영역 맞추기 ------------ //
-  function fitBoundsAll() {
-    const b = new kakao.maps.LatLngBounds();
-    let has = false;
+// ---------- 화면 영역 맞추기 ---------- //
+function fitBoundsAll() {
+  if (!state.map) return;
 
-    for (const arr of state.polygons.values()) {
-      for (const poly of arr) {
-        const path = poly.getPath();   // 이 path 는 여러 LineString(링) 배열
-        path.forEach(line => {
-          for (let i = 0; i < line.getLength(); i++) {
-            b.extend(line.getAt(i));
-            has = true;
-          }
-        });
-      }
+  const bounds = new kakao.maps.LatLngBounds();
+  let hasPoint = false;
+
+  // path 안에서 LatLng 들만 싹 뽑아내는 재귀 함수
+  function collectLatLngs(path, out) {
+    if (!path) return;
+
+    // 1) JS 배열 ([], [[], []] 등)
+    if (Array.isArray(path)) {
+      path.forEach(p => collectLatLngs(p, out));
+      return;
     }
 
-    if (has) {
-      state.map.setBounds(b);
+    // 2) kakao.maps.LatLngArray (MVCArray)
+    if (typeof path.getLength === "function" && typeof path.getAt === "function") {
+      const len = path.getLength();
+      for (let i = 0; i < len; i++) {
+        out.push(path.getAt(i));
+      }
+      return;
+    }
+
+    // 3) 단일 kakao.maps.LatLng
+    if (path instanceof kakao.maps.LatLng) {
+      out.push(path);
     }
   }
+
+  for (const arr of state.polygons.values()) {
+    for (const poly of arr) {
+      const pts = [];
+      collectLatLngs(poly.getPath(), pts);
+
+      pts.forEach(pt => {
+        bounds.extend(pt);
+        hasPoint = true;
+      });
+    }
+  }
+
+  if (hasPoint) {
+    state.map.setBounds(bounds);
+  }
+}
 
   // ------------ DOM 로드 ------------ //
   document.addEventListener('DOMContentLoaded', () => {

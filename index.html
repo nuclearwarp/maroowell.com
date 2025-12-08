@@ -394,30 +394,37 @@
       return polys;
     }
 
-    // path 에서 LatLng 전부 뽑기
-    function collectLatLngsFromPath(path) {
-      const out = [];
+// path 에서 LatLng 전부 뽑기 (수정 버전)
+function collectLatLngsFromPath(path) {
+  const out = [];
 
-      const walk = (p) => {
-        if (!p) return;
+  const walk = (p) => {
+    if (!p) return;
 
-        // LatLngPath
-        if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
-          for (let i = 0; i < p.getLength(); i++) {
-            out.push(p.getAt(i));
-          }
-          return;
-        }
-
-        // 배열 (LatLng[], 또는 그 배열의 배열)
-        if (Array.isArray(p)) {
-          p.forEach(walk);
-        }
-      };
-
-      walk(path);
-      return out;
+    // 1) kakao.maps.LatLng 한 점
+    if (p instanceof kakao.maps.LatLng ||
+        (typeof p.getLat === 'function' && typeof p.getLng === 'function')) {
+      out.push(p);
+      return;
     }
+
+    // 2) LatLngPath (getLength / getAt 가진 객체)
+    if (typeof p.getLength === 'function' && typeof p.getAt === 'function') {
+      for (let i = 0; i < p.getLength(); i++) {
+        walk(p.getAt(i));
+      }
+      return;
+    }
+
+    // 3) 배열 (LatLng[] 이거나 그 배열의 배열)
+    if (Array.isArray(p)) {
+      p.forEach(walk);
+    }
+  };
+
+  walk(path);
+  return out;
+}
 
     // 선택된 우편번호들 ZIP API 호출해서 그리기 + 새 영역으로 이동
     async function drawSelected() {
@@ -470,23 +477,27 @@
       }
     }
 
-    // ------- 전체 폴리곤 기준 영역맞춤 (버튼용) ------- //
-    function fitBoundsAll() {
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
+// ------- 화면 영역 맞추기 ------- //
+function fitBoundsAll() {
+  if (!state.map) return;
 
-      for (const arr of state.polygons.values()) {
-        for (const poly of arr) {
-          const latlngs = collectLatLngsFromPath(poly.getPath());
-          latlngs.forEach(ll => {
-            b.extend(ll);
-            has = true;
-          });
-        }
-      }
+  const b = new kakao.maps.LatLngBounds();
+  let has = false;
 
-      if (has) state.map.setBounds(b);
+  for (const arr of state.polygons.values()) {
+    for (const poly of arr) {
+      const latlngs = collectLatLngsFromPath(poly.getPath());
+      latlngs.forEach(ll => {
+        b.extend(ll);
+        has = true;
+      });
     }
+  }
+
+  if (has) {
+    state.map.setBounds(b);
+  }
+}
 
     // ------- DOM 로드 ------- //
     document.addEventListener('DOMContentLoaded', () => {

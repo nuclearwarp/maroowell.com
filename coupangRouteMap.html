@@ -125,7 +125,10 @@
     }
   </style>
 
-  <!-- Kakao Maps JavaScript API : JS 키만 너 키로 유지 -->
+  <!-- proj4: 5179 -> WGS84 변환용 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.1/proj4.js"></script>
+
+  <!-- Kakao Maps JavaScript API (JS 키는 그대로) -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false"></script>
 </head>
 <body>
@@ -133,7 +136,7 @@
     <aside class="side">
       <div>
         <div class="side-header-title">MarooWell 지도</div>
-        <div class="side-header-sub">다중 우편번호 권역 표시 · 카카오맵 + GeoJSON</div>
+        <div class="side-header-sub">다중 우편번호 권역 표시 · 카카오맵 + 행안부 API</div>
       </div>
 
       <div class="btn-row">
@@ -152,9 +155,9 @@
       </div>
 
       <div class="hint">
-        · 지도에 표시되려면 <code>/public/geojson/우편번호.json</code> 파일이 있어야 합니다.<br />
-        · 예: <code>07420.json</code> → <code>/public/geojson/07420.json</code><br />
-        · 없는 우편번호는 미탐지로 안내합니다.
+        · 각 우편번호는 <code>https://zip.maroowell.com/?zipcode=XXXXX</code> 에서<br />
+        &nbsp;&nbsp;폴리곤을 가져와서 카카오 지도에 그립니다.<br />
+        · 여러 개를 동시에 입력하면 한 번에 모두 표시됩니다.
       </div>
 
       <div class="selected-list" id="selectedInfo"></div>
@@ -169,11 +172,22 @@
   </div>
 
   <script>
+    // ---------- proj4 설정 (EPSG:5179 -> WGS84) ----------
+    proj4.defs("EPSG:5179",
+      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+      "+x_0=1000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs"
+    );
+
+    function toWgs84From5179(x, y) {
+      // 반환 [lng, lat]
+      return proj4("EPSG:5179", "WGS84", [x, y]);
+    }
+
     // ---------- 전역 상태 ----------
     let map;
     let polygons = [];          // 현재 지도에 그려진 polygon들
     let selectedZips = [];      // 현재 선택된 우편번호들
-    const GEOJSON_BASE = "/public/geojson";  // GeoJSON 파일 경로 기본값
+    const API_BASE = "https://zip.maroowell.com";  // Worker API 엔드포인트
 
     // ---------- 유틸 ----------
     function parseZipInput(text) {
@@ -216,24 +230,23 @@
       return colors[sum % colors.length];
     }
 
-    function polygonsFromGeometry(geometry, zip) {
-      const type = geometry.type;
-      const coords = geometry.coordinates;
+    // ---------- Worker API → Kakao Polygon ----------
+    function polygonsFromApiData(data, zip) {
       const result = [];
+      const polys5179 = data.polygon5179 || [];
 
-      if (!type || !coords) return result;
+      // polygon5179 구조: [ [ [x,y], [x,y], ... ], [ ... ], ... ]
+      polys5179.forEach(ring => {
+        if (!Array.isArray(ring) || !ring.length) return;
 
-      const makePolygon = (rings) => {
-        if (!rings || !rings.length) return null;
-        const outer = rings[0]; // 첫 번째 링만 사용 (외곽)
-        const path = outer.map(function (pt) {
-          // GeoJSON: [lng, lat]
-          return new kakao.maps.LatLng(pt[1], pt[0]);
+        const path = ring.map(([x, y]) => {
+          const [lng, lat] = toWgs84From5179(x, y);
+          return new kakao.maps.LatLng(lat, lng);
         });
 
         const color = colorForZip(zip);
 
-        return new kakao.maps.Polygon({
+        const poly = new kakao.maps.Polygon({
           path: path,
           strokeWeight: 2,
           strokeColor: color,
@@ -242,45 +255,33 @@
           fillColor: color,
           fillOpacity: 0.3
         });
-      };
 
-      if (type === "Polygon") {
-        const poly = makePolygon(coords);
-        if (poly) result.push(poly);
-      } else if (type === "MultiPolygon") {
-        coords.forEach(rings => {
-          const poly = makePolygon(rings);
-          if (poly) result.push(poly);
-        });
-      }
+        result.push(poly);
+      });
 
       return result;
     }
 
-    async function loadGeoJsonForZip(zip) {
-      const url = `${GEOJSON_BASE}/${zip}.json`;
+    async function loadPolygonsForZip(zip) {
+      const url = `${API_BASE}/?zipcode=${encodeURIComponent(zip)}`;
       const resp = await fetch(url);
-
       if (!resp.ok) {
-        throw new Error("GeoJSON not found: " + zip);
+        throw new Error(`API 응답 오류(${resp.status}) : ${zip}`);
       }
 
-      const gj = await resp.json();
-      const polys = [];
+      const data = await resp.json();
 
-      if (gj.type === "FeatureCollection" && Array.isArray(gj.features)) {
-        gj.features.forEach(f => {
-          polys.push(...polygonsFromGeometry(f.geometry, zip));
-        });
-      } else if (gj.type === "Feature") {
-        polys.push(...polygonsFromGeometry(gj.geometry, zip));
-      } else {
-        polys.push(...polygonsFromGeometry(gj, zip));
+      if (!data.polygon5179 || !data.polygon5179.length) {
+        throw new Error("polygon5179 없음: " + zip);
       }
 
-      return polys;
+      return {
+        polygons: polygonsFromApiData(data, zip),
+        center5179: data.center5179 || null
+      };
     }
 
+    // ---------- 지도 표시 로직 ----------
     async function showZipAreas() {
       const raw = document.getElementById("zipInput").value;
       const zips = parseZipInput(raw);
@@ -293,7 +294,7 @@
       clearPolygons();
       selectedZips = zips;
       updateSelectedInfo();
-      setOverlayMessage("GeoJSON 로딩 중...");
+      setOverlayMessage("행안부 API 호출 중...");
 
       const bounds = new kakao.maps.LatLngBounds();
       let hasAny = false;
@@ -301,7 +302,8 @@
 
       for (const zip of zips) {
         try {
-          const polys = await loadGeoJsonForZip(zip);
+          const { polygons: polys, center5179 } = await loadPolygonsForZip(zip);
+
           if (!polys.length) {
             missing.push(zip);
             continue;
@@ -317,8 +319,16 @@
             }
           });
 
+          // center5179 있으면 한 번만 중심으로 써도 됨 (있어도 bounds가 더 중요)
+          if (center5179 && !hasAny) {
+            const [cx, cy] = center5179;
+            const [lng, lat] = toWgs84From5179(cx, cy);
+            map.setCenter(new kakao.maps.LatLng(lat, lng));
+          }
+
           hasAny = true;
         } catch (e) {
+          console.error(e);
           missing.push(zip);
         }
       }
@@ -331,7 +341,7 @@
       }
 
       if (missing.length) {
-        alert("다음 우편번호는 GeoJSON 파일을 찾지 못했습니다:\n" + missing.join(", "));
+        alert("다음 우편번호는 폴리곤을 가져오지 못했습니다:\n" + missing.join(", "));
       }
     }
 

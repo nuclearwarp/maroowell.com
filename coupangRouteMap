@@ -41,19 +41,24 @@
       color: #9ca3af;
     }
 
-    textarea {
+    .field-label {
+      font-size: 0.78rem;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+
+    .input {
       width: 100%;
-      min-height: 130px;
-      resize: vertical;
-      border-radius: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
       border: 1px solid #1f2937;
       background: #020617;
       color: #e5e7eb;
-      padding: 8px 10px;
       font-size: 0.8rem;
     }
-    textarea::placeholder {
-      color: #4b5563;
+
+    .input[readonly] {
+      opacity: 0.7;
     }
 
     .btn-row {
@@ -76,6 +81,10 @@
       background: #111827;
       border-color: #111827;
     }
+    button.danger {
+      border-color: #b91c1c;
+      color: #fecaca;
+    }
     button:hover {
       background: #111827;
     }
@@ -85,6 +94,19 @@
       font-size: 0.72rem;
       color: #6b7280;
       line-height: 1.4;
+    }
+
+    .status-box {
+      margin-top: 4px;
+      font-size: 0.74rem;
+      color: #e5e7eb;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #020617;
+      border: 1px solid #1f2937;
+      max-height: 72px;
+      overflow: auto;
+      white-space: pre-line;
     }
 
     .map-wrapper {
@@ -108,11 +130,6 @@
       pointer-events: none;
     }
 
-    .selected-list {
-      font-size: 0.78rem;
-      color: #9ca3af;
-    }
-
     @media (max-width: 768px) {
       .page {
         flex-direction: column;
@@ -125,42 +142,36 @@
     }
   </style>
 
-  <!-- proj4: 5179 -> WGS84 변환용 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.1/proj4.js"></script>
-
-  <!-- Kakao Maps JavaScript API (JS 키는 그대로) -->
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false"></script>
+  <!-- Kakao Maps JavaScript API + Drawing 라이브러리 -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing&autoload=false"></script>
 </head>
 <body>
   <div class="page">
     <aside class="side">
       <div>
-        <div class="side-header-title">마루웰 지도</div>
-        <div class="side-header-sub">Kakao Map API</div>
+        <div class="side-header-title">마루웰 라우트 편집기</div>
+        <div class="side-header-sub">Kakao Map · Supabase /route API</div>
+      </div>
+
+      <div>
+        <div class="field-label">라우트 코드 (예: 126B01)</div>
+        <input id="routeCodeInput" class="input" />
       </div>
 
       <div class="btn-row">
-        <!-- 나중에 주소검색 기능 붙일 자리 (지금은 버튼만 껍데기) -->
-        <button id="addrSearchBtn">주소검색 추가(추후)</button>
-      </div>
-
-      <label style="font-size:0.78rem; margin-top:4px;">우편번호 목록</label>
-      <textarea id="zipInput" placeholder="예: 07420, 07421 07422
-쉼표 / 공백 / 줄바꿈 아무렇게나 섞어서 입력해도 됩니다."></textarea>
-
-      <div class="btn-row">
-        <button class="primary" id="showBtn">지도표시</button>
-        <button id="fitBtn">영역맞춤</button>
-        <button id="clearBtn">초기화</button>
+        <button id="loadBtn">불러오기(GET)</button>
+        <button id="newDrawBtn">새로 그리기</button>
+        <button class="primary" id="saveBtn">저장(POST)</button>
+        <button class="danger" id="clearMapBtn">지도 초기화</button>
       </div>
 
       <div class="hint">
-        · 각 우편번호는 <code>https://zip.maroowell.com/?zipcode=XXXXX</code> 에서<br />
-        &nbsp;&nbsp;폴리곤을 가져와서 카카오 지도에 그립니다.<br />
-        · 여러 개를 동시에 입력하면 한 번에 모두 표시됩니다.
+        · URL에 <code>?code=126B01</code> 이 있으면 자동으로 코드 채워짐<br />
+        · 폴리곤은 <b>다각형 도구</b>로 그리고, 더블 클릭하면 닫힙니다.<br />
+        · 저장 시 <code>polygon_wgs84</code> / <code>center_wgs84</code> 로 Supabase에 업서트 됩니다.
       </div>
 
-      <div class="selected-list" id="selectedInfo"></div>
+      <div class="status-box" id="statusBox">준비 완료</div>
     </aside>
 
     <div class="map-wrapper">
@@ -172,222 +183,258 @@
   </div>
 
   <script>
-    // ---------- proj4 설정 (EPSG:5179 -> WGS84) ----------
-    proj4.defs("EPSG:5179",
-      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
-      "+x_0=1000000 +y_0=2000000 +ellps=GRS80 +units=m +no_defs"
-    );
+    const ROUTE_API_BASE = "https://route.maroowell.com";
 
-    function toWgs84From5179(x, y) {
-      // 반환 [lng, lat]
-      return proj4("EPSG:5179", "WGS84", [x, y]);
-    }
-
-    // ---------- 전역 상태 ----------
     let map;
-    let polygons = [];          // 현재 지도에 그려진 polygon들
-    let selectedZips = [];      // 현재 선택된 우편번호들
-    const API_BASE = "https://zip.maroowell.com";  // Worker API 엔드포인트
+    let drawingManager;
+    let currentPolygon = null; // 마지막으로 그린 polygon overlay
 
-    // ---------- 유틸 ----------
-    function parseZipInput(text) {
-      return Array.from(
-        new Set(
-          text
-            .split(/[\s,]+/)
-            .map(v => v.trim())
-            .filter(v => v.length > 0)
-        )
-      );
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(msg) {
+      $("statusBox").textContent = msg;
+    }
+    function setOverlay(msg) {
+      $("overlayInfo").textContent = msg;
     }
 
-    function clearPolygons() {
-      polygons.forEach(p => p.setMap(null));
-      polygons = [];
+    // URL ?code=126B01 읽기
+    function getCodeFromQuery() {
+      const sp = new URLSearchParams(location.search);
+      return sp.get("code") || "";
     }
 
-    function updateSelectedInfo() {
-      const el = document.getElementById("selectedInfo");
-      if (!selectedZips.length) {
-        el.textContent = "표시 중인 우편번호 없음";
-      } else {
-        el.textContent = "표시 중인 우편번호: " + selectedZips.join(", ");
-      }
-    }
-
-    function setOverlayMessage(msg) {
-      document.getElementById("overlayInfo").textContent = msg;
-    }
-
-    function colorForZip(zip) {
-      // 간단 컬러 해시 (우편번호별 다른 색)
-      const colors = [
-        "#22c55e","#3b82f6","#eab308","#f97316",
-        "#ec4899","#a855f7","#2dd4bf","#f97316"
-      ];
-      let sum = 0;
-      for (let i = 0; i < zip.length; i++) sum += zip.charCodeAt(i);
-      return colors[sum % colors.length];
-    }
-
-    // ---------- Worker API → Kakao Polygon ----------
-    function polygonsFromApiData(data, zip) {
-      const result = [];
-      const polys5179 = data.polygon5179 || [];
-
-      // polygon5179 구조: [ [ [x,y], [x,y], ... ], [ ... ], ... ]
-      polys5179.forEach(ring => {
-        if (!Array.isArray(ring) || !ring.length) return;
-
-        const path = ring.map(([x, y]) => {
-          const [lng, lat] = toWgs84From5179(x, y);
-          return new kakao.maps.LatLng(lat, lng);
-        });
-
-        const color = colorForZip(zip);
-
-        const poly = new kakao.maps.Polygon({
-          path: path,
-          strokeWeight: 2,
-          strokeColor: color,
-          strokeOpacity: 0.9,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.3
-        });
-
-        result.push(poly);
+    // Kakao 지도 + DrawingManager 초기화
+    function initMap() {
+      const container = $("map");
+      const center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울시청 근처
+      map = new kakao.maps.Map(container, {
+        center,
+        level: 6,
       });
 
-      return result;
+      // DrawingManager : polygon만 허용
+      const options = {
+        map,
+        drawingMode: [
+          kakao.maps.drawing.OverlayType.POLYGON,
+        ],
+        guideTooltip: ["draw"],
+
+        polygonOptions: {
+          draggable: true,
+          removable: true,
+          strokeWeight: 3,
+          strokeColor: "#f97316",
+          strokeOpacity: 0.9,
+          strokeStyle: "solid",
+          fillColor: "#f97316",
+          fillOpacity: 0.3,
+        },
+      };
+
+      drawingManager = new kakao.maps.drawing.DrawingManager(options);
+
+      // 그리기 완료 시 이벤트
+      kakao.maps.event.addListener(drawingManager, "drawend", function(data) {
+        if (data.overlayType === kakao.maps.drawing.OverlayType.POLYGON) {
+          // 이전 폴리곤 지우고 새거로 교체
+          if (currentPolygon) currentPolygon.setMap(null);
+          currentPolygon = data.target;
+          setStatus("폴리곤 작성 완료. 저장하려면 [저장(POST)] 버튼을 누르세요.");
+        }
+      });
+
+      setOverlay("지도 준비 완료. 라우트 코드를 입력하고 불러오거나, 새로 그리세요.");
     }
 
-    async function loadPolygonsForZip(zip) {
-      const url = `${API_BASE}/?zipcode=${encodeURIComponent(zip)}`;
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        throw new Error(`API 응답 오류(${resp.status}) : ${zip}`);
+    // 현재 currentPolygon 의 경도/위도 배열 추출
+    function extractLngLatFromPolygon(poly) {
+      const path = poly.getPath();
+      const arr = [];
+      for (let i = 0; i < path.length; i++) {
+        const p = path.getAt(i);
+        arr.push([p.getLng(), p.getLat()]);
       }
+      return arr;
+    }
 
-      const data = await resp.json();
+    // 경도/위도 배열로부터 중심점(단순 평균) 계산
+    function calcCenterFromLngLat(points) {
+      if (!points.length) return null;
+      let sumLng = 0, sumLat = 0;
+      points.forEach(([lng, lat]) => {
+        sumLng += lng;
+        sumLat += lat;
+      });
+      return [sumLng / points.length, sumLat / points.length];
+    }
 
-      if (!data.polygon5179 || !data.polygon5179.length) {
-        throw new Error("polygon5179 없음: " + zip);
+    // polygon_wgs84 데이터를 지도에 그리기
+    function drawPolygonFromWgs84(points) {
+      if (!Array.isArray(points) || !points.length) return;
+
+      const path = points.map(([lng, lat]) => new kakao.maps.LatLng(lat, lng));
+
+      if (currentPolygon) currentPolygon.setMap(null);
+
+      currentPolygon = new kakao.maps.Polygon({
+        map,
+        path,
+        strokeWeight: 3,
+        strokeColor: "#22c55e",
+        strokeOpacity: 0.9,
+        strokeStyle: "solid",
+        fillColor: "#22c55e",
+        fillOpacity: 0.3,
+      });
+
+      // 영역 맞게 센터/레벨 조정
+      const bounds = new kakao.maps.LatLngBounds();
+      path.forEach(p => bounds.extend(p));
+      map.setBounds(bounds);
+
+      setStatus("저장된 폴리곤을 불러와서 지도에 표시했습니다.");
+    }
+
+    // Supabase에서 라우트 1건 GET
+    async function fetchRoute(code) {
+      const url = `${ROUTE_API_BASE}/route?code=${encodeURIComponent(code)}`;
+      const res = await fetch(url);
+      if (res.status === 404) {
+        return { found: false };
       }
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`GET /route 실패: ${res.status} / ${t}`);
+      }
+      return await res.json(); // { found, row }
+    }
 
-      return {
-        polygons: polygonsFromApiData(data, zip),
-        center5179: data.center5179 || null
+    // Supabase로 라우트 저장 POST
+    async function saveRoute({ code, polygon_wgs84, center_wgs84 }) {
+      const url = `${ROUTE_API_BASE}/route`;
+      const body = {
+        code,
+        polygon_wgs84,
+        center_wgs84,
+      };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`POST /route 실패: ${res.status} / ${t}`);
+      }
+      return await res.json(); // { ok, row }
+    }
+
+    // 버튼 이벤트들
+    function bindUI() {
+      const codeInput = $("routeCodeInput");
+
+      $("loadBtn").onclick = async () => {
+        const code = codeInput.value.trim();
+        if (!code) {
+          alert("라우트 코드를 입력하세요. (예: 126B01)");
+          return;
+        }
+        try {
+          setStatus("GET /route 호출 중...");
+          const data = await fetchRoute(code);
+          if (!data.found) {
+            setStatus(`저장된 데이터 없음: ${code}`);
+            if (currentPolygon) {
+              currentPolygon.setMap(null);
+              currentPolygon = null;
+            }
+            return;
+          }
+          const row = data.row;
+          if (row.polygon_wgs84) {
+            drawPolygonFromWgs84(row.polygon_wgs84);
+          } else {
+            setStatus("polygon_wgs84 데이터가 없어 지도엔 표시하지 못했습니다.");
+          }
+        } catch (e) {
+          console.error(e);
+          setStatus(String(e));
+          alert("라우트 불러오기 중 오류가 발생했습니다. 콘솔 확인.");
+        }
+      };
+
+      $("newDrawBtn").onclick = () => {
+        setStatus("다각형 도구로 지도를 클릭해서 라우트 영역을 그리세요. (더블 클릭으로 종료)");
+        // 기존 폴리곤은 남겨두고 새로 그릴 수도 있지만,
+        // 헷갈리지 않게 기존 것 삭제
+        if (currentPolygon) {
+          currentPolygon.setMap(null);
+          currentPolygon = null;
+        }
+        // polygon 모드로 전환
+        drawingManager.cancel();
+        drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
+      };
+
+      $("saveBtn").onclick = async () => {
+        const code = codeInput.value.trim();
+        if (!code) {
+          alert("라우트 코드를 먼저 입력하세요.");
+          return;
+        }
+        if (!currentPolygon) {
+          alert("저장할 폴리곤이 없습니다. 먼저 영역을 그려주세요.");
+          return;
+        }
+
+        try {
+          const pts = extractLngLatFromPolygon(currentPolygon);
+          if (!pts.length) {
+            alert("폴리곤 좌표가 비어 있습니다.");
+            return;
+          }
+          const center = calcCenterFromLngLat(pts);
+
+          setStatus("POST /route (Supabase 저장) 호출 중...");
+          const resp = await saveRoute({
+            code,
+            polygon_wgs84: pts,
+            center_wgs84: center,
+          });
+
+          setStatus(`저장 완료. id=${resp.row?.id ?? "?"}, updated_at=${resp.row?.updated_at ?? ""}`);
+          alert("저장 완료!");
+        } catch (e) {
+          console.error(e);
+          setStatus(String(e));
+          alert("저장 중 오류가 발생했습니다. 콘솔 확인.");
+        }
+      };
+
+      $("clearMapBtn").onclick = () => {
+        if (currentPolygon) {
+          currentPolygon.setMap(null);
+          currentPolygon = null;
+        }
+        drawingManager.cancel();
+        setStatus("지도 초기화 완료.");
       };
     }
 
-    // ---------- 지도 표시 로직 ----------
-    async function showZipAreas() {
-      const raw = document.getElementById("zipInput").value;
-      const zips = parseZipInput(raw);
-
-      if (!zips.length) {
-        alert("우편번호를 하나 이상 입력해주세요.");
-        return;
-      }
-
-      clearPolygons();
-      selectedZips = zips;
-      updateSelectedInfo();
-      setOverlayMessage("행안부 API 호출 중...");
-
-      const bounds = new kakao.maps.LatLngBounds();
-      let hasAny = false;
-      const missing = [];
-
-      for (const zip of zips) {
-        try {
-          const { polygons: polys, center5179 } = await loadPolygonsForZip(zip);
-
-          if (!polys.length) {
-            missing.push(zip);
-            continue;
-          }
-
-          polys.forEach(poly => {
-            poly.setMap(map);
-            polygons.push(poly);
-
-            const path = poly.getPath();
-            for (let i = 0; i < path.length; i++) {
-              bounds.extend(path.getAt(i));
-            }
-          });
-
-          // center5179 있으면 한 번만 중심으로 써도 됨 (있어도 bounds가 더 중요)
-          if (center5179 && !hasAny) {
-            const [cx, cy] = center5179;
-            const [lng, lat] = toWgs84From5179(cx, cy);
-            map.setCenter(new kakao.maps.LatLng(lat, lng));
-          }
-
-          hasAny = true;
-        } catch (e) {
-          console.error(e);
-          missing.push(zip);
-        }
-      }
-
-      if (hasAny) {
-        map.setBounds(bounds);
-        setOverlayMessage("표시 중인 우편번호: " + selectedZips.join(", "));
-      } else {
-        setOverlayMessage("표시할 영역이 없습니다.");
-      }
-
-      if (missing.length) {
-        alert("다음 우편번호는 폴리곤을 가져오지 못했습니다:\n" + missing.join(", "));
-      }
-    }
-
-    function fitBoundsToPolygons() {
-      if (!polygons.length) {
-        alert("지도에 표시 중인 영역이 없습니다.");
-        return;
-      }
-      const bounds = new kakao.maps.LatLngBounds();
-      polygons.forEach(poly => {
-        const path = poly.getPath();
-        for (let i = 0; i < path.length; i++) {
-          bounds.extend(path.getAt(i));
-        }
-      });
-      map.setBounds(bounds);
-    }
-
-    function clearAll() {
-      clearPolygons();
-      selectedZips = [];
-      document.getElementById("zipInput").value = "";
-      updateSelectedInfo();
-      setOverlayMessage("지도 초기화됨");
-    }
-
-    // ---------- 초기화 ----------
     kakao.maps.load(function () {
-      const container = document.getElementById("map");
-      const center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울시청 근처
-      map = new kakao.maps.Map(container, {
-        center: center,
-        level: 7
-      });
+      initMap();
+      bindUI();
 
-      setOverlayMessage("지도 준비 완료. 우편번호를 입력하고 [지도표시]를 눌러주세요.");
-      updateSelectedInfo();
-
-      document.getElementById("showBtn").addEventListener("click", showZipAreas);
-      document.getElementById("fitBtn").addEventListener("click", fitBoundsToPolygons);
-      document.getElementById("clearBtn").addEventListener("click", clearAll);
-
-      // 주소검색 버튼은 아직 미구현
-      document.getElementById("addrSearchBtn").addEventListener("click", function () {
-        alert("주소검색 기능은 추후 구현 예정입니다.");
-      });
+      // URL 쿼리에서 code 있으면 자동 세팅
+      const qCode = getCodeFromQuery();
+      if (qCode) {
+        $("routeCodeInput").value = qCode;
+        setStatus(`URL에서 code=${qCode} 감지. [불러오기(GET)] 눌러봐도 됨.`);
+      } else {
+        setStatus("라우트 코드를 입력하고 [불러오기] 또는 [새로 그리기]를 사용하세요.");
+      }
     });
   </script>
 </body>

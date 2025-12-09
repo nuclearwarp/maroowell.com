@@ -140,7 +140,7 @@
   <header>
     <div>
       <div class="title">마루웰 라우트 편집기</div>
-      <div class="subtitle">plz~</div>
+      <div class="subtitle">제발</div>
     </div>
     <span class="badge" id="statusBadge">API: idle</span>
   </header>
@@ -307,15 +307,31 @@
         state.drawingManager,
         "drawend",
         (data) => {
-          const { overlayType, overlay } = data;
-          if (overlayType !== kakao.maps.drawing.OverlayType.POLYGON) return;
+          // 방어 코드: 이상한 drawend면 무시
+          if (!data || !data.overlayType) {
+            log("drawend: data 없음 또는 overlayType 없음");
+            return;
+          }
+          if (data.overlayType !== kakao.maps.drawing.OverlayType.POLYGON) {
+            log("drawend: polygon 이 아님", data.overlayType);
+            return;
+          }
+
+          const overlay = data.overlay;
+          if (!overlay || typeof overlay.getPath !== "function") {
+            log("drawend: overlay 없음 또는 getPath 없음");
+            return;
+          }
 
           // 이전 폴리곤 다 지우고 방금 그린 것만 유지
           clearPolygons();
           state.polygons.push(overlay);
-          setOverlayMessage("새 폴리곤 그리기 완료");
-          log("drawend polygon", collectLngLat(overlay.getPath()));
 
+          // 디버그용 로그
+          const coords = collectLngLat(overlay.getPath());
+          log("drawend polygon", coords);
+
+          setOverlayMessage("새 폴리곤 그리기 완료");
           // 그리기 모드 종료
           state.drawingManager.cancel();
         }
@@ -417,8 +433,13 @@
           return;
         }
 
-        // 마지막 폴리곤 기준
         const poly = state.polygons[state.polygons.length - 1];
+        if (!poly || typeof poly.getPath !== "function") {
+          alert("내부 오류: 폴리곤 객체를 찾지 못했습니다. 한 번 더 그려주세요.");
+          log("saveBtn: poly 없음 또는 getPath 없음", poly);
+          return;
+        }
+
         const coords = collectLngLat(poly.getPath());
 
         if (coords.length < 3) {

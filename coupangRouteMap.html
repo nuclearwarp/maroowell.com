@@ -246,7 +246,7 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Kakao Polygon -> WGS84 위경도 배열 추출 ========
+    // ======== Kakao Polygon -> WGS84 위경도 배열 추출 (강화 버전) ========
     function getPolygonPointsWgs84(polygon) {
       const result = [];
 
@@ -258,37 +258,65 @@
       const rawPath = polygon.getPath();
       log("[DEBUG] drawend raw path", rawPath, "info");
 
-      const walk = (node) => {
-        if (!node) return;
+      const pushLatLng = (ll) => {
+        if (!ll) return;
+        let lat, lng;
 
-        // kakao.maps.LatLng 또는 비슷한 객체
-        if (typeof node.getLat === "function" && typeof node.getLng === "function") {
-          const lat = node.getLat();
-          const lng = node.getLng();
-          if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            result.push({ lat, lng });
-          }
-          return;
+        if (ll instanceof kakao.maps.LatLng ||
+            (typeof ll.getLat === "function" && typeof ll.getLng === "function")) {
+          lat = ll.getLat();
+          lng = ll.getLng();
+        } else if ("Ma" in ll && "La" in ll) {      // kakao 내부 필드명
+          lat = ll.Ma;
+          lng = ll.La;
+        } else if ("lat" in ll && "lng" in ll) {    // {lat, lng}
+          lat = ll.lat;
+          lng = ll.lng;
         }
 
-        // LatLngPath (getLength / getAt)
-        if (typeof node.getLength === "function" && typeof node.getAt === "function") {
-          const len = node.getLength();
-          for (let i = 0; i < len; i++) {
-            walk(node.getAt(i));
-          }
-          return;
-        }
-
-        // 배열이면 재귀
-        if (Array.isArray(node)) {
-          node.forEach(walk);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          result.push({ lat, lng });
         }
       };
 
-      walk(rawPath);
+      const handleAnyPath = (p) => {
+        if (!p) return;
 
-      log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${result.length}`, "info");
+        // 1) LatLngPath (getLength / getAt)
+        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
+          const len = p.getLength();
+          for (let i = 0; i < len; i++) {
+            handleAnyPath(p.getAt(i));
+          }
+          return;
+        }
+
+        // 2) 배열류 또는 forEach 를 가진 객체
+        if (Array.isArray(p) || typeof p.forEach === "function" || typeof p.length === "number") {
+          const forEachFn = p.forEach
+            ? p.forEach.bind(p)
+            : (cb) => { for (let i = 0; i < p.length; i++) cb(p[i], i); };
+
+          const first = p[0];
+          // 첫 원소가 또 path 비슷하면 중첩으로 판단
+          if (first &&
+              (Array.isArray(first) ||
+               typeof first.getLength === "function" ||
+               typeof first.forEach === "function")) {
+            forEachFn(inner => handleAnyPath(inner));
+          } else {
+            forEachFn(pushLatLng);
+          }
+          return;
+        }
+
+        // 3) 그냥 점으로 간주
+        pushLatLng(p);
+      };
+
+      handleAnyPath(rawPath);
+
+      log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${result.length}`, result.length ? "info" : "warn");
       return result;
     }
 
@@ -454,7 +482,6 @@
           return;
         }
 
-        // code 완전 일치 우선 -> 없으면 polygon 있는 것 중 최신 것
         const rows = data.rows.slice();
         rows.sort((a, b) => {
           const ta = new Date(a.updated_at || a.created_at || 0).getTime();
@@ -521,7 +548,6 @@
         return;
       }
 
-      // 이상 좌표 경고 (그래도 저장은 진행)
       const weird = pts.filter(p =>
         p.lat < 30 || p.lat > 45 || p.lng < 120 || p.lng > 135
       );

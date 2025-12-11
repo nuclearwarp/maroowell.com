@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기2</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -109,7 +109,7 @@
     }
   </style>
 
-  <!-- proj4: 5179 -> 4326 변환용 (DB 읽을 때만 사용) -->
+  <!-- proj4: 5179 -> 4326 변환용 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
 
   <!-- Kakao Maps + drawing 라이브러리 -->
@@ -118,7 +118,7 @@
 <body>
   <aside class="side">
     <div>
-      <div class="title">마루웰 라우트 편집기1</div>
+      <div class="title">마루웰 라우트 편집기</div>
       <div class="subtitle">캠프 + 라우트 코드 기반 · Supabase / Cloudflare route API 사용</div>
     </div>
 
@@ -200,7 +200,7 @@
       overlayInfo.textContent = msg;
     }
 
-    // ======== 좌표계 변환 (5179 -> WGS84) - DB 읽을 때만 사용 ========
+    // ======== 좌표계 변환 (5179 <-> WGS84) ========
     proj4.defs(
       "EPSG:5179",
       "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
@@ -277,7 +277,7 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Kakao Polygon -> (lat,lng) 배열 (변환 X, 그대로 저장) ========
+    // ======== Kakao Polygon -> 내부 좌표 추출 (지금 이건 그대로 사용) ========
     function getPolygonPointsWgs84(polygon) {
       const result = [];
 
@@ -293,12 +293,10 @@
         if (!ll) return;
         let lat, lng;
 
-        // kakao.maps.LatLng 또는 유사 객체
         if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
           lat = ll.getLat();
           lng = ll.getLng();
         } else if ("Ma" in ll && "La" in ll) {
-          // 일부 내부 구조에서 lat/lng 를 Ma/La 로 들고 있을 수 있음
           lat = ll.Ma;
           lng = ll.La;
         } else if ("lat" in ll && "lng" in ll) {
@@ -314,23 +312,18 @@
       const walk = (p) => {
         if (!p) return;
 
-        // 1) LatLngPath (getLength / getAt)
         if (typeof p.getLength === "function" && typeof p.getAt === "function") {
           const len = p.getLength();
-          for (let i = 0; i < len; i++) {
-            walk(p.getAt(i));
-          }
+          for (let i = 0; i < len; i++) walk(p.getAt(i));
           return;
         }
 
-        // 2) 배열 또는 배열 비슷한 것
         if (Array.isArray(p) || typeof p.length === "number" || typeof p.forEach === "function") {
           const forEachFn = p.forEach
             ? p.forEach.bind(p)
             : (cb) => { for (let i = 0; i < p.length; i++) cb(p[i], i); };
 
           const first = p[0];
-          // 첫 원소가 또 path 스타일이면 재귀
           if (first &&
               (Array.isArray(first) ||
                (typeof first === "object" &&
@@ -342,7 +335,6 @@
           return;
         }
 
-        // 3) 단일 점
         pushLatLng(p);
       };
 
@@ -350,7 +342,7 @@
       return result;
     }
 
-    // ======== Supabase Cloudflare Worker 연동 ========
+    // ======== API 연동 ========
     async function fetchRoute(camp, code) {
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
@@ -407,22 +399,17 @@
 
       let points = [];
 
-      // 1) [{lat, lng}, ...]
       if (Array.isArray(raw) && raw.length && typeof raw[0] === "object" && "lat" in raw[0]) {
         const first = raw[0];
         const lat0 = Number(first.lat);
         const lng0 = Number(first.lng);
 
         if (looksLikeWgs84(lat0, lng0)) {
-          points = raw.map(p => ({
-            lat: Number(p.lat),
-            lng: Number(p.lng)
-          }));
+          points = raw.map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }));
         } else {
           points = raw.map(p => convert5179ToWgs84(Number(p.lng), Number(p.lat)));
         }
       }
-      // 2) [[x,y], [x,y] ...]
       else if (Array.isArray(raw) && Array.isArray(raw[0])) {
         const a0 = Number(raw[0][0]);
         const b0 = Number(raw[0][1]);
@@ -565,6 +552,7 @@
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
     });
 
+    /* --------------- 여기만 핵심 수정 --------------- */
     saveBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -580,12 +568,22 @@
         return;
       }
 
-      const pts = getPolygonPointsWgs84(currentPolygon);
-      if (!pts.length) {
+      // 1) 현재 kakao polygon에서 점 좌표 뽑기 (기존 로직 그대로)
+      const rawPts = getPolygonPointsWgs84(currentPolygon);
+      if (!rawPts.length) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
         log("[LOG] 저장 실패: 추출된 점 개수 0", "err");
         return;
       }
+
+      // 2) index.html 방식으로 좌표계 정리:
+      //    - 이미 WGS84 범위면 그대로 사용
+      //    - 아니면 5179(같은 숫자)라고 보고 5179 -> WGS84 변환
+      const pts = rawPts.map(p => {
+        if (looksLikeWgs84(p.lat, p.lng)) return { lat: p.lat, lng: p.lng };
+        const conv = convert5179ToWgs84(p.lng, p.lat);
+        return conv;
+      });
 
       const center = computeCenter(pts);
       log(
@@ -601,6 +599,7 @@
         alert("저장 중 오류가 발생했습니다.");
       }
     });
+    /* --------------- 수정 끝 --------------- */
 
     resetBtn.addEventListener("click", () => {
       clearCurrentOverlays();
@@ -609,7 +608,6 @@
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     });
 
-    // ======== 초기 실행 ========
     kakao.maps.load(initMap);
   </script>
 </body>

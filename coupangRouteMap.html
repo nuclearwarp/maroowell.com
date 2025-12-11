@@ -2,15 +2,17 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%; height: 100%;
+      width: 100%;
+      height: 100%;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:#020617; color:#e5e7eb;
+      background:#020617;
+      color:#e5e7eb;
     }
     body { display:flex; }
 
@@ -30,29 +32,39 @@
 
     label { font-size:0.78rem; margin-bottom:2px; display:block; }
     input[type="text"] {
-      width:100%; padding:7px 10px; border-radius:8px;
-      border:1px solid #374151; background:#020617; color:#e5e7eb;
+      width:100%;
+      padding:7px 10px;
+      border-radius:8px;
+      border:1px solid #374151;
+      background:#020617;
+      color:#e5e7eb;
       font-size:0.8rem;
     }
 
     .btn-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; }
     button {
-      border-radius:999px; border:1px solid #374151;
-      background:#020617; color:#e5e7eb;
-      padding:6px 12px; font-size:0.78rem;
-      cursor:pointer; white-space:nowrap;
+      border-radius:999px;
+      border:1px solid #374151;
+      background:#020617;
+      color:#e5e7eb;
+      padding:6px 12px;
+      font-size:0.78rem;
+      cursor:pointer;
+      white-space:nowrap;
     }
     button.primary { background:#111827; border-color:#111827; }
     button.danger  { border-color:#b91c1c; color:#fecaca; }
     button:hover { background:#111827; }
 
-    .hint {
-      font-size:0.7rem; color:#6b7280; line-height:1.4;
-    }
+    .hint { font-size:0.7rem; color:#6b7280; line-height:1.4; }
     .status-bar {
-      font-size:0.7rem; padding:4px 8px; border-radius:999px;
-      background:#022c22; color:#6ee7b7;
-      display:inline-block; margin-top:4px;
+      font-size:0.7rem;
+      padding:4px 8px;
+      border-radius:999px;
+      background:#022c22;
+      color:#6ee7b7;
+      display:inline-block;
+      margin-top:4px;
     }
     .status-error { background:#450a0a; color:#fecaca; }
 
@@ -75,17 +87,24 @@
     .map-wrap { flex:1; position:relative; }
     #map { width:100%; height:100%; }
     .overlay-badge {
-      position:absolute; top:10px; left:10px;
-      background:rgba(15,23,42,0.9); border:1px solid #1f2937;
-      border-radius:999px; padding:4px 10px;
-      font-size:0.72rem; pointer-events:none;
+      position:absolute;
+      top:10px;
+      left:10px;
+      background:rgba(15,23,42,0.9);
+      border:1px solid #1f2937;
+      border-radius:999px;
+      padding:4px 10px;
+      font-size:0.72rem;
+      pointer-events:none;
     }
 
     @media (max-width:900px) {
       body { flex-direction:column; }
       .side {
-        width:100%; max-width:none;
-        border-right:none; border-bottom:1px solid #1f2937;
+        width:100%;
+        max-width:none;
+        border-right:none;
+        border-bottom:1px solid #1f2937;
       }
       .map-wrap { height:calc(100% - 260px); }
     }
@@ -120,9 +139,9 @@
 
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
-      · 코드 길이 5자리 이상(예: 126B01)은 <code>exact</code> 조회, 그 이하는 <code>prefix</code> 조회입니다.<br/>
-      · 저장은 현재 선택된 폴리곤 한 개만 저장합니다. (점수, 꼭짓점 3개 이상 권장)<br/>
-      · 저장 시 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
+      · GET: 126 → 126, 126A, 126B, 126B01 등 <code>mode=prefix</code>로 조회합니다.<br/>
+      · 저장은 현재 화면에 보이는 <b>마지막 폴리곤 1개</b>만 저장됩니다.<br/>
+      · 예전에 잘못 저장된 좌표(5179 같은 값)는 자동으로 필터링해서 무시합니다.
     </div>
 
     <div id="apiStatus" class="status-bar">API: ready</div>
@@ -136,27 +155,26 @@
   </div>
 
   <script>
-    // ======== 공통 설정 ========
+    /**************** 공통 유틸 ****************/
     const ROUTE_API_BASE = "https://route.maroowell.com"; // Cloudflare Worker
 
-    const logBox      = document.getElementById("logBox");
-    const apiStatus   = document.getElementById("apiStatus");
-    const overlayInfo = document.getElementById("overlayInfo");
-    const campInput   = document.getElementById("campInput");
-    const routeInput  = document.getElementById("routeInput");
-    const loadBtn     = document.getElementById("loadBtn");
-    const drawBtn     = document.getElementById("drawBtn");
-    const saveBtn     = document.getElementById("saveBtn");
-    const resetBtn    = document.getElementById("resetBtn");
+    const logBox     = document.getElementById("logBox");
+    const apiStatus  = document.getElementById("apiStatus");
+    const overlayInfo= document.getElementById("overlayInfo");
+    const campInput  = document.getElementById("campInput");
+    const routeInput = document.getElementById("routeInput");
+    const loadBtn    = document.getElementById("loadBtn");
+    const drawBtn    = document.getElementById("drawBtn");
+    const saveBtn    = document.getElementById("saveBtn");
+    const resetBtn   = document.getElementById("resetBtn");
 
     function log(message, level = "info") {
       const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const ss = String(now.getSeconds()).padStart(2, "0");
+      const hh = String(now.getHours()).padStart(2,"0");
+      const mm = String(now.getMinutes()).padStart(2,"0");
+      const ss = String(now.getSeconds()).padStart(2,"0");
 
       const line = document.createElement("div");
-
       const spanTime = document.createElement("span");
       spanTime.textContent = `[${hh}:${mm}:${ss}] `;
       spanTime.className = "log-line-time";
@@ -171,7 +189,7 @@
       logBox.scrollTop = logBox.scrollHeight;
     }
 
-    function setApiStatus(msg, isError = false) {
+    function setApiStatus(msg, isError=false) {
       apiStatus.textContent = "API: " + msg;
       apiStatus.className = "status-bar" + (isError ? " status-error" : "");
     }
@@ -180,7 +198,16 @@
       overlayInfo.textContent = msg;
     }
 
-    // ======== Kakao 지도 & DrawingManager ========
+    // 한국 범위 안에 있는지 체크 (WGS84 기준)
+    function isValidKoreaLatLng(lat, lng) {
+      return (
+        Number.isFinite(lat) && Number.isFinite(lng) &&
+        lat >= 30 && lat <= 45 &&
+        lng >= 120 && lng <= 135
+      );
+    }
+
+    /**************** Kakao 지도 & DrawingManager ****************/
     let map;
     let drawingManager;
     let currentPolygon = null;   // 마지막으로 그린 / 불러온 폴리곤
@@ -189,8 +216,7 @@
     function initMap() {
       const center = new kakao.maps.LatLng(37.5665, 126.9780);
       map = new kakao.maps.Map(document.getElementById("map"), {
-        center,
-        level: 7,
+        center, level: 7
       });
 
       const options = {
@@ -207,12 +233,12 @@
           strokeStyle: "solid",
           fillColor: "#22c55e",
           fillOpacity: 0.3,
-        },
+        }
       };
       drawingManager = new kakao.maps.drawing.DrawingManager(options);
 
       // 도형 그리기 끝났을 때
-      kakao.maps.event.addListener(drawingManager, "drawend", function (data) {
+      kakao.maps.event.addListener(drawingManager, "drawend", function(data) {
         const overlay = data.target;
         if (!overlay || !(overlay instanceof kakao.maps.Polygon)) {
           log("[LOG] drawend: polygon overlay 아님, 무시", "warn");
@@ -223,17 +249,18 @@
         drawnOverlays.push(overlay);
 
         const pts = extractPathFromPolygon(overlay);
-        log(
-          `[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`,
-          pts.length ? "info" : "warn"
-        );
+        log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
       });
 
       setOverlayText("지도 초기화 완료.");
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== 폴리곤 경로 추출 ========
+    /**
+     * Kakao Polygon에서 Lat/Lng 배열 추출
+     * - kakao.maps.Array / Array / 중첩 배열 / MVCArray 모두 대응
+     * 반환: [{lat, lng}, ...]
+     */
     function extractPathFromPolygon(polygon) {
       const result = [];
 
@@ -246,14 +273,11 @@
         if (!ll) return;
         let lat, lng;
         if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
-          lat = ll.getLat();
-          lng = ll.getLng();
-        } else if ("Ma" in ll && "La" in ll) {
-          lat = ll.Ma;
-          lng = ll.La;
+          lat = ll.getLat(); lng = ll.getLng();
+        } else if ("Ma" in ll && "La" in ll) { // 내부 필드명일 수도 있음
+          lat = ll.Ma; lng = ll.La;
         } else if ("lat" in ll && "lng" in ll) {
-          lat = ll.lat;
-          lng = ll.lng;
+          lat = ll.lat; lng = ll.lng;
         }
         if (Number.isFinite(lat) && Number.isFinite(lng)) {
           result.push({ lat, lng });
@@ -263,40 +287,37 @@
       const handleAnyPath = (pathLike) => {
         if (!pathLike) return;
 
-        if (
-          typeof pathLike.getLength === "function" &&
-          typeof pathLike.getAt === "function"
-        ) {
+        // kakao.maps.Array(MVCArray 스타일)
+        if (typeof pathLike.getLength === "function" &&
+            typeof pathLike.getAt === "function") {
           const len = pathLike.getLength();
           for (let i = 0; i < len; i++) pushLatLng(pathLike.getAt(i));
           return;
         }
 
-        if (
-          Array.isArray(pathLike) ||
-          typeof pathLike.length === "number" ||
-          typeof pathLike.forEach === "function"
-        ) {
+        // 배열류 또는 forEach만 있는 경우
+        if (Array.isArray(pathLike) ||
+            typeof pathLike.length === "number" ||
+            typeof pathLike.forEach === "function") {
+
           const forEachFn = pathLike.forEach
             ? pathLike.forEach.bind(pathLike)
-            : (cb) => {
-                for (let i = 0; i < pathLike.length; i++) cb(pathLike[i], i);
-              };
+            : (cb) => { for (let i=0; i<pathLike.length; i++) cb(pathLike[i], i); };
 
           const first = pathLike[0];
-          if (
-            first &&
-            (Array.isArray(first) ||
-              typeof first.getLength === "function" ||
-              typeof first.forEach === "function")
-          ) {
-            forEachFn((inner) => handleAnyPath(inner));
+          if (first &&
+              (Array.isArray(first) ||
+               typeof first.getLength === "function" ||
+               typeof first.forEach === "function")) {
+            // 다중 ring
+            forEachFn(inner => handleAnyPath(inner));
           } else {
             forEachFn(pushLatLng);
           }
           return;
         }
 
+        // fallback
         pushLatLng(pathLike);
       };
 
@@ -306,20 +327,14 @@
       return result;
     }
 
-    // ======== Supabase Cloudflare Worker 연동 ========
+    /**************** Supabase Cloudflare Worker 연동 ****************/
     async function fetchRoute(camp, code) {
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
       url.searchParams.set("code", code);
+      url.searchParams.set("mode", "prefix"); // 126B면 126B01까지 전부 조회
 
-      // 코드 길이 기준으로 exact / prefix 모드 결정
-      const mode = code.length >= 5 ? "exact" : "prefix";
-      url.searchParams.set("mode", mode);
-
-      log(
-        `[LOG] GET /route 요청: ${url.toString()} (mode=${mode})`,
-        "info"
-      );
+      log(`[LOG] GET /route 요청: ${url.toString()}`, "info");
       setApiStatus("GET /route 호출 중...");
 
       const res = await fetch(url.toString());
@@ -337,12 +352,7 @@
 
     async function saveRoute(camp, code, polygonWgs84, centerWgs84) {
       const url = ROUTE_API_BASE + "/route";
-      const body = {
-        camp,
-        code,
-        polygon_wgs84: polygonWgs84,
-        center_wgs84: centerWgs84,
-      };
+      const body = { camp, code, polygon_wgs84: polygonWgs84, center_wgs84: centerWgs84 };
 
       log(`[LOG] POST /route 요청: ${JSON.stringify(body)}`, "info");
       setApiStatus("POST /route 호출 중...");
@@ -365,11 +375,10 @@
       return json;
     }
 
-    // ======== 지도 상의 폴리곤 → 단순 lat/lng 배열 & 중심 ========
+    /**************** 지도 상의 폴리곤 유틸 ****************/
     function computeCenter(points) {
       if (!points.length) return null;
-      let sumLat = 0,
-        sumLng = 0;
+      let sumLat = 0, sumLng = 0;
       for (const p of points) {
         sumLat += p.lat;
         sumLng += p.lng;
@@ -378,12 +387,64 @@
     }
 
     function clearCurrentOverlays() {
-      drawnOverlays.forEach((o) => o.setMap(null));
+      drawnOverlays.forEach(o => o.setMap(null));
       drawnOverlays = [];
       currentPolygon = null;
     }
 
-    // ======== 버튼 이벤트 ========
+    // Supabase row 하나를 가지고 실제 폴리곤을 그리는 함수
+    function drawPolygonFromRow(row, index) {
+      const poly = row && row.polygon_wgs84;
+      if (!poly || !Array.isArray(poly) || !poly.length) {
+        log(`[WARN] drawPolygonFromRow: polygon_wgs84 없음 / 비어 있음 (index=${index})`, "warn");
+        return false;
+      }
+
+      const pathLatLng = [];
+      for (const p of poly) {
+        if (!p) continue;
+        const lat = Number(p.lat ?? p.latitude ?? p.y);
+        const lng = Number(p.lng ?? p.longitude ?? p.x);
+
+        if (!isValidKoreaLatLng(lat, lng)) {
+          log(
+            `[WARN] drawPolygonFromRow: 위경도 범위 초과 (lat=${lat}, lng=${lng}) => 이 row 필드 무시`,
+            "warn"
+          );
+          return false; // 이 row 전체를 버린다 (옛날 5179 데이터일 가능성 높음)
+        }
+        pathLatLng.push(new kakao.maps.LatLng(lat, lng));
+      }
+
+      if (pathLatLng.length < 3) {
+        log(`[WARN] drawPolygonFromRow: 유효 점 개수 < 3 (index=${index})`, "warn");
+        return false;
+      }
+
+      const polygon = new kakao.maps.Polygon({
+        map,
+        path: pathLatLng,
+        strokeWeight: 2,
+        strokeColor: "#22c55e",
+        strokeOpacity: 0.9,
+        strokeStyle: "solid",
+        fillColor: "#22c55e",
+        fillOpacity: 0.3,
+      });
+
+      drawnOverlays.push(polygon);
+      currentPolygon = polygon;
+
+      const bounds = new kakao.maps.LatLngBounds();
+      pathLatLng.forEach(latlng => bounds.extend(latlng));
+      map.setBounds(bounds);
+
+      log(`[LOG] drawPolygonFromRow: 폴리곤 생성 완료 (index=${index}, 점 ${pathLatLng.length}개)`, "info");
+      setOverlayText(`불러온 폴리곤 점 ${pathLatLng.length}개 (row index=${index})`);
+      return true;
+    }
+
+    /**************** 버튼 이벤트 ****************/
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -397,89 +458,51 @@
         clearCurrentOverlays();
         const data = await fetchRoute(camp, code);
 
-        const rows = (data && data.rows) || [];
+        const rows = Array.isArray(data.rows) ? [...data.rows] : [];
         if (!rows.length) {
           log("[LOG] 해당 캠프/라우트 데이터 없음.", "warn");
           alert("해당 라우트 데이터가 없습니다.");
           return;
         }
 
-        // 어떤 코드들이 왔는지 로깅
-        log(
-          `[LOG] 불러온 폴리곤 목록: 총 ${rows.length}개, codes = ${rows
-            .map((r) => r.code)
-            .join(", ")}`,
-          "info"
-        );
-
-        // 1순위: code 완전 일치 + polygon_wgs84 있음
-        let row =
-          rows.find(
-            (r) =>
-              r.code === code &&
-              Array.isArray(r.polygon_wgs84) &&
-              r.polygon_wgs84.length > 0
-          ) || null;
-
-        // 2순위: polygon_wgs84 있는 첫 번째
-        if (!row) {
-          row =
-            rows.find(
-              (r) =>
-                Array.isArray(r.polygon_wgs84) && r.polygon_wgs84.length > 0
-            ) || null;
-        }
-
-        if (!row) {
-          log(
-            "[ERR] polygon_wgs84 데이터가 비어 있는 row 뿐입니다.",
-            "err"
-          );
-          alert("저장된 폴리곤 데이터가 없습니다.");
-          return;
-        }
-
-        const poly = row.polygon_wgs84;
-        const path = poly.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
-        const polygon = new kakao.maps.Polygon({
-          map,
-          path,
-          strokeWeight: 2,
-          strokeColor: "#22c55e",
-          strokeOpacity: 0.9,
-          strokeStyle: "solid",
-          fillColor: "#22c55e",
-          fillOpacity: 0.3,
+        // 최신(updated_at) 기준으로 정렬 (없으면 id 기준으로 대충 정렬)
+        rows.sort((a, b) => {
+          const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
+          const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
+          if (ta !== tb) return tb - ta; // desc
+          return (b.id || 0) - (a.id || 0);
         });
 
-        drawnOverlays.push(polygon);
-        currentPolygon = polygon;
+        log(`[LOG] 응답 row 개수: ${rows.length}. 최신순으로 정렬 후 usable row 탐색`, "info");
 
-        const bounds = new kakao.maps.LatLngBounds();
-        path.forEach((latlng) => bounds.extend(latlng));
-        map.setBounds(bounds);
+        let used = false;
+        for (let i = 0; i < rows.length; i++) {
+          const ok = drawPolygonFromRow(rows[i], i);
+          if (ok) {
+            used = true;
+            break;
+          }
+        }
 
-        log(
-          `[LOG] 폴리곤 불러오기 완료. 선택 코드=${row.code}, 점 ${path.length}개`,
-          "info"
-        );
-        setOverlayText(
-          `불러온 폴리곤 점 ${path.length}개 (code=${row.code})`
-        );
+        if (!used) {
+          log("[ERR] 사용 가능한 폴리곤 row가 없습니다. (모두 이상 좌표)", "err");
+          alert("저장된 폴리곤 중 사용할 수 있는 데이터가 없습니다.");
+          setOverlayText("유효한 폴리곤 데이터 없음");
+        } else {
+          log("[LOG] 불러오기 완료: 유효 폴리곤 1개 표시", "info");
+        }
       } catch (e) {
         console.error(e);
+        log(`[ERR] 라우트 조회 중 예외: ${String(e)}`, "err");
         alert("라우트 조회 중 오류가 발생했습니다.");
       }
     });
 
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel();
+      drawingManager.cancel(); // 혹시 진행 중이던 것
       drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
-      log(
-        "[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.",
-        "info"
-      );
+      log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
     });
 
@@ -493,9 +516,7 @@
       }
 
       if (!currentPolygon) {
-        alert(
-          "저장할 폴리곤이 없습니다. [새로 그리기]로 영역을 그리고 저장해주세요."
-        );
+        alert("저장할 폴리곤이 없습니다. [새로 그리기]로 영역을 그리고 저장해주세요.");
         log("[LOG] 저장 실패: currentPolygon 없음", "err");
         return;
       }
@@ -509,9 +530,7 @@
 
       const center = computeCenter(pts);
       log(
-        `[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat.toFixed(
-          6
-        )}, ${center.lng.toFixed(6)})`,
+        `[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat.toFixed(6)}, ${center.lng.toFixed(6)})`,
         "info"
       );
 
@@ -520,6 +539,7 @@
         alert("저장 완료되었습니다.");
       } catch (e) {
         console.error(e);
+        log(`[ERR] 저장 중 예외: ${String(e)}`, "err");
         alert("저장 중 오류가 발생했습니다.");
       }
     });
@@ -531,7 +551,7 @@
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     });
 
-    // ======== 초기 실행 ========
+    /**************** 초기 실행 ****************/
     kakao.maps.load(initMap);
   </script>
 </body>

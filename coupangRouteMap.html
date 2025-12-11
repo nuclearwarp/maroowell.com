@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -32,25 +32,17 @@
 
     label { font-size:0.78rem; margin-bottom:2px; display:block; }
     input[type="text"] {
-      width:100%;
-      padding:7px 10px;
-      border-radius:8px;
-      border:1px solid #374151;
-      background:#020617;
-      color:#e5e7eb;
+      width:100%; padding:7px 10px; border-radius:8px;
+      border:1px solid #374151; background:#020617; color:#e5e7eb;
       font-size:0.8rem;
     }
 
     .btn-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; }
     button {
-      border-radius:999px;
-      border:1px solid #374151;
-      background:#020617;
-      color:#e5e7eb;
-      padding:6px 12px;
-      font-size:0.78rem;
-      cursor:pointer;
-      white-space:nowrap;
+      border-radius:999px; border:1px solid #374151;
+      background:#020617; color:#e5e7eb;
+      padding:6px 12px; font-size:0.78rem;
+      cursor:pointer; white-space:nowrap;
     }
     button.primary { background:#111827; border-color:#111827; }
     button.danger  { border-color:#b91c1c; color:#fecaca; }
@@ -58,13 +50,8 @@
 
     .hint { font-size:0.7rem; color:#6b7280; line-height:1.4; }
     .status-bar {
-      font-size:0.7rem;
-      padding:4px 8px;
-      border-radius:999px;
-      background:#022c22;
-      color:#6ee7b7;
-      display:inline-block;
-      margin-top:4px;
+      font-size:0.7rem; padding:4px 8px; border-radius:999px;
+      background:#022c22; color:#6ee7b7; display:inline-block; margin-top:4px;
     }
     .status-error { background:#450a0a; color:#fecaca; }
 
@@ -87,25 +74,15 @@
     .map-wrap { flex:1; position:relative; }
     #map { width:100%; height:100%; }
     .overlay-badge {
-      position:absolute;
-      top:10px;
-      left:10px;
-      background:rgba(15,23,42,0.9);
-      border:1px solid #1f2937;
-      border-radius:999px;
-      padding:4px 10px;
-      font-size:0.72rem;
-      pointer-events:none;
+      position:absolute; top:10px; left:10px;
+      background:rgba(15,23,42,0.9); border:1px solid #1f2937;
+      border-radius:999px; padding:4px 10px;
+      font-size:0.72rem; pointer-events:none;
     }
 
     @media (max-width:900px) {
       body { flex-direction:column; }
-      .side {
-        width:100%;
-        max-width:none;
-        border-right:none;
-        border-bottom:1px solid #1f2937;
-      }
+      .side { width:100%; max-width:none; border-right:none; border-bottom:1px solid #1f2937; }
       .map-wrap { height:calc(100% - 260px); }
     }
   </style>
@@ -139,9 +116,9 @@
 
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
-      · GET: 정확히 일치하는 라우트(예: 126B01) 또는 <code>mode=prefix</code>로 126B 전체 조회 가능.<br/>
-      · 저장은 A[포인트] 기준으로 마지막 점까지만 저장됩니다. (점수, 꼭짓점 3개 이상 권장)<br/>
-      · 저장 시 현재 선택된 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
+      · GET: code=126B&mode=prefix 로 126B01 전체 조회 가능.<br/>
+      · 저장은 <b>지도 위에서 직접 그린 폴리곤의 WGS84 위/경도 그대로</b> 저장합니다.<br/>
+      · 예전에 들어가 있던 이상 좌표(1,100,000 같은 값)도 최대한 호환해서 불러옵니다.
     </div>
 
     <div id="apiStatus" class="status-bar">API: ready</div>
@@ -230,15 +207,20 @@
 
       // 도형 그리기 끝났을 때
       kakao.maps.event.addListener(drawingManager, "drawend", function(data) {
+        // data.target: kakao.maps.Polygon
         const overlay = data.target;
         log("[DEBUG] drawend raw path", "info");
 
-        const pts = getPolygonPointsWgs84(overlay);
-        log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
+        if (!overlay || !(overlay instanceof kakao.maps.Polygon)) {
+          log("[WARN] drawend: polygon overlay 아님, 무시", "warn");
+          return;
+        }
 
         currentPolygon = overlay;
         drawnOverlays.push(overlay);
 
+        const pts = getPolygonPointsWgs84(overlay);
+        log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
       });
 
@@ -246,76 +228,41 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Polygon 경로 추출 (★점 인식 로직★) ========
-    // path 안에서 kakao.maps.LatLng 를 전부 걷어오는 helper
-    function collectLatLngsFromPath(path) {
-      const out = [];
-
-      const walk = (p) => {
-        if (!p) return;
-
-        // 1) kakao.maps.LatLng 한 점
-        if (
-          p instanceof kakao.maps.LatLng ||
-          (typeof p.getLat === "function" && typeof p.getLng === "function")
-        ) {
-          out.push(p);
-          return;
-        }
-
-        // 2) LatLngPath (getLength / getAt 가진 객체)
-        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
-          for (let i = 0; i < p.getLength(); i++) {
-            walk(p.getAt(i));
-          }
-          return;
-        }
-
-        // 3) getArray() 만 있는 경우
-        if (typeof p.getArray === "function") {
-          walk(p.getArray());
-          return;
-        }
-
-        // 4) 배열 (LatLng[] 이거나 그 배열의 배열)
-        if (Array.isArray(p)) {
-          p.forEach(walk);
-          return;
-        }
-      };
-
-      walk(path);
-      return out;
-    }
-
-    // Polygon → [{lat,lng}, ...]
+    // ======== 폴리곤 경로 추출 (WGS84, 최소 로직만 사용) ========
+    /**
+     * Kakao Polygon -> [{lat, lng}, ...]
+     * - 좌표계 변환, 필터링 없음
+     * - 그냥 getLat(), getLng()만 사용
+     */
     function getPolygonPointsWgs84(polygon) {
       const result = [];
-      if (!polygon) return result;
-
-      let path = null;
-
-      if (typeof polygon.getPath === "function") {
-        path = polygon.getPath();
-      } else if (typeof polygon.getPaths === "function") {
-        const paths = polygon.getPaths();
-        path = Array.isArray(paths) && paths.length ? paths[0] : paths;
-      } else {
-        path = polygon;
+      if (!polygon || typeof polygon.getPath !== "function") {
+        log("[ERR] getPolygonPointsWgs84: polygon 또는 getPath 없음", "err");
+        return result;
       }
 
-      const latlngs = collectLatLngsFromPath(path);
-      latlngs.forEach((ll) => {
-        try {
-          const lat = ll.getLat();
-          const lng = ll.getLng();
-          if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            result.push({ lat, lng });
-          }
-        } catch (e) {
-          // 무시
+      const path = polygon.getPath(); // kakao.maps.LatLngArray
+      if (!path) return result;
+
+      let len = 0;
+      if (typeof path.getLength === "function") {
+        len = path.getLength();
+      } else if (typeof path.length === "number") {
+        len = path.length;
+      }
+
+      for (let i = 0; i < len; i++) {
+        const p = typeof path.getAt === "function" ? path.getAt(i) : path[i];
+        if (!p) continue;
+
+        const lat = typeof p.getLat === "function" ? p.getLat() : p.lat;
+        const lng = typeof p.getLng === "function" ? p.getLng() : p.lng;
+
+        if (typeof lat === "number" && typeof lng === "number" &&
+            isFinite(lat) && isFinite(lng)) {
+          result.push({ lat, lng });
         }
-      });
+      }
 
       return result;
     }
@@ -368,40 +315,7 @@
       return json;
     }
 
-    // ======== DB polygon_wgs84 파싱 ========
-    function parsePolygonWgs84(poly) {
-      const pts = [];
-      if (!poly) return pts;
-
-      const push = (lat, lng) => {
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-        pts.push({ lat, lng });
-      };
-
-      if (Array.isArray(poly)) {
-        for (const p of poly) {
-          if (!p) continue;
-
-          // [lng, lat] 형식
-          if (Array.isArray(p) && p.length >= 2) {
-            push(Number(p[1]), Number(p[0]));
-            continue;
-          }
-
-          // {lat, lng} 또는 {y, x}
-          if (typeof p === "object") {
-            if ("lat" in p && "lng" in p) {
-              push(Number(p.lat), Number(p.lng));
-            } else if ("y" in p && "x" in p) {
-              push(Number(p.y), Number(p.x));
-            }
-          }
-        }
-      }
-
-      return pts;
-    }
-
+    // ======== 단순 중심 계산 (WGS84 그대로) ========
     function computeCenter(points) {
       if (!points.length) return null;
       let sumLat = 0, sumLng = 0;
@@ -416,6 +330,48 @@
       drawnOverlays.forEach(o => o.setMap(null));
       drawnOverlays = [];
       currentPolygon = null;
+    }
+
+    // ======== 저장된 polygon_wgs84 파싱 (형식 여러 개 지원) ========
+    /**
+     * polygon_wgs84 형식:
+     *  1) [{lat: 37..., lng: 126...}, ...]
+     *  2) [[127.1,37.6], [127.2,37.6], ...]  (lon, lat 순)
+     *  3) 옛날 잘못된 좌표(1,000,000 이상)는 일단 그대로 LatLng로 찍어 줌
+     */
+    function parsePolygonWgs84(polyRaw) {
+      const points = [];
+      if (!polyRaw || !Array.isArray(polyRaw)) return points;
+
+      for (const p of polyRaw) {
+        let lat, lng;
+
+        if (Array.isArray(p) && p.length >= 2) {
+          // [lng, lat] 형식일 가능성
+          const a0 = Number(p[0]);
+          const a1 = Number(p[1]);
+          if (!Number.isFinite(a0) || !Number.isFinite(a1)) continue;
+
+          if (Math.abs(a0) <= 180 && Math.abs(a1) <= 90) {
+            // [lng, lat]
+            lng = a0; lat = a1;
+          } else {
+            // 그냥 (x, y)처럼 취급 -> lat=a1, lng=a0 로 찍기
+            lng = a0; lat = a1;
+          }
+        } else if (p && typeof p === "object") {
+          const la = Number(p.lat);
+          const ln = Number(p.lng);
+          if (!Number.isFinite(la) || !Number.isFinite(ln)) continue;
+          lat = la; lng = ln;
+        } else {
+          continue;
+        }
+
+        points.push(new kakao.maps.LatLng(lat, lng));
+      }
+
+      return points;
     }
 
     // ======== 버튼 이벤트 ========
@@ -438,35 +394,34 @@
           return;
         }
 
-        // 최신 updated_at 순으로 정렬 후 polygon_wgs84 있는 것 우선 사용
-        const rows = data.rows.slice().sort((a, b) => {
-          return new Date(b.updated_at || 0) - new Date(a.updated_at || 0);
+        // updated_at 기준으로 정렬해서 가장 최신 row 우선
+        const sorted = [...data.rows].sort((a, b) => {
+          const ta = new Date(a.updated_at || 0).getTime();
+          const tb = new Date(b.updated_at || 0).getTime();
+          return tb - ta;
         });
 
-        let chosenIndex = -1;
-        let chosenPts = [];
+        let usedIndex = -1;
+        let usedPath = null;
 
-        rows.forEach((row, idx) => {
-          const pts = parsePolygonWgs84(row.polygon_wgs84);
-          log(`[DEBUG] parsePolygonWgs84 index=${idx}, 결과 점 수=${pts.length}`, "info");
-          if (pts.length >= 3 && chosenIndex === -1) {
-            chosenIndex = idx;
-            chosenPts = pts;
+        sorted.forEach((row, idx) => {
+          const poly = parsePolygonWgs84(row.polygon_wgs84);
+          log(`[DEBUG] parsePolygonWgs84 index=${idx}, 결과 점 수=${poly.length}`, "info");
+          if (usedIndex === -1 && poly.length >= 3) {
+            usedIndex = idx;
+            usedPath = poly;
           }
         });
 
-        if (chosenIndex === -1) {
+        if (!usedPath) {
           log("[ERR] 사용 가능한 폴리곤 row가 없습니다. (모두 이상 좌표)", "err");
-          alert("사용 가능한 폴리곤 데이터가 없습니다.");
+          alert("저장된 폴리곤이 없거나 이상 좌표입니다.");
           return;
         }
 
-        const row = rows[chosenIndex];
-
-        const path = chosenPts.map(p => new kakao.maps.LatLng(p.lat, p.lng));
         const polygon = new kakao.maps.Polygon({
           map,
-          path,
+          path: usedPath,
           strokeWeight: 2,
           strokeColor: "#22c55e",
           strokeOpacity: 0.9,
@@ -479,11 +434,11 @@
         currentPolygon = polygon;
 
         const bounds = new kakao.maps.LatLngBounds();
-        path.forEach(latlng => bounds.extend(latlng));
+        usedPath.forEach(latlng => bounds.extend(latlng));
         map.setBounds(bounds);
 
-        log(`[LOG] 폴리곤 불러오기 완료. row index=${chosenIndex}, 점 ${path.length}개`, "info");
-        setOverlayText(`불러온 폴리곤 점 ${path.length}개`);
+        log(`[LOG] 폴리곤 불러오기 완료. row index=${usedIndex}, 점 ${usedPath.length}개`, "info");
+        setOverlayText(`불러온 폴리곤 점 ${usedPath.length}개`);
       } catch (e) {
         console.error(e);
         alert("라우트 조회 중 오류가 발생했습니다.");
@@ -514,8 +469,6 @@
       }
 
       const pts = getPolygonPointsWgs84(currentPolygon);
-      log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
-
       if (!pts.length) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
         log("[LOG] 저장 실패: 추출된 점 개수 0", "err");

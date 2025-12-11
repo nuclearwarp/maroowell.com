@@ -259,6 +259,7 @@
         drawnOverlays.push(overlay);
 
         const pts = getPolygonPointsWgs84(overlay);
+        console.log("[DEBUG] drawend raw path", overlay.getPath && overlay.getPath());
         log("[DEBUG] drawend raw path", "info");
         log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, "info");
@@ -268,53 +269,73 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== path flatten (index.html과 동일한 느낌) ========
-    function collectLatLngsFromPath(path) {
+    // ======== Kakao Polygon -> WGS84 좌표 배열  (점 인식 핵심) ========
+    function getPolygonPointsWgs84(polygon) {
       const out = [];
+      if (!polygon) return out;
 
-      const walk = (p) => {
+      const pushFromLatLng = (ll) => {
+        if (!ll) return;
+        let lat, lng;
+
+        if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
+          lat = ll.getLat();
+          lng = ll.getLng();
+        } else if ("Ma" in ll && "La" in ll) { // 내부 필드 백업
+          lat = ll.Ma; lng = ll.La;
+        } else if ("lat" in ll && "lng" in ll) {
+          lat = ll.lat; lng = ll.lng;
+        }
+
+        if (!isFinite(lat) || !isFinite(lng)) return;
+
+        const norm = normalizeToWgs84(lat, lng);
+        if (isFinite(norm.lat) && isFinite(norm.lng)) {
+          out.push(norm);
+        }
+      };
+
+      const walkPathLike = (p) => {
         if (!p) return;
 
         // LatLng 한 점
         if (p instanceof kakao.maps.LatLng ||
-            (typeof p.getLat === "function" && typeof p.getLng === "function")) {
-          out.push(p);
+            (typeof p.getLat === "function" && typeof p.getLng === "function") ||
+            ("Ma" in p && "La" in p) ||
+            ("lat" in p && "lng" in p)) {
+          pushFromLatLng(p);
           return;
         }
 
-        // MVCArray 스타일
+        // MVCArray 스타일 (getLength/getAt)
         if (typeof p.getLength === "function" && typeof p.getAt === "function") {
-          for (let i = 0; i < p.getLength(); i++) {
-            walk(p.getAt(i));
+          const len = p.getLength();
+          for (let i = 0; i < len; i++) {
+            walkPathLike(p.getAt(i));
           }
           return;
         }
 
-        // 배열 또는 forEach 가진 객체
-        if (Array.isArray(p) || typeof p.forEach === "function") {
-          p.forEach(walk);
+        // 배열
+        if (Array.isArray(p)) {
+          p.forEach(walkPathLike);
+          return;
+        }
+
+        // forEach 만 있는 경우
+        if (typeof p.forEach === "function") {
+          p.forEach(walkPathLike);
           return;
         }
       };
 
-      walk(path);
-      return out;
-    }
-
-    // ======== Kakao Polygon -> WGS84 좌표 배열 ========
-    function getPolygonPointsWgs84(polygon) {
-      const out = [];
-      if (!polygon || typeof polygon.getPath !== "function") return out;
-
-      const latlngs = collectLatLngsFromPath(polygon.getPath());
-      latlngs.forEach(ll => {
-        let lat = typeof ll.getLat === "function" ? ll.getLat() : ll.lat;
-        let lng = typeof ll.getLng === "function" ? ll.getLng() : ll.lng;
-        const norm = normalizeToWgs84(lat, lng);
-        if (Number.isFinite(norm.lat) && Number.isFinite(norm.lng)) {
-          out.push(norm);
-        }
-      });
+      if (typeof polygon.getPath === "function") {
+        walkPathLike(polygon.getPath());
+      }
+      // 혹시 getPaths 형태인 경우도 방어
+      if (!out.length && typeof polygon.getPaths === "function") {
+        walkPathLike(polygon.getPaths());
+      }
 
       return out;
     }

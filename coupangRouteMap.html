@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기2</title>
+  <title>마루웰 라우트 편집기</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -88,7 +88,7 @@
     }
   </style>
 
-  <!-- proj4: 5179 -> 4326 변환용 -->
+  <!-- proj4: 5179 -> 4326 변환용 (DB 읽을 때만 사용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
 
   <!-- Kakao Maps + drawing 라이브러리 -->
@@ -179,7 +179,7 @@
       overlayInfo.textContent = msg;
     }
 
-    // ======== proj4 좌표계 설정 (카카오 5179 → WGS84) ========
+    // ======== proj4 좌표계 설정 (카카오 5179 → WGS84) - DB 읽을 때만 사용 ========
     proj4.defs("EPSG:5179",
       "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
       "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
@@ -189,7 +189,6 @@
       "+proj=longlat +datum=WGS84 +no_defs"
     );
 
-    // x,y(5179) -> { lat, lon } (WGS84)
     function convert5179ToWgs84(x, y) {
       try {
         const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
@@ -200,12 +199,11 @@
       }
     }
 
-    // 값이 5179 같은 이상한 숫자면 변환, 이미 위경도면 그대로 사용
+    // 5179 범위 같으면 변환, 아니면 그대로
     function normalizeToWgs84(lat, lng) {
       let nLat = Number(lat);
       let nLng = Number(lng);
 
-      // 카카오 TM 좌표 같은 경우 (수십만~백만 단위)
       if (Math.abs(nLat) > 90 || Math.abs(nLng) > 180) {
         const { lat: cLat, lon: cLon } = convert5179ToWgs84(nLng, nLat); // x=lng, y=lat
         if (isFinite(cLat) && isFinite(cLon)) {
@@ -220,8 +218,8 @@
     // ======== Kakao 지도 & DrawingManager ========
     let map;
     let drawingManager;
-    let currentPolygon = null;   // 마지막으로 그린 / 불러온 폴리곤
-    let drawnOverlays  = [];     // 새로 그리기/초기화 시 제거용
+    let currentPolygon = null;
+    let drawnOverlays  = [];
 
     function initMap() {
       const center = new kakao.maps.LatLng(37.5665, 126.9780);
@@ -247,7 +245,6 @@
       };
       drawingManager = new kakao.maps.drawing.DrawingManager(options);
 
-      // 도형 그리기 끝났을 때
       kakao.maps.event.addListener(drawingManager, "drawend", function(data) {
         const overlay = data.target;
         if (!overlay || !(overlay instanceof kakao.maps.Polygon)) {
@@ -269,45 +266,32 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Kakao Polygon -> WGS84 좌표 배열  (점 인식 핵심) ========
+    // ======== Kakao Polygon -> 좌표 배열 (저장용) ========
+    // !!! 여기서는 절대 좌표계 변환 안 함. Kakao LatLng 그대로 저장 !!!
     function getPolygonPointsWgs84(polygon) {
       const out = [];
       if (!polygon) return out;
 
       const pushFromLatLng = (ll) => {
         if (!ll) return;
-        let lat, lng;
-
         if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
-          lat = ll.getLat();
-          lng = ll.getLng();
-        } else if ("Ma" in ll && "La" in ll) { // 내부 필드 백업
-          lat = ll.Ma; lng = ll.La;
-        } else if ("lat" in ll && "lng" in ll) {
-          lat = ll.lat; lng = ll.lng;
-        }
-
-        if (!isFinite(lat) || !isFinite(lng)) return;
-
-        const norm = normalizeToWgs84(lat, lng);
-        if (isFinite(norm.lat) && isFinite(norm.lng)) {
-          out.push(norm);
+          const lat = ll.getLat();
+          const lng = ll.getLng();
+          if (isFinite(lat) && isFinite(lng)) {
+            out.push({ lat, lng });
+          }
         }
       };
 
       const walkPathLike = (p) => {
         if (!p) return;
 
-        // LatLng 한 점
         if (p instanceof kakao.maps.LatLng ||
-            (typeof p.getLat === "function" && typeof p.getLng === "function") ||
-            ("Ma" in p && "La" in p) ||
-            ("lat" in p && "lng" in p)) {
+            (typeof p.getLat === "function" && typeof p.getLng === "function")) {
           pushFromLatLng(p);
           return;
         }
 
-        // MVCArray 스타일 (getLength/getAt)
         if (typeof p.getLength === "function" && typeof p.getAt === "function") {
           const len = p.getLength();
           for (let i = 0; i < len; i++) {
@@ -316,13 +300,11 @@
           return;
         }
 
-        // 배열
         if (Array.isArray(p)) {
           p.forEach(walkPathLike);
           return;
         }
 
-        // forEach 만 있는 경우
         if (typeof p.forEach === "function") {
           p.forEach(walkPathLike);
           return;
@@ -332,7 +314,6 @@
       if (typeof polygon.getPath === "function") {
         walkPathLike(polygon.getPath());
       }
-      // 혹시 getPaths 형태인 경우도 방어
       if (!out.length && typeof polygon.getPaths === "function") {
         walkPathLike(polygon.getPaths());
       }
@@ -345,7 +326,7 @@
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
       url.searchParams.set("code", code);
-      url.searchParams.set("mode", "prefix"); // 126B면 126B01까지 전부 조회
+      url.searchParams.set("mode", "prefix");
 
       log(`[LOG] GET /route 요청: ${url.toString()}`, "info");
       setApiStatus("GET /route 호출 중...");
@@ -388,7 +369,7 @@
       return json;
     }
 
-    // ======== DB에서 온 polygon_wgs84 파싱 (5179 / WGS84 둘 다 대응) ========
+    // ======== DB polygon 파싱 (5179 / WGS84 둘 다 대응) ========
     function parsePolygonWgs84(polyRaw, rowIndex) {
       const pts = [];
       if (!polyRaw) return pts;
@@ -403,7 +384,7 @@
       if (Array.isArray(polyRaw)) {
         polyRaw.forEach(p => {
           if (Array.isArray(p) && p.length >= 2) {
-            // [lng, lat] 형식으로 저장된 케이스
+            // [lng, lat] 형식
             pushNorm(p[1], p[0]);
           } else if (p && typeof p === "object") {
             pushNorm(p.lat ?? p.latitude, p.lng ?? p.longitude ?? p.lon);
@@ -415,7 +396,7 @@
       return pts;
     }
 
-    // ======== 지도 상의 폴리곤 → 중심 계산 ========
+    // ======== 중심 계산 ========
     function computeCenter(points) {
       if (!points.length) return null;
       let sumLat = 0, sumLng = 0;
@@ -452,7 +433,6 @@
           return;
         }
 
-        // updated_at 기준 최신순 정렬 후, polygon_wgs84 유효한 row 사용
         const rows = [...data.rows].sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at));
         log(`[LOG] 응답 row 개수: ${rows.length}. 최신순으로 정렬 후 usable row 탐색`, "info");
 
@@ -504,7 +484,7 @@
 
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel(); // 진행 중이던 것 취소
+      drawingManager.cancel();
       drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
       log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
@@ -551,7 +531,6 @@
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     });
 
-    // ======== 초기 실행 ========
     kakao.maps.load(initMap);
   </script>
 </body>

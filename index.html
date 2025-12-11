@@ -1,1 +1,491 @@
-<!doctype html> <html lang="ko"> <head> <meta charset="utf-8" /> <meta name="viewport" content="width=device-width,initial-scale=1" /> <meta name="referrer" content="origin" /> <title>★마루웰★</title> <style> :root { --headerH: 52px; --bg:#0f1115; --card:#161a22; --muted:#8b95a7; --text:#e6e9ef; } *{box-sizing:border-box} body{ margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,AppleSDGothicNeo,Segoe UI,Roboto } header{ display:flex; gap:12px; align-items:center; padding:12px 16px; height:var(--headerH); background:#161a22; border-bottom:1px solid #232838; position:sticky; top:0; z-index:5 } header h1{font-size:16px;margin:0} #app{ display:grid; grid-template-columns:360px 1fr; min-height:calc(100dvh - var(--headerH)); } #panel{ padding:14px; border-right:1px solid #232838; background:#10141b } #mapWrap{ position:relative; min-height:calc(100dvh - var(--headerH)); } #map{position:absolute;inset:0} label{display:block;margin:10px 0 6px;color:#9aa6b2} input,textarea,button{font:inherit} textarea{ width:100%; background:#0c0f14; border:1px solid #2a3142; color:var(--text); padding:10px; border-radius:10px; min-height:90px } button{ background:#1b2230; border:1px solid #2a3142; color:var(--text); padding:8px 12px; border-radius:10px; cursor:pointer } button:hover{border-color:#3a4561} .row{display:flex;gap:8px;flex-wrap:wrap} .muted{color:#8b95a7;font-size:12px} .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px} .chip{ border:1px solid #2a3142; border-radius:999px; padding:6px 10px; background:#0c0f14; display:inline-flex; align-items:center; gap:6px } .chip button{ border:none; background:transparent; color:#94a3b8; cursor:pointer } /* 모바일에서 지도 비율 키우기 */ @media (max-width: 900px){ #app{ grid-template-columns:1fr; } #panel{ order:2; } #mapWrap{ min-height:60vh; } } </style> <!-- Daum 우편번호 --> <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script> <!-- proj4 (5179 -> 4326 변환용) --> <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script> <!-- Kakao 지도 SDK --> <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script> </head> <body> <header> <h1>Maroowell 우편번호 검색기</h1> <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span> </header> <!-- 바로 보여줄 거라 display:none 제거 --> <div id="app"> <aside id="panel"> <div class="row" style="justify-content:space-between"> <div> <div class="muted">우편번호 여러 개 동시 조회</div> <div class="muted">쉼표/공백/줄바꿈 모두 가능</div> </div> <button id="openAddr">주소검색 추가</button> </div> <label style="margin-top:12px">우편번호 목록</label> <textarea id="zipInput" placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea> <div class="row" style="margin-top:8px"> <button id="addBtn">추가</button> <button id="clearBtn">초기화</button> <button id="searchBtn">지도표시</button> </div> <div class="list" id="zipList"></div> <p class="muted" style="margin-top:10px"> • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다. </p> </aside> <div id="mapWrap"> <div id="map"></div> </div> </div> <script> // ------- 전역 상태 ------- // const state = { map: null, polygons: new Map(), // zipcode -> [Polygon, ...] selectedZips: new Set(), colors: [ '#ff4b4b','#22c55e','#fbbf24','#3b82f6', '#22d3ee','#c084fc','#f472b6','#60a5fa', '#34d399','#f97316' ] }; const ZIP_API = 'https://zip.maroowell.com/?zipcode='; const $ = sel => document.querySelector(sel); const parseZips = raw => [...new Set((raw || '').match(/\d{5}/g) || [])]; const pickColor = zip => { let h = 0; for (let i = 0; i < zip.length; i++) { h = (h * 31 + zip.charCodeAt(i)) >>> 0; } return state.colors[h % state.colors.length]; }; // ------- proj4 세팅 (5179 -> 4326) ------- // proj4.defs('EPSG:5179', '+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 ' + '+x_0=1000000 +y_0=2000000 +ellps=GRS80 ' + '+towgs84=0,0,0,0,0,0,0 +units=m +no_defs' ); proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs' ); // 5179 → WGS84 변환 (안되면 fallback) function convertPoint(x, y) { let lon, lat; try { const out = proj4('EPSG:5179', 'EPSG:4326', [x, y]); lon = out[0]; lat = out[1]; } catch (e) { console.warn('proj4 변환 실패, 원본 좌표 사용 시도', x, y, e); } // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용 if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) { lon = x; lat = y; } return { lat, lon }; } // ------- 지도 초기화 ------- // function createMap() { if (!(window.kakao && kakao.maps)) { alert('카카오 지도 SDK 로딩 실패'); return; } state.map = new kakao.maps.Map($('#map'), { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 8 }); window.addEventListener('resize', () => { const c = state.map.getCenter(); state.map.relayout(); state.map.setCenter(c); }); } // ------- UI 이벤트 ------- // function bindUI() { $('#addBtn').onclick = () => { parseZips($('#zipInput').value) .forEach(z => state.selectedZips.add(z)); $('#zipInput').value = ''; renderZipChips(); }; $('#clearBtn').onclick = () => { state.selectedZips.clear(); clearPolygons(); renderZipChips(); }; $('#searchBtn').onclick = async () => { await drawSelected(); fitBoundsAll(); }; $('#fitBtn').onclick = fitBoundsAll; $('#shareBtn').onclick = async () => { const u = new URL(location.href); u.searchParams.set('zips', [...state.selectedZips].join(',')); await navigator.clipboard.writeText(u.toString()); alert('공유 링크 복사됨'); }; $('#openAddr').onclick = () => { new daum.Postcode({ oncomplete: d => { if (d.zonecode) { state.selectedZips.add(d.zonecode); renderZipChips(); } } }).open(); }; const preset = parseZips(new URLSearchParams(location.search).get('zips')); preset.forEach(z => state.selectedZips.add(z)); renderZipChips(); if (preset.length) { drawSelected().then(fitBoundsAll); } } function renderZipChips() { const list = $('#zipList'); list.innerHTML = ''; [...state.selectedZips].sort().forEach(z => { const div = document.createElement('div'); div.className = 'chip'; const color = pickColor(z); div.innerHTML = <b>${z}</b> + <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span> + <button title="삭제">✕</button>; div.querySelector('button').onclick = () => { state.selectedZips.delete(z); removePolygon(z); renderZipChips(); }; list.appendChild(div); }); } // ------- 폴리곤 관리 ------- // function clearPolygons() { for (const arr of state.polygons.values()) { arr.forEach(p => p.setMap(null)); } state.polygons.clear(); } function removePolygon(zip) { if (!state.polygons.has(zip)) return; state.polygons.get(zip).forEach(p => p.setMap(null)); state.polygons.delete(zip); } // zip API -> Polygon 생성 function polygonsFrom5179(polygon5179, color, zip) { if (!Array.isArray(polygon5179) || !polygon5179.length) return []; // polygon5179 가 [[x,y], ...] 형식 const rings = ( Array.isArray(polygon5179[0]) && typeof polygon5179[0][0] === 'number' ) ? [polygon5179] : polygon5179; const polys = []; rings.forEach((ring, idx) => { const path = []; ring.forEach((pt, i) => { if (!Array.isArray(pt) || pt.length < 2) return; const x = Number(pt[0]); const y = Number(pt[1]); if (!isFinite(x) || !isFinite(y)) return; const { lat, lon } = convertPoint(x, y); if (!isFinite(lat) || !isFinite(lon)) return; path.push(new kakao.maps.LatLng(lat, lon)); if (idx === 0 && i < 3) { console.log([ZIP ${zip}] sample point, { x, y, lat, lon }); } }); console.log([ZIP ${zip}] ring ${idx} path length, path.length); if (path.length < 3) return; const poly = new kakao.maps.Polygon({ map: state.map, path, strokeWeight: 4, strokeColor: color, strokeOpacity: 1, strokeStyle: 'solid', fillColor: color, fillOpacity: 0.45 }); polys.push(poly); }); return polys; } // ZIP API 호출해서 그리기 async function drawSelected() { const targets = [...state.selectedZips].filter(z => !state.polygons.has(z)); if (!targets.length) return; const notFound = []; for (const zip of targets) { try { const url = ${ZIP_API}${encodeURIComponent(zip)}; const res = await fetch(url, { cache: 'no-store' }); const data = await res.json(); console.log('[ZIP] 로드 완료', zip, data); if (!Array.isArray(data.polygon5179) || !data.polygon5179.length) { notFound.push(zip); continue; } const color = pickColor(zip); const polys = polygonsFrom5179(data.polygon5179, color, zip); if (!polys.length) { console.warn('[ZIP] 폴리곤 생성 실패', zip); notFound.push(zip); continue; } state.polygons.set(zip, polys); } catch (e) { console.error('[ZIP] 로드 실패', zip, e); notFound.push(zip); } } if (notFound.length) { alert(폴리곤을 그리지 못한 우편번호: ${notFound.join(', ')}); } } // ------- path 에서 LatLng 전부 뽑기 (수정 버전) ------- // function collectLatLngsFromPath(path) { const out = []; const walk = (p) => { if (!p) return; // 1) kakao.maps.LatLng 한 점 if (p instanceof kakao.maps.LatLng || (typeof p.getLat === 'function' && typeof p.getLng === 'function')) { out.push(p); return; } // 2) LatLngPath (getLength / getAt 가진 객체) if (typeof p.getLength === 'function' && typeof p.getAt === 'function') { for (let i = 0; i < p.getLength(); i++) { walk(p.getAt(i)); } return; } // 3) 배열 (LatLng[] 이거나 그 배열의 배열) if (Array.isArray(p)) { p.forEach(walk); } }; walk(path); return out; } // ------- 화면 영역 맞추기 (수정 버전) ------- // function fitBoundsAll() { if (!state.map) return; const b = new kakao.maps.LatLngBounds(); let has = false; for (const arr of state.polygons.values()) { for (const poly of arr) { const latlngs = collectLatLngsFromPath(poly.getPath()); latlngs.forEach(ll => { b.extend(ll); has = true; }); } } if (has) { state.map.setBounds(b); } } // ------- DOM 로드 시 바로 초기화 ------- // document.addEventListener('DOMContentLoaded', () => { createMap(); bindUI(); }); </script> </body> </html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>Maroowell 우편번호 검색기</title>
+
+  <style>
+    :root {
+      --headerH: 52px;
+      --bg:#0f1115;
+      --card:#161a22;
+      --muted:#8b95a7;
+      --text:#e6e9ef;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font:14px/1.4 system-ui,AppleSDGothicNeo,"Segoe UI",Roboto
+    }
+    header{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      padding:12px 16px;
+      height:var(--headerH);
+      background:#161a22;
+      border-bottom:1px solid #232838;
+      position:sticky;
+      top:0;
+      z-index:5
+    }
+    header h1{font-size:16px;margin:0}
+    #app{
+      display:grid;
+      grid-template-columns:360px 1fr;
+      min-height:calc(100dvh - var(--headerH));
+    }
+    #panel{
+      padding:14px;
+      border-right:1px solid #232838;
+      background:#10141b
+    }
+    #mapWrap{
+      position:relative;
+      min-height:calc(100dvh - var(--headerH));
+    }
+    #map{position:absolute;inset:0}
+
+    label{display:block;margin:10px 0 6px;color:#9aa6b2}
+    input,textarea,button{font:inherit}
+    textarea{
+      width:100%;
+      background:#0c0f14;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:10px;
+      border-radius:10px;
+      min-height:90px
+    }
+    button{
+      background:#1b2230;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:6px 10px;
+      border-radius:10px;
+      cursor:pointer
+    }
+    button:hover{border-color:#3a4561}
+
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .muted{color:#8b95a7;font-size:12px}
+    .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+    .chip{
+      border:1px solid #2a3142;
+      border-radius:999px;
+      padding:6px 10px;
+      background:#0c0f14;
+      display:inline-flex;
+      align-items:center;
+      gap:6px
+    }
+    .chip button{
+      border:none;
+      background:transparent;
+      color:#94a3b8;
+      cursor:pointer
+    }
+
+    @media (max-width: 900px){
+      #app{
+        grid-template-columns:1fr;
+      }
+      #panel{
+        order:2;
+      }
+      #mapWrap{
+        min-height:60vh;
+      }
+    }
+  </style>
+
+  <!-- Daum 우편번호 -->
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+  <!-- proj4 (5179 -> 4326 변환용) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
+  <!-- Kakao 지도 SDK -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
+</head>
+<body>
+  <header>
+    <h1>Maroowell 우편번호 검색기</h1>
+    <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
+  </header>
+
+  <div id="app">
+    <aside id="panel">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="muted">우편번호 여러 개 동시 조회</div>
+          <div class="muted">쉼표/공백/줄바꿈 모두 가능</div>
+        </div>
+        <button id="openAddr">주소검색 추가</button>
+      </div>
+
+      <label style="margin-top:12px">우편번호 목록</label>
+      <textarea id="zipInput"
+        placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea>
+
+      <div class="row" style="margin-top:8px">
+        <button id="addBtn">추가</button>
+        <button id="clearBtn">초기화</button>
+        <button id="searchBtn">지도표시</button>
+        <button id="fitBtn">전체보기</button>
+        <button id="shareBtn">링크복사</button>
+      </div>
+
+      <div class="list" id="zipList"></div>
+
+      <p class="muted" style="margin-top:10px">
+        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
+      </p>
+    </aside>
+
+    <div id="mapWrap">
+      <div id="map"></div>
+    </div>
+  </div>
+
+  <script>
+    // ------- 전역 상태 ------- //
+    const state = {
+      map: null,
+      polygons: new Map(),    // zipcode -> [Polygon, ...]
+      selectedZips: new Set(),
+      colors: [
+        "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
+        "#22d3ee","#c084fc","#f472b6","#60a5fa",
+        "#34d399","#f97316"
+      ]
+    };
+
+    const ZIP_API = "https://zip.maroowell.com/?zipcode=";
+    const $ = (sel) => document.querySelector(sel);
+
+    const parseZips = (raw) =>
+      [...new Set((raw || "").match(/\d{5}/g) || [])];
+
+    const pickColor = (zip) => {
+      let h = 0;
+      for (let i = 0; i < zip.length; i++) {
+        h = (h * 31 + zip.charCodeAt(i)) >>> 0;
+      }
+      return state.colors[h % state.colors.length];
+    };
+
+    // ------- proj4 세팅 (5179 -> 4326) ------- //
+    proj4.defs(
+      "EPSG:5179",
+      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+        "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
+        "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+    );
+    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+    // 5179 → WGS84 변환 (안되면 fallback)
+    function convertPoint(x, y) {
+      let lon, lat;
+
+      try {
+        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
+        lon = out[0];
+        lat = out[1];
+      } catch (e) {
+        console.warn("proj4 변환 실패, 원본 좌표 사용 시도", x, y, e);
+      }
+
+      // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용
+      if (
+        !isFinite(lat) ||
+        !isFinite(lon) ||
+        lat < 30 ||
+        lat > 45 ||
+        lon < 120 ||
+        lon > 135
+      ) {
+        lon = x;
+        lat = y;
+      }
+
+      return { lat, lon };
+    }
+
+    // ------- 지도 초기화 ------- //
+    function createMap() {
+      if (!(window.kakao && kakao.maps)) {
+        alert("카카오 지도 SDK 로딩 실패");
+        return;
+      }
+      state.map = new kakao.maps.Map($("#map"), {
+        center: new kakao.maps.LatLng(37.5665, 126.978),
+        level: 8
+      });
+
+      window.addEventListener("resize", () => {
+        const c = state.map.getCenter();
+        state.map.relayout();
+        state.map.setCenter(c);
+      });
+    }
+
+    // ------- UI 이벤트 ------- //
+    function bindUI() {
+      $("#addBtn").onclick = () => {
+        parseZips($("#zipInput").value).forEach((z) =>
+          state.selectedZips.add(z)
+        );
+        $("#zipInput").value = "";
+        renderZipChips();
+      };
+
+      $("#clearBtn").onclick = () => {
+        state.selectedZips.clear();
+        clearPolygons();
+        renderZipChips();
+      };
+
+      $("#searchBtn").onclick = async () => {
+        await drawSelected();
+        fitBoundsAll();
+      };
+
+      $("#fitBtn").onclick = fitBoundsAll;
+
+      $("#shareBtn").onclick = async () => {
+        const u = new URL(location.href);
+        u.searchParams.set("zips", [...state.selectedZips].join(","));
+        await navigator.clipboard.writeText(u.toString());
+        alert("공유 링크 복사됨");
+      };
+
+      $("#openAddr").onclick = () => {
+        new daum.Postcode({
+          oncomplete: (d) => {
+            if (d.zonecode) {
+              state.selectedZips.add(d.zonecode);
+              renderZipChips();
+            }
+          }
+        }).open();
+      };
+
+      const preset = parseZips(
+        new URLSearchParams(location.search).get("zips")
+      );
+      preset.forEach((z) => state.selectedZips.add(z));
+      renderZipChips();
+      if (preset.length) {
+        drawSelected().then(fitBoundsAll);
+      }
+    }
+
+    function renderZipChips() {
+      const list = $("#zipList");
+      list.innerHTML = "";
+      [...state.selectedZips].sort().forEach((z) => {
+        const div = document.createElement("div");
+        div.className = "chip";
+        const color = pickColor(z);
+        div.innerHTML =
+          `<b>${z}</b>` +
+          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
+          `<button title="삭제">✕</button>`;
+        div.querySelector("button").onclick = () => {
+          state.selectedZips.delete(z);
+          removePolygon(z);
+          renderZipChips();
+        };
+        list.appendChild(div);
+      });
+    }
+
+    // ------- 폴리곤 관리 ------- //
+    function clearPolygons() {
+      for (const arr of state.polygons.values()) {
+        arr.forEach((p) => p.setMap(null));
+      }
+      state.polygons.clear();
+    }
+
+    function removePolygon(zip) {
+      if (!state.polygons.has(zip)) return;
+      state.polygons.get(zip).forEach((p) => p.setMap(null));
+      state.polygons.delete(zip);
+    }
+
+    // zip API -> Polygon 생성
+    function polygonsFrom5179(polygon5179, color, zip) {
+      if (!Array.isArray(polygon5179) || !polygon5179.length) return [];
+
+      // polygon5179 가 [[x,y], ...] 형식 / 혹은 [ [ [x,y]... ], [ ... ] ] 형식
+      const rings =
+        Array.isArray(polygon5179[0]) &&
+        typeof polygon5179[0][0] === "number"
+          ? [polygon5179]
+          : polygon5179;
+
+      const polys = [];
+
+      rings.forEach((ring, idx) => {
+        const path = [];
+        ring.forEach((pt, i) => {
+          if (!Array.isArray(pt) || pt.length < 2) return;
+          const x = Number(pt[0]);
+          const y = Number(pt[1]);
+          if (!isFinite(x) || !isFinite(y)) return;
+
+          const { lat, lon } = convertPoint(x, y);
+          if (!isFinite(lat) || !isFinite(lon)) return;
+
+          path.push(new kakao.maps.LatLng(lat, lon));
+
+          if (idx === 0 && i < 3) {
+            console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
+          }
+        });
+
+        console.log(`[ZIP ${zip}] ring ${idx} path length`, path.length);
+
+        if (path.length < 3) return;
+
+        const poly = new kakao.maps.Polygon({
+          map: state.map,
+          path,
+          strokeWeight: 4,
+          strokeColor: color,
+          strokeOpacity: 1,
+          strokeStyle: "solid",
+          fillColor: color,
+          fillOpacity: 0.45
+        });
+        polys.push(poly);
+      });
+
+      return polys;
+    }
+
+    // ZIP API 호출해서 그리기
+    async function drawSelected() {
+      const targets = [...state.selectedZips].filter(
+        (z) => !state.polygons.has(z)
+      );
+      if (!targets.length) return;
+
+      const notFound = [];
+
+      for (const zip of targets) {
+        try {
+          const url = `${ZIP_API}${encodeURIComponent(zip)}`;
+          const res = await fetch(url, { cache: "no-store" });
+          const data = await res.json();
+          console.log("[ZIP] 로드 완료", zip, data);
+
+          if (
+            !Array.isArray(data.polygon5179) ||
+            !data.polygon5179.length
+          ) {
+            notFound.push(zip);
+            continue;
+          }
+
+          const color = pickColor(zip);
+          const polys = polygonsFrom5179(
+            data.polygon5179,
+            color,
+            zip
+          );
+          if (!polys.length) {
+            console.warn("[ZIP] 폴리곤 생성 실패", zip);
+            notFound.push(zip);
+            continue;
+          }
+
+          state.polygons.set(zip, polys);
+        } catch (e) {
+          console.error("[ZIP] 로드 실패", zip, e);
+          notFound.push(zip);
+        }
+      }
+
+      if (notFound.length) {
+        alert(
+          `폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`
+        );
+      }
+    }
+
+    // ------- path 에서 LatLng 전부 뽑기 ------- //
+    function collectLatLngsFromPath(path) {
+      const out = [];
+
+      const walk = (p) => {
+        if (!p) return;
+
+        // LatLng 한 점
+        if (
+          p instanceof kakao.maps.LatLng ||
+          (typeof p.getLat === "function" &&
+            typeof p.getLng === "function")
+        ) {
+          out.push(p);
+          return;
+        }
+
+        // MVCArray 스타일
+        if (
+          typeof p.getLength === "function" &&
+          typeof p.getAt === "function"
+        ) {
+          for (let i = 0; i < p.getLength(); i++) {
+            walk(p.getAt(i));
+          }
+          return;
+        }
+
+        // 배열 또는 forEach 가진 객체
+        if (Array.isArray(p) || typeof p.forEach === "function") {
+          p.forEach(walk);
+          return;
+        }
+      };
+
+      walk(path);
+      return out;
+    }
+
+    // ------- 화면 영역 맞추기 ------- //
+    function fitBoundsAll() {
+      if (!state.map) return;
+
+      const b = new kakao.maps.LatLngBounds();
+      let has = false;
+
+      for (const arr of state.polygons.values()) {
+        for (const poly of arr) {
+          const latlngs = collectLatLngsFromPath(poly.getPath());
+          latlngs.forEach((ll) => {
+            b.extend(ll);
+            has = true;
+          });
+        }
+      }
+
+      if (has) {
+        state.map.setBounds(b);
+      }
+    }
+
+    // ------- DOM 로드 시 초기화 ------- //
+    document.addEventListener("DOMContentLoaded", () => {
+      createMap();
+      bindUI();
+    });
+  </script>
+</body>
+</html>

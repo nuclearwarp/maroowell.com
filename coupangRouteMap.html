@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -198,11 +198,10 @@
       return { lat, lon };
     }
 
-    // polygon_wgs84 점 배열을 WGS84로 통일
+    // polygon 점 배열을 WGS84로 통일 (5179이면 변환, 이미 WGS84면 그대로)
     function convertManyToWgs84(points) {
       if (!points || !points.length) return [];
 
-      // 이미 위경도(한국) 범위면 변환 없이 사용
       const allDeg = points.every(p =>
         p.lat >= 30 && p.lat <= 45 && p.lng >= 120 && p.lng <= 135
       );
@@ -211,7 +210,6 @@
         return points.map(p => ({ lat: p.lat, lng: p.lng }));
       }
 
-      // 아니면 5179로 보고 x=lng, y=lat 변환
       const out = points.map(p => {
         const { lat, lon } = convertPoint(p.lng, p.lat);
         return { lat, lng: lon };
@@ -445,6 +443,8 @@
     }
 
     // ======== 버튼 이벤트 ======== //
+
+    // GET 로 불러오기
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -530,6 +530,7 @@
       }
     });
 
+    // 새로 그리기
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
       drawingManager.cancel();
@@ -538,6 +539,7 @@
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
     });
 
+    // **저장 (여기가 핵심 수정 부분)**  
     saveBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -553,14 +555,22 @@
         return;
       }
 
-      const pts = extractPathFromPolygon(currentPolygon);
-      if (!pts.length) {
+      const ptsRaw = extractPathFromPolygon(currentPolygon);
+      if (!ptsRaw.length) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
         log("[LOG] 저장 실패: 추출된 점 개수 0", "err");
         return;
       }
 
-      // 이제부터는 Kakao LatLng 그대로 WGS84 로 저장
+      // 1) raw 좌표(5179 / WGS84 섞여 있을 수 있음)를 WGS84 로 통일
+      const pts = convertManyToWgs84(ptsRaw);
+      if (!pts.length) {
+        alert("좌표 변환에 실패했습니다.");
+        log("[LOG] 저장 실패: convertManyToWgs84 결과 0개", "err");
+        return;
+      }
+
+      // 2) 중심도 WGS84 기준으로 계산
       const center = computeCenter(pts);
       log(`[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat}, ${center.lng})`, "info");
 
@@ -573,6 +583,7 @@
       }
     });
 
+    // 지도 초기화
     resetBtn.addEventListener("click", () => {
       clearCurrentOverlays();
       drawingManager.cancel();

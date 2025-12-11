@@ -207,15 +207,47 @@ function initMap() {
 
 /* ------------------ 도우미: 폴리곤 좌표 변환 ------------------ */
 
+/**
+ * Kakao polygon.getPath() 가
+ *  - MVCArray (getLength/getAt 존재)
+ *  - LatLng[] (일반 배열)
+ *  - LatLng[][] (멀티폴리곤)
+ * 어떤 형태로 와도 전부 {lng,lat}[] 로 변환
+ */
 function extractPath(poly) {
   if (!poly || typeof poly.getPath !== "function") return [];
-  const path = poly.getPath();
+
+  const rawPath = poly.getPath();
   const out = [];
-  for (let i = 0; i < path.length; i++) {
-    const ll = path.getAt(i);
-    if (!ll) continue;
-    out.push({ lng: ll.getLng(), lat: ll.getLat() });
+
+  const pushLatLng = (ll) => {
+    if (!ll) return;
+    if (typeof ll.getLat === "function") {
+      out.push({ lng: ll.getLng(), lat: ll.getLat() });
+    } else if (typeof ll.lat === "number" && typeof ll.lng === "number") {
+      out.push({ lng: ll.lng, lat: ll.lat });
+    }
+  };
+
+  // MVCArray 스타일
+  if (rawPath && typeof rawPath.getLength === "function" && typeof rawPath.getAt === "function") {
+    for (let i = 0; i < rawPath.getLength(); i++) {
+      pushLatLng(rawPath.getAt(i));
+    }
   }
+  // 일반 배열 스타일
+  else if (Array.isArray(rawPath)) {
+    if (rawPath.length && Array.isArray(rawPath[0])) {
+      // [[LatLng,...]] 형태 (멀티폴리곤) → 전부 flatten
+      rawPath.forEach(inner => {
+        if (!Array.isArray(inner)) return;
+        inner.forEach(pushLatLng);
+      });
+    } else {
+      rawPath.forEach(pushLatLng);
+    }
+  }
+
   return out;
 }
 
@@ -238,9 +270,27 @@ function makePolygonFromWgs(pathArr, editable = false) {
 function fitToPolygon(poly) {
   if (!poly) return;
   const path = poly.getPath();
-  if (path.length === 0) return;
-  const bounds = new kakao.maps.LatLngBounds();
-  for (let i = 0; i < path.length; i++) bounds.extend(path.getAt(i));
+  let bounds = new kakao.maps.LatLngBounds();
+
+  // path도 위와 같이 복잡할 수 있어서 다시 처리
+  const addToBounds = (ll) => {
+    if (!ll) return;
+    if (typeof ll.getLat === "function") {
+      bounds.extend(ll);
+    } else if (typeof ll.lat === "number" && typeof ll.lng === "number") {
+      bounds.extend(new kakao.maps.LatLng(ll.lat, ll.lng));
+    }
+  };
+
+  if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
+    for (let i = 0; i < path.getLength(); i++) addToBounds(path.getAt(i));
+  } else if (Array.isArray(path)) {
+    if (path.length && Array.isArray(path[0])) {
+      path.forEach(inner => inner.forEach(addToBounds));
+    } else {
+      path.forEach(addToBounds);
+    }
+  }
   map.setBounds(bounds);
 }
 
@@ -287,7 +337,6 @@ $("loadBtn").onclick = async () => {
 
   try {
     setApiState("API: loading...");
-    // prefix / exact 등은 백엔드 구현에 맞게 사용
     const params = new URLSearchParams({ camp, code, mode: "prefix" });
     const url = `${ROUTE_API}?${params.toString()}`;
 
@@ -309,7 +358,6 @@ $("loadBtn").onclick = async () => {
       if (viewPolygons.length) fitToPolygon(viewPolygons[0]);
       log(`GET 결과: ${viewPolygons.length}개 폴리곤 표시`, "ok");
     } else if (data && data.found && data.row) {
-      // 단일 row 형태({found,row})도 지원
       const row = data.row;
       if (row.polygon_wgs84) {
         const poly = makePolygonFromWgs(row.polygon_wgs84, false);

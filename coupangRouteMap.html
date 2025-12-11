@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -77,6 +77,9 @@
     }
   </style>
 
+  <!-- proj4 (5179 -> 4326 변환용) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
   <!-- Kakao Maps + drawing 라이브러리 -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing"></script>
 </head>
@@ -106,7 +109,7 @@
 
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
-      · GET: 현재는 코드 prefix 기준으로 조회 (예: 126B ⇒ 126B01 포함).<br/>
+      · GET: 코드 prefix 기준으로 조회 (예: 126B ⇒ 126B01 포함).<br/>
       · 저장은 A[포인트] 기준으로 마지막 점까지만 저장됩니다. (점수, 꼭짓점 3개 이상 권장)<br/>
       · 저장 시 현재 선택된 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
     </div>
@@ -163,6 +166,70 @@
 
     function setOverlayText(msg) {
       overlayInfo.textContent = msg;
+    }
+
+    // ======== proj4 세팅 & 좌표 변환 ======== //
+    // index.html 과 동일한 설정
+    proj4.defs('EPSG:5179',
+      '+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 ' +
+      '+x_0=1000000 +y_0=2000000 +ellps=GRS80 ' +
+      '+towgs84=0,0,0,0,0,0,0 +units=m +no_defs'
+    );
+    proj4.defs('EPSG:4326',
+      '+proj=longlat +datum=WGS84 +no_defs'
+    );
+
+    function convertPoint(x, y) {
+      let lon, lat;
+      try {
+        const out = proj4('EPSG:5179', 'EPSG:4326', [x, y]);
+        lon = out[0];
+        lat = out[1];
+      } catch (e) {
+        console.warn('proj4 변환 실패, 원본 좌표 사용 시도', x, y, e);
+      }
+
+      // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+          lat < 30 || lat > 45 || lon < 120 || lon > 135) {
+        lon = x;
+        lat = y;
+      }
+      return { lat, lon };
+    }
+
+    // 5179 / WGS84 뒤섞여 있을 때 WGS84 로 정규화
+    function normalizeToWgs84(p) {
+      let lat = Number(p.lat);
+      let lng = Number(p.lng);
+      if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+      // 이미 위경도 범위면 그대로 사용
+      if (lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135) {
+        return { lat, lng };
+      }
+
+      // 5179 추정 → 두 가지 순서 모두 시도해서 말 되는 쪽 선택
+      const cand = [];
+
+      try {
+        const c1 = convertPoint(lng, lat); // x=lng, y=lat
+        cand.push({ lat: c1.lat, lng: c1.lon });
+      } catch {}
+      try {
+        const c2 = convertPoint(lat, lng); // x=lat, y=lng
+        cand.push({ lat: c2.lat, lng: c2.lon });
+      } catch {}
+
+      for (const c of cand) {
+        if (c.lat >= 30 && c.lat <= 45 && c.lng >= 120 && c.lng <= 135) {
+          return c;
+        }
+      }
+
+      // 여전히 이상하면 그냥 원본(로그만 남기고) 사용
+      console.warn('normalizeToWgs84: 위경도 범위로 못 맞춤, 원본 사용', p);
+      return { lat, lng };
     }
 
     // ======== Kakao 지도 & DrawingManager ======== //
@@ -286,7 +353,6 @@
       const pushPoint = (p) => {
         if (!p) return;
 
-        // 배열인 경우: [x,y] 또는 [lng,lat]
         if (Array.isArray(p)) {
           if (p.length < 2) return;
           const lng = Number(p[0]);
@@ -298,7 +364,6 @@
         }
 
         if (typeof p === "object") {
-          // 객체: {lat, lng} / {y, x} / {lon, lat} 등
           const lat = Number(
             p.lat ?? p.y ?? (Array.isArray(p.coords) ? p.coords[1] : undefined)
           );
@@ -412,7 +477,6 @@
           return;
         }
 
-        // updated_at 기준 최신순 정렬
         rows.sort((a,b) => {
           const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
           const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
@@ -426,12 +490,22 @@
 
         for (let i=0;i<rows.length;i++) {
           const r = rows[i];
-          const pts = parsePolygonWgs84(r.polygon_wgs84, i);
-          if (!pts || pts.length < 3) {
+          const ptsRaw = parsePolygonWgs84(r.polygon_wgs84, i);
+          if (!ptsRaw || ptsRaw.length < 3) {
             log(`[WARN] drawPolygonFromRow: polygon_wgs84 없음 / 비어 있음 (index=${i})`, "warn");
             continue;
           }
-          chosen = pts;
+
+          const ptsNorm = ptsRaw
+            .map(normalizeToWgs84)
+            .filter(Boolean);
+
+          if (ptsNorm.length < 3) {
+            log(`[WARN] drawPolygonFromRow: 정규화 후 점 < 3 (index=${i})`, "warn");
+            continue;
+          }
+
+          chosen = ptsNorm;
           chosenIdx = i;
           break;
         }
@@ -442,7 +516,6 @@
           return;
         }
 
-        // 폴리곤 그리기
         const path = chosen.map(p => new kakao.maps.LatLng(p.lat, p.lng));
 
         const polygon = new kakao.maps.Polygon({
@@ -501,6 +574,7 @@
         return;
       }
 
+      // 저장은 일단 "보이는 그대로" 저장 (Kakao LatLng 좌표 그대로)
       const center = computeCenter(pts);
       log(`[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat}, ${center.lng})`, "info");
 

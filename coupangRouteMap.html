@@ -207,7 +207,6 @@
       };
       drawingManager = new kakao.maps.drawing.DrawingManager(options);
 
-      // 도형 그리기 끝났을 때
       kakao.maps.event.addListener(drawingManager, "drawend", function(data) {
         const overlay = data.target;
         if (!overlay || !(overlay instanceof kakao.maps.Polygon)) {
@@ -226,11 +225,7 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Polygon → 좌표 배열 추출 (버그 방어판) ========
-    /**
-     * Kakao Polygon에서 Lat/Lng 배열 추출
-     * 반환: [{lat, lng}, ...]
-     */
+    // ======== Polygon → 좌표 배열 추출 ========
     function extractPathFromPolygon(polygon) {
       const result = [];
 
@@ -244,7 +239,7 @@
         let lat, lng;
         if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
           lat = ll.getLat(); lng = ll.getLng();
-        } else if ("Ma" in ll && "La" in ll) { // 내부 필드명 방어
+        } else if ("Ma" in ll && "La" in ll) {
           lat = ll.Ma; lng = ll.La;
         } else if ("lat" in ll && "lng" in ll) {
           lat = ll.lat; lng = ll.lng;
@@ -257,7 +252,6 @@
       const handleAnyPath = (pathLike) => {
         if (!pathLike) return;
 
-        // kakao.maps.Array(MVCArray 스타일)
         if (typeof pathLike.getLength === "function" &&
             typeof pathLike.getAt === "function") {
           const len = pathLike.getLength();
@@ -265,7 +259,6 @@
           return;
         }
 
-        // 배열/유사배열
         if (Array.isArray(pathLike) ||
             typeof pathLike.length === "number" ||
             typeof pathLike.forEach === "function") {
@@ -286,7 +279,6 @@
           return;
         }
 
-        // fallback
         pushLatLng(pathLike);
       };
 
@@ -301,7 +293,7 @@
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
       url.searchParams.set("code", code);
-      url.searchParams.set("mode", "prefix"); // 계층 구조 조회
+      url.searchParams.set("mode", "prefix");
 
       log(`[LOG] GET /route 요청: ${url.toString()}`, "info");
       setApiStatus("GET /route 호출 중...");
@@ -369,20 +361,30 @@
         return null;
       }
 
-      const path = src.map(pt => {
+      const path = [];
+
+      for (const pt of src) {
+        let lat, lng;
+
         if (Array.isArray(pt) && pt.length >= 2) {
-          const [lng, lat] = pt;
-          return new kakao.maps.LatLng(lat, lng);
+          // 혹시 [lng, lat] 형식으로 들어온 경우
+          lng = pt[0];
+          lat = pt[1];
+        } else if (pt && typeof pt === "object") {
+          lat = pt.lat ?? pt.latitude;
+          lng = pt.lng ?? pt.longitude ?? pt.lon;
         }
-        if (pt && typeof pt === "object") {
-          const lat = pt.lat ?? pt.latitude;
-          const lng = pt.lng ?? pt.longitude ?? pt.lon;
-          if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            return new kakao.maps.LatLng(lat, lng);
-          }
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+        // ---- 여기서 5179 같은 미친 값 필터링 ----
+        if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+          log(`[WARN] drawPolygonFromRow: 위경도 범위 초과(lat=${lat}, lng=${lng}) → 이 row 통째로 무시`, "warn");
+          return null; // 이 row는 그냥 버린다
         }
-        return null;
-      }).filter(Boolean);
+
+        path.push(new kakao.maps.LatLng(lat, lng));
+      }
 
       if (path.length < 3) {
         log("[WARN] drawPolygonFromRow: path 변환 후 점 부족", "warn");
@@ -410,6 +412,7 @@
     }
 
     // ======== 버튼 이벤트 ========
+
     // GET: prefix 조회 → 메인 + 서브 모두 그리기
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
@@ -430,24 +433,29 @@
           return;
         }
 
-        // polygon_wgs84 있는 row만 사용
-        const rowsWithPoly = data.rows.filter(
-          r => Array.isArray(r.polygon_wgs84) && r.polygon_wgs84.length >= 3
-        );
+        // polygon_wgs84 있고, 위경도 범위 정상인 것만 골라서 그리기
+        const rowsWithPoly = [];
+        for (const r of data.rows) {
+          const testPoly = drawPolygonFromRow(r, {}, null);
+          if (testPoly) {
+            // drawPolygonFromRow에서 이미 map에 올려버리니까 다시 안 올리도록 remove
+            testPoly.setMap(null);
+            drawnOverlays.pop();
+            rowsWithPoly.push(r);
+          }
+        }
 
         if (rowsWithPoly.length === 0) {
-          log("[ERR] polygon_wgs84 데이터가 비어 있습니다.", "err");
-          alert("저장된 폴리곤 데이터가 없습니다.");
+          log("[ERR] 유효한 polygon_wgs84 데이터가 없습니다.", "err");
+          alert("저장된 유효한 폴리곤 데이터가 없습니다.");
           return;
         }
 
-        // 메인: code 정확히 일치하는 라우트 (없으면 첫 번째)
         const mainRow = rowsWithPoly.find(r => r.code === code) || rowsWithPoly[0];
         const childRows = rowsWithPoly.filter(r => r !== mainRow);
 
         const bounds = new kakao.maps.LatLngBounds();
 
-        // 메인 폴리곤(두껍고 진하게)
         const mainPoly = drawPolygonFromRow(mainRow, {
           strokeWeight: 4,
           strokeColor : "#22c55e",
@@ -455,7 +463,6 @@
           fillOpacity : 0.3,
         }, bounds);
 
-        // 서브 폴리곤들(조금 옅게)
         childRows.forEach(row => {
           drawPolygonFromRow(row, {
             strokeWeight: 2,
@@ -465,20 +472,13 @@
           }, bounds);
         });
 
-        if (!bounds.isEmpty && mainPoly) {
-          // kakao bounds는 isEmpty가 없어서 그냥 세팅
+        if (mainPoly) {
           map.setBounds(bounds);
-        } else if (mainPoly) {
-          // 혹시 모를 대비, 메인 기준으로 bounds 계산
-          const path = mainPoly.getPath();
-          const b = new kakao.maps.LatLngBounds();
-          path.forEach(p => b.extend(p));
-          map.setBounds(b);
         }
 
         currentPolygon = mainPoly || null;
 
-        log(`[LOG] 폴리곤 불러오기 완료. 전체 ${rowsWithPoly.length}개 (메인: ${mainRow.code})`, "info");
+        log(`[LOG] 폴리곤 불러오기 완료. 유효 폴리곤 ${rowsWithPoly.length}개 (메인: ${mainRow.code})`, "info");
         setOverlayText(`불러온 폴리곤 ${rowsWithPoly.length}개 (메인: ${mainRow.code})`);
       } catch (e) {
         console.error(e);
@@ -538,7 +538,6 @@
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     });
 
-    // ======== 초기 실행 ========
     kakao.maps.load(initMap);
   </script>
 </body>

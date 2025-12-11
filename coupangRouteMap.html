@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -98,7 +98,7 @@
 <body>
   <aside class="side">
     <div>
-      <div class="title">마루웰 라우트 편집기1</div>
+      <div class="title">마루웰 라우트 편집기</div>
       <div class="subtitle">캠프 + 라우트 코드 기반 · Supabase / Cloudflare route API 사용</div>
     </div>
 
@@ -122,7 +122,6 @@
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
       · GET: <code>code=126B&mode=prefix</code> 기준으로 126B, 126B01 등 전부 조회 후, 현재 코드(126B)에 해당하는 최신 데이터만 사용합니다.<br/>
-      · 저장은 A[포인트] 기준으로 마지막 점까지만 저장됩니다. (점수, 꼭짓점 3개 이상 권장)<br/>
       · 저장 시 현재 선택된 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
     </div>
 
@@ -183,8 +182,9 @@
     // ======== Kakao 지도 & DrawingManager ========
     let map;
     let drawingManager;
-    let currentPolygon = null;   // 마지막으로 그린 / 불러온 폴리곤
-    let drawnOverlays  = [];     // 새로 그리기/초기화 시 제거용
+    let currentPolygon = null;          // 마지막으로 그린 / 불러온 폴리곤
+    let currentPolygonPoints = [];      // 그 폴리곤의 WGS84 점 [{lat,lng}, ...]
+    let drawnOverlays  = [];           // 새로 그리기/초기화 시 제거용
 
     function initMap() {
       const center = new kakao.maps.LatLng(37.5665, 126.9780);
@@ -218,11 +218,30 @@
           return;
         }
 
+        // 1단계: drawingManager가 준 data.points에서 직접 좌표 추출
+        let pts = [];
+        if (Array.isArray(data.points) && data.points.length > 0) {
+          pts = data.points
+            .filter(p => p && typeof p.getLat === "function" && typeof p.getLng === "function")
+            .map(p => ({ lat: p.getLat(), lng: p.getLng() }));
+        }
+
+        // 2단계: 그래도 0개면, polygon.getPath() 기반으로 한 번 더 시도
+        if (!pts.length) {
+          pts = getPolygonPoints(overlay);
+          console.log("[DEBUG] drawend fallback getPath -> points", pts);
+        }
+
         currentPolygon = overlay;
+        currentPolygonPoints = pts;
         drawnOverlays.push(overlay);
 
-        const pts = getPolygonPoints(overlay);
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
+
+        if (!pts.length) {
+          console.log("[DEBUG] drawend raw data", data);
+          console.log("[DEBUG] drawend raw path", overlay.getPath && overlay.getPath());
+        }
       });
 
       setOverlayText("지도 초기화 완료.");
@@ -265,7 +284,7 @@
       return out;
     }
 
-    // ======== polygon → [{lat,lng},...] (저장용) ========
+    // ======== polygon → [{lat,lng},...] (저장용 / fallback용) ========
     function getPolygonPoints(polygon) {
       if (!polygon || typeof polygon.getPath !== "function") {
         log("[ERR] getPolygonPoints: polygon 또는 getPath 없음", "err");
@@ -335,7 +354,6 @@
         lat = Number(lat);
         lng = Number(lng);
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-        // 위경도 범위 체크
         if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
         points.push({ lat, lng });
       };
@@ -343,12 +361,11 @@
       const walk = (v) => {
         if (!v) return;
 
-        // [{lat,lng}, ...]
+        // [[lng,lat], ...] 스타일
         if (Array.isArray(v)) {
           if (v.length === 2 &&
               typeof v[0] === "number" &&
               typeof v[1] === "number") {
-            // [lng, lat] 로 저장된 예전 데이터 대응
             const lng = v[0];
             const lat = v[1];
             push(lat, lng);
@@ -358,6 +375,7 @@
           return;
         }
 
+        // {lat, lng} 스타일
         if (typeof v === "object") {
           if ("lat" in v && "lng" in v) {
             push(v.lat, v.lng);
@@ -399,13 +417,13 @@
       drawnOverlays.forEach(o => o.setMap(null));
       drawnOverlays = [];
       currentPolygon = null;
+      currentPolygonPoints = [];
     }
 
     // ======== GET 응답 rows 중에서 사용할 row 선택 + 그리기 ========
     function pickUsableRow(rows, requestedCode) {
       if (!Array.isArray(rows) || !rows.length) return null;
 
-      // 최신(updated_at DESC) + code 우선 필터
       const copied = [...rows].sort((a,b) => {
         const ta = new Date(a.updated_at || 0).getTime();
         const tb = new Date(b.updated_at || 0).getTime();
@@ -417,7 +435,6 @@
       for (let i=0; i<copied.length; i++) {
         const row = copied[i];
 
-        // 현재 코드와 일치하는 row만 사용(126B, 101A 등)
         if (row.code !== requestedCode) continue;
 
         const pts = parsePolygonWgs84(row.polygon_wgs84);
@@ -451,8 +468,8 @@
 
       drawnOverlays.push(polygon);
       currentPolygon = polygon;
+      currentPolygonPoints = points.slice(); // 저장용으로도 사용
 
-      // bounds 맞추기
       const bounds = new kakao.maps.LatLngBounds();
       path.forEach(latlng => bounds.extend(latlng));
       map.setBounds(bounds);
@@ -497,7 +514,7 @@
 
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel(); // 혹시 진행 중이던 것
+      drawingManager.cancel();
       drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
       log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
@@ -518,7 +535,15 @@
         return;
       }
 
-      const pts = getPolygonPoints(currentPolygon);
+      // 1순위: drawend에서 저장해 둔 좌표를 사용
+      let pts = currentPolygonPoints.slice();
+
+      // 그래도 비어있으면 마지막 방어선: getPolygonPoints 재시도
+      if (!pts.length) {
+        pts = getPolygonPoints(currentPolygon);
+        console.log("[DEBUG] saveBtn fallback getPolygonPoints ->", pts);
+      }
+
       if (!pts.length) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
         log("[LOG] 저장 실패: 추출된 점 개수 0", "err");

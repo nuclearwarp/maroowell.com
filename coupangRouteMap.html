@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기1</title>
+  <title>마루웰 라우트 편집기</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -218,84 +218,75 @@
           return;
         }
 
-        // 1단계: drawingManager가 준 data.points에서 직접 좌표 추출
-        let pts = [];
-        if (Array.isArray(data.points) && data.points.length > 0) {
-          pts = data.points
-            .filter(p => p && typeof p.getLat === "function" && typeof p.getLng === "function")
-            .map(p => ({ lat: p.getLat(), lng: p.getLng() }));
-        }
-
-        // 2단계: 그래도 0개면, polygon.getPath() 기반으로 한 번 더 시도
-        if (!pts.length) {
-          pts = getPolygonPoints(overlay);
-          console.log("[DEBUG] drawend fallback getPath -> points", pts);
-        }
+        // drawingManager가 만든 polygon에서 직접 좌표 추출
+        const pts = getPolygonPoints(overlay);
+        console.log("[DEBUG] drawend raw path", overlay.getPath && overlay.getPath());
+        console.log("[DEBUG] drawend getPolygonPoints ->", pts);
 
         currentPolygon = overlay;
         currentPolygonPoints = pts;
         drawnOverlays.push(overlay);
 
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
-
-        if (!pts.length) {
-          console.log("[DEBUG] drawend raw data", data);
-          console.log("[DEBUG] drawend raw path", overlay.getPath && overlay.getPath());
-        }
       });
 
       setOverlayText("지도 초기화 완료.");
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== path 전체에서 LatLng 뽑기 (index.html에서 쓰던 검증된 버전) ========
-    function collectLatLngsFromPath(path) {
-      const out = [];
-
-      const walk = (p) => {
-        if (!p) return;
-
-        // 1) kakao.maps.LatLng 한 점
-        if (p instanceof kakao.maps.LatLng ||
-            (typeof p.getLat === "function" && typeof p.getLng === "function")) {
-          out.push(p);
-          return;
-        }
-
-        // 2) LatLngPath (getLength / getAt 가진 객체)
-        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
-          for (let i = 0; i < p.getLength(); i++) {
-            walk(p.getAt(i));
-          }
-          return;
-        }
-
-        // 3) 배열 (LatLng[] 이거나 그 배열의 배열)
-        if (Array.isArray(p) || typeof p.forEach === "function") {
-          const arr = p;
-          const forEachFn = arr.forEach
-            ? arr.forEach.bind(arr)
-            : (cb) => { for (let i=0; i<arr.length; i++) cb(arr[i], i); };
-          forEachFn(walk);
-        }
-      };
-
-      walk(path);
-      return out;
-    }
-
-    // ======== polygon → [{lat,lng},...] (저장용 / fallback용) ========
+    // ======== polygon → [{lat,lng},...]  (Kakao 내부 타입(Ma/La) 포함) ========
     function getPolygonPoints(polygon) {
+      const result = [];
+
       if (!polygon || typeof polygon.getPath !== "function") {
         log("[ERR] getPolygonPoints: polygon 또는 getPath 없음", "err");
-        return [];
+        return result;
       }
-      const rawPath = polygon.getPath();
-      const latlngs = collectLatLngsFromPath(rawPath);
-      return latlngs.map(ll => ({
-        lat: ll.getLat(),
-        lng: ll.getLng(),
-      }));
+
+      const pathObj = polygon.getPath();
+      // pathObj: kakao.maps.Array(M) 이거나, 일반 배열일 수 있음
+      const length = typeof pathObj.getLength === "function"
+        ? pathObj.getLength()
+        : pathObj.length;
+
+      for (let i = 0; i < length; i++) {
+        const ll = (typeof pathObj.getAt === "function")
+          ? pathObj.getAt(i)
+          : pathObj[i];
+
+        if (!ll) continue;
+
+        let lat, lng;
+
+        // 1) 정상 LatLng 객체
+        if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
+          lat = ll.getLat();
+          lng = ll.getLng();
+        }
+        // 2) Kakao 내부 타입(M) - Ma/La 필드 사용
+        else if ("Ma" in ll && "La" in ll) {
+          lat = ll.Ma;
+          lng = ll.La;
+        }
+        // 3) {lat,lng}
+        else if ("lat" in ll && "lng" in ll) {
+          lat = ll.lat;
+          lng = ll.lng;
+        }
+        // 4) {y,x}
+        else if ("y" in ll && "x" in ll) {
+          lat = ll.y;
+          lng = ll.x;
+        }
+
+        lat = Number(lat);
+        lng = Number(lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+        result.push({ lat, lng });
+      }
+
+      return result;
     }
 
     // ======== Supabase Cloudflare Worker 연동 ========
@@ -392,17 +383,6 @@
       return points;
     }
 
-    // ======== center_wgs84 파싱 ========
-    function parseCenterWgs84(raw) {
-      if (!raw || typeof raw !== "object") return null;
-      const lat = Number(raw.lat);
-      const lng = Number(raw.lng);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-      return { lat, lng };
-    }
-
-    // ======== center 계산 ========
     function computeCenter(points) {
       if (!points.length) return null;
       let sumLat = 0, sumLng = 0;
@@ -420,7 +400,6 @@
       currentPolygonPoints = [];
     }
 
-    // ======== GET 응답 rows 중에서 사용할 row 선택 + 그리기 ========
     function pickUsableRow(rows, requestedCode) {
       if (!Array.isArray(rows) || !rows.length) return null;
 
@@ -468,7 +447,7 @@
 
       drawnOverlays.push(polygon);
       currentPolygon = polygon;
-      currentPolygonPoints = points.slice(); // 저장용으로도 사용
+      currentPolygonPoints = points.slice(); // 저장용
 
       const bounds = new kakao.maps.LatLngBounds();
       path.forEach(latlng => bounds.extend(latlng));
@@ -535,10 +514,10 @@
         return;
       }
 
-      // 1순위: drawend에서 저장해 둔 좌표를 사용
+      // 1순위: drawend에서 저장해 둔 좌표
       let pts = currentPolygonPoints.slice();
 
-      // 그래도 비어있으면 마지막 방어선: getPolygonPoints 재시도
+      // 그래도 비어있으면 마지막 방어선
       if (!pts.length) {
         pts = getPolygonPoints(currentPolygon);
         console.log("[DEBUG] saveBtn fallback getPolygonPoints ->", pts);

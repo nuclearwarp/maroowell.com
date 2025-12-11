@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기2</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -267,55 +267,50 @@
     }
 
     // ======== Kakao Polygon -> 좌표 배열 (저장용) ========
-    // !!! 여기서는 절대 좌표계 변환 안 함. Kakao LatLng 그대로 저장 !!!
+    // ★★★ 여기서는 절대 좌표계 변환 안 함. Kakao LatLng 그대로 저장 ★★★
     function getPolygonPointsWgs84(polygon) {
       const out = [];
       if (!polygon) return out;
 
-      const pushFromLatLng = (ll) => {
-        if (!ll) return;
-        if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
-          const lat = ll.getLat();
-          const lng = ll.getLng();
+      const collect = (p) => {
+        if (!p) return;
+
+        // 1) LatLng 한 점
+        if (p instanceof kakao.maps.LatLng ||
+            (typeof p.getLat === "function" && typeof p.getLng === "function")) {
+          const lat = p.getLat();
+          const lng = p.getLng();
           if (isFinite(lat) && isFinite(lng)) {
             out.push({ lat, lng });
           }
-        }
-      };
-
-      const walkPathLike = (p) => {
-        if (!p) return;
-
-        if (p instanceof kakao.maps.LatLng ||
-            (typeof p.getLat === "function" && typeof p.getLng === "function")) {
-          pushFromLatLng(p);
           return;
         }
 
+        // 2) LatLngPath / kakao.maps.Array (getLength / getAt)
         if (typeof p.getLength === "function" && typeof p.getAt === "function") {
           const len = p.getLength();
           for (let i = 0; i < len; i++) {
-            walkPathLike(p.getAt(i));
+            collect(p.getAt(i));
           }
           return;
         }
 
-        if (Array.isArray(p)) {
-          p.forEach(walkPathLike);
+        // 3) 배열 또는 forEach만 있는 객체
+        if (Array.isArray(p) || typeof p.length === "number") {
+          for (let i = 0; i < p.length; i++) collect(p[i]);
           return;
         }
-
         if (typeof p.forEach === "function") {
-          p.forEach(walkPathLike);
+          p.forEach(collect);
           return;
         }
       };
 
       if (typeof polygon.getPath === "function") {
-        walkPathLike(polygon.getPath());
+        collect(polygon.getPath());
       }
       if (!out.length && typeof polygon.getPaths === "function") {
-        walkPathLike(polygon.getPaths());
+        collect(polygon.getPaths());
       }
 
       return out;

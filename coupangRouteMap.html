@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기1</title>
+  <title>마루웰 라우트 편집기</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -168,8 +168,7 @@
       overlayInfo.textContent = msg;
     }
 
-    // ======== proj4 세팅 & 좌표 변환 ======== //
-    // index.html 과 동일한 설정
+    // ======== proj4 세팅 & 변환 유틸 (index.html과 동일) ======== //
     proj4.defs('EPSG:5179',
       '+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 ' +
       '+x_0=1000000 +y_0=2000000 +ellps=GRS80 ' +
@@ -179,8 +178,10 @@
       '+proj=longlat +datum=WGS84 +no_defs'
     );
 
+    // 5179 → WGS84
     function convertPoint(x, y) {
       let lon, lat;
+
       try {
         const out = proj4('EPSG:5179', 'EPSG:4326', [x, y]);
         lon = out[0];
@@ -189,47 +190,34 @@
         console.warn('proj4 변환 실패, 원본 좌표 사용 시도', x, y, e);
       }
 
-      // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
-          lat < 30 || lat > 45 || lon < 120 || lon > 135) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
         lon = x;
         lat = y;
       }
+
       return { lat, lon };
     }
 
-    // 5179 / WGS84 뒤섞여 있을 때 WGS84 로 정규화
-    function normalizeToWgs84(p) {
-      let lat = Number(p.lat);
-      let lng = Number(p.lng);
-      if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    // polygon_wgs84 점 배열을 WGS84로 통일
+    function convertManyToWgs84(points) {
+      if (!points || !points.length) return [];
 
-      // 이미 위경도 범위면 그대로 사용
-      if (lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135) {
-        return { lat, lng };
+      // 이미 위경도(한국) 범위면 변환 없이 사용
+      const allDeg = points.every(p =>
+        p.lat >= 30 && p.lat <= 45 && p.lng >= 120 && p.lng <= 135
+      );
+
+      if (allDeg) {
+        return points.map(p => ({ lat: p.lat, lng: p.lng }));
       }
 
-      // 5179 추정 → 두 가지 순서 모두 시도해서 말 되는 쪽 선택
-      const cand = [];
+      // 아니면 5179로 보고 x=lng, y=lat 변환
+      const out = points.map(p => {
+        const { lat, lon } = convertPoint(p.lng, p.lat);
+        return { lat, lng: lon };
+      });
 
-      try {
-        const c1 = convertPoint(lng, lat); // x=lng, y=lat
-        cand.push({ lat: c1.lat, lng: c1.lon });
-      } catch {}
-      try {
-        const c2 = convertPoint(lat, lng); // x=lat, y=lng
-        cand.push({ lat: c2.lat, lng: c2.lon });
-      } catch {}
-
-      for (const c of cand) {
-        if (c.lat >= 30 && c.lat <= 45 && c.lng >= 120 && c.lng <= 135) {
-          return c;
-        }
-      }
-
-      // 여전히 이상하면 그냥 원본(로그만 남기고) 사용
-      console.warn('normalizeToWgs84: 위경도 범위로 못 맞춤, 원본 사용', p);
-      return { lat, lng };
+      return out;
     }
 
     // ======== Kakao 지도 & DrawingManager ======== //
@@ -439,7 +427,7 @@
       return json;
     }
 
-    // ======== 지도 상의 폴리곤 → 중심 ======== //
+    // ======== 중심 계산 ======== //
     function computeCenter(points) {
       if (!points.length) return null;
       let sumLat = 0, sumLng = 0;
@@ -477,6 +465,7 @@
           return;
         }
 
+        // 최신순 정렬
         rows.sort((a,b) => {
           const ta = a.updated_at ? Date.parse(a.updated_at) : 0;
           const tb = b.updated_at ? Date.parse(b.updated_at) : 0;
@@ -492,26 +481,23 @@
           const r = rows[i];
           const ptsRaw = parsePolygonWgs84(r.polygon_wgs84, i);
           if (!ptsRaw || ptsRaw.length < 3) {
-            log(`[WARN] drawPolygonFromRow: polygon_wgs84 없음 / 비어 있음 (index=${i})`, "warn");
+            log(`[WARN] polygon_wgs84 없음 / 점 < 3 (index=${i})`, "warn");
             continue;
           }
 
-          const ptsNorm = ptsRaw
-            .map(normalizeToWgs84)
-            .filter(Boolean);
-
-          if (ptsNorm.length < 3) {
-            log(`[WARN] drawPolygonFromRow: 정규화 후 점 < 3 (index=${i})`, "warn");
+          const ptsDeg = convertManyToWgs84(ptsRaw);
+          if (!ptsDeg || ptsDeg.length < 3) {
+            log(`[WARN] convertManyToWgs84 후 점 < 3 (index=${i})`, "warn");
             continue;
           }
 
-          chosen = ptsNorm;
+          chosen = ptsDeg;
           chosenIdx = i;
           break;
         }
 
         if (!chosen) {
-          log("[ERR] 사용 가능한 폴리곤 row가 없습니다. (모든 row가 점 3개 미만)", "err");
+          log("[ERR] 사용 가능한 폴리곤 row가 없습니다.", "err");
           alert("저장된 폴리곤 데이터가 없습니다.");
           return;
         }
@@ -574,7 +560,7 @@
         return;
       }
 
-      // 저장은 일단 "보이는 그대로" 저장 (Kakao LatLng 좌표 그대로)
+      // 이제부터는 Kakao LatLng 그대로 WGS84 로 저장
       const center = computeCenter(pts);
       log(`[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat}, ${center.lng})`, "info");
 

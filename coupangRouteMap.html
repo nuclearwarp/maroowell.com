@@ -109,13 +109,16 @@
     }
   </style>
 
+  <!-- proj4: 5179 -> 4326 변환용 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
   <!-- Kakao Maps + drawing 라이브러리 -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing"></script>
 </head>
 <body>
   <aside class="side">
     <div>
-      <div class="title">마루웰 라우트 편집기</div>
+      <div class="title">마루웰 라우트 편집기1</div>
       <div class="subtitle">캠프 + 라우트 코드 기반 · Supabase / Cloudflare route API 사용</div>
     </div>
 
@@ -197,6 +200,45 @@
       overlayInfo.textContent = msg;
     }
 
+    // ======== 좌표계 변환 (5179 -> WGS84) ========
+    proj4.defs(
+      "EPSG:5179",
+      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+      "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
+      "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+    );
+    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+    function convert5179ToWgs84(x, y) {
+      let lon, lat;
+      try {
+        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
+        lon = out[0];
+        lat = out[1];
+      } catch (e) {
+        console.warn("proj4 변환 실패, 원본 좌표 사용 시도", x, y, e);
+      }
+
+      // 한국 영역 밖이면 그냥 원본을 위경도로 간주
+      if (
+        !Number.isFinite(lat) || !Number.isFinite(lon) ||
+        lat < 30 || lat > 45 || lon < 120 || lon > 135
+      ) {
+        lon = x;
+        lat = y;
+      }
+
+      return { lat, lng: lon };
+    }
+
+    function looksLikeWgs84(lat, lng) {
+      return (
+        Number.isFinite(lat) && Number.isFinite(lng) &&
+        lat >= 30 && lat <= 45 &&
+        lng >= 120 && lng <= 135
+      );
+    }
+
     // ======== Kakao 지도 & DrawingManager ========
     let map;
     let drawingManager;
@@ -239,6 +281,8 @@
         drawnOverlays.push(overlay);
 
         const pts = getPolygonPointsWgs84(overlay);
+        log("[DEBUG] drawend raw path", "info");
+        log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, pts.length ? "info" : "warn");
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
       });
 
@@ -246,7 +290,7 @@
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ======== Kakao Polygon -> WGS84 위경도 배열 추출 (강화 버전) ========
+    // ======== Kakao Polygon -> WGS84 위경도 배열 추출 ========
     function getPolygonPointsWgs84(polygon) {
       const result = [];
 
@@ -256,9 +300,8 @@
       }
 
       const rawPath = polygon.getPath();
-      log("[DEBUG] drawend raw path", rawPath, "info");
 
-      const pushLatLng = (ll) => {
+      const pushFromAny = (ll) => {
         if (!ll) return;
         let lat, lng;
 
@@ -266,57 +309,55 @@
             (typeof ll.getLat === "function" && typeof ll.getLng === "function")) {
           lat = ll.getLat();
           lng = ll.getLng();
-        } else if ("Ma" in ll && "La" in ll) {      // kakao 내부 필드명
+        } else if ("Ma" in ll && "La" in ll) {
           lat = ll.Ma;
           lng = ll.La;
-        } else if ("lat" in ll && "lng" in ll) {    // {lat, lng}
+        } else if ("lat" in ll && "lng" in ll) {
           lat = ll.lat;
           lng = ll.lng;
         }
 
-        if (Number.isFinite(lat) && Number.isFinite(lng)) {
-          result.push({ lat, lng });
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        // 5179 같이 큰 값이면 변환, 아니면 그대로 사용
+        let outLat = lat;
+        let outLng = lng;
+        if (!looksLikeWgs84(lat, lng) && (Math.abs(lat) > 1000 || Math.abs(lng) > 1000)) {
+          const conv = convert5179ToWgs84(lng, lat); // (x=lng, y=lat)
+          outLat = conv.lat;
+          outLng = conv.lng;
+        }
+
+        if (looksLikeWgs84(outLat, outLng)) {
+          result.push({ lat: outLat, lng: outLng });
+        } else {
+          // 여전히 이상하면 그냥 버림
+          console.warn("이상 좌표, 스킵", { lat, lng, outLat, outLng });
         }
       };
 
-      const handleAnyPath = (p) => {
+      const walk = (p) => {
         if (!p) return;
 
-        // 1) LatLngPath (getLength / getAt)
         if (typeof p.getLength === "function" && typeof p.getAt === "function") {
           const len = p.getLength();
-          for (let i = 0; i < len; i++) {
-            handleAnyPath(p.getAt(i));
-          }
+          for (let i = 0; i < len; i++) walk(p.getAt(i));
           return;
         }
 
-        // 2) 배열류 또는 forEach 를 가진 객체
         if (Array.isArray(p) || typeof p.forEach === "function" || typeof p.length === "number") {
           const forEachFn = p.forEach
             ? p.forEach.bind(p)
-            : (cb) => { for (let i = 0; i < p.length; i++) cb(p[i], i); };
+            : (cb) => { for (let i=0; i<p.length; i++) cb(p[i], i); };
 
-          const first = p[0];
-          // 첫 원소가 또 path 비슷하면 중첩으로 판단
-          if (first &&
-              (Array.isArray(first) ||
-               typeof first.getLength === "function" ||
-               typeof first.forEach === "function")) {
-            forEachFn(inner => handleAnyPath(inner));
-          } else {
-            forEachFn(pushLatLng);
-          }
+          forEachFn(walk);
           return;
         }
 
-        // 3) 그냥 점으로 간주
-        pushLatLng(p);
+        pushFromAny(p);
       };
 
-      handleAnyPath(rawPath);
-
-      log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${result.length}`, result.length ? "info" : "warn");
+      walk(rawPath);
       return result;
     }
 
@@ -368,7 +409,7 @@
       return json;
     }
 
-    // ======== DB polygon_wgs84 파싱 (여러 형식 지원) ========
+    // ======== DB polygon_wgs84 파싱 (5179 & WGS84 둘 다 지원) ========
     function parsePolygonWgs84(raw, index) {
       if (!raw) {
         log(`[WARN] parsePolygonWgs84 index=${index}, polygon_wgs84 없음`, "warn");
@@ -377,35 +418,51 @@
 
       let points = [];
 
-      // 1) [{lat, lng}, ...] 형태
+      // 1) [{lat, lng}, ...]
       if (Array.isArray(raw) && raw.length && typeof raw[0] === "object" && "lat" in raw[0]) {
-        points = raw.map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+        const first = raw[0];
+        const isWgs = looksLikeWgs84(Number(first.lat), Number(first.lng));
+        if (isWgs) {
+          points = raw.map(p => ({
+            lat: Number(p.lat),
+            lng: Number(p.lng)
+          }));
+        } else {
+          // 5179로 보고 변환
+          points = raw.map(p => {
+            const conv = convert5179ToWgs84(Number(p.lng), Number(p.lat));
+            return { lat: conv.lat, lng: conv.lng };
+          });
+        }
       }
-      // 2) [[a,b], [a,b]...] 형태 (lng/lat 또는 lat/lng)
+      // 2) [[a,b], [a,b]...]
       else if (Array.isArray(raw) && Array.isArray(raw[0])) {
+        const a0 = Number(raw[0][0]);
+        const b0 = Number(raw[0][1]);
+        let treatAsWgs = looksLikeWgs84(b0, a0) || looksLikeWgs84(a0, b0); // (lng,lat) or (lat,lng)
+
         points = raw.map(pair => {
           const a = Number(pair[0]);
           const b = Number(pair[1]);
-          // lng(120~135), lat(30~45) 패턴
-          if (a >= 120 && a <= 135 && b >= 30 && b <= 45) {
-            return { lat: b, lng: a };
+
+          if (treatAsWgs) {
+            // Kakao 우편번호처럼 [lon, lat]
+            if (looksLikeWgs84(b, a)) return { lat: b, lng: a };
+            if (looksLikeWgs84(a, b)) return { lat: a, lng: b };
           }
-          // lat(30~45), lng(120~135) 패턴
-          if (a >= 30 && a <= 45 && b >= 120 && b <= 135) {
-            return { lat: a, lng: b };
-          }
-          return { lat: NaN, lng: NaN };
-        }).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+
+          // 아니면 5179로 보고 변환
+          const conv = convert5179ToWgs84(a, b);
+          return { lat: conv.lat, lng: conv.lng };
+        });
       }
       else {
         log(`[WARN] parsePolygonWgs84 index=${index}, 지원하지 않는 형식`, "warn");
         return [];
       }
 
-      // 한국 범위 필터
-      const filtered = points.filter(p =>
-        p.lat >= 30 && p.lat <= 45 && p.lng >= 120 && p.lng <= 135
-      );
+      // 최종적으로도 한국 범위 아닌 건 버림
+      const filtered = points.filter(p => looksLikeWgs84(p.lat, p.lng));
 
       log(
         `[DEBUG] parsePolygonWgs84 index=${index}, 결과 점 수=${filtered.length}`,
@@ -445,7 +502,7 @@
       return true;
     }
 
-    // ======== 지도 상의 폴리곤 → 단순 lat/lng 배열 & 중심 ========
+    // ======== 지도 상의 폴리곤 → 중심 ========
     function computeCenter(points) {
       if (!points.length) return null;
       let sumLat = 0, sumLng = 0;
@@ -519,7 +576,7 @@
 
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel(); // 혹시 진행 중이던 것
+      drawingManager.cancel();
       drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
       log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
@@ -541,16 +598,13 @@
       }
 
       const pts = getPolygonPointsWgs84(currentPolygon);
-
       if (!pts.length) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
         log("[LOG] 저장 실패: 추출된 점 개수 0", "err");
         return;
       }
 
-      const weird = pts.filter(p =>
-        p.lat < 30 || p.lat > 45 || p.lng < 120 || p.lng > 135
-      );
+      const weird = pts.filter(p => !looksLikeWgs84(p.lat, p.lng));
       if (weird.length) {
         const w = weird[0];
         log(
@@ -561,9 +615,7 @@
 
       const center = computeCenter(pts);
       log(
-        `[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat.toFixed(
-          6
-        )}, ${center.lng.toFixed(6)})`,
+        `[LOG] 저장 준비: 점 ${pts.length}개, 중심 (${center.lat.toFixed(6)}, ${center.lng.toFixed(6)})`,
         "info"
       );
 

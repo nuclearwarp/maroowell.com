@@ -248,7 +248,31 @@
         return result;
       }
 
+      const projection = map?.getProjection?.();
       const rawPath = polygon.getPath();
+
+      const normalizeLatLng = (lat, lng) => {
+        if (typeof lat !== "number" || typeof lng !== "number" || !isFinite(lat) || !isFinite(lng)) {
+          return null;
+        }
+
+        // 정상 범위면 그대로 사용
+        if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+          return { lat, lng };
+        }
+
+        // Kakao 지도에서 Point(x, y) 형태가 넘어온 경우 WGS84로 변환
+        if (projection && typeof projection.coordsFromPoint === "function") {
+          try {
+            const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
+            return { lat: coords.getLat(), lng: coords.getLng() };
+          } catch (e) {
+            // ignore 변환 실패 시 null 반환
+          }
+        }
+
+        return null;
+      };
 
       const pushLatLng = (ll) => {
         if (!ll) return;
@@ -270,10 +294,30 @@
           lat = ll.lat;
           lng = ll.lng;
         }
+        // {x, y} 혹은 {X, Y}
+        else if ("x" in ll && "y" in ll) {
+          lng = ll.x;
+          lat = ll.y;
+        } else if ("X" in ll && "Y" in ll) {
+          lng = ll.X;
+          lat = ll.Y;
+        }
+        // 배열 [lat, lng] 또는 [lng, lat]
+        else if (Array.isArray(ll) && ll.length >= 2) {
+          const a0 = ll[0];
+          const a1 = ll[1];
+          if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) {
+            lat = a0; lng = a1;
+          } else if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) {
+            lat = a1; lng = a0;
+          } else {
+            lat = a1; lng = a0; // 최후 수단으로 [x, y] 가정
+          }
+        }
 
-        if (typeof lat === "number" && typeof lng === "number" &&
-            isFinite(lat) && isFinite(lng)) {
-          result.push({ lat, lng });
+        const normalized = normalizeLatLng(lat, lng);
+        if (normalized) {
+          result.push(normalized);
         }
       };
 
@@ -321,7 +365,7 @@
       return result;
     }
 
-    // ================== Supabase Cloudflare Worker 연동 ==================
+    // ================== Supabase Cloudflare Worker 연 ==================
     async function fetchRoute(camp, code) {
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
@@ -426,6 +470,33 @@
         let usedIndex = -1;
         let pathLatLng = null;
 
+        const normalizeStoredPoint = (p) => {
+          if (p == null) return null;
+
+          // {lat, lng}
+          if (typeof p === "object" && "lat" in p && "lng" in p && isFinite(p.lat) && isFinite(p.lng)) {
+            return { lat: p.lat, lng: p.lng };
+          }
+
+          // {x, y} 혹은 {X, Y}
+          if (typeof p === "object" && ("x" in p || "X" in p) && ("y" in p || "Y" in p)) {
+            const lng = p.x ?? p.X;
+            const lat = p.y ?? p.Y;
+            return { lat, lng };
+          }
+
+          // [lat, lng] or [lng, lat]
+          if (Array.isArray(p) && p.length >= 2) {
+            const a0 = p[0];
+            const a1 = p[1];
+            if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 };
+            if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) return { lat: a1, lng: a0 };
+            return { lat: a1, lng: a0 };
+          }
+
+          return null;
+        };
+
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const poly = row.polygon_wgs84;
@@ -435,14 +506,27 @@
             continue;
           }
 
-          // 이미 WGS84 [{lat,lng}, ...] 형태로 저장한다고 가정
           const pts = [];
           for (const p of poly) {
-            if (typeof p === "object" && p !== null &&
-                "lat" in p && "lng" in p &&
-                isFinite(p.lat) && isFinite(p.lng)) {
-              pts.push(new kakao.maps.LatLng(p.lat, p.lng));
+            const normalized = normalizeStoredPoint(p);
+            if (!normalized) continue;
+
+            if (Math.abs(normalized.lat) > 90 || Math.abs(normalized.lng) > 180) {
+              // 좌표가 범위 밖이면 지도 투영 좌표로 판단해 변환 시도
+              const projection = map?.getProjection?.();
+              if (projection && typeof projection.coordsFromPoint === "function") {
+                try {
+                  const coords = projection.coordsFromPoint(new kakao.maps.Point(normalized.lng, normalized.lat));
+                  pts.push(coords);
+                  continue;
+                } catch (e) {
+                  // 변환 실패 시 skip
+                }
+              }
+              continue;
             }
+
+            pts.push(new kakao.maps.LatLng(normalized.lat, normalized.lng));
           }
 
           log(`[DEBUG] parsePolygonWgs84 index=${i}, 결과 점 수=${pts.length}`, "info");

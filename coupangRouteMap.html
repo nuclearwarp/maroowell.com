@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -256,6 +256,11 @@
           return null;
         }
 
+        // 위경도 범위 내로 먼저 스왑 시도 (위도/경도 뒤바뀐 경우)
+        if ((Math.abs(lat) > 90 || Math.abs(lng) > 180) && Math.abs(lng) <= 90 && Math.abs(lat) <= 180) {
+          [lat, lng] = [lng, lat];
+        }
+
         // 정상 범위면 그대로 사용
         if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
           return { lat, lng };
@@ -265,7 +270,19 @@
         if (projection && typeof projection.coordsFromPoint === "function") {
           try {
             const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
-            return { lat: coords.getLat(), lng: coords.getLng() };
+            const cLat = coords.getLat();
+            const cLng = coords.getLng();
+
+            if (Math.abs(cLat) <= 90 && Math.abs(cLng) <= 180) {
+              return { lat: cLat, lng: cLng };
+            }
+
+            // 변환 값이 여전히 비정상인 경우 스왑 후 재검증
+            if (Math.abs(cLng) <= 90 && Math.abs(cLat) <= 180) {
+              return { lat: cLng, lng: cLat };
+            }
+
+            return null;
           } catch (e) {
             // ignore 변환 실패 시 null 반환
           }

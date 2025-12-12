@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기1</title>
+  <title>마루웰 라우트 편집기</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -226,31 +226,65 @@
 
         let pts = extractPathFromPolygon(overlay);
 
-        // drawingManager 이벤트에서 path가 비어 있는 경우 data.points(픽셀 좌표) 기반 복원
-        if (!pts.length && data && Array.isArray(data.points) && data.points.length) {
-          const projection = map?.getProjection?.();
+        // drawingManager의 data.points -> Lat/Lng 복원 시도
+        const recoverFromDataPoints = () => {
           const recovered = [];
+          if (!data || !Array.isArray(data.points) || !data.points.length) return recovered;
+
+          const projection = map?.getProjection?.();
 
           for (const p of data.points) {
             if (!p) continue;
 
-            let lat = p.y ?? p.Ma;
-            let lng = p.x ?? p.La;
+            // 우선 lat/lng 형태로 보이는지 검사
+            let lat = p.y ?? p.Ma ?? p.lat;
+            let lng = p.x ?? p.La ?? p.lng;
+            let added = false;
 
-            if (projection && typeof projection.coordsFromPoint === "function") {
+            if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+              recovered.push({ lat, lng });
+              added = true;
+            }
+
+            // 위 케이스가 아니면 projection 변환 시도 (픽셀/맵 포인트 좌표 가정)
+            if (!added && projection && typeof projection.coordsFromPoint === "function" &&
+                isFinite(lat) && isFinite(lng)) {
               try {
                 const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
-                lat = coords.getLat();
-                lng = coords.getLng();
+                const cLat = coords.getLat();
+                const cLng = coords.getLng();
+                if (isFinite(cLat) && isFinite(cLng)) {
+                  recovered.push({ lat: cLat, lng: cLng });
+                  added = true;
+                }
               } catch (e) {
-                // 변환 실패 시 그대로 사용
+                // 변환 실패 시 다음 포인트 진행
               }
             }
 
-            if (isFinite(lat) && isFinite(lng)) {
-              recovered.push({ lat, lng });
+            // 혹시 x/y가 뒤바뀐 경우도 한번 더 시도
+            if (!added && projection && typeof projection.coordsFromPoint === "function" &&
+                isFinite(lat) && isFinite(lng)) {
+              try {
+                const coords = projection.coordsFromPoint(new kakao.maps.Point(lat, lng));
+                const cLat = coords.getLat();
+                const cLng = coords.getLng();
+                if (isFinite(cLat) && isFinite(cLng)) {
+                  recovered.push({ lat: cLat, lng: cLng });
+                  added = true;
+                }
+              } catch (e) {
+                // ignore
+              }
             }
           }
+
+          return recovered;
+        };
+
+        // drawingManager 이벤트에서 path가 비어 있는 경우 data.points(픽셀 좌표) 기반 복원
+        if (!pts.length) {
+          const recovered = recoverFromDataPoints();
 
           if (recovered.length) {
             overlay.setPath(recovered.map(pt => new kakao.maps.LatLng(pt.lat, pt.lng)));
@@ -490,7 +524,7 @@
       currentPolygon = null;
     }
 
-    // ================== 버튼 이벤트 ==================
+    // ================== 버튼 벤트 ==================
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();

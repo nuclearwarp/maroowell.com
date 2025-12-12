@@ -121,7 +121,7 @@
 
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
-      · GET: 정확히 일치하는 라우트(예: 126B01) 또는 <code>mode=prefix</code>로 126B 전체 조회 가능.<br/>
+      · GET: 정확히 일치하는 라우트(예: 126B01) 또는 <code>mode=prefix</code> 126B 전체 조회 가능.<br/>
       · 저장은 현재 지도 위에 그린 WGS84 위/경도 그대로 저장됩니다. (점수, 꼭짓점 3개 이상 권장)<br/>
       · 저장 시 현재 선택된 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
     </div>
@@ -251,6 +251,8 @@
       const projection = map?.getProjection?.();
       const rawPath = polygon.getPath();
 
+      const isInKorea = (lt, lg) => lt >= 30 && lt <= 45 && lg >= 120 && lg <= 135;
+
       const normalizeLatLng = (lat, lng) => {
         if (typeof lat !== "number" || typeof lng !== "number" || !isFinite(lat) || !isFinite(lng)) {
           return null;
@@ -261,24 +263,24 @@
           [lat, lng] = [lng, lat];
         }
 
-        // 정상 범위면 그대로 사용
-        if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+        // 정상 범위면 그대로 사용 (단, 한국 대략 범위 안으로 제한)
+        if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && isInKorea(lat, lng)) {
           return { lat, lng };
         }
 
-        // Kakao 지도에서 Point(x, y) 형태가 넘어온 경우 WGS84로 변환
+        // Kakao 지도에서 Point(x, y) 형태가 넘어온 경우 WGS84로 변환 후 한국 범위 재검증
         if (projection && typeof projection.coordsFromPoint === "function") {
           try {
             const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
             const cLat = coords.getLat();
             const cLng = coords.getLng();
 
-            if (Math.abs(cLat) <= 90 && Math.abs(cLng) <= 180) {
+            if (Math.abs(cLat) <= 90 && Math.abs(cLng) <= 180 && isInKorea(cLat, cLng)) {
               return { lat: cLat, lng: cLng };
             }
 
             // 변환 값이 여전히 비정상인 경우 스왑 후 재검증
-            if (Math.abs(cLng) <= 90 && Math.abs(cLat) <= 180) {
+            if (Math.abs(cLng) <= 90 && Math.abs(cLat) <= 180 && isInKorea(cLng, cLat)) {
               return { lat: cLng, lng: cLat };
             }
 

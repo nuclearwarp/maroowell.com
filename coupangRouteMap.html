@@ -224,7 +224,40 @@
         currentPolygon = overlay;
         drawnOverlays.push(overlay);
 
-        const pts = extractPathFromPolygon(overlay);
+        let pts = extractPathFromPolygon(overlay);
+
+        // drawingManager 이벤트에서 path가 비어 있는 경우 data.points(픽셀 좌표) 기반 복원
+        if (!pts.length && data && Array.isArray(data.points) && data.points.length) {
+          const projection = map?.getProjection?.();
+          const recovered = [];
+
+          for (const p of data.points) {
+            if (!p) continue;
+
+            let lat = p.y ?? p.Ma;
+            let lng = p.x ?? p.La;
+
+            if (projection && typeof projection.coordsFromPoint === "function") {
+              try {
+                const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
+                lat = coords.getLat();
+                lng = coords.getLng();
+              } catch (e) {
+                // 변환 실패 시 그대로 사용
+              }
+            }
+
+            if (isFinite(lat) && isFinite(lng)) {
+              recovered.push({ lat, lng });
+            }
+          }
+
+          if (recovered.length) {
+            overlay.setPath(recovered.map(pt => new kakao.maps.LatLng(pt.lat, pt.lng)));
+            pts = recovered;
+          }
+        }
+
         log("[DEBUG] drawend raw path", "info");
         log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
         log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");

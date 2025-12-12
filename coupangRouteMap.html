@@ -233,12 +233,18 @@
 
           const projection = map?.getProjection?.();
 
-          for (const p of data.points) {
-            if (!p) continue;
+          const walkPoints = (pt) => {
+            if (!pt) return;
+
+            // 배열(중첩)인 경우 모두 풀어서 순회
+            if (Array.isArray(pt)) {
+              pt.forEach(walkPoints);
+              return;
+            }
 
             // 우선 lat/lng 형태로 보이는지 검사
-            let lat = p.y ?? p.Ma ?? p.lat;
-            let lng = p.x ?? p.La ?? p.lng;
+            let lat = pt.y ?? pt.Ma ?? pt.lat;
+            let lng = pt.x ?? pt.La ?? pt.lng;
             let added = false;
 
             if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
@@ -277,7 +283,9 @@
                 // ignore
               }
             }
-          }
+          };
+
+          data.points.forEach(walkPoints);
 
           return recovered;
         };
@@ -521,19 +529,56 @@
         sumLat += p.lat;
         sumLng += p.lng;
       }
-      return {
-        lat: sumLat / points.length,
-        lng: sumLng / points.length
-      };
+      return { lat: sumLat / points.length, lng: sumLng / points.length };
     }
 
     function clearCurrentOverlays() {
       drawnOverlays.forEach(o => o.setMap(null));
       drawnOverlays = [];
       currentPolygon = null;
+      setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     }
 
-    // ================== 이벤트: 불러오기 버튼 ==================
+    function normalizeStoredPoint(p) {
+      if (!p) return null;
+
+      // 이미 {lat, lng}
+      if (typeof p.lat === "number" && typeof p.lng === "number") {
+        return { lat: p.lat, lng: p.lng };
+      }
+
+      // {latitude, longitude}
+      if (typeof p.latitude === "number" && typeof p.longitude === "number") {
+        return { lat: p.latitude, lng: p.longitude };
+      }
+
+      // [lat, lng] 또는 [lng, lat]
+      if (Array.isArray(p) && p.length >= 2) {
+        const a0 = Number(p[0]);
+        const a1 = Number(p[1]);
+        if (isFinite(a0) && isFinite(a1)) {
+          if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) {
+            return { lat: a0, lng: a1 };
+          }
+          if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) {
+            return { lat: a1, lng: a0 };
+          }
+          return { lat: a1, lng: a0 }; // 최후 수단
+        }
+      }
+
+      // {x, y} 좌표(픽셀 좌표일 수도 있음)
+      if (typeof p.x === "number" && typeof p.y === "number") {
+        return { lng: p.x, lat: p.y };
+      }
+      if (typeof p.X === "number" && typeof p.Y === "number") {
+        return { lng: p.X, lat: p.Y };
+      }
+
+      return null;
+    }
+
+    // ================== 이벤트 바인딩 ==================
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -545,27 +590,19 @@
 
       try {
         clearCurrentOverlays();
-
         const data = await fetchRoute(camp, code);
-        const list = data?.routes || [];
 
-        if (!Array.isArray(list) || !list.length) {
-          alert("해당 캠프/라우트 데이터가 없습니다.");
+        const list = Array.isArray(data) ? data : (Array.isArray(data?.routes) ? data.routes : []);
+        if (!list.length) {
+          log("[WARN] GET 결과 없음", "warn");
+          alert("일치하는 라우트가 없습니다.");
           return;
         }
 
-        let usedIndex = -1;
         let pathLatLng = null;
+        let usedIndex = null;
 
-        const normalizeStoredPoint = (pt) => {
-          if (!pt) return null;
-          if (typeof pt.lat === "number" && typeof pt.lng === "number") return pt;
-          if (Array.isArray(pt) && pt.length >= 2) return { lat: pt[0], lng: pt[1] };
-          if ("x" in pt && "y" in pt) return { lat: pt.y, lng: pt.x };
-          if ("X" in pt && "Y" in pt) return { lat: pt.Y, lng: pt.X };
-          return null;
-        };
-
+        // 여러 row 중 usable 한 것 찾기
         for (let i = 0; i < list.length; i++) {
           const poly = list[i]?.polygon_wgs84;
           if (!poly || !Array.isArray(poly) || !poly.length) {

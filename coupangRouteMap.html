@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>마루웰 라우트 편집기</title>
+  <title>마루웰 라우트 편집기1</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
@@ -185,7 +185,7 @@
     let map;
     let drawingManager;
     let currentPolygon = null;    // 마지막으로 그린 / 불러온 폴리곤
-    let drawnOverlays  = [];      // 새로 그리기/초기화 시 제거용
+    let drawnOverlays  = [];      // 새로 그리기/기화 시 제거용
 
     function initMap() {
       const center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울 시청 근처
@@ -316,7 +316,16 @@
       }
 
       const projection = map?.getProjection?.();
-      const rawPath = polygon.getPath();
+      let rawPath = polygon.getPath();
+
+      // kakao.maps.Array 계열은 getArray()로 실제 배열을 가져와야 할 수 있음
+      if (rawPath && typeof rawPath.getArray === "function") {
+        try {
+          rawPath = rawPath.getArray();
+        } catch (e) {
+          // getArray 실패 시 원본 유지
+        }
+      }
 
       const isInKorea = (lt, lg) => lt >= 30 && lt <= 45 && lg >= 120 && lg <= 135;
 
@@ -524,7 +533,7 @@
       currentPolygon = null;
     }
 
-    // ================== 버튼 벤트 ==================
+    // ================== 이벤트: 불러오기 버튼 ==================
     loadBtn.addEventListener("click", async () => {
       const camp = campInput.value.trim();
       const code = routeInput.value.trim();
@@ -536,57 +545,29 @@
 
       try {
         clearCurrentOverlays();
-        const data = await fetchRoute(camp, code);
 
-        if (!data || !data.rows || !data.rows.length) {
-          log("[LOG] 해당 캠프/라우트 데이터 없음.", "warn");
-          alert("해당 라우트 데이터가 없습니다.");
+        const data = await fetchRoute(camp, code);
+        const list = data?.routes || [];
+
+        if (!Array.isArray(list) || !list.length) {
+          alert("해당 캠프/라우트 데이터가 없습니다.");
           return;
         }
-
-        // updated_at 기준 최신 row 우선 (혹시 여러 개 있을 때)
-        const rows = [...data.rows].sort((a, b) => {
-          const ta = new Date(a.updated_at || 0).getTime();
-          const tb = new Date(b.updated_at || 0).getTime();
-          return tb - ta;
-        });
-
-        log(`[LOG] 응답 row 개수: ${rows.length}. 최신순으로 정렬 후 usable row 탐색`, "info");
 
         let usedIndex = -1;
         let pathLatLng = null;
 
-        const normalizeStoredPoint = (p) => {
-          if (p == null) return null;
-
-          // {lat, lng}
-          if (typeof p === "object" && "lat" in p && "lng" in p && isFinite(p.lat) && isFinite(p.lng)) {
-            return { lat: p.lat, lng: p.lng };
-          }
-
-          // {x, y} 혹은 {X, Y}
-          if (typeof p === "object" && ("x" in p || "X" in p) && ("y" in p || "Y" in p)) {
-            const lng = p.x ?? p.X;
-            const lat = p.y ?? p.Y;
-            return { lat, lng };
-          }
-
-          // [lat, lng] or [lng, lat]
-          if (Array.isArray(p) && p.length >= 2) {
-            const a0 = p[0];
-            const a1 = p[1];
-            if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 };
-            if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) return { lat: a1, lng: a0 };
-            return { lat: a1, lng: a0 };
-          }
-
+        const normalizeStoredPoint = (pt) => {
+          if (!pt) return null;
+          if (typeof pt.lat === "number" && typeof pt.lng === "number") return pt;
+          if (Array.isArray(pt) && pt.length >= 2) return { lat: pt[0], lng: pt[1] };
+          if ("x" in pt && "y" in pt) return { lat: pt.y, lng: pt.x };
+          if ("X" in pt && "Y" in pt) return { lat: pt.Y, lng: pt.X };
           return null;
         };
 
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-          const poly = row.polygon_wgs84;
-
+        for (let i = 0; i < list.length; i++) {
+          const poly = list[i]?.polygon_wgs84;
           if (!poly || !Array.isArray(poly) || !poly.length) {
             log(`[WARN] parsePolygonWgs84 index=${i}, polygon_wgs84 없음 / 비어 있음`, "warn");
             continue;

@@ -17,9 +17,9 @@
     body { display:flex; }
 
     .side {
-      width: 390px;
+      width: 400px;
       min-width: 320px;
-      max-width: 480px;
+      max-width: 520px;
       background:#020617;
       border-right:1px solid #1f2937;
       padding:14px 16px;
@@ -63,7 +63,7 @@
       border:1px solid #1f2937;
       background:#020617;
       font-size:0.7rem;
-      height:150px;
+      height:170px;
       overflow:auto;
       white-space:pre-wrap;
     }
@@ -105,7 +105,6 @@
     }
 
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .row > * { flex: 0 0 auto; }
     .row input { flex: 1 1 auto; min-width: 140px; }
 
     @media (max-width:900px) {
@@ -114,14 +113,14 @@
         width:100%; max-width:none;
         border-right:none; border-bottom:1px solid #1f2937;
       }
-      .map-wrap { height:calc(100% - 320px); }
+      .map-wrap { height:calc(100% - 340px); }
     }
   </style>
 
-  <!-- turf.js (인접색 + 정렬 알고리즘 일부) -->
+  <!-- turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
-  <!-- Kakao Maps + drawing 라이브러리 -->
+  <!-- Kakao Maps + drawing -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing&autoload=false"></script>
 </head>
 
@@ -134,7 +133,7 @@
 
     <div>
       <label for="campInput">캠프 이름 (예: 대구3)</label>
-      <input id="campInput" type="text" placeholder="예: 일산2 / 대구3" />
+      <input id="campInput" type="text" placeholder="예: 대구3" />
     </div>
 
     <div>
@@ -153,27 +152,35 @@
     </div>
 
     <div class="hint">
-      • GET은 <b>기본 prefix</b> 조회로 하위 노선까지 표시합니다.<br/>
-      • <b>camp만 입력</b>하고 GET하면 해당 camp 전체 노선을 표시합니다.<br/>
-      • 지도에서 폴리곤 클릭 → 해당 코드가 <b>편집 대상(녹색)</b>으로 전환됩니다.<br/>
-      • 구역 추가: 같은 코드에 폴리곤을 여러 개 추가(떨어진 구역 지원).<br/>
+      • GET은 기본적으로 prefix 조회로 하위 노선까지 표시합니다.<br/>
+      • camp만 입력하고 GET하면 해당 camp 전체 노선을 표시합니다.<br/>
+      • 폴리곤 클릭 → 해당 코드가 편집 대상(녹색)으로 전환됩니다.<br/>
+      • 구역 추가: 같은 코드에 폴리곤 여러 개 추가(떨어진 구역 지원).<br/>
       • 저장: 편집 대상 폴리곤(들)을 DB에 저장합니다. (구역 2개 이상이면 다중 배열 저장)<br/>
-      • 지도 정렬: 편집 대상이 있으면 그 노선만 정렬 / 없으면 <b>현재 표시된(prefix 그룹) 전체 정렬</b> 후 자동 저장.<br/>
-      • 라벨 위치: 중심점이 아니라 <b>polylabel(폴리곤 내부 최적)</b>로 잡습니다.
+      • 지도 정렬: 편집 대상이 있으면 그 노선만 / 없으면 현재 표시된(prefix 그룹) 전체 정렬 후 자동 저장<br/>
+      • 삭제:
+        (1) 편집 폴리곤 X로 모두 삭제 후 저장 → polygon_wgs84=null 저장
+        (2) DB row 삭제 버튼 → DB에서 레코드 자체 삭제
     </div>
 
     <div class="section">
+      <div style="font-size:0.78rem;color:#9aa6b2;margin-bottom:6px;">DB 수정</div>
+
       <div class="row" style="margin-bottom:6px;">
-        <div style="font-size:0.78rem; color:#9aa6b2; width:100%;">DB 캠프명 수정</div>
+        <input id="campEditInput" type="text" placeholder="캠프 수정: 예) 대구3" />
+        <button id="campUpdateSelectedBtn">선택 camp 수정</button>
+        <button id="campRenameAllBtn">camp 전체 이관(병합)</button>
       </div>
+
       <div class="row">
-        <input id="campEditInput" type="text" placeholder="예: 대구3" />
-        <button id="campUpdateSelectedBtn">선택 노선 수정</button>
-        <button id="campRenameAllBtn">camp 전체 이관</button>
+        <input id="routeEditInput" type="text" placeholder="코드 수정: 예) 213D → 213C" />
+        <button id="routeRenameBtn">선택 코드 수정</button>
+        <button id="routeDeleteRowBtn" class="danger">선택 DB 삭제</button>
       </div>
+
       <div class="hint" style="margin-top:6px;">
-        • 예: 산격MB로 잘못 등록된 경우 → 입력에 <b>대구3</b> 후 “camp 전체 이관”<br/>
-        • 선택 노선 수정은 현재 편집 대상으로 전환된 노선에만 적용됩니다.
+        • 선택 수정은 “지도에서 해당 노선을 클릭해서 편집 대상으로 만든 상태”에서 동작합니다.<br/>
+        • camp 전체 이관은 (from=현재 campInput, to=campEditInput) 기준으로 충돌 시 자동 병합/정리합니다.
       </div>
     </div>
 
@@ -187,10 +194,9 @@
   </div>
 
   <script>
-    // ================== 공통 설정 ==================
+    // ================== 설정 ==================
     const ROUTE_API_BASE = "https://route.maroowell.com";
 
-    // 정렬(스냅) 옵션
     const ALIGN = {
       OSM_MARGIN_DEG: 0.0020,
       MAX_ROADS: 900,
@@ -202,12 +208,13 @@
       MAX_DENSIFIED_POINTS: 2200
     };
 
+    // ================== DOM ==================
     const logBox      = document.getElementById("logBox");
     const apiStatus   = document.getElementById("apiStatus");
     const overlayInfo = document.getElementById("overlayInfo");
+
     const campInput   = document.getElementById("campInput");
     const routeInput  = document.getElementById("routeInput");
-    const campEditInput = document.getElementById("campEditInput");
 
     const loadBtn     = document.getElementById("loadBtn");
     const drawBtn     = document.getElementById("drawBtn");
@@ -217,9 +224,14 @@
     const labelBtn    = document.getElementById("labelBtn");
     const resetBtn    = document.getElementById("resetBtn");
 
+    const campEditInput = document.getElementById("campEditInput");
+    const routeEditInput = document.getElementById("routeEditInput");
     const campUpdateSelectedBtn = document.getElementById("campUpdateSelectedBtn");
     const campRenameAllBtn      = document.getElementById("campRenameAllBtn");
+    const routeRenameBtn        = document.getElementById("routeRenameBtn");
+    const routeDeleteRowBtn     = document.getElementById("routeDeleteRowBtn");
 
+    // ================== 로깅 ==================
     function log(message, level = "info") {
       const now = new Date();
       const hh = String(now.getHours()).padStart(2,"0");
@@ -251,326 +263,58 @@
       overlayInfo.textContent = msg;
     }
 
+    // 콘솔을 못 보는 환경 대비: 브라우저 에러도 UI 로그로
+    window.addEventListener("error", (e) => {
+      log(`[ERR] window.error: ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`, "err");
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      log(`[ERR] unhandledrejection: ${String(e.reason)}`, "err");
+    });
+
     const round6 = (x) => Math.round(x * 1e6) / 1e6;
 
-    // ================== 전역 상태 ==================
+    // ================== 지도 상태 ==================
     let map;
     let drawingManager;
 
-    let staticItems = [];   // [{key,row,ringsLatLng,polygons,labels}]
+    let staticItems = [];  // [{key,row,ringsLatLng,polygons,labels}]
     let labelsOn = true;
 
     let editTargetKey = null;
     let editTargetRow = null;
 
-    // 색상 맵
-    let routeColorMap = new Map(); // key -> {h,l}
+    // ================== polylabel(라벨 위치) 간단 구현 ==================
+    // (이전 버전과 동일 - 생략 없이 그대로)
+    class MaxHeap { constructor(){this.data=[]} push(i){this.data.push(i);this._up(this.data.length-1)} pop(){if(!this.data.length)return null;const t=this.data[0];const e=this.data.pop();if(this.data.length){this.data[0]=e;this._down(0)}return t} get size(){return this.data.length} _up(n){const e=this.data[n];while(n>0){const p=Math.floor((n-1)/2);const pn=this.data[p];if(e.max<=pn.max)break;this.data[p]=e;this.data[n]=pn;n=p}} _down(n){const l=this.data.length;const e=this.data[n];for(;;){let ln=2*n+1;let rn=2*n+2;let s=null;if(ln<l){const le=this.data[ln];if(le.max>e.max)s=ln}if(rn<l){const re=this.data[rn];if((s===null&&re.max>e.max)||(s!==null&&re.max>this.data[s].max))s=rn}if(s===null)break;this.data[n]=this.data[s];this.data[s]=e;n=s}} }
+    function getSegDistSq(px,py,a,b){let x=a[0],y=a[1];let dx=b[0]-x,dy=b[1]-y;if(dx!==0||dy!==0){const t=((px-x)*dx+(py-y)*dy)/(dx*dx+dy*dy);if(t>1){x=b[0];y=b[1]}else if(t>0){x+=dx*t;y+=dy*t}}dx=px-x;dy=py-y;return dx*dx+dy*dy}
+    function pointToPolygonDist(x,y,poly){let inside=false;let min=Infinity;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1]+0.0)+a[0])inside=!inside;min=Math.min(min,getSegDistSq(x,y,a,b))}const d=Math.sqrt(min);return inside?d:-d}
+    function polygonCentroid(ring){let x=0,y=0,area=0;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const a=ring[i],b=ring[j];const f=a[0]*b[1]-b[0]*a[1];x+=(a[0]+b[0])*f;y+=(a[1]+b[1])*f;area+=f}area*=0.5;if(area===0)return null;x/=(6*area);y/=(6*area);return [x,y]}
+    class Cell{constructor(x,y,h,poly){this.x=x;this.y=y;this.h=h;this.d=pointToPolygonDist(x,y,poly);this.max=this.d+this.h*Math.SQRT2}}
+    function polylabel(ring,precision=1e-5){if(!Array.isArray(ring)||ring.length<3)return null;let pts=ring.slice();const f=pts[0],l=pts[pts.length-1];if(f[0]!==l[0]||f[1]!==l[1])pts.push(f);let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1])}const w=maxX-minX,h=maxY-minY;if(w===0&&h===0)return [minX,minY];const cellSize=Math.min(w,h);let hh=cellSize/2;const heap=new MaxHeap();for(let x=minX;x<maxX;x+=cellSize)for(let y=minY;y<maxY;y+=cellSize)heap.push(new Cell(x+hh,y+hh,hh,pts));let best=null;const c=polygonCentroid(pts);if(c)best=new Cell(c[0],c[1],0,pts);const bboxCell=new Cell(minX+w/2,minY+h/2,0,pts);if(!best||bboxCell.d>best.d)best=bboxCell;let iter=0;const maxIter=30000;while(heap.size&&iter++<maxIter){const cell=heap.pop();if(!cell)break;if(cell.d>best.d)best=cell;if(cell.max-best.d<=precision)continue;hh=cell.h/2;heap.push(new Cell(cell.x-hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x-hh,cell.y+hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y+hh,hh,pts))}return [best.x,best.y]}
 
-    // ================== Polylabel (라벨 위치) ==================
-    // Mapbox polylabel 알고리즘 기반(간략 구현)
-    class MaxHeap {
-      constructor() { this.data = []; }
-      push(item) {
-        this.data.push(item);
-        this._bubbleUp(this.data.length - 1);
-      }
-      pop() {
-        if (!this.data.length) return null;
-        const top = this.data[0];
-        const end = this.data.pop();
-        if (this.data.length) {
-          this.data[0] = end;
-          this._sinkDown(0);
-        }
-        return top;
-      }
-      get size(){ return this.data.length; }
-      _bubbleUp(n) {
-        const element = this.data[n];
-        while (n > 0) {
-          const parentN = Math.floor((n - 1) / 2);
-          const parent = this.data[parentN];
-          if (element.max <= parent.max) break;
-          this.data[parentN] = element;
-          this.data[n] = parent;
-          n = parentN;
-        }
-      }
-      _sinkDown(n) {
-        const length = this.data.length;
-        const element = this.data[n];
-
-        while (true) {
-          let leftN = 2 * n + 1;
-          let rightN = 2 * n + 2;
-          let swap = null;
-
-          if (leftN < length) {
-            const left = this.data[leftN];
-            if (left.max > element.max) swap = leftN;
-          }
-          if (rightN < length) {
-            const right = this.data[rightN];
-            if ((swap === null && right.max > element.max) || (swap !== null && right.max > this.data[swap].max)) {
-              swap = rightN;
-            }
-          }
-          if (swap === null) break;
-          this.data[n] = this.data[swap];
-          this.data[swap] = element;
-          n = swap;
-        }
-      }
-    }
-
-    function getSegDistSq(px, py, a, b) {
-      let x = a[0], y = a[1];
-      let dx = b[0] - x;
-      let dy = b[1] - y;
-
-      if (dx !== 0 || dy !== 0) {
-        const t = ((px - x) * dx + (py - y) * dy) / (dx * dx + dy * dy);
-        if (t > 1) { x = b[0]; y = b[1]; }
-        else if (t > 0) { x += dx * t; y += dy * t; }
-      }
-      dx = px - x;
-      dy = py - y;
-      return dx * dx + dy * dy;
-    }
-
-    function pointToPolygonDist(x, y, polygon) {
-      // polygon: closed ring coords [[x,y],...,[x,y]]
-      let inside = false;
-      let minDistSq = Infinity;
-
-      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const a = polygon[i];
-        const b = polygon[j];
-
-        if ((a[1] > y) !== (b[1] > y) && (x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1] + 0.0) + a[0])) {
-          inside = !inside;
-        }
-        minDistSq = Math.min(minDistSq, getSegDistSq(x, y, a, b));
-      }
-
-      const dist = Math.sqrt(minDistSq);
-      return inside ? dist : -dist;
-    }
-
-    function polygonCentroid(ring) {
-      // ring: closed ring coords
-      let x = 0, y = 0, area = 0;
-      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-        const a = ring[i];
-        const b = ring[j];
-        const f = a[0] * b[1] - b[0] * a[1];
-        x += (a[0] + b[0]) * f;
-        y += (a[1] + b[1]) * f;
-        area += f;
-      }
-      area *= 0.5;
-      if (area === 0) return null;
-      x /= (6 * area);
-      y /= (6 * area);
-      return [x, y];
-    }
-
-    class Cell {
-      constructor(x, y, h, polygon) {
-        this.x = x;
-        this.y = y;
-        this.h = h;
-        this.d = pointToPolygonDist(x, y, polygon);
-        this.max = this.d + this.h * Math.SQRT2;
-      }
-    }
-
-    function polylabel(ring, precision = 1e-5) {
-      // ring: open/closed coords [[lng,lat],...]
-      if (!Array.isArray(ring) || ring.length < 3) return null;
-
-      let pts = ring.slice();
-      const f = pts[0], l = pts[pts.length - 1];
-      if (f[0] !== l[0] || f[1] !== l[1]) pts.push(f);
-
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const p of pts) {
-        minX = Math.min(minX, p[0]);
-        minY = Math.min(minY, p[1]);
-        maxX = Math.max(maxX, p[0]);
-        maxY = Math.max(maxY, p[1]);
-      }
-
-      const width = maxX - minX;
-      const height = maxY - minY;
-      if (width === 0 && height === 0) return [minX, minY];
-
-      const cellSize = Math.min(width, height);
-      let h = cellSize / 2;
-
-      const heap = new MaxHeap();
-
-      for (let x = minX; x < maxX; x += cellSize) {
-        for (let y = minY; y < maxY; y += cellSize) {
-          heap.push(new Cell(x + h, y + h, h, pts));
-        }
-      }
-
-      let best = null;
-
-      const c = polygonCentroid(pts);
-      if (c) best = new Cell(c[0], c[1], 0, pts);
-
-      const bboxCell = new Cell(minX + width / 2, minY + height / 2, 0, pts);
-      if (!best || bboxCell.d > best.d) best = bboxCell;
-
-      let iterations = 0;
-      const maxIterations = 30000;
-
-      while (heap.size && iterations++ < maxIterations) {
-        const cell = heap.pop();
-        if (!cell) break;
-
-        if (cell.d > best.d) best = cell;
-
-        if (cell.max - best.d <= precision) continue;
-
-        h = cell.h / 2;
-        heap.push(new Cell(cell.x - h, cell.y - h, h, pts));
-        heap.push(new Cell(cell.x + h, cell.y - h, h, pts));
-        heap.push(new Cell(cell.x - h, cell.y + h, h, pts));
-        heap.push(new Cell(cell.x + h, cell.y + h, h, pts));
-      }
-
-      return [best.x, best.y];
-    }
-
-    // ================== 색상(인접 대비) ==================
-    function hueDist(a,b){
-      let d = Math.abs(a-b) % 360;
-      if (d > 180) d = 360 - d;
-      return d;
-    }
+    // ================== 색상(간단 해시 기반) ==================
     function hashHue(str){
       let h = 0;
       for (let i=0;i<str.length;i++) h = (h*31 + str.charCodeAt(i)) >>> 0;
       return h % 360;
     }
-    function bboxIntersects(a,b, margin=0){
-      return !(a[2]+margin < b[0] || b[2]+margin < a[0] || a[3]+margin < b[1] || b[3]+margin < a[1]);
+    function colorCss(key){
+      const h = hashHue(key);
+      // 가독성 위해 밝기 고정 + 채도 높게
+      return `hsl(${h}, 85%, 50%)`;
     }
 
-    const COLOR_CANDIDATES = (() => {
-      const list = [];
-      for (let h=0; h<360; h+=30) list.push({h, l:45});
-      for (let h=15; h<360; h+=30) list.push({h, l:60});
-      return list;
-    })();
-
-    function candCss(c){ return `hsl(${c.h}, 85%, ${c.l}%)`; }
-    function candDist(a,b){
-      return hueDist(a.h,b.h) + Math.abs(a.l-b.l) * 3;
-    }
-
-    function itemToTurfFeature(item){
-      if (!window.turf) return null;
-
-      const polys = [];
-      for (const ringLatLng of item.ringsLatLng) {
-        const coords = ringLatLng.map(ll => [ll.getLng(), ll.getLat()]);
-        if (coords.length < 3) continue;
-        const first = coords[0];
-        const last  = coords[coords.length-1];
-        if (first[0] !== last[0] || first[1] !== last[1]) coords.push(first);
-        polys.push([coords]);
-      }
-
-      if (!polys.length) return null;
-      if (polys.length === 1) return turf.polygon(polys[0], { key: item.key });
-      return turf.multiPolygon(polys, { key: item.key });
-    }
-
-    function buildColorMapByAdjacency(items){
-      if (!window.turf || !items.length) {
-        const m = new Map();
-        for (const it of items) m.set(it.key, {h:hashHue(it.key), l:50});
-        return m;
-      }
-
-      const features = items.map(itemToTurfFeature);
-      const buffers  = features.map(f => {
-        try { return turf.buffer(f, 0.03, {units:"kilometers"}); } catch { return f; }
-      });
-      const bboxes   = buffers.map(b => { try { return turf.bbox(b); } catch { return null; } });
-
-      const neighbors = new Map();
-      for (const it of items) neighbors.set(it.key, new Set());
-
-      for (let i=0;i<items.length;i++){
-        if (!buffers[i] || !bboxes[i]) continue;
-        for (let j=i+1;j<items.length;j++){
-          if (!buffers[j] || !bboxes[j]) continue;
-          if (!bboxIntersects(bboxes[i], bboxes[j])) continue;
-          let adj = false;
-          try { adj = turf.booleanIntersects(buffers[i], buffers[j]); } catch {}
-          if (adj) {
-            neighbors.get(items[i].key).add(items[j].key);
-            neighbors.get(items[j].key).add(items[i].key);
-          }
-        }
-      }
-
-      const order = items.map((it, idx) => {
-        let area = 0;
-        try { area = turf.area(features[idx]) || 0; } catch {}
-        return { key: it.key, area };
-      }).sort((a,b) => b.area - a.area);
-
-      const picked = new Map(); // key -> candidate
-
-      for (const node of order) {
-        const key = node.key;
-        const neigh = [...(neighbors.get(key) || [])];
-        const used = neigh.map(k => picked.get(k)).filter(Boolean);
-        const baseH = hashHue(key);
-
-        let best = null;
-        let bestScore = -1;
-
-        for (const cand of COLOR_CANDIDATES) {
-          let score;
-          if (!used.length) {
-            score = 999 - hueDist(cand.h, baseH) * 0.2;
-          } else {
-            const minD = Math.min(...used.map(u => candDist(u, cand)));
-            score = minD * 10 - hueDist(cand.h, baseH) * 0.15;
-          }
-          if (score > bestScore) {
-            bestScore = score;
-            best = cand;
-          }
-        }
-        picked.set(key, best || {h:baseH, l:50});
-      }
-
-      return picked;
-    }
-
-    function getRouteColorCss(key){
-      const c = routeColorMap.get(key) || {h:hashHue(key), l:50};
-      return candCss(c);
-    }
-
-    // ================== 지도 & DrawingManager ==================
+    // ================== 지도 초기화 ==================
     function initMap() {
-      const center = new kakao.maps.LatLng(37.5665, 126.9780);
-      map = new kakao.maps.Map(document.getElementById("map"), { center, level: 7 });
+      map = new kakao.maps.Map(document.getElementById("map"), {
+        center: new kakao.maps.LatLng(35.8714, 128.6014), // 대구 근처 기본
+        level: 6
+      });
 
-      const options = {
+      drawingManager = new kakao.maps.drawing.DrawingManager({
         map,
         drawingMode: [kakao.maps.drawing.OverlayType.POLYGON],
         guideTooltip: ["draw", "drag", "edit"],
-        coordinate: kakao.maps.drawing.Coordinate.WGS84,
         polygonOptions: {
           draggable: true,
           removable: true,
@@ -582,11 +326,9 @@
           fillColor: "#22c55e",
           fillOpacity: 0.25,
         },
-      };
+      });
 
-      drawingManager = new kakao.maps.drawing.DrawingManager(options);
-
-      kakao.maps.event.addListener(drawingManager, "drawend", function () {
+      kakao.maps.event.addListener(drawingManager, "drawend", () => {
         const rings = getEditableRingsWgs84();
         log(`[LOG] drawend: 편집 폴리곤 생성/수정, 구역 ${rings.length}개`, "info");
       });
@@ -600,30 +342,36 @@
       try { drawingManager.remove(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
     }
 
-    // ★★★ 핵심 수정: put은 LatLng가 아니라 {x:lng,y:lat}로 넣어야 함
+    // ================== 핵심 FIX: put 데이터 구조 ==================
+    // ✅ put(Polygon, data)에서 data는 "폴리곤들의 배열" 형태로 넣는다.
+    //    data === getData().polygon 과 동일 구조가 가장 안전함.
     function putEditableRingsLatLng(ringsLatLng){
       clearEditablePolygons();
+
+      try { drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
+
+      const polygonArray = ringsLatLng.map(ring =>
+        ring.map(ll => ({ x: ll.getLng(), y: ll.getLat() }))
+      );
+
+      if (!polygonArray.length) return;
+
       try {
-        for (const ring of ringsLatLng) {
-          const pts = ring.map(ll => ({ x: ll.getLng(), y: ll.getLat() }));
-          drawingManager.put(kakao.maps.drawing.OverlayType.POLYGON, pts);
-        }
+        drawingManager.put(kakao.maps.drawing.OverlayType.POLYGON, polygonArray);
       } catch (e) {
-        log("[ERR] drawingManager.put 실패(편집 폴리곤 표시)", "err");
+        log(`[ERR] drawingManager.put 예외: ${String(e?.message || e)}`, "err");
+        if (e?.stack) log(String(e.stack).slice(0, 800), "err");
         throw e;
       }
     }
 
+    // ================== drawingManager.getData() -> WGS84 ring 배열 ==================
     function getEditableRingsWgs84(){
-      if (!drawingManager || typeof drawingManager.getData !== "function") {
-        log("[ERR] drawingManager.getData() 실패(미정의)", "err");
-        return [];
-      }
       let data;
       try {
         data = drawingManager.getData();
       } catch (e) {
-        log("[ERR] drawingManager.getData() 실패", "err");
+        log(`[ERR] drawingManager.getData 실패: ${String(e?.message || e)}`, "err");
         return [];
       }
 
@@ -635,20 +383,17 @@
       for (const poly of raw) {
         if (!poly) continue;
 
-        // poly가 [ {x,y}, ... ] 일 수도 있고, [[{x,y}...], ...] 일 수도 있음(holes)
+        // poly: [ {x,y}, ... ] 또는 [[{x,y}...], ...]일 수 있음(홀)
         let outer = poly;
         if (Array.isArray(poly) && Array.isArray(poly[0])) outer = poly[0];
-
         if (!Array.isArray(outer)) continue;
 
-        const pts = outer
-          .map(p => {
-            const lng = Number(p?.x ?? p?.lng ?? p?.La);
-            const lat = Number(p?.y ?? p?.lat ?? p?.Ma);
-            if (!isFinite(lat) || !isFinite(lng)) return null;
-            return { lat: round6(lat), lng: round6(lng) };
-          })
-          .filter(Boolean);
+        const pts = outer.map(p => {
+          const lng = Number(p?.x);
+          const lat = Number(p?.y);
+          if (!isFinite(lat) || !isFinite(lng)) return null;
+          return { lat: round6(lat), lng: round6(lng) };
+        }).filter(Boolean);
 
         if (pts.length >= 3) rings.push(pts);
       }
@@ -657,109 +402,49 @@
     }
 
     // ================== API ==================
-    async function fetchRoutes({camp, code, mode="prefix"}) {
-      const url = new URL(ROUTE_API_BASE + "/route");
-      if (camp) url.searchParams.set("camp", camp);
-      if (code) {
-        url.searchParams.set("code", code);
-        url.searchParams.set("mode", mode);
+    async function apiGet(path, params){
+      const url = new URL(ROUTE_API_BASE + path);
+      for (const [k,v] of Object.entries(params || {})) {
+        if (v === undefined || v === null || String(v).trim() === "") continue;
+        url.searchParams.set(k, v);
       }
 
-      log(`[LOG] GET /route 요청: ${url.toString()}`, "info");
-      setApiStatus("GET /route 호출 중...");
+      log(`[LOG] GET ${path} 요청: ${url.toString()}`, "info");
+      setApiStatus(`GET ${path} 호출 중...`);
 
-      const res = await fetch(url.toString(), { cache: "no-store" });
+      const res = await fetch(url.toString(), { cache:"no-store" });
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setApiStatus(`에러 ${res.status}`, true);
-        log(`[ERR] GET /route 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error("GET 실패");
+        setApiStatus(`GET 에러 ${res.status}`, true);
+        log(`[ERR] GET ${path} 실패: ${JSON.stringify(json)}`, "err");
+        throw new Error(`GET ${path} 실패`);
       }
+
       setApiStatus("GET 성공");
       return json;
     }
 
-    async function saveRoute(payload) {
-      const url = ROUTE_API_BASE + "/route";
-      log(`[LOG] POST /route 요청: ${JSON.stringify(payload)}`, "info");
-      setApiStatus("POST /route 호출 중...");
+    async function apiPost(path, body){
+      const url = ROUTE_API_BASE + path;
+      log(`[LOG] POST ${path} 요청: ${JSON.stringify(body)}`, "info");
+      setApiStatus(`POST ${path} 호출 중...`);
 
       const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(payload),
+        headers: { "Content-Type":"application/json; charset=utf-8" },
+        body: JSON.stringify(body),
       });
+
       const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         setApiStatus(`POST 에러 ${res.status}`, true);
-        log(`[ERR] POST /route 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error("POST 실패");
+        log(`[ERR] POST ${path} 실패: ${JSON.stringify(json)}`, "err");
+        throw new Error(`POST ${path} 실패`);
       }
+
       setApiStatus("POST 성공");
-      log(`[LOG] POST /route 응답: ${JSON.stringify(json)}`, "info");
-      return json;
-    }
-
-    async function fetchOsm(bbox){
-      const url = new URL(ROUTE_API_BASE + "/osm");
-      url.searchParams.set("bbox", bbox.join(","));
-      log(`[LOG] GET /osm 요청: ${url.toString()}`, "info");
-      setApiStatus("정렬: OSM 데이터 조회 중...");
-
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok || !json?.ok) {
-        setApiStatus("정렬: OSM 실패", true);
-        log(`[ERR] GET /osm 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error("OSM fetch 실패");
-      }
-
-      setApiStatus("정렬: OSM 조회 완료");
-      return json;
-    }
-
-    async function updateRouteMeta(payload){
-      const url = ROUTE_API_BASE + "/route/meta";
-      log(`[LOG] POST /route/meta 요청: ${JSON.stringify(payload)}`, "info");
-      setApiStatus("메타 수정 중...");
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setApiStatus(`메타 수정 에러 ${res.status}`, true);
-        log(`[ERR] /route/meta 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error("meta update 실패");
-      }
-      setApiStatus("메타 수정 성공");
-      log(`[LOG] /route/meta 응답: ${JSON.stringify(json)}`, "info");
-      return json;
-    }
-
-    async function renameCamp(payload){
-      const url = ROUTE_API_BASE + "/camp/rename";
-      log(`[LOG] POST /camp/rename 요청: ${JSON.stringify(payload)}`, "info");
-      setApiStatus("camp 이관 중...");
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setApiStatus(`camp 이관 에러 ${res.status}`, true);
-        log(`[ERR] /camp/rename 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error("camp rename 실패");
-      }
-      setApiStatus("camp 이관 성공");
-      log(`[LOG] /camp/rename 응답: ${JSON.stringify(json)}`, "info");
       return json;
     }
 
@@ -769,24 +454,26 @@
 
       if (typeof p.lat === "number" && typeof p.lng === "number") return { lat: p.lat, lng: p.lng };
       if (typeof p.lat === "number" && typeof p.lon === "number") return { lat: p.lat, lng: p.lon };
-      if (typeof p.latitude === "number" && typeof p.longitude === "number") return { lat: p.latitude, lng: p.longitude };
 
       if (Array.isArray(p) && p.length >= 2) {
         const a0 = Number(p[0]);
         const a1 = Number(p[1]);
         if (!isFinite(a0) || !isFinite(a1)) return null;
 
+        // 한국 범위 휴리스틱: [lng,lat] 우선
         const isLat = (v) => v >= 30 && v <= 45;
         const isLng = (v) => v >= 120 && v <= 135;
 
-        if (isLng(a0) && isLat(a1)) return { lat: a1, lng: a0 }; // [lng,lat]
-        if (isLat(a0) && isLng(a1)) return { lat: a0, lng: a1 }; // [lat,lng]
+        if (isLng(a0) && isLat(a1)) return { lat: a1, lng: a0 };
+        if (isLat(a0) && isLng(a1)) return { lat: a0, lng: a1 };
 
+        // fallback
         if (Math.abs(a0) <= 180 && Math.abs(a1) <= 90) return { lat: a1, lng: a0 };
         if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 };
 
         return null;
       }
+
       return null;
     }
 
@@ -803,7 +490,6 @@
         for (const p of ring) {
           const n = normalizeStoredPoint(p);
           if (!n) continue;
-          if (!isFinite(n.lat) || !isFinite(n.lng)) continue;
           pts.push(new kakao.maps.LatLng(n.lat, n.lng));
         }
         if (pts.length >= 3) out.push(pts);
@@ -820,22 +506,19 @@
       staticItems = [];
     }
 
-    function createRouteLabels(key, ringsLatLng, colorCss){
+    function createRouteLabels(key, ringsLatLng){
       const labels = [];
       if (!labelsOn) return labels;
 
       for (const ring of ringsLatLng) {
         if (!ring || ring.length < 3) continue;
 
-        // polylabel point
         const coords = ring.map(ll => [ll.getLng(), ll.getLat()]);
         const p = polylabel(coords, 1e-5);
 
         let pos;
-        if (p && isFinite(p[0]) && isFinite(p[1])) {
-          pos = new kakao.maps.LatLng(p[1], p[0]);
-        } else {
-          // fallback bounds center
+        if (p && isFinite(p[0]) && isFinite(p[1])) pos = new kakao.maps.LatLng(p[1], p[0]);
+        else {
           const b = new kakao.maps.LatLngBounds();
           ring.forEach(ll => b.extend(ll));
           pos = b.getCenter();
@@ -844,8 +527,7 @@
         const content = document.createElement("div");
         content.className = "route-label";
         content.textContent = key;
-        content.style.borderColor = colorCss;
-        content.style.opacity = "0.95";
+        content.style.borderColor = colorCss(key);
 
         const overlay = new kakao.maps.CustomOverlay({
           position: pos,
@@ -856,19 +538,34 @@
         overlay.setMap(map);
         labels.push(overlay);
       }
+
       return labels;
+    }
+
+    function hideStaticForKey(key){
+      const it = staticItems.find(x => x.key === key);
+      if (!it) return;
+      it.polygons?.forEach(p => p.setMap(null));
+      it.labels?.forEach(l => l.setMap(null));
+      it.labels = [];
+    }
+
+    function restoreStaticForKey(key){
+      const it = staticItems.find(x => x.key === key);
+      if (!it) return;
+      it.polygons?.forEach(p => p.setMap(map));
+      it.labels?.forEach(l => l.setMap(null));
+      it.labels = labelsOn ? createRouteLabels(it.key, it.ringsLatLng) : [];
     }
 
     function renderStaticItems(items){
       clearStaticOverlays();
 
-      routeColorMap = buildColorMapByAdjacency(items);
-
       const bounds = new kakao.maps.LatLngBounds();
       let hasAny = false;
 
       for (const item of items) {
-        const color = getRouteColorCss(item.key);
+        const color = colorCss(item.key);
 
         const polys = [];
         for (const ring of item.ringsLatLng) {
@@ -883,16 +580,13 @@
             fillOpacity: 0.20,
           });
 
-          kakao.maps.event.addListener(poly, "click", () => {
-            setEditTarget(item.key);
-          });
-
+          kakao.maps.event.addListener(poly, "click", () => setEditTarget(item.key));
           polys.push(poly);
 
           ring.forEach(ll => { bounds.extend(ll); hasAny = true; });
         }
 
-        const labels = labelsOn ? createRouteLabels(item.key, item.ringsLatLng, color) : [];
+        const labels = labelsOn ? createRouteLabels(item.key, item.ringsLatLng) : [];
 
         staticItems.push({
           key: item.key,
@@ -906,32 +600,17 @@
       if (hasAny) map.setBounds(bounds);
     }
 
-    function restoreStaticForKey(key){
-      const it = staticItems.find(x => x.key === key);
-      if (!it) return;
-      it.polygons?.forEach(p => p.setMap(map));
-      it.labels?.forEach(l => l.setMap(null));
-      it.labels = labelsOn ? createRouteLabels(it.key, it.ringsLatLng, getRouteColorCss(it.key)) : [];
-    }
-
-    function hideStaticForKey(key){
-      const it = staticItems.find(x => x.key === key);
-      if (!it) return;
-      it.polygons?.forEach(p => p.setMap(null));
-      it.labels?.forEach(l => l.setMap(null));
-      it.labels = [];
-    }
-
     function setLabelsVisible(on){
       labelsOn = on;
+      labelBtn.textContent = labelsOn ? "라우트 표시" : "라우트 표시";
+
+      // 버튼 문구: on/off 토글처럼 보이게
       labelBtn.textContent = labelsOn ? "라우트 숨기기" : "라우트 표시";
 
       for (const it of staticItems) {
         it.labels?.forEach(l => l.setMap(null));
         it.labels = [];
-        if (labelsOn) {
-          it.labels = createRouteLabels(it.key, it.ringsLatLng, getRouteColorCss(it.key));
-        }
+        if (labelsOn) it.labels = createRouteLabels(it.key, it.ringsLatLng);
       }
     }
 
@@ -943,7 +622,6 @@
         return;
       }
 
-      // 이전 편집 대상 복구(정적 표시)
       if (editTargetKey && editTargetKey !== key) {
         restoreStaticForKey(editTargetKey);
       }
@@ -951,8 +629,8 @@
       editTargetKey = key;
       editTargetRow = found.row || null;
       routeInput.value = key;
+      routeEditInput.value = key;
 
-      // 편집 폴리곤 put 성공하면 정적 숨김
       try {
         putEditableRingsLatLng(found.ringsLatLng);
         hideStaticForKey(key);
@@ -960,10 +638,10 @@
         log(`[LOG] 편집 대상 전환: ${key}`, "info");
         setOverlayText(`편집 대상: ${key} (녹색)`);
       } catch (e) {
-        // put 실패 시 정적 유지(사라지는 현상 방지)
+        // 실패 시 정적 복구
         restoreStaticForKey(key);
-        log("[ERR] 편집 전환 실패: 정적 폴리곤 유지", "err");
-        alert("편집 전환 실패: drawingManager.put 오류. (콘솔/로그 확인)");
+        log(`[ERR] 편집 전환 실패: ${String(e?.message || e)}`, "err");
+        alert("편집 전환 실패: drawingManager.put 오류. (로그창 확인)");
       }
     }
 
@@ -977,16 +655,19 @@
         return;
       }
 
-      // 편집 초기화
       if (editTargetKey) restoreStaticForKey(editTargetKey);
       editTargetKey = null;
       editTargetRow = null;
       clearEditablePolygons();
 
       try {
-        const data = await fetchRoutes({ camp, code: code || "", mode: "prefix" });
-        const rows = Array.isArray(data) ? data : (Array.isArray(data?.rows) ? data.rows : []);
+        const data = await apiGet("/route", {
+          camp,
+          code: code || "",
+          mode: "prefix"
+        });
 
+        const rows = Array.isArray(data?.rows) ? data.rows : [];
         if (!rows.length) {
           clearStaticOverlays();
           log("[WARN] GET 결과 없음", "warn");
@@ -1012,7 +693,7 @@
           return;
         }
 
-        // 같은 key 중복 제거(첫번째 유지)
+        // key 중복 제거
         const uniq = new Map();
         for (const it of items) if (!uniq.has(it.key)) uniq.set(it.key, it);
 
@@ -1054,15 +735,23 @@
 
       const rings = getEditableRingsWgs84();
 
-      // 모두 삭제한 경우(null 저장)
+      // ✅ 모두 삭제한 경우: polygon=null 저장 (삭제 저장)
       if (!rings.length) {
         try {
-          await saveRoute({ camp, code, polygon_wgs84: null, center_wgs84: null });
+          const payload = {
+            camp,
+            code,
+            polygon_wgs84: null,
+            center_wgs84: null,
+          };
+          if (editTargetRow?.id) payload.id = editTargetRow.id;
+
+          await apiPost("/route", payload);
           alert("삭제(폴리곤 null) 저장 완료");
           await loadAndShow();
         } catch (e) {
           console.error(e);
-          alert("삭제 저장 실패: worker가 polygon=null 저장을 지원하는지 확인 필요");
+          alert("삭제 저장 실패 (로그 확인)");
         }
         return;
       }
@@ -1070,10 +759,16 @@
       const center = computeCenterFromRings(rings);
       const polygonPayload = buildPolygonPayloadFromRings(rings);
 
-      log(`[LOG] 저장 준비: code=${code}, 구역 ${rings.length}개`, "info");
-
       try {
-        await saveRoute({ camp, code, polygon_wgs84: polygonPayload, center_wgs84: center });
+        const payload = {
+          camp,
+          code,
+          polygon_wgs84: polygonPayload,
+          center_wgs84: center
+        };
+        if (editTargetRow?.id) payload.id = editTargetRow.id;
+
+        await apiPost("/route", payload);
         alert("저장 완료");
         await loadAndShow();
       } catch (e) {
@@ -1082,18 +777,14 @@
       }
     }
 
-    // ================== 정렬(OSM 스냅) ==================
+    // ================== 정렬(OSM) ==================
     function computeBboxFromRings(rings){
-      let minLat =  90, maxLat = -90, minLng =  180, maxLng = -180;
-      for (const ring of rings) {
-        for (const p of ring) {
-          minLat = Math.min(minLat, p.lat);
-          maxLat = Math.max(maxLat, p.lat);
-          minLng = Math.min(minLng, p.lng);
-          maxLng = Math.max(maxLng, p.lng);
-        }
+      let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+      for (const ring of rings) for (const p of ring) {
+        minLat=Math.min(minLat,p.lat); maxLat=Math.max(maxLat,p.lat);
+        minLng=Math.min(minLng,p.lng); maxLng=Math.max(maxLng,p.lng);
       }
-      return [minLng, minLat, maxLng, maxLat];
+      return [minLng,minLat,maxLng,maxLat];
     }
 
     function ensureClosedCoords(coords){
@@ -1119,7 +810,6 @@
 
     function densifyClosedRing(coordsClosed, stepMeters){
       if (!window.turf || !coordsClosed || coordsClosed.length < 4) return coordsClosed || [];
-
       let coords = coordsClosed.slice();
 
       try {
@@ -1134,7 +824,6 @@
       } catch {}
 
       const stepKm = stepMeters / 1000;
-
       const out = [];
       for (let i=0;i<coords.length-1;i++){
         const a = coords[i];
@@ -1142,8 +831,7 @@
         out.push(a);
 
         let segLen = 0;
-        try { segLen = turf.length(turf.lineString([a,b]), {units:"kilometers"}); } catch { segLen = 0; }
-
+        try { segLen = turf.length(turf.lineString([a,b]), {units:"kilometers"}); } catch {}
         const n = Math.floor(segLen / stepKm);
         if (n > 1) {
           for (let j=1;j<n;j++){
@@ -1178,13 +866,10 @@
       const g = feat?.type === "Feature" ? feat.geometry : feat;
       const rings = [];
       if (!g) return rings;
-
       if (g.type === "Polygon") {
         if (g.coordinates?.[0]?.length >= 4) rings.push(g.coordinates[0]);
       } else if (g.type === "MultiPolygon") {
-        for (const poly of g.coordinates || []) {
-          if (poly?.[0]?.length >= 4) rings.push(poly[0]);
-        }
+        for (const poly of g.coordinates || []) if (poly?.[0]?.length >= 4) rings.push(poly[0]);
       }
       return rings;
     }
@@ -1195,38 +880,50 @@
         const f = coords[0], l = coords[coords.length-1];
         if (f[0] === l[0] && f[1] === l[1]) coords = coords.slice(0,-1);
       }
-      const pts = coords
-        .map(c => ({ lat: round6(c[1]), lng: round6(c[0]) }))
+      const pts = coords.map(c => ({ lat: round6(c[1]), lng: round6(c[0]) }))
         .filter(p => isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat)<=90 && Math.abs(p.lng)<=180);
-
       return (pts.length >= 3) ? pts : null;
+    }
+
+    function buildRoadMulti(osm){
+      const roadsRaw = (osm.roads || []).slice(0, ALIGN.MAX_ROADS);
+      if (!window.turf || !roadsRaw.length) return null;
+      try {
+        const lines = roadsRaw.map(r => r?.coords).filter(c => Array.isArray(c) && c.length >= 2);
+        if (!lines.length) return null;
+        return turf.multiLineString(lines);
+      } catch { return null; }
+    }
+
+    function buildBuildingFeatures(osm){
+      const buildingsRaw = (osm.buildings || []).slice(0, ALIGN.MAX_BUILDINGS);
+      const out = [];
+      if (!window.turf || !buildingsRaw.length) return out;
+
+      for (const b of buildingsRaw) {
+        const c = b?.coords;
+        if (!Array.isArray(c) || c.length < 4) continue;
+        const first = c[0];
+        const last = c[c.length - 1];
+        const ring = (first[0]===last[0] && first[1]===last[1]) ? c : c.concat([first]);
+        if (ring.length >= 4) {
+          try { out.push(turf.polygon([ring])); } catch {}
+        }
+      }
+      return out;
     }
 
     function includeBuildings(routeFeat, buildings){
       if (!window.turf || !routeFeat || !buildings?.length) return routeFeat;
-
       let merged = routeFeat;
       let included = 0;
 
-      let routeBbox;
-      try { routeBbox = turf.bbox(routeFeat); } catch { routeBbox = null; }
-
       for (const b of buildings) {
-        if (!b) continue;
-
-        if (routeBbox) {
-          let bb;
-          try { bb = turf.bbox(b); } catch { bb = null; }
-          if (bb && !bboxIntersects(routeBbox, bb)) continue;
-        }
-
         let inter = null;
         try {
           if (!turf.booleanIntersects(routeFeat, b)) continue;
           inter = turf.intersect(routeFeat, b);
-        } catch {
-          inter = null;
-        }
+        } catch { inter = null; }
         if (!inter) continue;
 
         let bArea = 0, iArea = 0;
@@ -1262,11 +959,7 @@
       coords = ensureClosedCoords(coords);
 
       let poly;
-      try {
-        poly = turf.polygon([coords]);
-      } catch {
-        return [ringWgs];
-      }
+      try { poly = turf.polygon([coords]); } catch { return [ringWgs]; }
 
       try { poly = turf.cleanCoords(poly); } catch {}
       try { poly = turf.simplify(poly, {tolerance: ALIGN.SIMPLIFY_TOLERANCE_DEG, highQuality:true}); } catch {}
@@ -1278,7 +971,6 @@
       } catch {}
 
       const outRings = [];
-
       for (const part of parts) {
         let merged = includeBuildings(part, buildingFeatures);
 
@@ -1295,39 +987,7 @@
       return outRings.length ? outRings : [ringWgs];
     }
 
-    function buildRoadMulti(osm){
-      const roadsRaw = (osm.roads || []).slice(0, ALIGN.MAX_ROADS);
-      if (!window.turf || !roadsRaw.length) return null;
-      try {
-        const lines = roadsRaw
-          .map(r => r?.coords)
-          .filter(c => Array.isArray(c) && c.length >= 2);
-        if (!lines.length) return null;
-        return turf.multiLineString(lines);
-      } catch {
-        return null;
-      }
-    }
-
-    function buildBuildingFeatures(osm){
-      const buildingsRaw = (osm.buildings || []).slice(0, ALIGN.MAX_BUILDINGS);
-      const out = [];
-      if (!window.turf || !buildingsRaw.length) return out;
-
-      for (const b of buildingsRaw) {
-        const c = b?.coords;
-        if (!Array.isArray(c) || c.length < 4) continue;
-        const first = c[0];
-        const last = c[c.length - 1];
-        const ring = (first[0]===last[0] && first[1]===last[1]) ? c : c.concat([first]);
-        try { out.push(turf.polygon([ring])); } catch {}
-      }
-      return out;
-    }
-
     async function alignTargetsAndSave(targets, camp){
-      // targets: [{key, ringsWgs84: [ring...]}]
-      // 1) bbox union
       let allRings = [];
       for (const t of targets) allRings = allRings.concat(t.ringsWgs84);
 
@@ -1344,11 +1004,10 @@
         bbox[3] + ALIGN.OSM_MARGIN_DEG
       ];
 
-      const osm = await fetchOsm(bbox);
+      const osm = await apiGet("/osm", { bbox: bbox.join(",") });
       const roadMulti = buildRoadMulti(osm);
       const buildingFeatures = buildBuildingFeatures(osm);
 
-      // 2) 각 route 정렬 + 저장
       for (const t of targets) {
         log(`[LOG] 정렬 시작: ${t.key}`, "info");
 
@@ -1366,12 +1025,7 @@
         const center = computeCenterFromRings(aligned);
         const polygonPayload = buildPolygonPayloadFromRings(aligned);
 
-        await saveRoute({
-          camp,
-          code: t.key,
-          polygon_wgs84: polygonPayload,
-          center_wgs84: center
-        });
+        await apiPost("/route", { camp, code: t.key, polygon_wgs84: polygonPayload, center_wgs84: center });
 
         log(`[LOG] 정렬 저장 완료: ${t.key} (구역 ${aligned.length}개)`, "info");
       }
@@ -1386,7 +1040,7 @@
         return;
       }
 
-      // 1) 편집 대상이 있으면 그거 우선 정렬
+      // 1) 편집 대상이 있으면 그 대상만 정렬
       const editableRings = getEditableRingsWgs84();
       if (editableRings.length && editTargetKey) {
         await alignTargetsAndSave([{ key: editTargetKey, ringsWgs84: editableRings }], camp);
@@ -1394,7 +1048,7 @@
         return;
       }
 
-      // 2) 편집 대상이 없으면: 현재 표시된 것 중 prefix 그룹 전체 정렬
+      // 2) 편집 대상이 없으면 표시된 prefix 그룹 전체 정렬
       const targets = [];
       for (const it of staticItems) {
         if (codePrefix && !it.key.startsWith(codePrefix)) continue;
@@ -1412,7 +1066,7 @@
       await loadAndShow();
     }
 
-    // ================== 캠프명 수정 ==================
+    // ================== DB 수정 기능 ==================
     async function updateSelectedCamp(){
       const newCamp = campEditInput.value.trim();
       if (!newCamp) {
@@ -1420,20 +1074,14 @@
         return;
       }
       if (!editTargetRow?.id) {
-        alert("선택 노선 수정은 먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환해야 합니다.");
+        alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
         return;
       }
 
-      try {
-        await updateRouteMeta({ id: editTargetRow.id, camp: newCamp });
-        alert("선택 노선 캠프 수정 완료");
-        // UI 상 campInput도 새 camp로 바꾸고 다시 로드하는 게 보통 기대값
-        campInput.value = newCamp;
-        await loadAndShow();
-      } catch (e) {
-        console.error(e);
-        alert("선택 노선 캠프 수정 실패");
-      }
+      await apiPost("/route/meta", { id: editTargetRow.id, camp: newCamp });
+      alert("선택 노선 camp 수정 완료");
+      campInput.value = newCamp;
+      await loadAndShow();
     }
 
     async function renameCampAll(){
@@ -1441,7 +1089,7 @@
       const to = campEditInput.value.trim();
 
       if (!from || !to) {
-        alert("현재 camp(좌측 입력) + 변경 camp(하단 입력) 둘 다 필요합니다.");
+        alert("현재 camp(campInput) + 변경 camp(campEditInput) 둘 다 필요합니다.");
         return;
       }
       if (from === to) {
@@ -1449,22 +1097,50 @@
         return;
       }
 
-      try {
-        const res = await renameCamp({ from, to });
-        alert(`camp 전체 이관 완료: updated=${res.updated ?? "?"}, failed=${res.failed ?? 0}`);
-        campInput.value = to;
-        await loadAndShow();
-      } catch (e) {
-        console.error(e);
-        alert("camp 전체 이관 실패");
+      const res = await apiPost("/camp/rename", { from, to, overwrite: true }); // overwrite=true (충돌 병합)
+      alert(`camp 전체 이관 완료: moved=${res.moved ?? "?"}, merged=${res.merged ?? "?"}, deleted=${res.deleted ?? "?"}, failed=${res.failed ?? 0}`);
+      campInput.value = to;
+      await loadAndShow();
+    }
+
+    async function renameSelectedRouteCode(){
+      const newCode = routeEditInput.value.trim();
+      const camp = campInput.value.trim();
+
+      if (!newCode) {
+        alert("변경할 라우트 코드를 입력하세요.");
+        return;
       }
+      if (!editTargetRow?.id) {
+        alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
+        return;
+      }
+
+      await apiPost("/route/rename", { id: editTargetRow.id, new_code: newCode, camp });
+      alert("선택 노선 코드 수정 완료");
+      routeInput.value = newCode;
+      await loadAndShow();
+    }
+
+    async function deleteSelectedRouteRow(){
+      if (!editTargetRow?.id) {
+        alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
+        return;
+      }
+      if (!confirm("정말 DB에서 이 노선을 삭제하시겠습니까? (되돌릴 수 없음)")) return;
+
+      await apiPost("/route/delete", { id: editTargetRow.id });
+      alert("선택 노선 DB 삭제 완료");
+      editTargetKey = null;
+      editTargetRow = null;
+      clearEditablePolygons();
+      await loadAndShow();
     }
 
     // ================== 버튼 바인딩 ==================
     loadBtn.addEventListener("click", loadAndShow);
 
     drawBtn.addEventListener("click", () => {
-      // 새로 그리기 = 편집대상 새로 시작
       if (editTargetKey) restoreStaticForKey(editTargetKey);
       editTargetKey = routeInput.value.trim() || null;
       editTargetRow = null;
@@ -1477,13 +1153,12 @@
     });
 
     addBtn.addEventListener("click", () => {
-      // 기존 편집 폴리곤 유지 + 새 폴리곤 추가
       try { drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
       log("[LOG] 구역 추가: 기존 편집 폴리곤 유지 + 새 다각형을 추가로 그리세요.", "info");
       setOverlayText("구역 추가 모드: 새 구역을 그리세요.");
     });
 
-    saveBtn.addEventListener("click", saveCurrent);
+    saveBtn.addEventListener("click", () => saveCurrent().catch(e => { console.error(e); alert("저장 오류"); }));
     alignBtn.addEventListener("click", () => alignButtonHandler().catch(e => { console.error(e); alert("정렬 중 오류"); }));
 
     labelBtn.addEventListener("click", () => {
@@ -1503,8 +1178,11 @@
       log("[LOG] 지도 초기화 완료.", "info");
     });
 
-    campUpdateSelectedBtn.addEventListener("click", updateSelectedCamp);
-    campRenameAllBtn.addEventListener("click", renameCampAll);
+    campUpdateSelectedBtn.addEventListener("click", () => updateSelectedCamp().catch(e => { console.error(e); alert("camp 수정 실패"); }));
+    campRenameAllBtn.addEventListener("click", () => renameCampAll().catch(e => { console.error(e); alert("camp 이관 실패"); }));
+
+    routeRenameBtn.addEventListener("click", () => renameSelectedRouteCode().catch(e => { console.error(e); alert("코드 수정 실패"); }));
+    routeDeleteRowBtn.addEventListener("click", () => deleteSelectedRouteRow().catch(e => { console.error(e); alert("DB 삭제 실패"); }));
 
     // ================== 초기 실행 ==================
     kakao.maps.load(initMap);

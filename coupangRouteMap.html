@@ -122,8 +122,8 @@
     <div class="hint">
       · 조회/저장은 <b>캠프 + 라우트 둘 다 필수</b>입니다.<br/>
       · GET: 정확히 일치하는 라우트(예: 126B01) 또는 <code>mode=prefix</code> 126B 전체 조회 가능.<br/>
-      · 저장은 현재 지도 위에 그린 WGS84 위/경도 그대로 저장됩니다. (점수, 꼭짓점 3개 이상 권장)<br/>
-      · 저장 시 현재 선택된 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
+      · 저장은 <b>DrawingManager.getData() 기반 WGS84 좌표만</b> 저장합니다. (점수, 꼭짓점 3개 이상 권장)<br/>
+      · 저장 시 마지막 폴리곤의 <code>polygon_wgs84 / center_wgs84</code> 를 Supabase에 업서트합니다.
     </div>
 
     <div id="apiStatus" class="status-bar">API: ready</div>
@@ -184,8 +184,108 @@
     // ================== Kakao 지도 & DrawingManager ==================
     let map;
     let drawingManager;
-    let currentPolygon = null;    // 마지막으로 그린 / 불러온 폴리곤
-    let drawnOverlays  = [];      // 새로 그리기/기화 시 제거용
+    let currentPolygon = null;
+
+    function round6(n) {
+      return Math.round(n * 1e6) / 1e6; // 소수 6자리 고정(좌표 흔들림 방지용)
+    }
+
+    // DrawingManager.getData() 기반으로 마지막 폴리곤 WGS84 좌표 추출
+    function getLastPolygonPointsWgs84FromManager() {
+      if (!drawingManager || typeof drawingManager.getData !== "function") return [];
+
+      const data = drawingManager.getData([kakao.maps.drawing.OverlayType.POLYGON]);
+      const polys = data?.polygon || data?.POLYGON || [];
+      if (!Array.isArray(polys) || polys.length === 0) return [];
+
+      const last = polys[polys.length - 1];
+      const pts = Array.isArray(last?.points) ? last.points : [];
+
+      const out = [];
+      for (const p of pts) {
+        // getData() polygon point는 보통 {x:lng, y:lat}
+        const lng = Number(p?.x);
+        const lat = Number(p?.y);
+        if (!isFinite(lat) || !isFinite(lng)) continue;
+        if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+
+        out.push({ lat: round6(lat), lng: round6(lng) });
+      }
+      return out;
+    }
+
+    // 혹시 getData가 비는 케이스 대비: Polygon.getPath()에서 LatLng 추출
+    function collectLatLngsFromPath(path) {
+      const out = [];
+
+      const walk = (p) => {
+        if (!p) return;
+
+        if (
+          p instanceof kakao.maps.LatLng ||
+          (typeof p.getLat === "function" && typeof p.getLng === "function")
+        ) {
+          out.push(p);
+          return;
+        }
+
+        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
+          for (let i = 0; i < p.getLength(); i++) walk(p.getAt(i));
+          return;
+        }
+
+        if (Array.isArray(p) || typeof p.forEach === "function") {
+          p.forEach(walk);
+          return;
+        }
+
+        // 혹시 내부 필드(La/Ma) 형태가 오면
+        if (p && typeof p === "object" && ("Ma" in p) && ("La" in p)) {
+          const lat = Number(p.Ma);
+          const lng = Number(p.La);
+          if (isFinite(lat) && isFinite(lng)) {
+            out.push(new kakao.maps.LatLng(lat, lng));
+          }
+        }
+      };
+
+      walk(path);
+      return out;
+    }
+
+    function getCurrentPolygonPointsWgs84() {
+      const pts = getLastPolygonPointsWgs84FromManager();
+      if (pts.length) return pts;
+
+      // fallback
+      if (currentPolygon && typeof currentPolygon.getPath === "function") {
+        const latlngs = collectLatLngsFromPath(currentPolygon.getPath());
+        return latlngs.map(ll => ({ lat: round6(ll.getLat()), lng: round6(ll.getLng()) }));
+      }
+      return [];
+    }
+
+    // DrawingManager에서 폴리곤들을 확실히 제거
+    function removeAllPolygonsFromManager() {
+      if (!drawingManager || typeof drawingManager.getOverlays !== "function") return;
+
+      try {
+        const overlays = drawingManager.getOverlays([kakao.maps.drawing.OverlayType.POLYGON]);
+        const polys = overlays?.polygon || overlays?.POLYGON || [];
+        if (!Array.isArray(polys) || !polys.length) return;
+
+        polys.forEach((poly) => {
+          // remove 시그니처가 환경마다 다를 수 있어 방어적으로 2번 시도
+          try {
+            drawingManager.remove(poly);
+          } catch (e1) {
+            try {
+              drawingManager.remove(kakao.maps.drawing.OverlayType.POLYGON, poly);
+            } catch (e2) {}
+          }
+        });
+      } catch (e) {}
+    }
 
     function initMap() {
       const center = new kakao.maps.LatLng(37.5665, 126.9780); // 서울 시청 근처
@@ -194,10 +294,15 @@
         level: 7
       });
 
+      // 좌표계 강제(WGS84) - 환경에 따라 constant가 없을 수도 있어 fallback
+      const COORD_WGS84 =
+        (kakao?.maps?.drawing?.Coordinate?.WGS84) ?? "wgs84";
+
       const options = {
         map,
         drawingMode: [kakao.maps.drawing.OverlayType.POLYGON],
         guideTooltip: ["draw", "drag", "edit"],
+        coordinate: COORD_WGS84,
         polygonOptions: {
           draggable: true,
           removable: true,
@@ -215,260 +320,26 @@
 
       // 도형 그리기 끝났을 때
       kakao.maps.event.addListener(drawingManager, "drawend", function (data) {
-        const overlay = data.target;
-        if (!overlay || !(overlay instanceof kakao.maps.Polygon)) {
-          log("[LOG] drawend: polygon overlay 아님, 무시", "warn");
-          return;
+        currentPolygon = data?.target || null;
+
+        const pts = getCurrentPolygonPointsWgs84();
+        log(`[LOG] drawend: 새 폴리곤 생성/수정, 점 ${pts.length}개`, pts.length >= 3 ? "info" : "warn");
+        if (pts.length) {
+          log(`[DEBUG] sample: ${JSON.stringify(pts.slice(0, 3))}`, "info");
+          setOverlayText(`현재 폴리곤 점 ${pts.length}개`);
+        } else {
+          setOverlayText("폴리곤 점을 읽지 못했습니다. 다시 그려주세요.");
         }
 
-        currentPolygon = overlay;
-        drawnOverlays.push(overlay);
-
-        let pts = extractPathFromPolygon(overlay);
-
-        // drawingManager의 data.points -> Lat/Lng 복원 시도
-        const recoverFromDataPoints = () => {
-          const recovered = [];
-          if (!data || !Array.isArray(data.points) || !data.points.length) return recovered;
-
-          const projection = map?.getProjection?.();
-
-          const walkPoints = (pt) => {
-            if (!pt) return;
-
-            // 배열(중첩)인 경우 모두 풀어서 순회
-            if (Array.isArray(pt)) {
-              pt.forEach(walkPoints);
-              return;
-            }
-
-            // 우선 lat/lng 형태로 보이는지 검사
-            let lat = pt.y ?? pt.Ma ?? pt.lat;
-            let lng = pt.x ?? pt.La ?? pt.lng;
-            let added = false;
-
-            if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-              recovered.push({ lat, lng });
-              added = true;
-            }
-
-            // 위 케이스가 아니면 projection 변환 시도 (픽셀/맵 포인트 좌표 가정)
-            if (!added && projection && typeof projection.coordsFromPoint === "function" &&
-                isFinite(lat) && isFinite(lng)) {
-              try {
-                const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
-                const cLat = coords.getLat();
-                const cLng = coords.getLng();
-                if (isFinite(cLat) && isFinite(cLng)) {
-                  recovered.push({ lat: cLat, lng: cLng });
-                  added = true;
-                }
-              } catch (e) {
-                // 변환 실패 시 다음 포인트 진행
-              }
-            }
-
-            // 혹시 x/y가 뒤바뀐 경우도 한번 더 시도
-            if (!added && projection && typeof projection.coordsFromPoint === "function" &&
-                isFinite(lat) && isFinite(lng)) {
-              try {
-                const coords = projection.coordsFromPoint(new kakao.maps.Point(lat, lng));
-                const cLat = coords.getLat();
-                const cLng = coords.getLng();
-                if (isFinite(cLat) && isFinite(cLng)) {
-                  recovered.push({ lat: cLat, lng: cLng });
-                  added = true;
-                }
-              } catch (e) {
-                // ignore
-              }
-            }
-          };
-
-          data.points.forEach(walkPoints);
-
-          return recovered;
-        };
-
-        // drawingManager 이벤트에서 path가 비어 있는 경우 data.points(픽셀 좌표) 기반 복원
-        if (!pts.length) {
-          const recovered = recoverFromDataPoints();
-
-          if (recovered.length) {
-            overlay.setPath(recovered.map(pt => new kakao.maps.LatLng(pt.lat, pt.lng)));
-            pts = recovered;
-          }
-        }
-
-        log("[DEBUG] drawend raw path", "info");
-        log(`[DEBUG] getPolygonPointsWgs84 결과 점 수=${pts.length}`, "info");
-        log(`[LOG] drawend: 새 폴리곤 생성, 점 ${pts.length}개`, pts.length ? "info" : "warn");
+        // 한 번 그리고 나면 그리기 모드를 종료(추가 폴리곤 생성 방지)
+        try { drawingManager.cancel(); } catch (e) {}
       });
 
       setOverlayText("지도 초기화 완료.");
       log("[LOG] 지도 초기화 완료.", "info");
     }
 
-    // ================== 폴리곤 경로 추출 (Kakao 전 구조 대응) ==================
-    /**
-     * Kakao Polygon 객체에서 WGS84 Lat/Lng 배열 추출
-     * - kakao.maps.Array / 배열 / 중첩배열 / MVCArray 모두 대응
-     * 반환: [{lat, lng}, ...]
-     */
-    function extractPathFromPolygon(polygon) {
-      const result = [];
-
-      if (!polygon || typeof polygon.getPath !== "function") {
-        log("[ERR] extractPathFromPolygon: polygon 또는 getPath 없음", "err");
-        return result;
-      }
-
-      const projection = map?.getProjection?.();
-      let rawPath = polygon.getPath();
-
-      // kakao.maps.Array 계열은 getArray()로 실제 배열을 가져와야 할 수 있음
-      if (rawPath && typeof rawPath.getArray === "function") {
-        try {
-          rawPath = rawPath.getArray();
-        } catch (e) {
-          // getArray 실패 시 원본 유지
-        }
-      }
-
-      const isInKorea = (lt, lg) => lt >= 30 && lt <= 45 && lg >= 120 && lg <= 135;
-
-      const normalizeLatLng = (lat, lng) => {
-        if (typeof lat !== "number" || typeof lng !== "number" || !isFinite(lat) || !isFinite(lng)) {
-          return null;
-        }
-
-        // 위경도 범위 내로 먼저 스왑 시도 (위도/경도 뒤바뀐 경우)
-        if ((Math.abs(lat) > 90 || Math.abs(lng) > 180) && Math.abs(lng) <= 90 && Math.abs(lat) <= 180) {
-          [lat, lng] = [lng, lat];
-        }
-
-        // 정상 범위면 그대로 사용 (단, 한국 대략 범위 안으로 제한)
-        if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && isInKorea(lat, lng)) {
-          return { lat, lng };
-        }
-
-        // Kakao 지도에서 Point(x, y) 형태가 넘어온 경우 WGS84로 변환 후 한국 범위 재검증
-        if (projection && typeof projection.coordsFromPoint === "function") {
-          try {
-            const coords = projection.coordsFromPoint(new kakao.maps.Point(lng, lat));
-            const cLat = coords.getLat();
-            const cLng = coords.getLng();
-
-            if (Math.abs(cLat) <= 90 && Math.abs(cLng) <= 180 && isInKorea(cLat, cLng)) {
-              return { lat: cLat, lng: cLng };
-            }
-
-            // 변환 값이 여전히 비정상인 경우 스왑 후 재검증
-            if (Math.abs(cLng) <= 90 && Math.abs(cLat) <= 180 && isInKorea(cLng, cLat)) {
-              return { lat: cLng, lng: cLat };
-            }
-
-            return null;
-          } catch (e) {
-            // ignore 변환 실패 시 null 반환
-          }
-        }
-
-        return null;
-      };
-
-      const pushLatLng = (ll) => {
-        if (!ll) return;
-
-        let lat, lng;
-
-        // 정상 kakao.maps.LatLng
-        if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
-          lat = ll.getLat();
-          lng = ll.getLng();
-        }
-        // 혹시 내부 필드로 넘어오는 경우 (Ma/La)
-        else if ("Ma" in ll && "La" in ll) {
-          lat = ll.Ma;
-          lng = ll.La;
-        }
-        // 평범한 객체 형태 {lat, lng}
-        else if ("lat" in ll && "lng" in ll) {
-          lat = ll.lat;
-          lng = ll.lng;
-        }
-        // {x, y} 혹은 {X, Y}
-        else if ("x" in ll && "y" in ll) {
-          lng = ll.x;
-          lat = ll.y;
-        } else if ("X" in ll && "Y" in ll) {
-          lng = ll.X;
-          lat = ll.Y;
-        }
-        // 배열 [lat, lng] 또는 [lng, lat]
-        else if (Array.isArray(ll) && ll.length >= 2) {
-          const a0 = ll[0];
-          const a1 = ll[1];
-          if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) {
-            lat = a0; lng = a1;
-          } else if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) {
-            lat = a1; lng = a0;
-          } else {
-            lat = a1; lng = a0; // 최후 수단으로 [x, y] 가정
-          }
-        }
-
-        const normalized = normalizeLatLng(lat, lng);
-        if (normalized) {
-          result.push(normalized);
-        }
-      };
-
-      const walk = (pathLike) => {
-        if (!pathLike) return;
-
-        // kakao.maps.Array(MVCArray 스타일)
-        if (typeof pathLike.getLength === "function" &&
-            typeof pathLike.getAt === "function") {
-          const len = pathLike.getLength();
-          for (let i = 0; i < len; i++) {
-            walk(pathLike.getAt(i));
-          }
-          return;
-        }
-
-        // 배열류 (혹은 forEach만 있는 kakao.maps.Array)
-        if (Array.isArray(pathLike) ||
-            typeof pathLike.length === "number" ||
-            typeof pathLike.forEach === "function") {
-
-          const forEachFn = pathLike.forEach
-            ? pathLike.forEach.bind(pathLike)
-            : (cb) => { for (let i = 0; i < pathLike.length; i++) cb(pathLike[i], i); };
-
-          const first = pathLike[0];
-
-          // 첫 원소가 또 path 처럼 보이면 (중첩 구조) 재귀
-          if (first &&
-              (Array.isArray(first) ||
-               typeof first?.getLength === "function" ||
-               typeof first?.forEach === "function")) {
-            forEachFn(inner => walk(inner));
-          } else {
-            forEachFn(pushLatLng);
-          }
-          return;
-        }
-
-        // 그 외는 그냥 한 점으로 시도
-        pushLatLng(pathLike);
-      };
-
-      walk(rawPath);
-      return result;
-    }
-
-    // ================== Supabase Cloudflare Worker 연 ==================
+    // ================== Supabase Cloudflare Worker 연동 ==================
     async function fetchRoute(camp, code) {
       const url = new URL(ROUTE_API_BASE + "/route");
       url.searchParams.set("camp", camp);
@@ -533,8 +404,9 @@
     }
 
     function clearCurrentOverlays() {
-      drawnOverlays.forEach(o => o.setMap(null));
-      drawnOverlays = [];
+      // DrawingManager 내부 폴리곤까지 확실히 제거
+      removeAllPolygonsFromManager();
+
       currentPolygon = null;
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     }
@@ -542,7 +414,7 @@
     function normalizeStoredPoint(p) {
       if (!p) return null;
 
-      // 이미 {lat, lng}
+      // {lat, lng}
       if (typeof p.lat === "number" && typeof p.lng === "number") {
         return { lat: p.lat, lng: p.lng };
       }
@@ -557,22 +429,20 @@
         const a0 = Number(p[0]);
         const a1 = Number(p[1]);
         if (isFinite(a0) && isFinite(a1)) {
-          if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) {
-            return { lat: a0, lng: a1 };
-          }
-          if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) {
-            return { lat: a1, lng: a0 };
-          }
-          return { lat: a1, lng: a0 }; // 최후 수단
+          // (lat,lng) 형태로 보이면 그대로
+          if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 };
+          // (lng,lat) 형태면 스왑
+          if (Math.abs(a1) <= 90 && Math.abs(a0) <= 180) return { lat: a1, lng: a0 };
+          // 그 외는 실패 처리
         }
       }
 
-      // {x, y} 좌표(픽셀 좌표일 수도 있음)
+      // {x, y} (혹시 저장이 이렇게 됐던 케이스) -> x=lng, y=lat 가정
       if (typeof p.x === "number" && typeof p.y === "number") {
-        return { lng: p.x, lat: p.y };
+        return { lat: p.y, lng: p.x };
       }
       if (typeof p.X === "number" && typeof p.Y === "number") {
-        return { lng: p.X, lat: p.Y };
+        return { lat: p.Y, lng: p.X };
       }
 
       return null;
@@ -615,20 +485,7 @@
             const normalized = normalizeStoredPoint(p);
             if (!normalized) continue;
 
-            if (Math.abs(normalized.lat) > 90 || Math.abs(normalized.lng) > 180) {
-              // 좌표가 범위 밖이면 지도 투영 좌표로 판단해 변환 시도
-              const projection = map?.getProjection?.();
-              if (projection && typeof projection.coordsFromPoint === "function") {
-                try {
-                  const coords = projection.coordsFromPoint(new kakao.maps.Point(normalized.lng, normalized.lat));
-                  pts.push(coords);
-                  continue;
-                } catch (e) {
-                  // 변환 실패 시 skip
-                }
-              }
-              continue;
-            }
+            if (Math.abs(normalized.lat) > 90 || Math.abs(normalized.lng) > 180) continue;
 
             pts.push(new kakao.maps.LatLng(normalized.lat, normalized.lng));
           }
@@ -643,24 +500,23 @@
         }
 
         if (!pathLatLng) {
-          log("[ERR] 사용 가능한 폴리곤 row가 없습니다. (모두 이상 좌표)", "err");
+          log("[ERR] 사용 가능한 폴리곤 row가 없습니다. (좌표 파싱 실패)", "err");
           alert("사용 가능한 폴리곤 데이터가 없습니다.");
           return;
         }
 
-        const polygon = new kakao.maps.Polygon({
-          map,
-          path: pathLatLng,
-          strokeWeight: 2,
-          strokeColor: "#22c55e",
-          strokeOpacity: 0.9,
-          strokeStyle: "solid",
-          fillColor: "#22c55e",
-          fillOpacity: 0.3,
-        });
+        // DrawingManager에 넣어서 이후 저장도 getData로 안정적으로 되게 함
+        try { drawingManager.cancel(); } catch (e) {}
+        drawingManager.put(kakao.maps.drawing.OverlayType.POLYGON, pathLatLng);
 
-        drawnOverlays.push(polygon);
-        currentPolygon = polygon;
+        // currentPolygon 잡기(있으면)
+        try {
+          const ovs = drawingManager.getOverlays([kakao.maps.drawing.OverlayType.POLYGON]);
+          const arr = ovs?.polygon || ovs?.POLYGON || [];
+          currentPolygon = arr[arr.length - 1] || null;
+        } catch (e) {
+          currentPolygon = null;
+        }
 
         const bounds = new kakao.maps.LatLngBounds();
         pathLatLng.forEach(latlng => bounds.extend(latlng));
@@ -676,7 +532,7 @@
 
     drawBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel(); // 혹시 진행 중이던 그리기 취소
+      try { drawingManager.cancel(); } catch (e) {}
       drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
       log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
@@ -691,16 +547,10 @@
         return;
       }
 
-      if (!currentPolygon) {
-        alert("저장할 폴리곤이 없습니다. [새로 그리기]로 영역을 그리고 저장해주세요.");
-        log("[LOG] 저장 실패: currentPolygon 없음", "err");
-        return;
-      }
-
-      const pts = extractPathFromPolygon(currentPolygon);
-      if (!pts.length) {
+      const pts = getCurrentPolygonPointsWgs84();
+      if (pts.length < 3) {
         alert("폴리곤 점이 없습니다. 최소 3개 이상 찍어주세요.");
-        log("[LOG] 저장 실패: 추출된 점 개수 0", "err");
+        log(`[LOG] 저장 실패: 추출된 점 개수 ${pts.length}`, "err");
         return;
       }
 
@@ -718,7 +568,7 @@
 
     resetBtn.addEventListener("click", () => {
       clearCurrentOverlays();
-      drawingManager.cancel();
+      try { drawingManager.cancel(); } catch (e) {}
       log("[LOG] 지도 초기화 완료.", "info");
       setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
     });

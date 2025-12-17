@@ -47,8 +47,40 @@
     #mapWrap{
       position:relative;
       min-height:calc(100dvh - var(--headerH));
+      display:flex;
     }
-    #map{position:absolute;inset:0}
+    #map,#roadview{
+      flex:1;
+      width:100%;
+      height:100%;
+      min-width:0;
+      min-height:0;
+    }
+    #roadview{display:none}
+    #mapWrap.roadview-on #roadview{display:block}
+
+    .map-controls{
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:10;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .map-controls button{
+      background:rgba(15,17,21,0.82);
+      border-color:#2a3142;
+      backdrop-filter: blur(6px);
+    }
+    .map-controls .hint{
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid #2a3142;
+      background:rgba(15,17,21,0.72);
+      color:#cbd5e1;
+      font-size:12px;
+    }
 
     label{display:block;margin:10px 0 6px;color:#9aa6b2}
     input,textarea,button{font:inherit}
@@ -127,6 +159,9 @@
       #mapWrap{
         min-height:60vh;
       }
+      #mapWrap.roadview-on{
+        flex-direction:column;
+      }
     }
   </style>
 
@@ -174,6 +209,12 @@
 
     <div id="mapWrap">
       <div id="map"></div>
+      <div id="roadview"></div>
+      <div class="map-controls">
+        <button id="toggleMapType" title="일반/위성 전환">위성</button>
+        <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
+        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 지도에서 위치 클릭</span>
+      </div>
     </div>
   </div>
 
@@ -184,6 +225,11 @@
       polygons: new Map(),    // zipcode -> [Polygon, ...]
       labels: new Map(),      // zipcode -> [CustomOverlay, ...]
       selectedZips: new Set(),
+      isSatellite: false,
+      roadviewOn: false,
+      roadview: null,
+      roadviewClient: null,
+      roadviewClickHandler: null,
       colors: [
         "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
         "#22d3ee","#c084fc","#f472b6","#60a5fa",
@@ -257,7 +303,83 @@
         const c = state.map.getCenter();
         state.map.relayout();
         state.map.setCenter(c);
+        if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
+          state.roadview.relayout();
+        }
       });
+    }
+
+    // ------- 지도 타입(일반/위성) ------- //
+    function setMapTypeSatellite(on) {
+      state.isSatellite = !!on;
+      if (!state.map) return;
+      state.map.setMapTypeId(
+        state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
+      );
+      const btn = $("#toggleMapType");
+      if (btn) btn.textContent = state.isSatellite ? "일반" : "위성";
+    }
+
+    // ------- 로드뷰 ------- //
+    function ensureRoadview() {
+      if (state.roadview && state.roadviewClient) return;
+      const container = $("#roadview");
+      if (!container) return;
+      state.roadview = new kakao.maps.Roadview(container);
+      state.roadviewClient = new kakao.maps.RoadviewClient();
+    }
+
+    function setRoadviewAt(latlng) {
+      ensureRoadview();
+      if (!state.roadviewClient || !state.roadview) return;
+
+      // 반경(m) 내 가장 가까운 로드뷰 pano 찾기
+      state.roadviewClient.getNearestPanoId(latlng, 80, (panoId) => {
+        if (!panoId) {
+          alert("이 위치 근처에는 로드뷰가 없습니다.");
+          return;
+        }
+        state.roadview.setPanoId(panoId, latlng);
+      });
+    }
+
+    function setRoadviewOn(on) {
+      state.roadviewOn = !!on;
+      const wrap = $("#mapWrap");
+      const hint = $("#roadviewHint");
+      const btn = $("#toggleRoadview");
+
+      if (wrap) wrap.classList.toggle("roadview-on", state.roadviewOn);
+      if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
+      if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
+
+      // 레이아웃 변경 후 relayout
+      if (state.map) {
+        const c = state.map.getCenter();
+        state.map.relayout();
+        state.map.setCenter(c);
+      }
+      if (state.roadviewOn) {
+        ensureRoadview();
+        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
+        // 기본: 현재 지도 중심으로 로드뷰 띄움
+        if (state.map) setRoadviewAt(state.map.getCenter());
+
+        // 지도 클릭 시 로드뷰 이동
+        if (!state.roadviewClickHandler && state.map) {
+          state.roadviewClickHandler = (mouseEvent) => {
+            if (!state.roadviewOn) return;
+            if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+          };
+          kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
+        }
+      } else {
+        // 클릭 핸들러 제거
+        if (state.roadviewClickHandler && state.map) {
+          kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
+        }
+        state.roadviewClickHandler = null;
+      }
     }
 
     // ------- UI 이벤트 ------- //
@@ -273,6 +395,7 @@
       $("#clearBtn").onclick = () => {
         state.selectedZips.clear();
         clearPolygons();
+        setRoadviewOn(false);
         renderZipChips();
       };
 
@@ -280,6 +403,16 @@
         await drawSelected();
         fitBoundsAll();
       };
+
+      const mapTypeBtn = $("#toggleMapType");
+      if (mapTypeBtn) {
+        mapTypeBtn.onclick = () => setMapTypeSatellite(!state.isSatellite);
+      }
+
+      const roadviewBtn = $("#toggleRoadview");
+      if (roadviewBtn) {
+        roadviewBtn.onclick = () => setRoadviewOn(!state.roadviewOn);
+      }
 
       // (옵션) 버튼이 있는 경우에만 바인딩
       const fitBtn = $("#fitBtn");

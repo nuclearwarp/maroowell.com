@@ -362,50 +362,40 @@
     function normalizePoint(p) {
       if (!p) return null;
 
-      // 모든 가능성 시도 (순서대로)
-      
-      // 1. getLat/getLng 메서드
+      // 1. getLat/getLng 메서드 (가장 안전!)
       if (typeof p.getLat === "function" && typeof p.getLng === "function") {
-        return { lat: p.getLat(), lng: p.getLng() };
+        const lat = p.getLat();
+        const lng = p.getLng();
+        // WGS84 범위 체크
+        if (lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135) {
+          return { lat, lng };
+        }
       }
 
-      // 2. lat, lng 프로퍼티
+      // 2. lat, lng 프로퍼티 (WGS84 범위 체크 필수!)
       if (p.lat !== undefined && p.lng !== undefined) {
         const lat = Number(p.lat);
         const lng = Number(p.lng);
         if (isFinite(lat) && isFinite(lng)) {
-          return { lat, lng };
+          // WGS84 범위 체크!
+          if (lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135) {
+            return { lat, lng };
+          }
         }
       }
 
-      // 3. La, Ma 프로퍼티 (Kakao Maps 내부)
-      if (p.La !== undefined && p.Ma !== undefined) {
-        const lat = Number(p.La);
-        const lng = Number(p.Ma);
-        if (isFinite(lat) && isFinite(lng)) {
-          return { lat, lng };
-        }
-      }
-
-      // 4. x, y 프로퍼티
-      if (p.x !== undefined && p.y !== undefined) {
-        const lng = Number(p.x);
-        const lat = Number(p.y);
-        if (isFinite(lat) && isFinite(lng)) {
-          return { lat, lng };
-        }
-      }
-
-      // 5. latitude, longitude
+      // 3. latitude, longitude (WGS84 범위 체크!)
       if (p.latitude !== undefined && p.longitude !== undefined) {
         const lat = Number(p.latitude);
         const lng = Number(p.longitude);
         if (isFinite(lat) && isFinite(lng)) {
-          return { lat, lng };
+          if (lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135) {
+            return { lat, lng };
+          }
         }
       }
 
-      // 6. 배열 [lng, lat] 또는 [lat, lng]
+      // 4. 배열 [lng, lat] 또는 [lat, lng]
       if (Array.isArray(p) && p.length >= 2) {
         const a = Number(p[0]), b = Number(p[1]);
         if (!isFinite(a) || !isFinite(b)) return null;
@@ -416,27 +406,10 @@
         if (inKR(b, a)) return { lat: b, lng: a };
         // [lat, lng]
         if (inKR(a, b)) return { lat: a, lng: b };
-
-        // 범위로 추측
-        if (Math.abs(a) <= 90 && Math.abs(b) <= 180) return { lat: a, lng: b };
-        if (Math.abs(a) <= 180 && Math.abs(b) <= 90) return { lat: b, lng: a };
       }
 
-      // 7. 모든 프로퍼티 강제 추출 시도
-      const keys = Object.keys(p);
-      if (keys.length === 2) {
-        const v1 = Number(p[keys[0]]);
-        const v2 = Number(p[keys[1]]);
-        if (isFinite(v1) && isFinite(v2)) {
-          // 한국 범위로 판단
-          if (v1 >= 30 && v1 <= 45 && v2 >= 120 && v2 <= 135) {
-            return { lat: v1, lng: v2 };
-          }
-          if (v2 >= 30 && v2 <= 45 && v1 >= 120 && v1 <= 135) {
-            return { lat: v2, lng: v1 };
-          }
-        }
-      }
+      // ❌ La/Ma, x/y, Object.keys 강제 추출 제거!
+      // 투영 좌표계일 수 있어서 위험함!
 
       return null;
     }

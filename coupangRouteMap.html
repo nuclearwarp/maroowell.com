@@ -371,29 +371,89 @@
       }
 
       const raw = data?.polygon;
-      if (!raw || !Array.isArray(raw) || !raw.length) return [];
+      if (!raw || !Array.isArray(raw) || !raw.length) {
+        log(`[WARN] polygon 데이터 없음`, "warn");
+        return [];
+      }
+
+      log(`[DEBUG] polygon 개수: ${raw.length}`, "info");
 
       const rings = [];
 
-      for (const poly of raw) {
+      for (let polyIdx = 0; polyIdx < raw.length; polyIdx++) {
+        const poly = raw[polyIdx];
         if (!poly) continue;
 
         let outer = poly;
         if (Array.isArray(poly) && Array.isArray(poly[0])) outer = poly[0];
         if (!Array.isArray(outer)) continue;
 
-        const pts = outer.map(p => {
-          const lng = Number(p?.x);  // ✅ x = lng
-          const lat = Number(p?.y);  // ✅ y = lat
-          if (!isFinite(lat) || !isFinite(lng)) return null;
-          // WGS84 범위 체크
-          if (lat < 30 || lat > 45 || lng < 120 || lng > 135) return null;
-          return { lat: round6(lat), lng: round6(lng) };
-        }).filter(Boolean);
+        log(`[DEBUG] polygon[${polyIdx}] 점 개수: ${outer.length}`, "info");
 
-        if (pts.length >= 3) rings.push(pts);
+        const pts = [];
+        for (let i = 0; i < outer.length; i++) {
+          const p = outer[i];
+          
+          // 🔍 디버깅: 실제 객체 구조 확인
+          if (i === 0) {
+            log(`[DEBUG] point[0] keys: ${Object.keys(p).join(', ')}`, "info");
+            log(`[DEBUG] point[0] values: ${Object.values(p).join(', ')}`, "info");
+            log(`[DEBUG] point[0].x: ${p?.x}, point[0].y: ${p?.y}`, "info");
+            log(`[DEBUG] point[0] constructor: ${p?.constructor?.name}`, "info");
+          }
+          
+          let lng, lat;
+          
+          // 방법 1: 직접 x, y 프로퍼티
+          if (typeof p?.x === 'number' && typeof p?.y === 'number') {
+            lng = p.x;
+            lat = p.y;
+          }
+          // 방법 2: Object.values로 추출
+          else {
+            const values = Object.values(p);
+            if (values.length === 2) {
+              const v0 = Number(values[0]);
+              const v1 = Number(values[1]);
+              
+              // WGS84 범위로 lat/lng 판별
+              const isLat = (v) => v >= 30 && v <= 45;
+              const isLng = (v) => v >= 120 && v <= 135;
+              
+              if (isLng(v0) && isLat(v1)) {
+                lng = v0;
+                lat = v1;
+              } else if (isLat(v0) && isLng(v1)) {
+                lat = v0;
+                lng = v1;
+              }
+            }
+          }
+          
+          if (!isFinite(lat) || !isFinite(lng)) {
+            log(`[WARN] point[${i}] 좌표 추출 실패`, "warn");
+            continue;
+          }
+          
+          // WGS84 범위 체크
+          if (lat < 30 || lat > 45 || lng < 120 || lng > 135) {
+            log(`[WARN] point[${i}] WGS84 범위 벗어남: lat=${lat}, lng=${lng}`, "warn");
+            continue;
+          }
+          
+          pts.push({ lat: round6(lat), lng: round6(lng) });
+        }
+
+        log(`[DEBUG] polygon[${polyIdx}] 유효한 점: ${pts.length}개`, "info");
+        
+        if (pts.length >= 3) {
+          rings.push(pts);
+        } else {
+          log(`[WARN] polygon[${polyIdx}] 점 부족 (${pts.length}개)`, "warn");
+        }
       }
 
+      log(`[DEBUG] 최종 rings: ${rings.length}개`, "info");
       return rings;
     }
 

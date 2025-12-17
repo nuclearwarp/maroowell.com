@@ -342,18 +342,42 @@
         else if (Array.isArray(path)) {
           console.log("🔍 [DRAWEND] 일반 배열, length:", path.length);
           path.forEach((ll, idx) => {
-            console.log(`🔍 [DRAWEND] point[${idx}]:`, ll, "type:", typeof ll);
+            console.log(`🔍 [DRAWEND] point[${idx}]:`, ll);
+            console.log(`🔍 [DRAWEND] typeof:`, typeof ll, "constructor:", ll?.constructor?.name);
             
-            // 여러 방법 시도
-            if (ll && typeof ll.getLat === "function" && typeof ll.getLng === "function") {
-              console.log("✅ getLat/getLng 있음!");
-              pts.push({ lat: ll.getLat(), lng: ll.getLng() });
-            } else {
-              // normalizePoint 시도
-              console.log("⚠️ getLat/getLng 없음, normalizePoint 시도");
-              const normalized = normalizePoint(ll);
-              console.log("normalizePoint 결과:", normalized);
-              if (normalized) pts.push(normalized);
+            // M 객체 완전 분석
+            if (ll && typeof ll === "object") {
+              console.log("🔍 [DRAWEND] Object.keys:", Object.keys(ll));
+              console.log("🔍 [DRAWEND] Object.values:", Object.values(ll));
+              
+              // 모든 가능한 프로퍼티 시도
+              const possible = {
+                lat: ll.lat, lng: ll.lng,
+                La: ll.La, Ma: ll.Ma,
+                x: ll.x, y: ll.y,
+                latitude: ll.latitude, longitude: ll.longitude,
+                getLat: typeof ll.getLat, getLng: typeof ll.getLng
+              };
+              console.log("🔍 [DRAWEND] 가능한 프로퍼티들:", possible);
+              
+              // getLat/getLng 메서드
+              if (typeof ll.getLat === "function" && typeof ll.getLng === "function") {
+                pts.push({ lat: ll.getLat(), lng: ll.getLng() });
+              } 
+              // Object.values로 직접 추출 (2개 값만 있으면)
+              else {
+                const vals = Object.values(ll);
+                if (vals.length === 2 && isFinite(vals[0]) && isFinite(vals[1])) {
+                  // 한국 범위 체크
+                  if (vals[0] >= 30 && vals[0] <= 45 && vals[1] >= 120 && vals[1] <= 135) {
+                    console.log("✅ Object.values [lat, lng]:", vals);
+                    pts.push({ lat: vals[0], lng: vals[1] });
+                  } else if (vals[1] >= 30 && vals[1] <= 45 && vals[0] >= 120 && vals[0] <= 135) {
+                    console.log("✅ Object.values [lng, lat]:", vals);
+                    pts.push({ lat: vals[1], lng: vals[0] });
+                  }
+                }
+              }
             }
           });
         }

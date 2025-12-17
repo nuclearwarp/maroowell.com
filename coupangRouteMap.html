@@ -321,8 +321,21 @@
           log(`[LOG] 편집 대상(draft) 생성: ${code}`, "info");
         }
 
-        // points 추출
-        const pts = extractPathFromPolygon(overlay);
+        // points 추출 - Drawing Manager용 특별 처리
+        const path = overlay.getPath();
+        const pts = [];
+        
+        // Drawing Manager의 path는 항상 MVCArray
+        if (path && typeof path.getLength === "function") {
+          for (let i = 0; i < path.getLength(); i++) {
+            const ll = path.getAt(i);
+            // Drawing Manager의 LatLng는 getLat/getLng 메서드 보장
+            if (ll && typeof ll.getLat === "function" && typeof ll.getLng === "function") {
+              pts.push({ lat: ll.getLat(), lng: ll.getLng() });
+            }
+          }
+        }
+        
         if (pts.length < 3) {
           overlay.setMap(null);
           log("[WARN] drawend: 점 3개 미만 → 취소", "warn");

@@ -697,6 +697,56 @@
       return json;
     }
 
+    // ================== 라벨 충돌 방지 ==================
+    function adjustLabelPositions(labels) {
+      // 라벨 간 충돌을 감지하고 위치를 조정
+      const labelData = labels.map(l => ({
+        entry: l.entry,
+        region: l.region,
+        original: { lat: l.pos.lat, lng: l.pos.lng },
+        adjusted: { lat: l.pos.lat, lng: l.pos.lng },
+        text: l.text
+      }));
+
+      const labelPadding = 0.0015; // 라벨 간 최소 거리 (약 150m)
+      const maxIterations = 50;
+      const adjustStep = 0.0003; // 조정 스텝 (약 30m)
+
+      // 반복적으로 충돌 해결
+      for (let iter = 0; iter < maxIterations; iter++) {
+        let hasCollision = false;
+
+        for (let i = 0; i < labelData.length; i++) {
+          for (let j = i + 1; j < labelData.length; j++) {
+            const a = labelData[i].adjusted;
+            const b = labelData[j].adjusted;
+
+            const dist = Math.sqrt(
+              Math.pow(a.lat - b.lat, 2) + 
+              Math.pow((a.lng - b.lng) * Math.cos(a.lat * Math.PI / 180), 2)
+            );
+
+            if (dist < labelPadding) {
+              hasCollision = true;
+
+              // 충돌 시 서로 반대 방향으로 이동
+              const angle = Math.atan2(a.lat - b.lat, a.lng - b.lng);
+              
+              labelData[i].adjusted.lat += Math.sin(angle) * adjustStep;
+              labelData[i].adjusted.lng += Math.cos(angle) * adjustStep;
+              
+              labelData[j].adjusted.lat -= Math.sin(angle) * adjustStep;
+              labelData[j].adjusted.lng -= Math.cos(angle) * adjustStep;
+            }
+          }
+        }
+
+        if (!hasCollision) break;
+      }
+
+      return labelData;
+    }
+
     // ================== 오버레이 관리 ==================
     function clearAllOverlays() {
       for (const entry of state.rowsById.values()) {
@@ -785,7 +835,8 @@
       // 색상 결정(인접 유사색 최소화)
       assignColorsGreedy(rows);
 
-      // rows -> overlay
+      // 1단계: 폴리곤 생성 및 초기 라벨 위치 수집
+      const allLabelData = [];
       let shown = 0;
 
       rows.forEach((row) => {
@@ -802,17 +853,41 @@
           const poly = createPolygonFromRegion(region, color, rowId);
           entry.regions.push(poly);
 
-          const label = createLabelOverlay(region, (row.full_code || row.code || ""));
-          if (label) entry.labels.push(label);
+          // 라벨 위치 계산 (아직 생성하지 않음)
+          const pos = polylabelPoint(region) || computeCenter(region);
+          if (pos) {
+            allLabelData.push({
+              entry: entry,
+              region: region,
+              pos: pos,
+              text: (row.full_code || row.code || "")
+            });
+          }
         });
 
         state.rowsById.set(rowId, entry);
         shown++;
       });
 
+      // 2단계: 라벨 위치 충돌 해결
+      const adjustedLabels = adjustLabelPositions(allLabelData);
+
+      // 3단계: 조정된 위치로 라벨 생성
+      adjustedLabels.forEach(labelData => {
+        const overlay = new kakao.maps.CustomOverlay({
+          position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
+          content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
+          yAnchor: 1,
+          zIndex: 10,
+        });
+        labelData.entry.labels.push(overlay);
+      });
+
       // 라벨 토글 반영
       if (!state.labelsOn) {
         for (const entry of state.rowsById.values()) entry.labels.forEach(l => l.setMap(null));
+      } else {
+        for (const entry of state.rowsById.values()) entry.labels.forEach(l => l.setMap(state.map));
       }
 
       // bounds
@@ -892,6 +967,9 @@
         setRegionsVisibility(null);
       }
 
+      // 라벨 재배치를 위한 데이터 수집
+      const allLabelData = [];
+      
       // 선택 강조 + X 버튼 부착
       for (const [id, entry] of state.rowsById.entries()) {
         const isSel = (id === state.editId);
@@ -904,10 +982,25 @@
             fillColor: color,
             fillOpacity: isSel ? 0.18 : 0.28
           });
+
+          // 라벨 위치 수집 (충돌 방지를 위해)
+          if (state.labelsOn) {
+            const region = poly.__mw_points || [];
+            const pos = polylabelPoint(region) || computeCenter(region);
+            if (pos) {
+              allLabelData.push({
+                entry: entry,
+                region: region,
+                pos: pos,
+                text: (entry.row.full_code || entry.row.code || "")
+              });
+            }
+          }
         });
 
-        // 라벨 on/off
-        entry.labels.forEach(l => l.setMap(state.labelsOn ? state.map : null));
+        // 기존 라벨 제거
+        entry.labels.forEach(l => l.setMap(null));
+        entry.labels = [];
 
         // X 버튼은 선택 대상에만
         entry.xbtns.forEach(x => x.setMap(null));
@@ -918,17 +1011,7 @@
             const xbtn = createXButton(region, () => {
               // 구역 삭제
               poly.setMap(null);
-              // labels도 제거(같은 인덱스일 가능성이 높지만 안전하게 전체 rebuild)
-              entry.labels.forEach(l => l.setMap(null));
               entry.regions.splice(idx, 1);
-
-              // labels 재생성
-              entry.labels = [];
-              entry.regions.forEach((p2) => {
-                const lab = createLabelOverlay(p2.__mw_points || [], entry.row.full_code || entry.row.code || "");
-                if (lab) entry.labels.push(lab);
-              });
-              if (state.labelsOn) entry.labels.forEach(l => l.setMap(state.map));
 
               log("[WARN] 편집 구역 삭제됨(X). 저장하면 DB에도 반영됩니다.", "warn");
               refreshSelectionUI();
@@ -939,6 +1022,21 @@
             }
           });
         }
+      }
+
+      // 라벨 충돌 방지 적용 및 생성
+      if (state.labelsOn && allLabelData.length > 0) {
+        const adjustedLabels = adjustLabelPositions(allLabelData);
+        adjustedLabels.forEach(labelData => {
+          const overlay = new kakao.maps.CustomOverlay({
+            position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
+            content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
+            yAnchor: 1,
+            zIndex: 10,
+          });
+          overlay.setMap(state.map);
+          labelData.entry.labels.push(overlay);
+        });
       }
 
       // 라벨 버튼 텍스트
@@ -1195,10 +1293,7 @@
           newRegions.forEach((reg) => {
             const poly = createPolygonFromRegion(reg, color, entry.row.id);
             entry.regions.push(poly);
-            const lab = createLabelOverlay(reg, entry.row.full_code || entry.row.code || "");
-            if (lab) entry.labels.push(lab);
           });
-          if (!state.labelsOn) entry.labels.forEach(l => l.setMap(null));
 
           // 자동 저장
           const center = computeCenterMulti(newRegions);

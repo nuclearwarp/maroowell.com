@@ -155,12 +155,12 @@
     </div>
 
     <div class="hint">
-      <b>✨ NEW!</b> <b>[📍 주소검색]</b> 버튼으로 주소 입력 → 해당 위치로 이동 → 폴리곤 그리기<br/>
-      <b>✨ NEW!</b> 폴리곤 <b>점을 드래그</b>해서 수동 편집 가능! 건물 경계에 맞춰 조정하세요.<br/>
-      · GET: <b>camp만</b> 입력하면 해당 camp의 전체 노선 표시.<br/>
-      · code 입력 시 기본 <code>mode=prefix</code>로 하위 노선까지 표시.<br/>
-      · 지도에서 폴리곤 클릭 → <b>편집 대상</b> 선택.<br/>
-      · 끊긴 구역은 <b>[구역 추가]</b>로 여러 개 저장/표시(멀티 폴리곤).
+      <b>✨ NEW!</b> <b>[📍 주소검색]</b> 주소 입력 → 위치 이동 → 폴리곤 그리기<br/>
+      <b>✨ NEW!</b> 폴리곤 <b>더블클릭</b> → 편집 모드 → 점 드래그로 수동 조정 → 다시 더블클릭으로 완료!<br/>
+      <b>✨ NEW!</b> <b>[지도 정렬]</b> 뾰족한 부분 자동 제거 + 경계선 스무딩<br/>
+      · GET: <b>camp만</b> 입력하면 전체 노선 표시.<br/>
+      · 폴리곤 클릭 → <b>편집 대상</b> 선택.<br/>
+      · 끊긴 구역은 <b>[구역 추가]</b>로 멀티 폴리곤 저장.
     </div>
 
     <div id="apiStatus" class="status-bar">API: ready</div>
@@ -288,12 +288,12 @@
         guideTooltip: ["draw", "drag", "edit"],
         polygonOptions: {
           draggable: true,
-          removable: false,  // X는 우리가 직접 구현
-          editable: true,    // ✅ 수동 편집 활성화!
-          strokeWeight: 3,
-          strokeOpacity: 0.95,
+          removable: false,
+          editable: true,
+          strokeWeight: 2,      // ✅ 경계선 얇게
+          strokeOpacity: 0.9,
           strokeStyle: "solid",
-          fillOpacity: 0.28,
+          fillOpacity: 0.25,    // ✅ 채우기 연하게
         },
       });
 
@@ -480,8 +480,7 @@
       return computeCenter(all);
     }
 
-    // polylabel(간단 구현): 라벨이 폴리곤 밖으로 튀는 문제를 줄임
-    // turf 사용 가능하면 turf.pointOnFeature도 가능하지만, 내부 중심에 더 잘 들어가도록 polylabel 사용
+    // polylabel 개선: 폴리곤의 진짜 중심점(centroid) 계산
     function polylabelPoint(region) {
       try {
         if (!window.turf || !region || region.length < 3) return computeCenter(region);
@@ -492,8 +491,21 @@
           coords[0].push(coords[0][0]);
         }
         const poly = turf.polygon(coords);
-        const pt = turf.pointOnFeature(poly); // 내부점
-        return { lat: pt.geometry.coordinates[1], lng: pt.geometry.coordinates[0] };
+        
+        // centroid 사용 (더 정확한 중심)
+        const centroid = turf.centroid(poly);
+        const centroidPt = { lat: centroid.geometry.coordinates[1], lng: centroid.geometry.coordinates[0] };
+        
+        // centroid가 폴리곤 내부인지 확인
+        const isInside = turf.booleanPointInPolygon(centroid, poly);
+        
+        if (isInside) {
+          return centroidPt;
+        } else {
+          // 밖에 있으면 pointOnFeature 사용 (확실히 내부에 있는 점)
+          const pt = turf.pointOnFeature(poly);
+          return { lat: pt.geometry.coordinates[1], lng: pt.geometry.coordinates[0] };
+        }
       } catch {
         return computeCenter(region);
       }
@@ -792,28 +804,43 @@
       const poly = new kakao.maps.Polygon({
         map: state.map,
         path,
-        strokeWeight: 3,
+        strokeWeight: 2,        // ✅ 경계선 얇게 (3 → 2)
         strokeColor: color,
-        strokeOpacity: 0.95,
+        strokeOpacity: 0.9,     // ✅ 투명도도 약간 조정
         strokeStyle: "solid",
         fillColor: color,
-        fillOpacity: 0.28,
-        draggable: true,   // ✅ 드래그 가능
-        editable: true     // ✅ 편집 가능 (점 이동 가능)
+        fillOpacity: 0.25       // ✅ 채우기도 약간 연하게
       });
       poly.__mw_points = region;
       poly.__mw_rowId = rowId;
+      poly.__mw_editable = false; // 편집 모드 상태
+
+      // 더블클릭으로 편집 모드 토글
+      kakao.maps.event.addListener(poly, "dblclick", () => {
+        poly.__mw_editable = !poly.__mw_editable;
+        poly.setOptions({
+          draggable: poly.__mw_editable,
+          editable: poly.__mw_editable,
+          strokeWeight: poly.__mw_editable ? 3 : 2,  // 편집 중에는 굵게
+          strokeColor: poly.__mw_editable ? "#ff00ff" : color  // 편집 중에는 핑크색
+        });
+        
+        if (poly.__mw_editable) {
+          log(`[LOG] 📝 편집 모드 ON: 점을 드래그하세요. (다시 더블클릭으로 종료)`, "info");
+          setOverlayText("📝 편집 모드 ON - 점 드래그 가능 (다시 더블클릭으로 완료)");
+        } else {
+          const newPts = extractPathFromPolygon(poly);
+          poly.__mw_points = newPts;
+          log(`[LOG] ✅ 편집 완료: ${newPts.length}개 점`, "info");
+          setOverlayText("✅ 편집 완료 - 저장하려면 [저장] 클릭");
+        }
+      });
 
       // 클릭 시 편집 대상 선택
       kakao.maps.event.addListener(poly, "click", () => {
-        selectRowId(rowId);
-      });
-
-      // 편집 완료 시 points 업데이트
-      kakao.maps.event.addListener(poly, "mouseup", () => {
-        const newPts = extractPathFromPolygon(poly);
-        poly.__mw_points = newPts;
-        log(`[LOG] 폴리곤 수정됨: ${newPts.length}개 점`, "info");
+        if (!poly.__mw_editable) {  // 편집 중이 아닐 때만
+          selectRowId(rowId);
+        }
       });
 
       return poly;
@@ -1011,12 +1038,15 @@
 
         entry.regions.forEach((poly) => {
           const color = getColorForRouteKey(routeKeyFromRow(entry.row));
-          poly.setOptions({
-            strokeWeight: isSel ? 6 : 3,
-            strokeColor: color,
-            fillColor: color,
-            fillOpacity: isSel ? 0.18 : 0.28
-          });
+          // 편집 모드가 아닐 때만 색상/두께 업데이트
+          if (!poly.__mw_editable) {
+            poly.setOptions({
+              strokeWeight: isSel ? 3 : 2,     // ✅ 선택 시에도 얇게 (6 → 3)
+              strokeColor: color,
+              fillColor: color,
+              fillOpacity: isSel ? 0.2 : 0.25  // ✅ 선택 시 약간 연하게
+            });
+          }
 
           // 라벨 위치 수집 (충돌 방지를 위해)
           if (state.labelsOn) {
@@ -1355,15 +1385,25 @@
           const regions = entry.regions.map(p => p.__mw_points || extractPathFromPolygon(p)).filter(r => r.length >= 3);
           if (!regions.length) continue;
 
-          // 단순 정렬: 1) 작은 버퍼(집/도로 경계 포함) 2) 스무딩(불필요한 지그재그 완화)
-          // turf 기반으로 MultiPolygon도 처리
+          // 강화된 정렬: 1) 큰 버퍼로 뾰족한 부분 제거 2) 단순화 3) 스무딩
           let feature = regionsToTurf(regions);
           if (!feature) continue;
 
-          // 버퍼 5m → 다시 -5m (형상 정리 효과)
           try {
-            feature = turf.buffer(feature, 0.005, { units:"kilometers" });   // +5m
-            feature = turf.buffer(feature, -0.005, { units:"kilometers" });  // -5m
+            // 1단계: 큰 버퍼로 뾰족한 부분 흡수 (20m)
+            feature = turf.buffer(feature, 0.02, { units:"kilometers" });
+            
+            // 2단계: 다시 줄여서 원래 크기로 (-15m, 약간 작게)
+            feature = turf.buffer(feature, -0.015, { units:"kilometers" });
+            
+            // 3단계: 형상 단순화 (너무 복잡한 경계 정리)
+            feature = turf.simplify(feature, { tolerance: 0.00005, highQuality: true });
+            
+            // 4단계: 최종 스무딩 (+3m, -3m)
+            feature = turf.buffer(feature, 0.003, { units:"kilometers" });
+            feature = turf.buffer(feature, -0.003, { units:"kilometers" });
+            
+            log(`[LOG] ✂️ 형상 정리 완료 (뾰족한 부분 제거)`, "info");
           } catch (e) {
             log(`[WARN] 정렬 버퍼 실패(무시): ${String(e)}`, "warn");
           }

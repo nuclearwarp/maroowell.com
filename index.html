@@ -333,14 +333,21 @@
       ensureRoadview();
       if (!state.roadviewClient || !state.roadview) return;
 
-      // 반경(m) 내 가장 가까운 로드뷰 pano 찾기
-      state.roadviewClient.getNearestPanoId(latlng, 80, (panoId) => {
-        if (!panoId) {
-          alert("이 위치 근처에는 로드뷰가 없습니다.");
-          return;
-        }
-        state.roadview.setPanoId(panoId, latlng);
-      });
+      // 반경(m) 내 가장 가까운 로드뷰 pano 찾기 (반경 단계적 확장)
+      const radii = [80, 200, 500, 1200];
+      const tryFind = (i) => {
+        const r = radii[i];
+        state.roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
+          // panoId가 0일 수도 있어 falsy 체크 금지
+          if (panoId === null || panoId === undefined) {
+            if (i < radii.length - 1) return tryFind(i + 1);
+            alert("이 위치 근처에는 로드뷰가 없습니다.");
+            return;
+          }
+          state.roadview.setPanoId(panoId, latlng);
+        });
+      };
+      tryFind(0);
     }
 
     function setRoadviewOn(on) {

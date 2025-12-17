@@ -360,74 +360,84 @@
     function isFiniteNum(n) { return typeof n === "number" && isFinite(n); }
 
     function normalizePoint(p) {
-      if (!p) {
-        console.log("[DEBUG normalizePoint] p is null/undefined");
-        return null;
-      }
+      if (!p) return null;
 
-      console.log("[DEBUG normalizePoint] p:", p, "type:", typeof p, "constructor:", p.constructor?.name);
-      console.log("[DEBUG normalizePoint] Object.keys:", Object.keys(p));
-      console.log("[DEBUG normalizePoint] Object.getOwnPropertyNames:", Object.getOwnPropertyNames(p));
-      console.log("[DEBUG normalizePoint] 프로퍼티 체크:", {
-        lat: p.lat,
-        lng: p.lng,
-        La: p.La,
-        Ma: p.Ma,
-        x: p.x,
-        y: p.y,
-        getLat: typeof p.getLat,
-        getLng: typeof p.getLng
-      });
-
-      // kakao.maps.LatLng - 가장 먼저 체크!
+      // 모든 가능성 시도 (순서대로)
+      
+      // 1. getLat/getLng 메서드
       if (typeof p.getLat === "function" && typeof p.getLng === "function") {
-        const result = { lat: p.getLat(), lng: p.getLng() };
-        console.log("[DEBUG normalizePoint] LatLng 메서드:", result);
-        return result;
+        return { lat: p.getLat(), lng: p.getLng() };
       }
 
-      // {lat,lng} - 더 관대한 체크
+      // 2. lat, lng 프로퍼티
       if (p.lat !== undefined && p.lng !== undefined) {
         const lat = Number(p.lat);
         const lng = Number(p.lng);
         if (isFinite(lat) && isFinite(lng)) {
-          const result = { lat, lng };
-          console.log("[DEBUG normalizePoint] {lat,lng} 성공:", result);
-          return result;
-        } else {
-          console.log("[DEBUG normalizePoint] lat/lng가 숫자가 아님:", lat, lng);
-        }
-      }
-      
-      // {latitude,longitude}
-      if (p.latitude !== undefined && p.longitude !== undefined) {
-        const lat = Number(p.latitude);
-        const lng = Number(p.longitude);
-        if (isFinite(lat) && isFinite(lng)) {
-          console.log("[DEBUG normalizePoint] {latitude,longitude} 성공");
           return { lat, lng };
         }
       }
 
-      // [a,b] : [lng,lat] 또는 [lat,lng]
+      // 3. La, Ma 프로퍼티 (Kakao Maps 내부)
+      if (p.La !== undefined && p.Ma !== undefined) {
+        const lat = Number(p.La);
+        const lng = Number(p.Ma);
+        if (isFinite(lat) && isFinite(lng)) {
+          return { lat, lng };
+        }
+      }
+
+      // 4. x, y 프로퍼티
+      if (p.x !== undefined && p.y !== undefined) {
+        const lng = Number(p.x);
+        const lat = Number(p.y);
+        if (isFinite(lat) && isFinite(lng)) {
+          return { lat, lng };
+        }
+      }
+
+      // 5. latitude, longitude
+      if (p.latitude !== undefined && p.longitude !== undefined) {
+        const lat = Number(p.latitude);
+        const lng = Number(p.longitude);
+        if (isFinite(lat) && isFinite(lng)) {
+          return { lat, lng };
+        }
+      }
+
+      // 6. 배열 [lng, lat] 또는 [lat, lng]
       if (Array.isArray(p) && p.length >= 2) {
         const a = Number(p[0]), b = Number(p[1]);
         if (!isFinite(a) || !isFinite(b)) return null;
 
-        const cand1 = { lng: a, lat: b };
-        const cand2 = { lng: b, lat: a };
-        const inKR = (pt) => pt.lat >= 30 && pt.lat <= 45 && pt.lng >= 120 && pt.lng <= 135;
+        const inKR = (lat, lng) => lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135;
 
-        if (inKR(cand1)) return { lat: cand1.lat, lng: cand1.lng };
-        if (inKR(cand2)) return { lat: cand2.lat, lng: cand2.lng };
+        // [lng, lat]
+        if (inKR(b, a)) return { lat: b, lng: a };
+        // [lat, lng]
+        if (inKR(a, b)) return { lat: a, lng: b };
 
-        if (Math.abs(a) <= 180 && Math.abs(b) <= 90) return { lat: b, lng: a };
+        // 범위로 추측
         if (Math.abs(a) <= 90 && Math.abs(b) <= 180) return { lat: a, lng: b };
-
-        return null;
+        if (Math.abs(a) <= 180 && Math.abs(b) <= 90) return { lat: b, lng: a };
       }
 
-      console.log("[DEBUG normalizePoint] 인식 실패! p:", p, "lat:", p.lat, "lng:", p.lng);
+      // 7. 모든 프로퍼티 강제 추출 시도
+      const keys = Object.keys(p);
+      if (keys.length === 2) {
+        const v1 = Number(p[keys[0]]);
+        const v2 = Number(p[keys[1]]);
+        if (isFinite(v1) && isFinite(v2)) {
+          // 한국 범위로 판단
+          if (v1 >= 30 && v1 <= 45 && v2 >= 120 && v2 <= 135) {
+            return { lat: v1, lng: v2 };
+          }
+          if (v2 >= 30 && v2 <= 45 && v1 >= 120 && v1 <= 135) {
+            return { lat: v2, lng: v1 };
+          }
+        }
+      }
+
       return null;
     }
 
@@ -483,31 +493,22 @@
       const out = [];
       try {
         const path = polygon.getPath();
-        console.log("[DEBUG] extractPathFromPolygon - path:", path);
         
         // MVCArray
         if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
-          const len = path.getLength();
-          console.log("[DEBUG] MVCArray length:", len);
-          for (let i = 0; i < len; i++) {
+          for (let i = 0; i < path.getLength(); i++) {
             const ll = path.getAt(i);
-            console.log("[DEBUG] point", i, ":", ll);
             const p = normalizePoint(ll);
             if (p) out.push(p);
           }
         } else if (Array.isArray(path)) {
-          console.log("[DEBUG] Array path, length:", path.length);
           path.forEach((ll) => {
             const p = normalizePoint(ll);
             if (p) out.push(p);
           });
-        } else {
-          console.log("[DEBUG] path 타입 알 수 없음:", typeof path);
         }
-        console.log("[DEBUG] extracted points:", out.length, out);
       } catch (e) {
         log("[ERR] extractPathFromPolygon 실패: " + String(e), "err");
-        console.error("[DEBUG] Exception:", e);
       }
       return out;
     }

@@ -699,14 +699,30 @@
 
     // ================== 라벨 충돌 방지 ==================
     function adjustLabelPositions(labels) {
+      // 빈 배열이면 그대로 반환
+      if (!labels || labels.length === 0) {
+        return [];
+      }
+
       // 라벨 간 충돌을 감지하고 위치를 조정
-      const labelData = labels.map(l => ({
-        entry: l.entry,
-        region: l.region,
-        original: { lat: l.pos.lat, lng: l.pos.lng },
-        adjusted: { lat: l.pos.lat, lng: l.pos.lng },
-        text: l.text
-      }));
+      const labelData = labels.map(l => {
+        // 안전 체크
+        if (!l || !l.pos || !isFiniteNum(l.pos.lat) || !isFiniteNum(l.pos.lng)) {
+          return null;
+        }
+        return {
+          entry: l.entry,
+          region: l.region,
+          original: { lat: l.pos.lat, lng: l.pos.lng },
+          adjusted: { lat: l.pos.lat, lng: l.pos.lng },
+          text: l.text || ""
+        };
+      }).filter(Boolean);
+
+      // 유효한 라벨이 없으면 반환
+      if (labelData.length === 0) {
+        return [];
+      }
 
       const labelPadding = 0.0015; // 라벨 간 최소 거리 (약 150m)
       const maxIterations = 50;
@@ -873,15 +889,22 @@
       const adjustedLabels = adjustLabelPositions(allLabelData);
 
       // 3단계: 조정된 위치로 라벨 생성
-      adjustedLabels.forEach(labelData => {
-        const overlay = new kakao.maps.CustomOverlay({
-          position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
-          content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
-          yAnchor: 1,
-          zIndex: 10,
+      if (adjustedLabels && adjustedLabels.length > 0) {
+        adjustedLabels.forEach(labelData => {
+          if (!labelData || !labelData.entry) return;
+          try {
+            const overlay = new kakao.maps.CustomOverlay({
+              position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
+              content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
+              yAnchor: 1,
+              zIndex: 10,
+            });
+            labelData.entry.labels.push(overlay);
+          } catch (e) {
+            log(`[WARN] 라벨 생성 실패: ${e.message}`, "warn");
+          }
         });
-        labelData.entry.labels.push(overlay);
-      });
+      }
 
       // 라벨 토글 반영
       if (!state.labelsOn) {
@@ -1027,16 +1050,23 @@
       // 라벨 충돌 방지 적용 및 생성
       if (state.labelsOn && allLabelData.length > 0) {
         const adjustedLabels = adjustLabelPositions(allLabelData);
-        adjustedLabels.forEach(labelData => {
-          const overlay = new kakao.maps.CustomOverlay({
-            position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
-            content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
-            yAnchor: 1,
-            zIndex: 10,
+        if (adjustedLabels && adjustedLabels.length > 0) {
+          adjustedLabels.forEach(labelData => {
+            if (!labelData || !labelData.entry) return;
+            try {
+              const overlay = new kakao.maps.CustomOverlay({
+                position: new kakao.maps.LatLng(labelData.adjusted.lat, labelData.adjusted.lng),
+                content: `<div class="route-label">${escapeHtml(labelData.text)}</div>`,
+                yAnchor: 1,
+                zIndex: 10,
+              });
+              overlay.setMap(state.map);
+              labelData.entry.labels.push(overlay);
+            } catch (e) {
+              log(`[WARN] 라벨 생성 실패: ${e.message}`, "warn");
+            }
           });
-          overlay.setMap(state.map);
-          labelData.entry.labels.push(overlay);
-        });
+        }
       }
 
       // 라벨 버튼 텍스트

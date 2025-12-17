@@ -90,7 +90,7 @@
       font-weight: 800;
       color: #0b1220;
       background: rgba(255,255,255,0.92);
-      border: 2px solid rgba(15,23,42,0.28);
+      border: 2px solid rgba(15,23,42,0.35);
       box-shadow: 0 2px 10px rgba(0,0,0,0.22);
       user-select: none;
       pointer-events: none;
@@ -125,8 +125,6 @@
 
   <!-- Daum Postcode -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-
-  <script>console.log("🔴 VERSION: 2025.12.17-FIX (draw/getData + /osm + colors) 🔴");</script>
 </head>
 
 <body>
@@ -158,31 +156,31 @@
     </div>
 
     <div class="hint">
-      • <b>불러오기:</b> camp만 입력하면 전체, code 입력하면 prefix로 하위까지<br/>
-      • <b>편집:</b> 폴리곤 클릭 → 편집 전환(초록) → 점 드래그/삭제 → 저장<br/>
-      • <b>새로 그리기:</b> 기존 편집 데이터 삭제 후 다시 생성<br/>
-      • <b>구역 추가:</b> 같은 코드에 폴리곤 여러 개(끊긴 구역) 지원<br/>
-      • <b>정렬:</b> /osm(Overpass) 기반 도로 스냅 + 건물 포함(조건) 후 저장
+      • <b>캠프만 GET:</b> 해당 캠프 전체 노선 표시<br/>
+      • <b>편집:</b> 폴리곤 클릭 → 편집 대상(녹색) 전환 → 점 드래그<br/>
+      • <b>구역 추가:</b> 같은 코드에 폴리곤 여러 개 추가(떨어진 구역 지원)<br/>
+      • <b>지도 정렬:</b> (편집 대상 있으면 그 노선만) 없으면 현재 표시된 노선(또는 prefix 그룹) 전체 정렬 저장<br/>
+      • <b>정렬 기준:</b> OSM 도로 중심선 스냅 + 건물 50% 이상 포함 시 자동 포함
     </div>
 
     <div class="section">
       <div style="font-size:0.78rem;color:#9aa6b2;margin-bottom:6px;">DB 수정</div>
 
       <div class="row" style="margin-bottom:6px;">
-        <input id="campEditInput" type="text" placeholder="캠프 수정: 예) 대구3" />
+        <input id="campEditInput" type="text" placeholder="캠프 변경: 예) 대구3" />
         <button id="campUpdateSelectedBtn">선택 camp 수정</button>
-        <button id="campRenameAllBtn">camp 전체 이관</button>
+        <button id="campRenameAllBtn">camp 전체 이관(병합)</button>
       </div>
 
       <div class="row">
-        <input id="routeEditInput" type="text" placeholder="코드 수정: 예) 213D → 213C" />
+        <input id="routeEditInput" type="text" placeholder="코드 변경: 예) 213D → 213C" />
         <button id="routeRenameBtn">선택 코드 수정</button>
         <button id="routeDeleteRowBtn" class="danger">선택 DB 삭제</button>
       </div>
 
       <div class="hint" style="margin-top:6px;">
-        • “선택 수정”은 반드시 <b>지도에서 해당 폴리곤을 클릭해 편집 대상으로 만든 상태</b>에서 동작합니다.<br/>
-        • camp 전체 이관은 (from=현재 campInput, to=campEditInput) 기준입니다.
+        • “선택” 작업은 지도에서 해당 노선을 클릭해 편집 대상으로 만든 상태에서 동작합니다.<br/>
+        • camp 전체 이관은 from=campInput → to=campEditInput, 충돌(동일 full_code) 시 자동 병합 후 source 삭제합니다.
       </div>
     </div>
 
@@ -193,34 +191,22 @@
   <div class="map-wrap">
     <div id="map"></div>
     <div class="overlay-badge" id="overlayInfo">지도 초기화 중...</div>
-    <div style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:10px;pointer-events:none;">
-      v2025.12.17-fix
-    </div>
   </div>
 
   <script>
     // ================== 설정 ==================
-    const DEBUG = true;
     const ROUTE_API_BASE = "https://route.maroowell.com";
 
     const ALIGN = {
       OSM_MARGIN_DEG: 0.0020,
-      MAX_ROADS: 900,
-      MAX_BUILDINGS: 1200,
-      ROAD_SNAP_METERS: 18,
-      DENSIFY_STEP_METERS: 18,
-      SIMPLIFY_TOLERANCE_DEG: 0.00001,
-      BUILDING_RATIO: 0.50
+      MAX_ROADS: 1200,
+      MAX_BUILDINGS: 2000,
+      ROAD_SNAP_METERS: 16,
+      DENSIFY_STEP_METERS: 14,
+      SIMPLIFY_TOLERANCE_DEG: 0.000008,
+      BUILDING_RATIO: 0.50,
+      MAX_DENSIFIED_POINTS: 2600
     };
-
-    // 확실히 다른 색이 나오는 고정 팔레트
-    const COLOR_PALETTE = [
-      "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e",
-      "#14b8a6", "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6",
-      "#a855f7", "#ec4899", "#f43f5e", "#10b981", "#0ea5e9",
-      "#1d4ed8", "#7c3aed", "#be123c", "#92400e", "#0f766e"
-    ];
-    let colorMap = new Map(); // key -> color
 
     // ================== DOM ==================
     const logBox      = document.getElementById("logBox");
@@ -267,10 +253,6 @@
 
       logBox.appendChild(line);
       logBox.scrollTop = logBox.scrollHeight;
-
-      if (level === "err") console.error(message);
-      else if (level === "warn") console.warn(message);
-      else console.log(message);
     }
 
     function setApiStatus(msg, isError = false) {
@@ -295,14 +277,16 @@
     let map;
     let drawingManager;
 
-    // [{key,row,ringsLatLng,polygons,labels}]
-    let staticItems = [];
+    let staticItems = [];  // [{key,row,ringsLatLng,polygons,labels}]
     let labelsOn = true;
 
     let editTargetKey = null;
     let editTargetRow = null;
 
-    // ================== polylabel (라벨 내부로) ==================
+    // route 색상 맵(인접 라우트끼리 최대한 다르게)
+    let routeColorMap = Object.create(null);
+
+    // ================== polylabel(라벨 위치) ==================
     class MaxHeap { constructor(){this.data=[]} push(i){this.data.push(i);this._up(this.data.length-1)} pop(){if(!this.data.length)return null;const t=this.data[0];const e=this.data.pop();if(this.data.length){this.data[0]=e;this._down(0)}return t} get size(){return this.data.length} _up(n){const e=this.data[n];while(n>0){const p=Math.floor((n-1)/2);const pn=this.data[p];if(e.max<=pn.max)break;this.data[p]=e;this.data[n]=pn;n=p}} _down(n){const l=this.data.length;const e=this.data[n];for(;;){let ln=2*n+1;let rn=2*n+2;let s=null;if(ln<l){const le=this.data[ln];if(le.max>e.max)s=ln}if(rn<l){const re=this.data[rn];if((s===null&&re.max>e.max)||(s!==null&&re.max>this.data[s].max))s=rn}if(s===null)break;this.data[n]=this.data[s];this.data[s]=e;n=s}} }
     function getSegDistSq(px,py,a,b){let x=a[0],y=a[1];let dx=b[0]-x,dy=b[1]-y;if(dx!==0||dy!==0){const t=((px-x)*dx+(py-y)*dy)/(dx*dx+dy*dy);if(t>1){x=b[0];y=b[1]}else if(t>0){x+=dx*t;y+=dy*t}}dx=px-x;dy=py-y;return dx*dx+dy*dy}
     function pointToPolygonDist(x,y,poly){let inside=false;let min=Infinity;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1]+0.0)+a[0])inside=!inside;min=Math.min(min,getSegDistSq(x,y,a,b))}const d=Math.sqrt(min);return inside?d:-d}
@@ -310,15 +294,91 @@
     class Cell{constructor(x,y,h,poly){this.x=x;this.y=y;this.h=h;this.d=pointToPolygonDist(x,y,poly);this.max=this.d+this.h*Math.SQRT2}}
     function polylabel(ring,precision=1e-5){if(!Array.isArray(ring)||ring.length<3)return null;let pts=ring.slice();const f=pts[0],l=pts[pts.length-1];if(f[0]!==l[0]||f[1]!==l[1])pts.push(f);let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1])}const w=maxX-minX,h=maxY-minY;if(w===0&&h===0)return [minX,minY];const cellSize=Math.min(w,h);let hh=cellSize/2;const heap=new MaxHeap();for(let x=minX;x<maxX;x+=cellSize)for(let y=minY;y<maxY;y+=cellSize)heap.push(new Cell(x+hh,y+hh,hh,pts));let best=null;const c=polygonCentroid(pts);if(c)best=new Cell(c[0],c[1],0,pts);const bboxCell=new Cell(minX+w/2,minY+h/2,0,pts);if(!best||bboxCell.d>best.d)best=bboxCell;let iter=0;const maxIter=30000;while(heap.size&&iter++<maxIter){const cell=heap.pop();if(!cell)break;if(cell.d>best.d)best=cell;if(cell.max-best.d<=precision)continue;hh=cell.h/2;heap.push(new Cell(cell.x-hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x-hh,cell.y+hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y+hh,hh,pts))}return [best.x,best.y]}
 
-    // ================== 색상 ==================
-    function rebuildColorMap(keysSorted){
-      colorMap = new Map();
-      keysSorted.forEach((k, i) => {
-        colorMap.set(k, COLOR_PALETTE[i % COLOR_PALETTE.length]);
-      });
+    // ================== 색상(인접 라우트 구분 강화) ==================
+    const COLOR_PALETTE = [
+      "hsl(0, 92%, 52%)",
+      "hsl(24, 92%, 52%)",
+      "hsl(48, 92%, 50%)",
+      "hsl(75, 82%, 45%)",
+      "hsl(120, 82%, 42%)",
+      "hsl(155, 82%, 42%)",
+      "hsl(185, 92%, 44%)",
+      "hsl(205, 92%, 50%)",
+      "hsl(225, 92%, 54%)",
+      "hsl(250, 82%, 58%)",
+      "hsl(275, 82%, 58%)",
+      "hsl(305, 92%, 56%)",
+      "hsl(330, 92%, 54%)",
+      "hsl(350, 92%, 52%)",
+    ];
+
+    function bboxOfItemRings(ringsLatLng){
+      let minLat=  90, maxLat= -90, minLng=  180, maxLng= -180;
+      for (const ring of ringsLatLng){
+        for (const ll of ring){
+          const lat = ll.getLat(), lng = ll.getLng();
+          minLat = Math.min(minLat, lat);
+          maxLat = Math.max(maxLat, lat);
+          minLng = Math.min(minLng, lng);
+          maxLng = Math.max(maxLng, lng);
+        }
+      }
+      return {minLat,maxLat,minLng,maxLng};
     }
+
+    function bboxOverlap(a,b,expandDeg=0.00045){
+      return !(
+        (a.maxLng + expandDeg) < (b.minLng - expandDeg) ||
+        (a.minLng - expandDeg) > (b.maxLng + expandDeg) ||
+        (a.maxLat + expandDeg) < (b.minLat - expandDeg) ||
+        (a.minLat - expandDeg) > (b.maxLat + expandDeg)
+      );
+    }
+
+    function computeColorMap(items){
+      // 인접성: bbox 근접(확장) 겹치면 이웃으로 간주 (가볍고 충분히 실용적)
+      const bboxes = new Map();
+      for (const it of items) bboxes.set(it.key, bboxOfItemRings(it.ringsLatLng));
+
+      const neighbors = new Map();
+      for (const it of items) neighbors.set(it.key, new Set());
+
+      for (let i=0;i<items.length;i++){
+        for (let j=i+1;j<items.length;j++){
+          const a = items[i].key, b = items[j].key;
+          if (bboxOverlap(bboxes.get(a), bboxes.get(b))) {
+            neighbors.get(a).add(b);
+            neighbors.get(b).add(a);
+          }
+        }
+      }
+
+      const order = [...items.map(x=>x.key)]
+        .sort((a,b) => (neighbors.get(b).size - neighbors.get(a).size) || a.localeCompare(b));
+
+      const map = Object.create(null);
+
+      for (const key of order){
+        const used = new Set();
+        for (const nb of neighbors.get(key)) {
+          if (map[nb]) used.add(map[nb]);
+        }
+        let chosen = null;
+        for (const c of COLOR_PALETTE){
+          if (!used.has(c)) { chosen = c; break; }
+        }
+        if (!chosen) {
+          // 다 막히면 그냥 순환
+          chosen = COLOR_PALETTE[Math.abs(key.length * 17 + key.charCodeAt(0)) % COLOR_PALETTE.length];
+        }
+        map[key] = chosen;
+      }
+
+      return map;
+    }
+
     function colorCss(key){
-      return colorMap.get(key) || "#22c55e";
+      return routeColorMap[key] || "hsl(120, 80%, 45%)";
     }
 
     // ================== 지도 초기화 ==================
@@ -339,1036 +399,3 @@
           strokeWeight: 4,
           strokeColor: "#22c55e",
           strokeOpacity: 0.98,
-          strokeStyle: "solid",
-          fillColor: "#22c55e",
-          fillOpacity: 0.22,
-        },
-      });
-
-      kakao.maps.event.addListener(drawingManager, "drawend", () => {
-        // drawend 타이밍에 getData가 아직 업데이트 전인 케이스가 있어 0ms 지연
-        setTimeout(() => {
-          const { rings, rawCount } = getEditableRingsWgs84({ returnMeta: true });
-          log(`[LOG] ✅ 폴리곤 생성 완료: raw=${rawCount}, rings=${rings.length}, 총점=${rings.reduce((s,r)=>s+r.length,0)}`, "info");
-        }, 0);
-      });
-
-      setOverlayText("지도 초기화 완료.");
-      log("[LOG] 지도 초기화 완료.", "info");
-    }
-
-    function clearEditablePolygons(){
-      try { drawingManager.cancel(); } catch {}
-      try { drawingManager.remove(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
-    }
-
-    function putEditableRingsLatLng(ringsLatLng){
-      clearEditablePolygons();
-
-      const polygonArray = (ringsLatLng || []).map(ring =>
-        (ring || []).map(ll => ({ x: ll.getLng(), y: ll.getLat() }))
-      ).filter(r => r.length >= 3);
-
-      if (!polygonArray.length) return;
-
-      // put은 “폴리곤 리스트”로 넣는다(멀티 구역 = 폴리곤 여러 개)
-      try {
-        drawingManager.put(kakao.maps.drawing.OverlayType.POLYGON, polygonArray);
-      } catch (e) {
-        log(`[ERR] drawingManager.put 예외: ${String(e?.message || e)}`, "err");
-        throw e;
-      }
-    }
-
-    // ================== DrawingManager getData 파서 (핵심 Fix) ==================
-    function isFiniteNum(n){ return typeof n === "number" && Number.isFinite(n); }
-    function inWgsRange(lat, lng){
-      return isFiniteNum(lat) && isFiniteNum(lng) && lat > -90 && lat < 90 && lng > -180 && lng < 180;
-    }
-    function inKRRange(lat, lng){
-      return isFiniteNum(lat) && isFiniteNum(lng) && lat >= 30 && lat <= 45 && lng >= 120 && lng <= 135;
-    }
-
-    function normalizeDrawingPoint(p){
-      if (!p) return null;
-
-      // 1) kakao LatLng
-      if (typeof p.getLat === "function" && typeof p.getLng === "function") {
-        const lat = p.getLat(), lng = p.getLng();
-        if (inWgsRange(lat, lng)) return { lat: round6(lat), lng: round6(lng) };
-      }
-
-      // 2) {x,y} (drawing)
-      if (isFiniteNum(p.x) && isFiniteNum(p.y)) {
-        const lng = p.x, lat = p.y;
-        if (inWgsRange(lat, lng)) return { lat: round6(lat), lng: round6(lng) };
-      }
-
-      // 3) {lat,lng}
-      if (isFiniteNum(p.lat) && isFiniteNum(p.lng)) {
-        const lat = p.lat, lng = p.lng;
-        if (inWgsRange(lat, lng)) return { lat: round6(lat), lng: round6(lng) };
-      }
-
-      // 4) Kakao 내부 필드(버전별)
-      // 흔한 케이스: (lat, lng) = (Ma, La) 또는 반대
-      const cand = [];
-      for (const [k,v] of Object.entries(p)) {
-        if (isFiniteNum(v)) cand.push([k, v]);
-      }
-      if (cand.length >= 2) {
-        // 숫자 2개 뽑아서 lat/lng 판별
-        const vals = cand.map(x => x[1]);
-        for (let i=0;i<vals.length;i++){
-          for (let j=i+1;j<vals.length;j++){
-            const a = vals[i], b = vals[j];
-
-            // (lng,lat)
-            if (inWgsRange(b, a) && (inKRRange(b,a) || !inKRRange(a,b))) return { lat: round6(b), lng: round6(a) };
-            // (lat,lng)
-            if (inWgsRange(a, b) && (inKRRange(a,b) || !inKRRange(b,a))) return { lat: round6(a), lng: round6(b) };
-          }
-        }
-      }
-
-      // 5) [a,b]
-      if (Array.isArray(p) && p.length >= 2) {
-        const a = Number(p[0]), b = Number(p[1]);
-        if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
-
-        // [lng,lat]
-        if (inWgsRange(b,a)) return { lat: round6(b), lng: round6(a) };
-        // [lat,lng]
-        if (inWgsRange(a,b)) return { lat: round6(a), lng: round6(b) };
-      }
-
-      return null;
-    }
-
-    function extractOuterRing(poly){
-      if (!poly) return null;
-
-      // A) Array 형태
-      if (Array.isArray(poly)) {
-        if (!poly.length) return null;
-
-        // poly가 ring = [point, point...]
-        if (poly.length && !Array.isArray(poly[0])) return poly;
-
-        // poly가 [ring, holes...] = [[point...], ...]
-        if (Array.isArray(poly[0]) && poly[0].length) {
-          // 아주 깊게 중첩되는 케이스 방어
-          let cur = poly;
-          while (Array.isArray(cur) && cur.length === 1 && Array.isArray(cur[0])) cur = cur[0];
-          // cur가 [point...]
-          if (cur.length && !Array.isArray(cur[0])) return cur;
-          // cur가 [[point...], ...]
-          if (cur.length && Array.isArray(cur[0])) return cur[0];
-        }
-        return null;
-      }
-
-      // B) Object 형태 (이번 케이스의 핵심)
-      if (typeof poly === "object") {
-        // 흔한 필드들
-        if (Array.isArray(poly.path)) return poly.path;
-        if (Array.isArray(poly.points)) return poly.points;
-        if (Array.isArray(poly.outer)) return poly.outer;
-        if (Array.isArray(poly.coords)) return poly.coords;
-
-        // GeoJSON 비슷한 구조
-        if (Array.isArray(poly.coordinates)) {
-          // Polygon coordinates: [ [ [lng,lat], ... ] ]
-          const c0 = poly.coordinates?.[0];
-          if (Array.isArray(c0)) return c0;
-        }
-        if (poly.geometry && Array.isArray(poly.geometry.coordinates)) {
-          const c0 = poly.geometry.coordinates?.[0];
-          if (Array.isArray(c0)) return c0;
-        }
-
-        // {0:point,1:point,...} 같은 형태
-        const vals = Object.values(poly);
-        if (vals.length && (typeof vals[0] === "object" || Array.isArray(vals[0]))) {
-          // vals가 point 배열일 가능성
-          const p0 = normalizeDrawingPoint(vals[0]);
-          if (p0) return vals;
-          // vals[0]가 ring일 가능성
-          if (Array.isArray(vals[0])) return vals[0];
-        }
-      }
-
-      return null;
-    }
-
-    function normalizeRingPoints(points){
-      const out = [];
-      for (const p of (points || [])) {
-        const n = normalizeDrawingPoint(p);
-        if (!n) continue;
-        out.push(n);
-      }
-      // 마지막 점이 첫 점과 동일하면 제거(저장은 open ring)
-      if (out.length >= 2) {
-        const f = out[0], l = out[out.length - 1];
-        if (f.lat === l.lat && f.lng === l.lng) out.pop();
-      }
-      // 연속 중복 제거
-      const dedup = [];
-      for (const p of out) {
-        const last = dedup[dedup.length - 1];
-        if (last && last.lat === p.lat && last.lng === p.lng) continue;
-        dedup.push(p);
-      }
-      return (dedup.length >= 3) ? dedup : [];
-    }
-
-    function getEditableRingsWgs84({ returnMeta = false } = {}){
-      let data;
-      try {
-        data = drawingManager.getData();
-      } catch (e) {
-        log(`[ERR] drawingManager.getData 실패: ${String(e?.message || e)}`, "err");
-        return returnMeta ? { rings: [], rawCount: 0 } : [];
-      }
-
-      const raw = data?.polygon;
-      const rawCount = Array.isArray(raw) ? raw.length : 0;
-
-      if (!rawCount) {
-        if (DEBUG) log(`[DEBUG] polygon 데이터 없음`, "warn");
-        return returnMeta ? { rings: [], rawCount } : [];
-      }
-
-      if (DEBUG) log(`[DEBUG] polygon 개수: ${rawCount}`, "info");
-
-      const rings = [];
-
-      for (let i = 0; i < raw.length; i++) {
-        const poly = raw[i];
-
-        // 핵심: poly가 배열이 아닐 수 있음
-        const outer = extractOuterRing(poly);
-
-        if (!outer) {
-          if (DEBUG) log(`[DEBUG] polygon[${i}] outer 추출 실패 (type=${typeof poly})`, "warn");
-          if (DEBUG) log(`[DEBUG] polygon[${i}] sampleKeys=${poly && typeof poly === "object" ? Object.keys(poly).slice(0,12).join(",") : ""}`, "warn");
-          continue;
-        }
-
-        const ring = normalizeRingPoints(outer);
-
-        if (DEBUG) log(`[DEBUG] polygon[${i}] outerLen=${outer.length}, ringLen=${ring.length}`, "info");
-
-        if (ring.length >= 3) rings.push(ring);
-      }
-
-      if (DEBUG) log(`[DEBUG] 최종 rings: ${rings.length}개`, rings.length ? "info" : "warn");
-
-      return returnMeta ? { rings, rawCount } : rings;
-    }
-
-    // ================== API ==================
-    async function apiGet(path, params){
-      const url = new URL(ROUTE_API_BASE + path);
-      for (const [k,v] of Object.entries(params || {})) {
-        if (v === undefined || v === null || String(v).trim() === "") continue;
-        url.searchParams.set(k, v);
-      }
-
-      log(`[LOG] GET ${path} 요청`, "info");
-      setApiStatus(`GET ${path} 호출 중...`);
-
-      const res = await fetch(url.toString(), { cache:"no-store" });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setApiStatus(`GET 에러 ${res.status}`, true);
-        log(`[ERR] GET ${path} 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error(`GET ${path} 실패`);
-      }
-
-      setApiStatus("GET 성공");
-      return json;
-    }
-
-    async function apiPost(path, body){
-      const url = ROUTE_API_BASE + path;
-      log(`[LOG] POST ${path} 요청`, "info");
-      setApiStatus(`POST ${path} 호출 중...`);
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type":"application/json; charset=utf-8" },
-        body: JSON.stringify(body),
-      });
-
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setApiStatus(`POST 에러 ${res.status}`, true);
-        log(`[ERR] POST ${path} 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error(`POST ${path} 실패`);
-      }
-
-      setApiStatus("POST 성공");
-      return json;
-    }
-
-    async function apiDelete(path, params){
-      const url = new URL(ROUTE_API_BASE + path);
-      for (const [k,v] of Object.entries(params || {})) {
-        if (v === undefined || v === null || String(v).trim() === "") continue;
-        url.searchParams.set(k, v);
-      }
-
-      log(`[LOG] DELETE ${path} 요청`, "info");
-      setApiStatus(`DELETE ${path} 호출 중...`);
-
-      const res = await fetch(url.toString(), { method:"DELETE" });
-      const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setApiStatus(`DELETE 에러 ${res.status}`, true);
-        log(`[ERR] DELETE ${path} 실패: ${JSON.stringify(json)}`, "err");
-        throw new Error(`DELETE ${path} 실패`);
-      }
-
-      setApiStatus("DELETE 성공");
-      return json;
-    }
-
-    // ================== 저장된 polygon 파싱 (DB -> LatLng) ==================
-    function normalizeStoredPoint(p){
-      if (!p) return null;
-
-      if (typeof p.lat === "number" && typeof p.lng === "number") {
-        if (inWgsRange(p.lat, p.lng)) return { lat: p.lat, lng: p.lng };
-      }
-      if (Array.isArray(p) && p.length >= 2) {
-        const a0 = Number(p[0]), a1 = Number(p[1]);
-        if (!Number.isFinite(a0) || !Number.isFinite(a1)) return null;
-
-        // [lng,lat]
-        if (inWgsRange(a1,a0)) return { lat: a1, lng: a0 };
-        // [lat,lng]
-        if (inWgsRange(a0,a1)) return { lat: a0, lng: a1 };
-      }
-      return null;
-    }
-
-    function normalizePolygonWgs84ToRingsLatLng(polygon_wgs84){
-      if (!polygon_wgs84) return [];
-
-      // 단일 ring인지 멀티인지 판정
-      const isRing = Array.isArray(polygon_wgs84)
-        && polygon_wgs84.length
-        && normalizeStoredPoint(polygon_wgs84[0]);
-
-      const ringsRaw = isRing ? [polygon_wgs84] : polygon_wgs84;
-
-      const out = [];
-      for (const ring of (ringsRaw || [])) {
-        if (!Array.isArray(ring) || ring.length < 3) continue;
-        const pts = [];
-        for (const p of ring) {
-          const n = normalizeStoredPoint(p);
-          if (!n) continue;
-          pts.push(new kakao.maps.LatLng(n.lat, n.lng));
-        }
-        if (pts.length >= 3) out.push(pts);
-      }
-      return out;
-    }
-
-    // ================== 렌더링(정적 폴리곤/라벨) ==================
-    function clearStaticOverlays(){
-      for (const it of staticItems) {
-        it.polygons?.forEach(p => p.setMap(null));
-        it.labels?.forEach(l => l.setMap(null));
-      }
-      staticItems = [];
-    }
-
-    function createRouteLabels(key, ringsLatLng){
-      const labels = [];
-      if (!labelsOn) return labels;
-
-      for (const ring of ringsLatLng) {
-        if (!ring || ring.length < 3) continue;
-
-        const coords = ring.map(ll => [ll.getLng(), ll.getLat()]);
-        const p = polylabel(coords, 1e-5);
-
-        let pos;
-        if (p && Number.isFinite(p[0]) && Number.isFinite(p[1])) pos = new kakao.maps.LatLng(p[1], p[0]);
-        else {
-          const b = new kakao.maps.LatLngBounds();
-          ring.forEach(ll => b.extend(ll));
-          pos = b.getCenter();
-        }
-
-        const content = document.createElement("div");
-        content.className = "route-label";
-        content.textContent = key;
-        content.style.borderColor = colorCss(key);
-
-        const overlay = new kakao.maps.CustomOverlay({
-          position: pos,
-          content,
-          yAnchor: 0.5,
-          zIndex: 9999
-        });
-        overlay.setMap(map);
-        labels.push(overlay);
-      }
-
-      return labels;
-    }
-
-    function hideStaticForKey(key){
-      const it = staticItems.find(x => x.key === key);
-      if (!it) return;
-      it.polygons?.forEach(p => p.setMap(null));
-      it.labels?.forEach(l => l.setMap(null));
-      it.labels = [];
-    }
-
-    function restoreStaticForKey(key){
-      const it = staticItems.find(x => x.key === key);
-      if (!it) return;
-      it.polygons?.forEach(p => p.setMap(map));
-      it.labels?.forEach(l => l.setMap(null));
-      it.labels = labelsOn ? createRouteLabels(it.key, it.ringsLatLng) : [];
-    }
-
-    function renderStaticItems(items){
-      clearStaticOverlays();
-
-      const keysSorted = items.map(it => it.key).slice().sort((a,b)=>a.localeCompare(b));
-      rebuildColorMap(keysSorted);
-
-      const bounds = new kakao.maps.LatLngBounds();
-      let hasAny = false;
-
-      for (const item of items) {
-        const color = colorCss(item.key);
-
-        const polys = [];
-        for (const ring of item.ringsLatLng) {
-          const poly = new kakao.maps.Polygon({
-            map,
-            path: ring,
-            strokeWeight: 2,
-            strokeColor: color,
-            strokeOpacity: 0.92,
-            strokeStyle: "solid",
-            fillColor: color,
-            fillOpacity: 0.22,
-            draggable: false,
-            editable: false
-          });
-
-          kakao.maps.event.addListener(poly, "click", () => setEditTarget(item.key));
-          polys.push(poly);
-
-          ring.forEach(ll => { bounds.extend(ll); hasAny = true; });
-        }
-
-        const labels = labelsOn ? createRouteLabels(item.key, item.ringsLatLng) : [];
-
-        staticItems.push({
-          key: item.key,
-          row: item.row,
-          ringsLatLng: item.ringsLatLng,
-          polygons: polys,
-          labels
-        });
-      }
-
-      if (hasAny) map.setBounds(bounds);
-    }
-
-    function setLabelsVisible(on){
-      labelsOn = on;
-      labelBtn.textContent = labelsOn ? "라우트 라벨 ON" : "라우트 라벨 OFF";
-
-      for (const it of staticItems) {
-        it.labels?.forEach(l => l.setMap(null));
-        it.labels = [];
-        if (labelsOn) it.labels = createRouteLabels(it.key, it.ringsLatLng);
-      }
-    }
-
-    // ================== 편집 대상 전환 ==================
-    function setEditTarget(key){
-      const found = staticItems.find(it => it.key === key);
-      if (!found) {
-        log(`[WARN] 편집 대상 전환 실패: ${key} not found`, "warn");
-        return;
-      }
-
-      if (editTargetKey && editTargetKey !== key) {
-        restoreStaticForKey(editTargetKey);
-      }
-
-      editTargetKey = key;
-      editTargetRow = found.row || null;
-      routeInput.value = key;
-      routeEditInput.value = key;
-
-      try {
-        putEditableRingsLatLng(found.ringsLatLng);
-        hideStaticForKey(key);
-
-        log(`[LOG] ✅ 편집 대상: ${key} (초록 폴리곤 - 점 드래그/삭제 가능)`, "info");
-        setOverlayText(`편집 대상: ${key} (초록 - 점 드래그로 수정)`);
-      } catch (e) {
-        restoreStaticForKey(key);
-        log(`[ERR] 편집 전환 실패: ${String(e?.message || e)}`, "err");
-        alert("편집 전환 실패: drawingManager.put 오류. (로그 확인)");
-      }
-    }
-
-    // ================== 불러오기 ==================
-    async function loadAndShow(){
-      const camp = campInput.value.trim();
-      const code = routeInput.value.trim();
-
-      if (!camp) {
-        alert("캠프 이름은 필수입니다.");
-        return;
-      }
-
-      if (editTargetKey) restoreStaticForKey(editTargetKey);
-      editTargetKey = null;
-      editTargetRow = null;
-      clearEditablePolygons();
-
-      try {
-        const data = await apiGet("/route", { camp, code: code || "", mode: "prefix" });
-        const rows = Array.isArray(data?.rows) ? data.rows : [];
-
-        if (!rows.length) {
-          clearStaticOverlays();
-          log("[WARN] GET 결과 없음", "warn");
-          alert("일치하는 라우트가 없습니다.");
-          return;
-        }
-
-        const items = [];
-        for (const row of rows) {
-          const key = String(row?.full_code || row?.code || "").trim();
-          if (!key) continue;
-
-          const ringsLatLng = normalizePolygonWgs84ToRingsLatLng(row?.polygon_wgs84);
-          if (!ringsLatLng.length) continue;
-
-          items.push({ key, row, ringsLatLng });
-        }
-
-        if (!items.length) {
-          clearStaticOverlays();
-          log("[WARN] 표시 가능한 polygon_wgs84 row가 없습니다.", "warn");
-          alert("표시 가능한 폴리곤 데이터가 없습니다.");
-          return;
-        }
-
-        // key 기준 중복 제거
-        const uniq = new Map();
-        for (const it of items) if (!uniq.has(it.key)) uniq.set(it.key, it);
-
-        const list = [...uniq.values()].sort((a,b) => a.key.localeCompare(b.key));
-        renderStaticItems(list);
-
-        setOverlayText(`불러오기 완료. 표시 ${list.length}개`);
-        log(`[LOG] ✅ 불러오기 완료. 표시 ${list.length}개`, "info");
-      } catch (e) {
-        alert("라우트 조회 중 오류가 발생했습니다.");
-      }
-    }
-
-    // ================== 저장 ==================
-    function computeCenterFromRings(rings){
-      const pts = [];
-      for (const r of rings) for (const p of r) pts.push(p);
-      if (!pts.length) return null;
-
-      let sumLat = 0, sumLng = 0;
-      for (const p of pts) { sumLat += p.lat; sumLng += p.lng; }
-      return { lat: sumLat/pts.length, lng: sumLng/pts.length };
-    }
-
-    function buildPolygonPayloadFromRings(rings){
-      if (!rings || !rings.length) return null;
-      return (rings.length === 1) ? rings[0] : rings;
-    }
-
-    async function saveCurrent(){
-      const camp = campInput.value.trim();
-      const code = routeInput.value.trim();
-
-      if (!camp || !code) {
-        alert("캠프 이름과 라우트 코드를 모두 입력해주세요.");
-        return;
-      }
-
-      // 보호: raw는 있는데 rings=0이면 “삭제 저장”을 하지 않는다.
-      const meta = getEditableRingsWgs84({ returnMeta: true });
-      const rings = meta.rings;
-
-      if (meta.rawCount > 0 && rings.length === 0) {
-        alert("폴리곤 좌표 추출이 실패했습니다. (raw는 있는데 rings=0)\n이 상태에서 저장하면 삭제로 들어가니 저장을 중단합니다.\n로그의 DEBUG를 확인하세요.");
-        return;
-      }
-
-      // 편집 상태에서 폴리곤이 없으면 삭제 저장
-      if (!rings.length) {
-        try {
-          await apiPost("/route", { camp, code, polygon_wgs84: null, center_wgs84: null });
-          alert("삭제(폴리곤 null) 저장 완료");
-          await loadAndShow();
-        } catch {
-          alert("삭제 저장 실패 (로그 확인)");
-        }
-        return;
-      }
-
-      const center = computeCenterFromRings(rings);
-      const polygonPayload = buildPolygonPayloadFromRings(rings);
-
-      try {
-        await apiPost("/route", { camp, code, polygon_wgs84: polygonPayload, center_wgs84: center });
-        alert("저장 완료");
-        await loadAndShow();
-      } catch {
-        alert("저장 중 오류가 발생했습니다.");
-      }
-    }
-
-    // ================== 지도 정렬(OSM) ==================
-    function computeBboxFromRings(rings){
-      let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
-      for (const ring of rings) for (const p of ring) {
-        minLat=Math.min(minLat,p.lat); maxLat=Math.max(maxLat,p.lat);
-        minLng=Math.min(minLng,p.lng); maxLng=Math.max(maxLng,p.lng);
-      }
-      return [minLng,minLat,maxLng,maxLat];
-    }
-
-    function ensureClosedCoords(coords){
-      if (!coords || coords.length < 3) return coords || [];
-      const first = coords[0];
-      const last  = coords[coords.length-1];
-      if (first[0] !== last[0] || first[1] !== last[1]) coords = coords.concat([first]);
-      return coords;
-    }
-
-    function removeConsecutiveNearDuplicates(coords, tolDeg=1e-7){
-      if (!coords || coords.length < 2) return coords || [];
-      const out = [coords[0]];
-      for (let i=1;i<coords.length;i++){
-        const prev = out[out.length-1];
-        const cur  = coords[i];
-        const d = Math.abs(prev[0]-cur[0]) + Math.abs(prev[1]-cur[1]);
-        if (d < tolDeg) continue;
-        out.push(cur);
-      }
-      return out;
-    }
-
-    function densifyClosedRing(coordsClosed, stepMeters){
-      if (!window.turf || !coordsClosed || coordsClosed.length < 4) return coordsClosed || [];
-      const stepKm = stepMeters / 1000;
-      const out = [];
-      for (let i=0;i<coordsClosed.length-1;i++){
-        const a = coordsClosed[i];
-        const b = coordsClosed[i+1];
-        out.push(a);
-
-        let segLen = 0;
-        try { segLen = turf.length(turf.lineString([a,b]), {units:"kilometers"}); } catch {}
-        const n = Math.floor(segLen / stepKm);
-        if (n > 1) {
-          for (let j=1;j<n;j++){
-            const dist = j * stepKm;
-            try {
-              const p = turf.along(turf.lineString([a,b]), dist, {units:"kilometers"}).geometry.coordinates;
-              out.push(p);
-            } catch {}
-          }
-        }
-      }
-      out.push(coordsClosed[coordsClosed.length-1]);
-      return out;
-    }
-
-    function buildRoadMulti(osm){
-      const roadsRaw = (osm.roads || []).slice(0, ALIGN.MAX_ROADS);
-      if (!window.turf || !roadsRaw.length) return null;
-      try {
-        const lines = roadsRaw.map(r => r?.coords).filter(c => Array.isArray(c) && c.length >= 2);
-        if (!lines.length) return null;
-        return turf.multiLineString(lines);
-      } catch { return null; }
-    }
-
-    function buildBuildingFeatures(osm){
-      const buildingsRaw = (osm.buildings || []).slice(0, ALIGN.MAX_BUILDINGS);
-      const out = [];
-      if (!window.turf || !buildingsRaw.length) return out;
-
-      for (const b of buildingsRaw) {
-        const c = b?.coords;
-        if (!Array.isArray(c) || c.length < 4) continue;
-        const first = c[0];
-        const last = c[c.length - 1];
-        const ring = (first[0]===last[0] && first[1]===last[1]) ? c : c.concat([first]);
-        if (ring.length >= 4) {
-          try { out.push(turf.polygon([ring])); } catch {}
-        }
-      }
-      return out;
-    }
-
-    function snapCoordsToRoad(coords, roadMulti){
-      if (!window.turf || !roadMulti || !coords || !coords.length) return coords || [];
-      const out = [];
-      for (const c of coords) {
-        let snapped = c;
-        try {
-          const np = turf.nearestPointOnLine(roadMulti, turf.point(c), {units:"kilometers"});
-          const distM = (np?.properties?.dist ?? Infinity) * 1000;
-          if (distM <= ALIGN.ROAD_SNAP_METERS) snapped = np.geometry.coordinates;
-        } catch {}
-        out.push(snapped);
-      }
-      return out;
-    }
-
-    function extractOuterRingsFromFeature(feat){
-      const g = feat?.type === "Feature" ? feat.geometry : feat;
-      const rings = [];
-      if (!g) return rings;
-      if (g.type === "Polygon") {
-        if (g.coordinates?.[0]?.length >= 4) rings.push(g.coordinates[0]);
-      } else if (g.type === "MultiPolygon") {
-        for (const poly of g.coordinates || []) if (poly?.[0]?.length >= 4) rings.push(poly[0]);
-      }
-      return rings;
-    }
-
-    function coordsRingToWgsPoints(ringCoords){
-      let coords = ringCoords;
-      if (coords.length >= 2) {
-        const f = coords[0], l = coords[coords.length-1];
-        if (f[0] === l[0] && f[1] === l[1]) coords = coords.slice(0,-1);
-      }
-      const pts = coords.map(c => ({ lat: round6(c[1]), lng: round6(c[0]) }))
-        .filter(p => inWgsRange(p.lat, p.lng));
-      return (pts.length >= 3) ? pts : null;
-    }
-
-    function includeBuildings(routeFeat, buildings){
-      if (!window.turf || !routeFeat || !buildings?.length) return routeFeat;
-      let merged = routeFeat;
-      let included = 0;
-
-      for (const b of buildings) {
-        let inter = null;
-        try {
-          if (!turf.booleanIntersects(routeFeat, b)) continue;
-          inter = turf.intersect(routeFeat, b);
-        } catch { inter = null; }
-        if (!inter) continue;
-
-        let bArea = 0, iArea = 0;
-        try { bArea = turf.area(b); } catch {}
-        try { iArea = turf.area(inter); } catch {}
-        if (!bArea) continue;
-
-        const ratio = iArea / bArea;
-        if (ratio >= ALIGN.BUILDING_RATIO) {
-          try {
-            const u = turf.union(merged, b);
-            if (u) merged = u;
-            included++;
-          } catch {}
-        }
-      }
-
-      if (included) log(`[LOG] 정렬: 건물 포함 ${included}개(>=${Math.round(ALIGN.BUILDING_RATIO*100)}%)`, "info");
-      return merged;
-    }
-
-    function alignOneRingWithOsm(ringWgs, roadMulti, buildingFeatures){
-      if (!window.turf) return [ringWgs];
-
-      let coords = ringWgs.map(p => [p.lng, p.lat]);
-      coords = removeConsecutiveNearDuplicates(coords);
-      coords = ensureClosedCoords(coords);
-
-      coords = densifyClosedRing(coords, ALIGN.DENSIFY_STEP_METERS);
-      coords = snapCoordsToRoad(coords, roadMulti);
-
-      coords = removeConsecutiveNearDuplicates(coords);
-      coords = ensureClosedCoords(coords);
-
-      let poly;
-      try { poly = turf.polygon([coords]); } catch { return [ringWgs]; }
-
-      try { poly = turf.cleanCoords(poly); } catch {}
-      try { poly = turf.simplify(poly, {tolerance: ALIGN.SIMPLIFY_TOLERANCE_DEG, highQuality:true}); } catch {}
-
-      let parts = [poly];
-      try {
-        const unk = turf.unkinkPolygon(poly);
-        if (unk?.features?.length) parts = unk.features;
-      } catch {}
-
-      const outRings = [];
-      for (const part of parts) {
-        let merged = includeBuildings(part, buildingFeatures);
-
-        try { merged = turf.cleanCoords(merged); } catch {}
-        try { merged = turf.simplify(merged, {tolerance: ALIGN.SIMPLIFY_TOLERANCE_DEG, highQuality:true}); } catch {}
-
-        const ringsCoords = extractOuterRingsFromFeature(merged);
-        for (const rc of ringsCoords) {
-          const pts = coordsRingToWgsPoints(rc);
-          if (pts) outRings.push(pts);
-        }
-      }
-
-      return outRings.length ? outRings : [ringWgs];
-    }
-
-    async function alignTargetsAndSave(targets, camp){
-      let allRings = [];
-      for (const t of targets) allRings = allRings.concat(t.ringsWgs84);
-
-      if (!allRings.length) {
-        alert("정렬할 폴리곤이 없습니다.");
-        return;
-      }
-
-      let bbox = computeBboxFromRings(allRings);
-      bbox = [
-        bbox[0] - ALIGN.OSM_MARGIN_DEG,
-        bbox[1] - ALIGN.OSM_MARGIN_DEG,
-        bbox[2] + ALIGN.OSM_MARGIN_DEG,
-        bbox[3] + ALIGN.OSM_MARGIN_DEG
-      ];
-
-      const osm = await apiGet("/osm", { bbox: bbox.join(",") });
-      const roadMulti = buildRoadMulti(osm);
-      const buildingFeatures = buildBuildingFeatures(osm);
-
-      for (const t of targets) {
-        log(`[LOG] 정렬 시작: ${t.key}`, "info");
-
-        const aligned = [];
-        for (const ring of t.ringsWgs84) {
-          const out = alignOneRingWithOsm(ring, roadMulti, buildingFeatures);
-          aligned.push(...out);
-        }
-
-        if (!aligned.length) {
-          log(`[WARN] 정렬 결과 없음: ${t.key} (스킵)`, "warn");
-          continue;
-        }
-
-        const center = computeCenterFromRings(aligned);
-        const polygonPayload = buildPolygonPayloadFromRings(aligned);
-
-        await apiPost("/route", { camp, code: t.key, polygon_wgs84: polygonPayload, center_wgs84: center });
-
-        log(`[LOG] ✅ 정렬 저장 완료: ${t.key} (구역 ${aligned.length}개)`, "info");
-      }
-    }
-
-    async function alignButtonHandler(){
-      const camp = campInput.value.trim();
-      const codePrefix = routeInput.value.trim();
-
-      if (!camp) {
-        alert("캠프 이름은 필수입니다.");
-        return;
-      }
-
-      const meta = getEditableRingsWgs84({ returnMeta: true });
-      if (meta.rawCount > 0 && meta.rings.length === 0) {
-        alert("편집 폴리곤 좌표 추출 실패 상태입니다(rings=0). 정렬을 중단합니다.");
-        return;
-      }
-
-      // 편집중이면 편집대상만 정렬
-      if (meta.rings.length && editTargetKey) {
-        await alignTargetsAndSave([{ key: editTargetKey, ringsWgs84: meta.rings }], camp);
-        await loadAndShow();
-        return;
-      }
-
-      // 통노선 정렬(표시된 것)
-      const targets = [];
-      for (const it of staticItems) {
-        if (codePrefix && !it.key.startsWith(codePrefix)) continue;
-        const ringsWgs84 = it.ringsLatLng.map(r => r.map(ll => ({ lat: ll.getLat(), lng: ll.getLng() })));
-        if (!ringsWgs84.length) continue;
-        targets.push({ key: it.key, ringsWgs84 });
-      }
-
-      if (!targets.length) {
-        alert("정렬할 대상이 없습니다. (표시된 노선이 없거나 prefix가 잘못됨)");
-        return;
-      }
-
-      await alignTargetsAndSave(targets, camp);
-      await loadAndShow();
-    }
-
-    // ================== 주소 검색 ==================
-    searchAddressBtn.addEventListener("click", () => {
-      new daum.Postcode({
-        oncomplete: (d) => {
-          const address = d.roadAddress || d.jibunAddress || d.address;
-          log(`[LOG] 📍 주소 검색: ${address}`, "info");
-
-          const geocoder = new kakao.maps.services.Geocoder();
-          geocoder.addressSearch(address, (result, status) => {
-            if (status === kakao.maps.services.Status.OK) {
-              const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
-
-              map.setCenter(coords);
-              map.setLevel(3);
-
-              const marker = new kakao.maps.Marker({ map, position: coords });
-              setTimeout(() => marker.setMap(null), 3000);
-
-              setOverlayText(`📍 ${address.substring(0, 40)}...`);
-              log(`[LOG] ✅ 위치 이동 완료`, "info");
-
-              const code = routeInput.value.trim();
-              if (code) {
-                try { drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
-                alert(`📍 주소 위치로 이동했습니다.\n이제 배달 구역을 그려주세요!`);
-              } else {
-                alert(`📍 주소 위치로 이동했습니다.\n먼저 라우트 코드를 입력한 후 그려주세요.`);
-              }
-            } else {
-              alert("❌ 주소를 찾을 수 없습니다.");
-            }
-          });
-        }
-      }).open();
-    });
-
-    // ================== DB 수정 (Worker /admin + DELETE /route) ==================
-    async function updateSelectedCamp(){
-      const newCamp = campEditInput.value.trim();
-      if (!newCamp) return alert("변경할 캠프명을 입력하세요.");
-      if (!editTargetRow?.id) return alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
-
-      await apiPost("/admin", { action:"updateCampSelected", id: editTargetRow.id, new_camp: newCamp });
-      alert("선택 노선 camp 수정 완료");
-      campInput.value = newCamp;
-      await loadAndShow();
-    }
-
-    async function moveCampAll(){
-      const from = campInput.value.trim();
-      const to = campEditInput.value.trim();
-      if (!from || !to) return alert("from(campInput) / to(campEditInput) 둘 다 필요합니다.");
-      if (from === to) return alert("from/to가 동일합니다.");
-
-      const res = await apiPost("/admin", { action:"moveCampAll", from_camp: from, to_camp: to });
-      alert(`camp 전체 이관 완료: updated=${res.updated ?? 0}, failed=${res.failed ?? 0}`);
-      campInput.value = to;
-      await loadAndShow();
-    }
-
-    async function renameSelectedRouteCode(){
-      const newCode = routeEditInput.value.trim();
-      if (!newCode) return alert("변경할 라우트 코드를 입력하세요.");
-      if (!editTargetRow?.id) return alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
-
-      await apiPost("/admin", { action:"renameCodeSelected", id: editTargetRow.id, new_code: newCode });
-      alert("선택 노선 코드 수정 완료");
-      routeInput.value = newCode;
-      await loadAndShow();
-    }
-
-    async function deleteSelectedRouteRow(){
-      if (!editTargetRow?.id) return alert("먼저 지도에서 해당 노선을 클릭해 편집 대상으로 전환하세요.");
-      if (!confirm("정말 DB에서 이 노선을 삭제하시겠습니까? (되돌릴 수 없음)")) return;
-
-      await apiDelete("/route", { id: String(editTargetRow.id) });
-      alert("✅ 선택 노선 DB 삭제 완료");
-
-      editTargetKey = null;
-      editTargetRow = null;
-      clearEditablePolygons();
-      await loadAndShow();
-    }
-
-    // ================== 버튼 바인딩 ==================
-    loadBtn.addEventListener("click", loadAndShow);
-
-    drawBtn.addEventListener("click", () => {
-      if (!routeInput.value.trim()) {
-        alert("새로 그리기는 라우트 코드를 입력하세요.");
-        return;
-      }
-
-      if (editTargetKey) restoreStaticForKey(editTargetKey);
-      editTargetKey = routeInput.value.trim();
-      editTargetRow = null;
-
-      clearEditablePolygons();
-      try { drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
-
-      log("[LOG] 새로 그리기: 다각형 모드 진입. 지도를 클릭해서 영역을 그리세요.", "info");
-      setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
-    });
-
-    addBtn.addEventListener("click", () => {
-      if (!routeInput.value.trim()) {
-        alert("구역 추가는 라우트 코드를 입력하세요.");
-        return;
-      }
-      try { drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
-      log("[LOG] 구역 추가: 기존 편집 폴리곤 유지 + 새 다각형을 추가로 그리세요.", "info");
-      setOverlayText("구역 추가 모드: 새 구역을 그리세요.");
-    });
-
-    saveBtn.addEventListener("click", () => saveCurrent().catch(e => { console.error(e); alert("저장 오류"); }));
-    alignBtn.addEventListener("click", () => alignButtonHandler().catch(e => { console.error(e); alert("정렬 중 오류"); }));
-
-    labelBtn.addEventListener("click", () => {
-      setLabelsVisible(!labelsOn);
-      log(labelsOn ? "[LOG] 라우트 라벨 ON" : "[LOG] 라우트 라벨 OFF", "info");
-    });
-
-    resetBtn.addEventListener("click", () => {
-      if (editTargetKey) restoreStaticForKey(editTargetKey);
-      editTargetKey = null;
-      editTargetRow = null;
-
-      clearEditablePolygons();
-      clearStaticOverlays();
-
-      setOverlayText("지도 초기화 완료. 새로 그리기 또는 불러오기 가능.");
-      log("[LOG] 지도 초기화 완료.", "info");
-    });
-
-    campUpdateSelectedBtn.addEventListener("click", () => updateSelectedCamp().catch(e => { console.error(e); alert("camp 수정 실패"); }));
-    campRenameAllBtn.addEventListener("click", () => moveCampAll().catch(e => { console.error(e); alert("camp 이관 실패"); }));
-
-    routeRenameBtn.addEventListener("click", () => renameSelectedRouteCode().catch(e => { console.error(e); alert("코드 수정 실패"); }));
-    routeDeleteRowBtn.addEventListener("click", () => deleteSelectedRouteRow().catch(e => { console.error(e); alert("DB 삭제 실패"); }));
-
-    // ================== 초기 실행 ==================
-    kakao.maps.load(initMap);
-  </script>
-</body>
-</html>

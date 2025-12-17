@@ -57,7 +57,8 @@
       min-height:0;
     }
     #roadview{display:none}
-    #mapWrap.roadview-on #roadview{display:block}
+    /* 로드뷰 "길 선택" 모드에서는 지도를 그대로 두고, 실제 로드뷰는 선택 후에만 표시 */
+    #mapWrap.roadview-open #roadview{display:block}
 
     .map-controls{
       position:absolute;
@@ -159,7 +160,7 @@
       #mapWrap{
         min-height:60vh;
       }
-      #mapWrap.roadview-on{
+      #mapWrap.roadview-open{
         flex-direction:column;
       }
     }
@@ -213,7 +214,7 @@
       <div class="map-controls">
         <button id="toggleMapType" title="일반/위성 전환">위성</button>
         <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
-        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 지도에서 위치 클릭</span>
+        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 파란 길(ROADVIEW) 클릭</span>
       </div>
     </div>
   </div>
@@ -226,7 +227,8 @@
       labels: new Map(),      // zipcode -> [CustomOverlay, ...]
       selectedZips: new Set(),
       isSatellite: false,
-      roadviewOn: false,
+      roadviewOn: false,       // 로드뷰 모드(길 선택 포함) on/off
+      roadviewOpen: false,     // 실제 로드뷰 화면 open 여부
       roadview: null,
       roadviewClient: null,
       roadviewClickHandler: null,
@@ -329,6 +331,17 @@
       state.roadviewClient = new kakao.maps.RoadviewClient();
     }
 
+    function setRoadviewOverlay(on) {
+      if (!state.map) return;
+      // ROADVIEW 오버레이(파란 길) 표시/해제
+      try {
+        if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+        else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+      } catch (e) {
+        console.warn("ROADVIEW 오버레이 토글 실패", e);
+      }
+    }
+
     function setRoadviewAt(latlng) {
       ensureRoadview();
       if (!state.roadviewClient || !state.roadview) return;
@@ -344,6 +357,15 @@
             alert("이 위치 근처에는 로드뷰가 없습니다.");
             return;
           }
+          // pano가 잡히면 그때 로드뷰 화면을 열어준다 (카카오처럼 '길 선택 → 진입')
+          state.roadviewOpen = true;
+          const wrap = $("#mapWrap");
+          if (wrap) wrap.classList.add("roadview-open");
+          // display:none → block 전환 후 레이아웃 갱신
+          if (state.roadview && typeof state.roadview.relayout === "function") {
+            setTimeout(() => state.roadview.relayout(), 0);
+          }
+
           state.roadview.setPanoId(panoId, latlng);
         });
       };
@@ -352,11 +374,17 @@
 
     function setRoadviewOn(on) {
       state.roadviewOn = !!on;
+      if (!state.roadviewOn) state.roadviewOpen = false;
       const wrap = $("#mapWrap");
       const hint = $("#roadviewHint");
       const btn = $("#toggleRoadview");
 
-      if (wrap) wrap.classList.toggle("roadview-on", state.roadviewOn);
+      if (wrap) {
+        wrap.classList.toggle("roadview-on", state.roadviewOn);
+        // off일 때는 로드뷰 화면도 강제로 닫기
+        if (!state.roadviewOn) wrap.classList.remove("roadview-open");
+        // on일 때는 아직 '선택' 단계이므로 roadview-open은 setRoadviewAt에서만 켠다
+      }
       if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
       if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
 
@@ -367,10 +395,8 @@
         state.map.setCenter(c);
       }
       if (state.roadviewOn) {
-        ensureRoadview();
-        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
-        // 기본: 현재 지도 중심으로 로드뷰 띄움
-        if (state.map) setRoadviewAt(state.map.getCenter());
+        // 카카오처럼: 먼저 '길 선택' 모드(ROADVIEW 오버레이)만 켜고, 선택 시에만 로드뷰를 연다
+        setRoadviewOverlay(true);
 
         // 지도 클릭 시 로드뷰 이동
         if (!state.roadviewClickHandler && state.map) {
@@ -381,11 +407,18 @@
           kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
         }
       } else {
+        setRoadviewOverlay(false);
         // 클릭 핸들러 제거
         if (state.roadviewClickHandler && state.map) {
           kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
         }
         state.roadviewClickHandler = null;
+      }
+
+      // roadview-open 상태에서만 relayout
+      if (state.roadviewOn && state.roadviewOpen) {
+        ensureRoadview();
+        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
       }
     }
 

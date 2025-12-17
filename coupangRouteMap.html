@@ -360,39 +360,51 @@
     function isFiniteNum(n) { return typeof n === "number" && isFinite(n); }
 
     function normalizePoint(p) {
-      if (!p) return null;
+      if (!p) {
+        console.log("[DEBUG normalizePoint] p is null/undefined");
+        return null;
+      }
+
+      console.log("[DEBUG normalizePoint] p:", p, "type:", typeof p, "constructor:", p.constructor?.name);
+
+      // kakao.maps.LatLng - 가장 먼저 체크!
+      if (typeof p.getLat === "function" && typeof p.getLng === "function") {
+        const result = { lat: p.getLat(), lng: p.getLng() };
+        console.log("[DEBUG normalizePoint] LatLng:", result);
+        return result;
+      }
 
       // {lat,lng}
-      if (isFiniteNum(p.lat) && isFiniteNum(p.lng)) return { lat: p.lat, lng: p.lng };
+      if (isFiniteNum(p.lat) && isFiniteNum(p.lng)) {
+        console.log("[DEBUG normalizePoint] {lat,lng}:", p);
+        return { lat: p.lat, lng: p.lng };
+      }
+      
       // {latitude,longitude}
-      if (isFiniteNum(p.latitude) && isFiniteNum(p.longitude)) return { lat: p.latitude, lng: p.longitude };
+      if (isFiniteNum(p.latitude) && isFiniteNum(p.longitude)) {
+        console.log("[DEBUG normalizePoint] {latitude,longitude}");
+        return { lat: p.latitude, lng: p.longitude };
+      }
 
       // [a,b] : [lng,lat] 또는 [lat,lng]
       if (Array.isArray(p) && p.length >= 2) {
         const a = Number(p[0]), b = Number(p[1]);
         if (!isFinite(a) || !isFinite(b)) return null;
 
-        // 한국 범위 힌트로 판정
-        // 보통 저장이 [lng,lat]인 케이스가 많음
-        const cand1 = { lng: a, lat: b }; // [lng,lat]
-        const cand2 = { lng: b, lat: a }; // [lat,lng] 뒤집기
+        const cand1 = { lng: a, lat: b };
+        const cand2 = { lng: b, lat: a };
         const inKR = (pt) => pt.lat >= 30 && pt.lat <= 45 && pt.lng >= 120 && pt.lng <= 135;
 
         if (inKR(cand1)) return { lat: cand1.lat, lng: cand1.lng };
         if (inKR(cand2)) return { lat: cand2.lat, lng: cand2.lng };
 
-        // 범위가 애매하면 일반 규칙 적용
         if (Math.abs(a) <= 180 && Math.abs(b) <= 90) return { lat: b, lng: a };
         if (Math.abs(a) <= 90 && Math.abs(b) <= 180) return { lat: a, lng: b };
 
         return null;
       }
 
-      // kakao.maps.LatLng
-      if (typeof p.getLat === "function" && typeof p.getLng === "function") {
-        return { lat: p.getLat(), lng: p.getLng() };
-      }
-
+      console.log("[DEBUG normalizePoint] 인식 실패! p:", p);
       return null;
     }
 

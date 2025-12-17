@@ -70,6 +70,33 @@
       cursor:pointer
     }
     button:hover{border-color:#3a4561}
+    button.danger{
+      background:#2a1416;
+      border-color:#7f1d1d;
+      color:#fecaca
+    }
+    button.danger:hover{
+      border-color:#ef4444
+    }
+
+    .zip-label{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:4px 10px;
+      border-radius:999px;
+      font-weight:800;
+      font-size:12px;
+      letter-spacing:0.2px;
+      color:#0b1220;
+      background:rgba(255,255,255,0.92);
+      border:2px solid rgba(15,23,42,0.28);
+      box-shadow:0 2px 10px rgba(0,0,0,0.22);
+      user-select:none;
+      pointer-events:none;
+      transform:translateY(-2px);
+      white-space:nowrap;
+    }
 
     .row{display:flex;gap:8px;flex-wrap:wrap}
     .muted{color:#8b95a7;font-size:12px}
@@ -134,8 +161,8 @@
 
       <div class="row" style="margin-top:8px">
         <button id="addBtn">추가</button>
-        <button id="clearBtn">초기화</button>
         <button id="searchBtn">지도표시</button>
+        <button id="clearBtn" class="danger">초기화</button>
       </div>
 
       <div class="list" id="zipList"></div>
@@ -155,6 +182,7 @@
     const state = {
       map: null,
       polygons: new Map(),    // zipcode -> [Polygon, ...]
+      labels: new Map(),      // zipcode -> [CustomOverlay, ...]
       selectedZips: new Set(),
       colors: [
         "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
@@ -253,14 +281,19 @@
         fitBoundsAll();
       };
 
-      $("#fitBtn").onclick = fitBoundsAll;
+      // (옵션) 버튼이 있는 경우에만 바인딩
+      const fitBtn = $("#fitBtn");
+      if (fitBtn) fitBtn.onclick = fitBoundsAll;
 
-      $("#shareBtn").onclick = async () => {
-        const u = new URL(location.href);
-        u.searchParams.set("zips", [...state.selectedZips].join(","));
-        await navigator.clipboard.writeText(u.toString());
-        alert("공유 링크 복사됨");
-      };
+      const shareBtn = $("#shareBtn");
+      if (shareBtn) {
+        shareBtn.onclick = async () => {
+          const u = new URL(location.href);
+          u.searchParams.set("zips", [...state.selectedZips].join(","));
+          await navigator.clipboard.writeText(u.toString());
+          alert("공유 링크 복사됨");
+        };
+      }
 
       $("#openAddr").onclick = () => {
         new daum.Postcode({
@@ -309,12 +342,88 @@
         arr.forEach((p) => p.setMap(null));
       }
       state.polygons.clear();
+
+      for (const arr of state.labels.values()) {
+        arr.forEach((l) => l.setMap(null));
+      }
+      state.labels.clear();
     }
 
     function removePolygon(zip) {
       if (!state.polygons.has(zip)) return;
       state.polygons.get(zip).forEach((p) => p.setMap(null));
       state.polygons.delete(zip);
+
+      if (state.labels.has(zip)) {
+        state.labels.get(zip).forEach((l) => l.setMap(null));
+        state.labels.delete(zip);
+      }
+    }
+
+    // ------- 라벨(우편번호) 위치 계산 ------- //
+    function centroidOfLatLngRing(latlngs) {
+      if (!latlngs || latlngs.length < 3) return null;
+
+      // 평면 근사: x=lng, y=lat
+      const pts = latlngs.map((ll) => [ll.getLng(), ll.getLat()]);
+      const f = pts[0];
+      const l = pts[pts.length - 1];
+      if (f[0] !== l[0] || f[1] !== l[1]) pts.push(f);
+
+      let area2 = 0;
+      let cx6 = 0;
+      let cy6 = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const x0 = pts[i][0], y0 = pts[i][1];
+        const x1 = pts[i + 1][0], y1 = pts[i + 1][1];
+        const f2 = x0 * y1 - x1 * y0;
+        area2 += f2;
+        cx6 += (x0 + x1) * f2;
+        cy6 += (y0 + y1) * f2;
+      }
+
+      if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
+      const cx = cx6 / (3 * area2);
+      const cy = cy6 / (3 * area2);
+      if (!isFinite(cx) || !isFinite(cy)) return null;
+      return new kakao.maps.LatLng(cy, cx);
+    }
+
+    function boundsCenterOfLatLngs(latlngs) {
+      if (!latlngs || !latlngs.length) return null;
+      const b = new kakao.maps.LatLngBounds();
+      latlngs.forEach((ll) => b.extend(ll));
+      return b.getCenter();
+    }
+
+    function createZipLabelOverlay(zip, color, pos) {
+      const el = document.createElement("div");
+      el.className = "zip-label";
+      el.textContent = zip;
+      el.style.borderColor = color;
+
+      return new kakao.maps.CustomOverlay({
+        position: pos,
+        content: el,
+        yAnchor: 0.5,
+        zIndex: 9999
+      });
+    }
+
+    function addZipLabelsForPolygons(zip, polys, color) {
+      const overlays = [];
+      for (const poly of polys) {
+        const latlngs = collectLatLngsFromPath(poly.getPath());
+        if (latlngs.length < 3) continue;
+
+        const center = centroidOfLatLngRing(latlngs) || boundsCenterOfLatLngs(latlngs);
+        if (!center) continue;
+
+        const ov = createZipLabelOverlay(zip, color, center);
+        ov.setMap(state.map);
+        overlays.push(ov);
+      }
+      if (overlays.length) state.labels.set(zip, overlays);
     }
 
     // zip API -> Polygon 생성
@@ -405,6 +514,7 @@
           }
 
           state.polygons.set(zip, polys);
+          addZipLabelsForPolygons(zip, polys, color);
         } catch (e) {
           console.error("[ZIP] 로드 실패", zip, e);
           notFound.push(zip);

@@ -323,25 +323,42 @@
 
         // points 추출 - Drawing Manager용 특별 처리
         const path = overlay.getPath();
+        console.log("🔍 [DRAWEND] path:", path);
+        console.log("🔍 [DRAWEND] isArray?", Array.isArray(path));
+        
         const pts = [];
         
-        // MVCArray 또는 일반 배열 모두 처리
+        // MVCArray 처리
         if (path && typeof path.getLength === "function") {
-          // MVCArray
+          console.log("🔍 [DRAWEND] MVCArray, length:", path.getLength());
           for (let i = 0; i < path.getLength(); i++) {
             const ll = path.getAt(i);
             if (ll && typeof ll.getLat === "function" && typeof ll.getLng === "function") {
               pts.push({ lat: ll.getLat(), lng: ll.getLng() });
             }
           }
-        } else if (Array.isArray(path)) {
-          // 일반 배열
-          path.forEach(ll => {
+        } 
+        // 일반 배열 처리
+        else if (Array.isArray(path)) {
+          console.log("🔍 [DRAWEND] 일반 배열, length:", path.length);
+          path.forEach((ll, idx) => {
+            console.log(`🔍 [DRAWEND] point[${idx}]:`, ll, "type:", typeof ll);
+            
+            // 여러 방법 시도
             if (ll && typeof ll.getLat === "function" && typeof ll.getLng === "function") {
+              console.log("✅ getLat/getLng 있음!");
               pts.push({ lat: ll.getLat(), lng: ll.getLng() });
+            } else {
+              // normalizePoint 시도
+              console.log("⚠️ getLat/getLng 없음, normalizePoint 시도");
+              const normalized = normalizePoint(ll);
+              console.log("normalizePoint 결과:", normalized);
+              if (normalized) pts.push(normalized);
             }
           });
         }
+        
+        console.log("🔍 [DRAWEND] 최종 pts:", pts);
         
         if (pts.length < 3) {
           overlay.setMap(null);

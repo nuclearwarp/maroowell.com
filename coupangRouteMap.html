@@ -155,11 +155,10 @@
     </div>
 
     <div class="hint">
-      <b>✨ NEW!</b> <b>[📍 주소검색]</b> 주소 입력 → 위치 이동 → 폴리곤 그리기<br/>
-      <b>✨ NEW!</b> 폴리곤 <b>더블클릭</b> → 편집 모드 → 점 드래그로 수동 조정 → 다시 더블클릭으로 완료!<br/>
-      <b>✨ NEW!</b> <b>[지도 정렬]</b> 뾰족한 부분 자동 제거 + 경계선 스무딩<br/>
-      · GET: <b>camp만</b> 입력하면 전체 노선 표시.<br/>
-      · 폴리곤 클릭 → <b>편집 대상</b> 선택.<br/>
+      <b>✨ 폴리곤 수정 방법:</b> 폴리곤 클릭(주황색 선택) → <b>점을 드래그</b>해서 건물에 맞춰 조정 → [저장]<br/>
+      <b>📍 주소검색:</b> 주소 입력 → 위치 이동 → 폴리곤 그리기<br/>
+      <b>✂️ 지도 정렬:</b> 뾰족한 부분 자동 제거 + 경계선 스무딩<br/>
+      · <b>모든 폴리곤</b>의 점을 자유롭게 드래그 가능!<br/>
       · 끊긴 구역은 <b>[구역 추가]</b>로 멀티 폴리곤 저장.
     </div>
 
@@ -804,42 +803,31 @@
       const poly = new kakao.maps.Polygon({
         map: state.map,
         path,
-        strokeWeight: 2,        // ✅ 경계선 얇게 (3 → 2)
+        strokeWeight: 2,
         strokeColor: color,
-        strokeOpacity: 0.9,     // ✅ 투명도도 약간 조정
+        strokeOpacity: 0.9,
         strokeStyle: "solid",
         fillColor: color,
-        fillOpacity: 0.25       // ✅ 채우기도 약간 연하게
+        fillOpacity: 0.25,
+        draggable: true,   // ✅ 항상 드래그 가능
+        editable: true,    // ✅ 항상 편집 가능!
+        zIndex: 1
       });
       poly.__mw_points = region;
       poly.__mw_rowId = rowId;
-      poly.__mw_editable = false; // 편집 모드 상태
-
-      // 더블클릭으로 편집 모드 토글
-      kakao.maps.event.addListener(poly, "dblclick", () => {
-        poly.__mw_editable = !poly.__mw_editable;
-        poly.setOptions({
-          draggable: poly.__mw_editable,
-          editable: poly.__mw_editable,
-          strokeWeight: poly.__mw_editable ? 3 : 2,  // 편집 중에는 굵게
-          strokeColor: poly.__mw_editable ? "#ff00ff" : color  // 편집 중에는 핑크색
-        });
-        
-        if (poly.__mw_editable) {
-          log(`[LOG] 📝 편집 모드 ON: 점을 드래그하세요. (다시 더블클릭으로 종료)`, "info");
-          setOverlayText("📝 편집 모드 ON - 점 드래그 가능 (다시 더블클릭으로 완료)");
-        } else {
-          const newPts = extractPathFromPolygon(poly);
-          poly.__mw_points = newPts;
-          log(`[LOG] ✅ 편집 완료: ${newPts.length}개 점`, "info");
-          setOverlayText("✅ 편집 완료 - 저장하려면 [저장] 클릭");
-        }
-      });
 
       // 클릭 시 편집 대상 선택
-      kakao.maps.event.addListener(poly, "click", () => {
-        if (!poly.__mw_editable) {  // 편집 중이 아닐 때만
-          selectRowId(rowId);
+      kakao.maps.event.addListener(poly, "click", (e) => {
+        selectRowId(rowId);
+        log(`[LOG] 📝 폴리곤 선택됨. 점을 드래그해서 수정하세요!`, "info");
+      });
+
+      // 편집 완료 시 자동 저장
+      kakao.maps.event.addListener(poly, "mouseup", () => {
+        const newPts = extractPathFromPolygon(poly);
+        if (newPts.length >= 3) {
+          poly.__mw_points = newPts;
+          log(`[LOG] ✅ 폴리곤 수정됨: ${newPts.length}개 점. [저장] 클릭해서 DB에 반영하세요.`, "info");
         }
       });
 
@@ -1038,15 +1026,13 @@
 
         entry.regions.forEach((poly) => {
           const color = getColorForRouteKey(routeKeyFromRow(entry.row));
-          // 편집 모드가 아닐 때만 색상/두께 업데이트
-          if (!poly.__mw_editable) {
-            poly.setOptions({
-              strokeWeight: isSel ? 3 : 2,     // ✅ 선택 시에도 얇게 (6 → 3)
-              strokeColor: color,
-              fillColor: color,
-              fillOpacity: isSel ? 0.2 : 0.25  // ✅ 선택 시 약간 연하게
-            });
-          }
+          poly.setOptions({
+            strokeWeight: isSel ? 3 : 2,
+            strokeColor: isSel ? "#ff6b00" : color,  // ✅ 선택 시 주황색
+            fillColor: color,
+            fillOpacity: isSel ? 0.35 : 0.25,
+            zIndex: isSel ? 10 : 1
+          });
 
           // 라벨 위치 수집 (충돌 방지를 위해)
           if (state.labelsOn) {

@@ -119,8 +119,8 @@
     }
   </style>
 
-  <!-- Kakao Maps + drawing -->
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing"></script>
+  <!-- Kakao Maps + drawing + services(geocoder) -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=drawing,services"></script>
 
   <!-- (선택) 지도 정렬(실험)용: turf.js -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
@@ -146,6 +146,7 @@
       <button id="loadBtn"  class="primary">불러오기(GET)</button>
       <button id="drawBtn">새로 그리기</button>
       <button id="addRegionBtn">구역 추가</button>
+      <button id="searchAddressBtn">📍 주소검색</button>
       <button id="saveBtn" class="primary">저장(POST)</button>
       <button id="alignBtn">지도 정렬</button>
       <button id="labelToggleBtn">라우트 라벨 OFF</button>
@@ -154,12 +155,12 @@
     </div>
 
     <div class="hint">
+      <b>✨ NEW!</b> <b>[📍 주소검색]</b> 버튼으로 주소 입력 → 해당 위치로 이동 → 폴리곤 그리기<br/>
+      <b>✨ NEW!</b> 폴리곤 <b>점을 드래그</b>해서 수동 편집 가능! 건물 경계에 맞춰 조정하세요.<br/>
       · GET: <b>camp만</b> 입력하면 해당 camp의 전체 노선 표시.<br/>
       · code 입력 시 기본 <code>mode=prefix</code>로 하위 노선까지 표시.<br/>
       · 지도에서 폴리곤 클릭 → <b>편집 대상</b> 선택.<br/>
-      · 끊긴 구역은 <b>[구역 추가]</b>로 여러 개 저장/표시(멀티 폴리곤).<br/>
-      · 편집 대상 구역을 전부 X로 삭제 후 저장하면 <b>DB에 polygon=null</b>로 반영됩니다.<br/>
-      · <b>drawingManager.put</b>은 카카오 SDK 버전에서 깨져서 제거했습니다(클릭 시 사라지지 않음).
+      · 끊긴 구역은 <b>[구역 추가]</b>로 여러 개 저장/표시(멀티 폴리곤).
     </div>
 
     <div id="apiStatus" class="status-bar">API: ready</div>
@@ -205,6 +206,7 @@
     const loadBtn     = document.getElementById("loadBtn");
     const drawBtn     = document.getElementById("drawBtn");
     const addRegionBtn= document.getElementById("addRegionBtn");
+    const searchAddressBtn = document.getElementById("searchAddressBtn");
     const saveBtn     = document.getElementById("saveBtn");
     const alignBtn    = document.getElementById("alignBtn");
     const labelToggleBtn = document.getElementById("labelToggleBtn");
@@ -287,7 +289,7 @@
         polygonOptions: {
           draggable: true,
           removable: false,  // X는 우리가 직접 구현
-          editable: false,   // 카카오 SDK 버전차로 편집 UI가 불안정해서 OFF
+          editable: true,    // ✅ 수동 편집 활성화!
           strokeWeight: 3,
           strokeOpacity: 0.95,
           strokeStyle: "solid",
@@ -795,13 +797,23 @@
         strokeOpacity: 0.95,
         strokeStyle: "solid",
         fillColor: color,
-        fillOpacity: 0.28
+        fillOpacity: 0.28,
+        draggable: true,   // ✅ 드래그 가능
+        editable: true     // ✅ 편집 가능 (점 이동 가능)
       });
       poly.__mw_points = region;
       poly.__mw_rowId = rowId;
 
+      // 클릭 시 편집 대상 선택
       kakao.maps.event.addListener(poly, "click", () => {
         selectRowId(rowId);
+      });
+
+      // 편집 완료 시 points 업데이트
+      kakao.maps.event.addListener(poly, "mouseup", () => {
+        const newPts = extractPathFromPolygon(poly);
+        poly.__mw_points = newPts;
+        log(`[LOG] 폴리곤 수정됨: ${newPts.length}개 점`, "info");
       });
 
       return poly;
@@ -1182,6 +1194,56 @@
       state.drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
       log("[LOG] 구역 추가 모드: 끊긴 구역이면 추가로 그리세요.", "info");
       setOverlayText("구역 추가 모드: 지도에서 추가 구역을 그리세요.");
+    });
+
+    searchAddressBtn.addEventListener("click", () => {
+      new daum.Postcode({
+        oncomplete: (d) => {
+          const address = d.roadAddress || d.jibunAddress || d.address;
+          log(`[LOG] 주소 검색: ${address}`, "info");
+          
+          // Kakao 지오코더로 좌표 검색
+          const geocoder = new kakao.maps.services.Geocoder();
+          geocoder.addressSearch(address, (result, status) => {
+            if (status === kakao.maps.services.Status.OK) {
+              const coords = new kakao.maps.LatLng(result[0].y, result[0].x);
+              
+              // 지도 이동
+              state.map.setCenter(coords);
+              state.map.setLevel(3); // 줌인
+              
+              // 마커 표시 (3초 후 자동 제거)
+              const marker = new kakao.maps.Marker({
+                map: state.map,
+                position: coords
+              });
+              setTimeout(() => marker.setMap(null), 3000);
+              
+              log(`[LOG] 위치 이동 완료. 이제 폴리곤을 그려주세요!`, "info");
+              setOverlayText(`📍 ${address.substring(0, 40)}... - 폴리곤 그리기 가능`);
+              
+              // 라우트 코드가 입력되어 있으면 자동으로 그리기 모드 시작
+              const code = (routeInput.value || "").trim();
+              if (code) {
+                // 편집 대상 설정
+                if (!getEditTargetKey()) {
+                  const camp = (campInput.value || "").trim();
+                  state.editDraft = { camp, code };
+                  state.editId = null;
+                }
+                
+                state.drawingManager.cancel();
+                state.drawingManager.select(kakao.maps.drawing.OverlayType.POLYGON);
+                alert(`📍 주소 위치로 이동했습니다.\n이제 지도에서 배달 구역을 그려주세요!`);
+              } else {
+                alert(`📍 주소 위치로 이동했습니다.\n먼저 라우트 코드를 입력한 후 폴리곤을 그려주세요.`);
+              }
+            } else {
+              alert("❌ 주소를 찾을 수 없습니다.");
+            }
+          });
+        }
+      }).open();
     });
 
     saveBtn.addEventListener("click", async () => {

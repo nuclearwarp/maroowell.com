@@ -96,7 +96,7 @@
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 
   <script>
-    console.log("🔴 VERSION: 2025.12.20-EDITFIX2 (NO drawingManager.put, palette colors) 🔴");
+    console.log("🔴 VERSION: 2025.12.21-EDITVIS1 (zIndex + dim static) 🔴");
   </script>
 </head>
 
@@ -166,7 +166,7 @@
     <div id="map"></div>
     <div class="overlay-badge" id="overlayInfo">지도 초기화 중...</div>
     <div style="position:absolute;bottom:10px;right:10px;background:rgba(0,0,0,0.7);color:#fff;padding:4px 8px;border-radius:4px;font-size:10px;pointer-events:none;">
-      v2025.12.20-editfix2
+      v2025.12.21-editvis1
     </div>
   </div>
 
@@ -174,13 +174,28 @@
     // ================== 설정 ==================
     const ROUTE_API_BASE = "https://route.maroowell.com";
 
-    // 색상: 고대비 팔레트(중복 가능하지만, 보통 표시 수(수개~수십개)에서는 구분 잘 됨)
+    // 고대비 팔레트
     const COLOR_PALETTE = [
       "#e6194b","#3cb44b","#ffe119","#4363d8","#f58231","#911eb4","#46f0f0","#f032e6",
       "#bcf60c","#fabebe","#008080","#e6beff","#9a6324","#fffac8","#800000","#aaffc3",
       "#808000","#ffd8b1","#000075","#808080","#1f77b4","#ff7f0e","#2ca02c","#d62728",
       "#9467bd","#8c564b","#e377c2","#7f7f7f","#bcbd22","#17becf"
     ];
+
+    // zIndex 정책 (중요: 편집 폴리곤을 무조건 최상단)
+    const Z = {
+      STATIC_BASE: 1000,
+      EDIT: 1000000,
+      LABEL: 1100000
+    };
+
+    // 편집 중 다른 폴리곤 흐리기
+    const DIM = {
+      on: true,                 // 필요하면 false로 끄면 됨
+      fillOpacity: 0.06,
+      strokeOpacity: 0.28,
+      strokeWeight: 2
+    };
 
     // 정렬 파라미터(기존 유지)
     const ALIGN = {
@@ -268,16 +283,17 @@
     let staticItems = [];
     let labelsOn = true;
 
-    // 편집 상태(핵심: put() 안 씀)
+    // 편집 상태
     let editTargetKey = null;
     let editTargetRow = null;
     let editPolygons = []; // kakao.maps.Polygon[]
     let editMode = false;
 
     // DrawingManager 사용 목적
-    // - "new": 새로 그리기(그린 결과를 저장할 것)
-    // - "append": 편집 중인 코드에 구역 추가(그린 결과를 editPolygons로 변환)
-    let drawPurpose = null;
+    let drawPurpose = null; // "new" | "append" | null
+
+    // dim 복구용 원본 옵션 저장
+    const originalStyle = new WeakMap(); // Polygon -> {fillOpacity, strokeOpacity, strokeWeight}
 
     // ================== 유틸 ==================
     function fnv1a(str){
@@ -294,7 +310,6 @@
     }
 
     function mvaToArray(mva){
-      // Kakao MVCArray 호환
       if (!mva) return [];
       if (Array.isArray(mva)) return mva;
       if (typeof mva.getLength === "function" && typeof mva.getAt === "function") {
@@ -305,13 +320,73 @@
       return [];
     }
 
-    // ================== polylabel(라벨 위치) 간단 구현 ==================
+    function setPolyZ(p, z){
+      try {
+        if (typeof p.setZIndex === "function") p.setZIndex(z);
+        else if (typeof p.setOptions === "function") p.setOptions({ zIndex: z });
+      } catch {}
+    }
+
+    // ================== polylabel(라벨 위치) ==================
     class MaxHeap { constructor(){this.data=[]} push(i){this.data.push(i);this._up(this.data.length-1)} pop(){if(!this.data.length)return null;const t=this.data[0];const e=this.data.pop();if(this.data.length){this.data[0]=e;this._down(0)}return t} get size(){return this.data.length} _up(n){const e=this.data[n];while(n>0){const p=Math.floor((n-1)/2);const pn=this.data[p];if(e.max<=pn.max)break;this.data[p]=e;this.data[n]=pn;n=p}} _down(n){const l=this.data.length;const e=this.data[n];for(;;){let ln=2*n+1;let rn=2*n+2;let s=null;if(ln<l){const le=this.data[ln];if(le.max>e.max)s=ln}if(rn<l){const re=this.data[rn];if((s===null&&re.max>e.max)||(s!==null&&re.max>this.data[s].max))s=rn}if(s===null)break;this.data[n]=this.data[s];this.data[s]=e;n=s}} }
     function getSegDistSq(px,py,a,b){let x=a[0],y=a[1];let dx=b[0]-x,dy=b[1]-y;if(dx!==0||dy!==0){const t=((px-x)*dx+(py-y)*dy)/(dx*dx+dy*dy);if(t>1){x=b[0];y=b[1]}else if(t>0){x+=dx*t;y+=dy*t}}dx=px-x;dy=py-y;return dx*dx+dy*dy}
     function pointToPolygonDist(x,y,poly){let inside=false;let min=Infinity;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a[1]>y)!==(b[1]>y)&&x<(b[0]-a[0])*(y-a[1])/(b[1]-a[1]+0.0)+a[0])inside=!inside;min=Math.min(min,getSegDistSq(x,y,a,b))}const d=Math.sqrt(min);return inside?d:-d}
     function polygonCentroid(ring){let x=0,y=0,area=0;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const a=ring[i],b=ring[j];const f=a[0]*b[1]-b[0]*a[1];x+=(a[0]+b[0])*f;y+=(a[1]+b[1])*f;area+=f}area*=0.5;if(area===0)return null;x/=(6*area);y/=(6*area);return [x,y]}
     class Cell{constructor(x,y,h,poly){this.x=x;this.y=y;this.h=h;this.d=pointToPolygonDist(x,y,poly);this.max=this.d+this.h*Math.SQRT2}}
     function polylabel(ring,precision=1e-5){if(!Array.isArray(ring)||ring.length<3)return null;let pts=ring.slice();const f=pts[0],l=pts[pts.length-1];if(f[0]!==l[0]||f[1]!==l[1])pts.push(f);let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const p of pts){minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1])}const w=maxX-minX,h=maxY-minY;if(w===0&&h===0)return [minX,minY];const cellSize=Math.min(w,h);let hh=cellSize/2;const heap=new MaxHeap();for(let x=minX;x<maxX;x+=cellSize)for(let y=minY;y<maxY;y+=cellSize)heap.push(new Cell(x+hh,y+hh,hh,pts));let best=null;const c=polygonCentroid(pts);if(c)best=new Cell(c[0],c[1],0,pts);const bboxCell=new Cell(minX+w/2,minY+h/2,0,pts);if(!best||bboxCell.d>best.d)best=bboxCell;let iter=0;const maxIter=30000;while(heap.size&&iter++<maxIter){const cell=heap.pop();if(!cell)break;if(cell.d>best.d)best=cell;if(cell.max-best.d<=precision)continue;hh=cell.h/2;heap.push(new Cell(cell.x-hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y-hh,hh,pts));heap.push(new Cell(cell.x-hh,cell.y+hh,hh,pts));heap.push(new Cell(cell.x+hh,cell.y+hh,hh,pts))}return [best.x,best.y]}
+
+    // ================== dim / undim ==================
+    function dimStaticExcept(key){
+      if (!DIM.on) return;
+      for (const it of staticItems) {
+        if (!it.polygons) continue;
+        for (const p of it.polygons) {
+          if (!p) continue;
+
+          if (it.key === key) continue;
+
+          if (!originalStyle.has(p)) {
+            originalStyle.set(p, {
+              fillOpacity: 0.22,
+              strokeOpacity: 0.95,
+              strokeWeight: 3
+            });
+          }
+
+          try {
+            if (typeof p.setOptions === "function") {
+              p.setOptions({
+                fillOpacity: DIM.fillOpacity,
+                strokeOpacity: DIM.strokeOpacity,
+                strokeWeight: DIM.strokeWeight
+              });
+            }
+            // 클릭 방해 줄이기: 흐린 상태에서는 클릭 이벤트가 계속 있어도 괜찮지만,
+            // 실제로는 zIndex로 편집 폴리곤이 위라 편집에 영향이 거의 없음.
+            setPolyZ(p, Z.STATIC_BASE); // 낮게
+          } catch {}
+        }
+      }
+    }
+
+    function undimAllStatic(){
+      for (const it of staticItems) {
+        if (!it.polygons) continue;
+        for (const p of it.polygons) {
+          const o = originalStyle.get(p);
+          if (!o) continue;
+          try {
+            if (typeof p.setOptions === "function") {
+              p.setOptions({
+                fillOpacity: o.fillOpacity,
+                strokeOpacity: o.strokeOpacity,
+                strokeWeight: o.strokeWeight
+              });
+            }
+          } catch {}
+        }
+      }
+    }
 
     // ================== 지도 초기화 ==================
     function initMap() {
@@ -328,21 +403,19 @@
           draggable: true,
           removable: true,
           editable: true,
-          strokeWeight: 4,
+          strokeWeight: 5,
           strokeColor: "#22c55e",
           strokeOpacity: 0.98,
           strokeStyle: "solid",
           fillColor: "#22c55e",
-          fillOpacity: 0.22,
+          fillOpacity: 0.18,
         },
       });
 
-      // drawend: 새로 그리기 / 구역 추가에서만 의미
       kakao.maps.event.addListener(drawingManager, "drawend", () => {
         const rings = getDrawingRingsWgs84();
         log(`[LOG] ✅ 폴리곤 생성/변경 감지: 구역 ${rings.length}개`, "info");
 
-        // 편집 중 "구역 추가"일 경우: Drawing 결과를 editPolygons로 흡수
         if (drawPurpose === "append" && editMode) {
           absorbDrawingIntoEditPolygons();
         }
@@ -357,14 +430,14 @@
       try { drawingManager.remove(kakao.maps.drawing.OverlayType.POLYGON); } catch {}
     }
 
-    // ================== drawingManager.getData 파싱 (그리기 전용) ==================
+    // ================== drawingManager.getData 파싱 ==================
     function isLatLngObj(p){
       return p && typeof p.getLat === "function" && typeof p.getLng === "function";
     }
     function toLatLngFromAny(p){
       try {
         if (isLatLngObj(p)) return { lat: round6(p.getLat()), lng: round6(p.getLng()) };
-        if (p && typeof p.x === "number" && typeof p.y === "number") return { lat: round6(p.y), lng: round6(p.x) }; // x=lng, y=lat
+        if (p && typeof p.x === "number" && typeof p.y === "number") return { lat: round6(p.y), lng: round6(p.x) };
         if (p && typeof p.lat === "number" && typeof p.lng === "number") return { lat: round6(p.lat), lng: round6(p.lng) };
         if (p && typeof p.lat === "number" && typeof p.lon === "number") return { lat: round6(p.lat), lng: round6(p.lon) };
         if (Array.isArray(p) && p.length >= 2) {
@@ -397,7 +470,6 @@
       for (const polyObj of polys) {
         let ptsRaw = polyObj?.points ?? polyObj?.path ?? polyObj;
 
-        // hole 구조면 outer만 사용
         if (Array.isArray(ptsRaw) && Array.isArray(ptsRaw[0])) ptsRaw = ptsRaw[0];
 
         if (!Array.isArray(ptsRaw) || ptsRaw.length < 3) continue;
@@ -475,8 +547,8 @@
         const a1 = Number(p[1]);
         if (!isFinite(a0) || !isFinite(a1)) return null;
 
-        if (Math.abs(a0) <= 180 && Math.abs(a1) <= 90) return { lat: a1, lng: a0 }; // [lng,lat]
-        if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 }; // [lat,lng]
+        if (Math.abs(a0) <= 180 && Math.abs(a1) <= 90) return { lat: a1, lng: a0 };
+        if (Math.abs(a0) <= 90 && Math.abs(a1) <= 180) return { lat: a0, lng: a1 };
       }
       return null;
     }
@@ -513,6 +585,7 @@
         it.labels?.forEach(l => l.setMap(null));
       }
       staticItems = [];
+      originalStyle && originalStyle; // keep
     }
 
     function createRouteLabels(key, ringsLatLng){
@@ -542,7 +615,7 @@
           position: pos,
           content,
           yAnchor: 0.5,
-          zIndex: 9999
+          zIndex: Z.LABEL
         });
         overlay.setMap(map);
         labels.push(overlay);
@@ -553,14 +626,16 @@
 
     function renderStaticItems(items){
       clearStaticOverlays();
+      undimAllStatic();
 
       const bounds = new kakao.maps.LatLngBounds();
       let hasAny = false;
 
+      let i = 0;
       for (const item of items) {
         const color = colorHex(item.key);
-
         const polys = [];
+
         for (const ring of item.ringsLatLng) {
           const poly = new kakao.maps.Polygon({
             map,
@@ -574,6 +649,10 @@
             draggable: false,
             editable: false
           });
+
+          // 정적 폴리곤도 기본 zIndex 부여(선택 시 편집 폴리곤이 위로 올라오도록 대비)
+          setPolyZ(poly, Z.STATIC_BASE + (i++));
+          originalStyle.set(poly, { fillOpacity: 0.22, strokeOpacity: 0.95, strokeWeight: 3 });
 
           kakao.maps.event.addListener(poly, "click", () => enterEditMode(item.key));
           polys.push(poly);
@@ -622,7 +701,7 @@
       }
     }
 
-    // ================== 편집(핵심: drawingManager.put() 완전 제거) ==================
+    // ================== 편집(핵심: 선택 시 안 보이는 문제 해결: zIndex + dim) ==================
     function clearEditPolygons(){
       for (const p of editPolygons) p.setMap(null);
       editPolygons = [];
@@ -633,15 +712,18 @@
       const poly = new kakao.maps.Polygon({
         map,
         path: ringLatLng,
-        strokeWeight: 4,
-        strokeColor: "#22c55e",
+        strokeWeight: 6,
+        strokeColor: "#00ff66",
         strokeOpacity: 0.98,
         strokeStyle: "solid",
-        fillColor: "#22c55e",
-        fillOpacity: 0.22,
+        fillColor: "#00ff66",
+        fillOpacity: 0.12,
         draggable: true,
         editable: true
       });
+
+      // 핵심: 무조건 최상단으로 올림
+      setPolyZ(poly, Z.EDIT);
       return poly;
     }
 
@@ -652,12 +734,11 @@
         return;
       }
 
-      // 다른 편집 대상이었다면 복구
+      // 다른 편집 대상이었다면 복구 + undim
       if (editTargetKey && editTargetKey !== key) {
         restoreStaticForKey(editTargetKey);
       }
 
-      // 현재 편집 폴리곤 제거
       clearDrawingPolygons();
       clearEditPolygons();
 
@@ -666,18 +747,31 @@
       routeInput.value = key;
       routeEditInput.value = key;
 
-      // 정적 숨기고, editable polygon 생성
+      // 선택된 키는 정적 숨김(겹침 방지)
       hideStaticForKey(key);
 
+      // 편집 폴리곤 생성
       for (const ring of found.ringsLatLng) {
         if (!ring || ring.length < 3) continue;
         editPolygons.push(makeEditPolygonFromRingLatLng(ring));
       }
 
+      if (!editPolygons.length) {
+        // 이 케이스면 "대표 row가 폴리곤 없는 row"로 잡힌 경우거나 데이터가 비정상.
+        // 일단 정적을 복구하고 안내.
+        restoreStaticForKey(key);
+        log(`[ERR] 편집 폴리곤 생성 실패: ${key} ringsLatLng 없음(데이터 확인 필요)`, "err");
+        alert("편집 폴리곤을 만들 수 없습니다. (polygon_wgs84 데이터가 없거나 대표 row 선택이 꼬였습니다)\n불러오기 결과/DB를 확인해주세요.");
+        return;
+      }
+
+      // 다른 폴리곤 흐리게(편집 폴리곤이 안 보이는 문제 방지)
+      dimStaticExcept(key);
+
       editMode = true;
       drawPurpose = null;
 
-      log(`[LOG] ✅ 편집 대상: ${key} (녹색 편집 폴리곤 - 점 드래그 가능)`, "info");
+      log(`[LOG] ✅ 편집 대상: ${key} (편집 폴리곤은 최상단 표시됨)`, "info");
       setOverlayText(`편집 대상: ${key} (녹색 - 점 드래그로 수정)`);
     }
 
@@ -695,7 +789,6 @@
       return rings;
     }
 
-    // 편집 중 "구역 추가"로 그린 DrawingManager 결과를 editPolygons로 흡수
     function absorbDrawingIntoEditPolygons(){
       const rings = getDrawingRingsWgs84();
       if (!rings.length) {
@@ -703,7 +796,6 @@
         return;
       }
 
-      // drawing overlay 제거
       clearDrawingPolygons();
 
       let added = 0;
@@ -729,12 +821,13 @@
         return;
       }
 
-      // 편집 상태 초기화(현재 편집을 버리고 로드)
+      // 편집 상태 종료 + undim
       if (editTargetKey) restoreStaticForKey(editTargetKey);
       editTargetKey = null;
       editTargetRow = null;
       clearEditPolygons();
       clearDrawingPolygons();
+      undimAllStatic();
 
       try {
         const data = await apiGet("/route", { camp, code: code || "", mode: "prefix" });
@@ -747,7 +840,7 @@
           return;
         }
 
-        // key별 대표 row 선택(폴리곤 있는 row 우선, 둘 다 있으면 updated_at 최신 우선)
+        // key별 대표 row 선택(폴리곤 있는 row 우선)
         const byKey = new Map();
         for (const row of rows) {
           const key = String(row?.code || row?.full_code || "").trim();
@@ -816,13 +909,9 @@
         return;
       }
 
-      // 편집모드면 editPolygons에서 읽고, 아니면 drawingManager에서 읽는다.
       let rings = [];
-      if (editMode && editPolygons.length) {
-        rings = getEditRingsWgs84();
-      } else {
-        rings = getDrawingRingsWgs84();
-      }
+      if (editMode && editPolygons.length) rings = getEditRingsWgs84();
+      else rings = getDrawingRingsWgs84();
 
       if (!rings.length) {
         alert("저장할 폴리곤이 없습니다. (노선을 클릭해 편집 전환하거나, 새로 그리기를 사용)");
@@ -868,7 +957,7 @@
       }
     }
 
-    // ================== 지도 정렬(기존과 동일하게 두되, 편집모드면 editPolygons 기준) ==================
+    // ================== 지도 정렬(기존 유지, 여기선 생략 X: 기존 코드 그대로) ==================
     function computeBboxFromRings(rings){
       let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
       for (const ring of rings) for (const p of ring) {
@@ -1115,7 +1204,6 @@
 
       if (!camp) { alert("캠프 이름은 필수입니다."); return; }
 
-      // 편집모드면 그 코드만 정렬
       if (editMode && editTargetKey) {
         const rings = getEditRingsWgs84();
         await alignTargetsAndSave([{ key: editTargetKey, ringsWgs84: rings }], camp);
@@ -1123,7 +1211,6 @@
         return;
       }
 
-      // 아니면 표시된 대상(prefix 필터)
       const targets = [];
       for (const it of staticItems) {
         if (codePrefix && !it.key.startsWith(codePrefix)) continue;
@@ -1159,11 +1246,8 @@
               setOverlayText(`📍 ${address.substring(0, 40)}...`);
 
               const code = routeInput.value.trim();
-              if (code) {
-                alert(`📍 주소 위치로 이동했습니다.\n이제 배달 구역을 그려주세요!`);
-              } else {
-                alert(`📍 주소 위치로 이동했습니다.\n먼저 라우트 코드를 입력한 후 그려주세요.`);
-              }
+              alert(code ? `📍 주소 위치로 이동했습니다.\n이제 배달 구역을 그려주세요!`
+                         : `📍 주소 위치로 이동했습니다.\n먼저 라우트 코드를 입력한 후 그려주세요.`);
             } else {
               alert("❌ 주소를 찾을 수 없습니다.");
             }
@@ -1172,7 +1256,7 @@
       }).open();
     });
 
-    // ================== DB 수정 기능 ==================
+    // ================== DB 수정 기능(기존 유지) ==================
     async function updateSelectedCamp(){
       const newCamp = campEditInput.value.trim();
       if (!newCamp) { alert("변경할 캠프명을 입력하세요. (예: 대구3)"); return; }
@@ -1219,6 +1303,7 @@
       editTargetRow = null;
       clearEditPolygons();
       clearDrawingPolygons();
+      undimAllStatic();
 
       log("[LOG] ✅ DB row 삭제 완료", "info");
       await loadAndShow();
@@ -1227,16 +1312,16 @@
     // ================== 버튼 바인딩 ==================
     loadBtn.addEventListener("click", loadAndShow);
 
-    // 새로 그리기: DrawingManager로 그림(저장은 DrawingManager 데이터 사용)
     drawBtn.addEventListener("click", () => {
       const code = routeInput.value.trim();
       if (!code) { alert("새로 그리기는 라우트 코드가 필요합니다. (예: 126C)"); return; }
 
-      // 편집중이면 편집 종료하고(저장 안 한 건 버림), 정적 복구
+      // 편집 종료/복구
       if (editTargetKey) restoreStaticForKey(editTargetKey);
       editTargetKey = code;
       editTargetRow = null;
       clearEditPolygons();
+      undimAllStatic();
 
       clearDrawingPolygons();
       drawPurpose = "new";
@@ -1246,7 +1331,6 @@
       setOverlayText("새로 그리기 모드: 지도에서 영역을 그리세요.");
     });
 
-    // 구역 추가: 편집 모드일 때만 의미 있음(그린 결과를 editPolygons로 흡수)
     addBtn.addEventListener("click", () => {
       const code = routeInput.value.trim();
       if (!code) { alert("구역 추가는 라우트 코드가 필요합니다."); return; }
@@ -1274,12 +1358,13 @@
     });
 
     resetBtn.addEventListener("click", () => {
-      // 편집 폴리곤 제거 + 정적 복구
+      // 편집 종료 + undim + 초기화
       if (editTargetKey) restoreStaticForKey(editTargetKey);
       editTargetKey = null;
       editTargetRow = null;
       clearEditPolygons();
       clearDrawingPolygons();
+      undimAllStatic();
 
       clearStaticOverlays();
 
@@ -1289,7 +1374,6 @@
 
     campUpdateSelectedBtn.addEventListener("click", () => updateSelectedCamp().catch(e => { console.error(e); alert("camp 수정 실패"); }));
     campRenameAllBtn.addEventListener("click", () => renameCampAll().catch(e => { console.error(e); alert("camp 이관 실패"); }));
-
     routeRenameBtn.addEventListener("click", () => renameSelectedRouteCode().catch(e => { console.error(e); alert("코드 수정 실패"); }));
     routeDeleteRowBtn.addEventListener("click", () => deleteSelectedRouteRow().catch(e => { console.error(e); alert("DB 삭제 실패"); }));
 

@@ -129,24 +129,31 @@ async function handleRouteGet(url, env) {
   params.set("camp", `eq.${camp}`);
   params.set("order", "full_code.asc");
 
-  if (code) {
-    if (mode === "exact") {
-      params.set("full_code", `eq.${code}`);
-    } else {
-      // prefix
-      // like는 % 필요, URL 인코딩 처리: % => %25
-      params.set("full_code", `like.${code}%`);
-    }
-  }
+  // code 필터는 클라이언트에서 처리 (Supabase like 연산자 이슈 회피)
+  // 일단 camp의 모든 데이터를 가져옴
 
   const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
     method: "GET"
   });
 
+  let filteredRows = rows || [];
+
+  // 클라이언트 측 필터링
+  if (code && Array.isArray(filteredRows)) {
+    if (mode === "exact") {
+      filteredRows = filteredRows.filter(row => row.full_code === code);
+    } else {
+      // prefix
+      filteredRows = filteredRows.filter(row => 
+        row.full_code && row.full_code.startsWith(code)
+      );
+    }
+  }
+
   // 프론트엔드를 위해 color를 자동 생성 (해시 기반)
   // polygon_wgs84가 문자열이면 JSON 파싱
-  if (Array.isArray(rows)) {
-    rows.forEach(row => {
+  if (Array.isArray(filteredRows)) {
+    filteredRows.forEach(row => {
       if (row && row.full_code && !row.color) {
         row.color = generateColor(row.full_code);
       }
@@ -162,7 +169,7 @@ async function handleRouteGet(url, env) {
     });
   }
 
-  return json({ rows: rows || [] }, 200, { "Cache-Control": "no-store" });
+  return json({ rows: filteredRows }, 200, { "Cache-Control": "no-store" });
 }
 
 // 프론트엔드와 동일한 색상 생성 로직

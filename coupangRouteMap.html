@@ -186,6 +186,13 @@
       <div class="log" id="log"></div>
     </div>
 
+    <div class="group" style="margin-top:10px;">
+      <div class="label">로드된 라우트 목록 (<span id="routeCount">0</span>개)</div>
+      <div style="max-height:200px; overflow-y:auto; font-size:12px; color:var(--muted);">
+        <div id="routeList"></div>
+      </div>
+    </div>
+
     <div class="help small" style="margin-top:10px;">
       - 문제 원인: DrawingManager.put / 잘못된 path 데이터 형태가 카카오 내부에서 a.e 호출로 터짐<br/>
       - 해결: Drawing 라이브러리 의존 제거 + LatLng 기반 편집기로 교체<br/>
@@ -229,6 +236,8 @@
   const statusPill = $("statusPill");
   const selectedInfo = $("selectedInfo");
   const hintEl = $("hint");
+  const routeListEl = $("routeList");
+  const routeCountEl = $("routeCount");
 
   // ====== 로그 ======
   const ts = () => {
@@ -426,11 +435,14 @@
 
     if (!routeRows.length) {
       setStatus("표시할 데이터가 없습니다.", "WARN");
+      updateRouteList();
       return;
     }
 
     let bounds = new kakao.maps.LatLngBounds();
     let any = false;
+    let withPolygon = 0;
+    let withoutPolygon = 0;
 
     for (const row of routeRows) {
       const id = row.id;
@@ -443,6 +455,7 @@
       const labels = [];
 
       if (poly && Array.isArray(poly) && poly.length > 0) {
+        withPolygon++;
         // poly: [ [ [lng,lat], ... ], [ [lng,lat], ... ] , ...]
         // 또는: [ [ {lat, lng}, ... ], [ {lat, lng}, ... ] , ...]
         for (let i=0;i<poly.length;i++) {
@@ -482,18 +495,71 @@
             labels.push(label);
           }
         }
+      } else {
+        withoutPolygon++;
+        log(`${camp} ${code} (id=${id}): polygon 없음`);
       }
 
       overlayById.set(id, { row, polygons, labels });
     }
 
+    updateRouteList();
+
     if (any) {
       map.setBounds(bounds);
-      setStatus(`불러오기 완료. 표시 ${routeRows.length}개`, "OK");
+      setStatus(`불러오기 완료: 총 ${routeRows.length}개 (표시 ${withPolygon}개, polygon 없음 ${withoutPolygon}개)`, "OK");
     } else {
-      setStatus(`불러오기 완료. 표시 가능한 polygon_wgs84 row가 없습니다. (${routeRows.length}개)`, "WARN");
+      setStatus(`불러오기 완료: 총 ${routeRows.length}개 (모두 polygon 없음). "새로 그리기"로 생성 가능`, "WARN");
+    }
+    
+    if (withoutPolygon > 0) {
+      log(`polygon 없는 라우트 목록:`);
+      for (const row of routeRows) {
+        const poly = parsePolygonWgs84(row.polygon_wgs84);
+        if (!poly || !Array.isArray(poly) || poly.length === 0) {
+          log(`  - ${row.camp} ${row.full_code} (id=${row.id})`);
+        }
+      }
     }
   }
+
+  function updateRouteList() {
+    if (!routeListEl || !routeCountEl) return;
+    
+    routeCountEl.textContent = routeRows.length;
+    
+    if (!routeRows.length) {
+      routeListEl.innerHTML = '<div style="padding:8px;color:#666;">로드된 라우트가 없습니다</div>';
+      return;
+    }
+
+    const html = routeRows.map(row => {
+      const code = row.full_code || row.code || "";
+      const camp = row.camp || "";
+      const poly = parsePolygonWgs84(row.polygon_wgs84);
+      const hasPolygon = poly && Array.isArray(poly) && poly.length > 0;
+      const color = row.color || colorFor(code);
+      const statusIcon = hasPolygon ? '✓' : '○';
+      const statusColor = hasPolygon ? '#22c55e' : '#666';
+      
+      return `<div style="padding:4px 8px; border-bottom:1px solid rgba(255,255,255,.05); cursor:pointer;" 
+                   onclick="javascript:selectRouteById(${row.id})">
+        <span style="color:${statusColor}">${statusIcon}</span>
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin:0 6px;vertical-align:middle;"></span>
+        <b>${escapeHtml(code)}</b>
+        <span style="color:#666; margin-left:6px; font-size:11px;">id=${row.id}</span>
+      </div>`;
+    }).join('');
+    
+    routeListEl.innerHTML = html;
+  }
+
+  // 전역으로 노출 (onclick에서 사용)
+  window.selectRouteById = function(id) {
+    if (overlayById.has(id)) {
+      startEditing(id);
+    }
+  };
 
   // ====== 편집(버텍스 핸들) ======
   let VERTEX_IMG = null;
@@ -852,7 +918,9 @@
       if (code) url.searchParams.set("code", code);
 
       setStatus(`GET /route 요청: ${url.toString()}`, "OK");
+      log(`요청 URL: ${url.toString()}`);
       const data = await apiGet(url.toString());
+      log(`응답 받음: ${data?.rows?.length || 0}개 row`);
       
       if (!data || !data.rows) {
         setStatus("서버 응답 데이터가 올바르지 않습니다.", "ERR");

@@ -144,10 +144,20 @@ async function handleRouteGet(url, env) {
   });
 
   // 프론트엔드를 위해 color를 자동 생성 (해시 기반)
+  // polygon_wgs84가 문자열이면 JSON 파싱
   if (Array.isArray(rows)) {
     rows.forEach(row => {
       if (row && row.full_code && !row.color) {
         row.color = generateColor(row.full_code);
+      }
+      // polygon_wgs84 파싱 (문자열 → 배열)
+      if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === 'string') {
+        try {
+          row.polygon_wgs84 = JSON.parse(row.polygon_wgs84);
+        } catch (e) {
+          console.error('polygon_wgs84 파싱 실패:', e);
+          row.polygon_wgs84 = null;
+        }
       }
     });
   }
@@ -219,6 +229,14 @@ async function handleRoutePost(request, env) {
     if (row && row.full_code) {
       row.color = generateColor(row.full_code);
     }
+    // polygon_wgs84 파싱
+    if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === 'string') {
+      try {
+        row.polygon_wgs84 = JSON.parse(row.polygon_wgs84);
+      } catch (e) {
+        row.polygon_wgs84 = null;
+      }
+    }
 
     return json({ row }, 200, { "Cache-Control": "no-store" });
   }
@@ -239,6 +257,14 @@ async function handleRoutePost(request, env) {
   const row = Array.isArray(inserted) ? inserted[0] : inserted;
   if (row && row.full_code) {
     row.color = generateColor(row.full_code);
+  }
+  // polygon_wgs84 파싱
+  if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === 'string') {
+    try {
+      row.polygon_wgs84 = JSON.parse(row.polygon_wgs84);
+    } catch (e) {
+      row.polygon_wgs84 = null;
+    }
   }
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
@@ -275,6 +301,14 @@ async function handleRouteDelete(request, env) {
   const row = Array.isArray(updated) ? updated[0] : updated;
   if (row && row.full_code) {
     row.color = generateColor(row.full_code);
+  }
+  // polygon_wgs84 파싱 (null이지만 일관성 유지)
+  if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === 'string') {
+    try {
+      row.polygon_wgs84 = JSON.parse(row.polygon_wgs84);
+    } catch (e) {
+      row.polygon_wgs84 = null;
+    }
   }
 
   return json({ row }, 200, { "Cache-Control": "no-store" });

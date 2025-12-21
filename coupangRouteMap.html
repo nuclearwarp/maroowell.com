@@ -130,7 +130,7 @@
       <input id="campInput" type="text" value="일산2" />
 
       <div class="label">라우트 코드 (예: 101, 101A) — 비우면 camp 전체 표시</div>
-      <input id="codeInput" type="text" value="126" />
+      <input id="codeInput" type="text" value="101" />
 
       <div class="sep"></div>
 
@@ -444,11 +444,25 @@
 
       if (poly && Array.isArray(poly) && poly.length > 0) {
         // poly: [ [ [lng,lat], ... ], [ [lng,lat], ... ] , ...]
+        // 또는: [ [ {lat, lng}, ... ], [ {lat, lng}, ... ] , ...]
         for (let i=0;i<poly.length;i++) {
           const ring = poly[i];
           if (!Array.isArray(ring) || ring.length < 3) continue;
 
-          const latlngs = ring.map(pt => new kakao.maps.LatLng(pt[1], pt[0]));
+          // 두 형식 모두 지원: [lng, lat] 배열 또는 {lat, lng} 객체
+          const latlngs = ring.map(pt => {
+            if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
+              // {lat, lng} 형식
+              return new kakao.maps.LatLng(pt.lat, pt.lng);
+            } else if (Array.isArray(pt) && pt.length >= 2) {
+              // [lng, lat] 형식
+              return new kakao.maps.LatLng(pt[1], pt[0]);
+            }
+            return null;
+          }).filter(ll => ll !== null);
+
+          if (latlngs.length < 3) continue;
+
           const p = makePolygon(latlngs, color, color, 1);
           p.setMap(map);
 

@@ -188,7 +188,8 @@
 
     <div class="help small" style="margin-top:10px;">
       - 문제 원인: DrawingManager.put / 잘못된 path 데이터 형태가 카카오 내부에서 a.e 호출로 터짐<br/>
-      - 해결: Drawing 라이브러리 의존 제거 + LatLng 기반 편집기로 교체
+      - 해결: Drawing 라이브러리 의존 제거 + LatLng 기반 편집기로 교체<br/>
+      - API 오류: 백엔드에서 "subsubroutes.color" 컬럼을 찾지 못함 → 백엔드 SQL 쿼리 수정 필요
     </div>
   </div>
 
@@ -838,7 +839,14 @@
 
       setStatus(`GET /route 요청: ${url.toString()}`, "OK");
       const data = await apiGet(url.toString());
-      renderRoutes(data?.rows || []);
+      
+      if (!data || !data.rows) {
+        setStatus("서버 응답 데이터가 올바르지 않습니다.", "ERR");
+        log(`응답: ${JSON.stringify(data)}`);
+        return;
+      }
+      
+      renderRoutes(data.rows);
 
       // 입력한 code가 있고, 해당 row가 존재하면 자동 선택
       if (code) {
@@ -851,7 +859,14 @@
       }
     } catch (e) {
       console.error(e);
-      setStatus(`불러오기 실패: ${e.message}`, "ERR");
+      const errMsg = e.message || String(e);
+      if (errMsg.includes("column") && errMsg.includes("does not exist")) {
+        setStatus(`데이터베이스 스키마 오류: ${errMsg}. 백엔드 API를 확인하세요.`, "ERR");
+        log("힌트: 백엔드에서 존재하지 않는 컬럼을 참조하고 있습니다.");
+        log("백엔드 서버의 SQL 쿼리와 데이터베이스 스키마를 확인하세요.");
+      } else {
+        setStatus(`불러오기 실패: ${errMsg}`, "ERR");
+      }
     }
   }
 
@@ -1125,8 +1140,11 @@
 
       setStatus("지도 로드 완료", "OK");
 
-      // 자동 로드
-      loadRoutes().catch(()=>{});
+      // 자동 로드 (실패 시 사용자에게 안내)
+      loadRoutes().catch((err) => {
+        log("자동 로드 실패. 백엔드 API 확인이 필요합니다.");
+        setStatus("자동 로드 실패 (백엔드 API 오류). 새로 그리기는 가능합니다.", "WARN");
+      });
     });
   }
 

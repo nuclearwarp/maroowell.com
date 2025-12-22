@@ -120,6 +120,10 @@ async function handleRouteGet(url, env) {
     "polygon_wgs84",
     "vendor_name",
     "vendor_business_number",
+    "delivery_location_name",
+    "delivery_location_address",
+    "delivery_location_lat",
+    "delivery_location_lng",
     "created_at",
     "updated_at"
   ].join(",");
@@ -211,13 +215,25 @@ async function handleRoutePost(request, env) {
   if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number")) {
     patch.vendor_business_number = body.vendor_business_number ?? null;
   }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_name")) {
+    patch.delivery_location_name = body.delivery_location_name ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_address")) {
+    patch.delivery_location_address = body.delivery_location_address ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lat")) {
+    patch.delivery_location_lat = body.delivery_location_lat ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lng")) {
+    patch.delivery_location_lng = body.delivery_location_lng ?? null;
+  }
   if (hasPoly) patch.polygon_wgs84 = body.polygon_wgs84 ?? null;
 
   // id가 오면 patch 우선(단, full_code/camp 같이 동기화)
   if (typeof id === "number") {
     const params = new URLSearchParams();
     params.set("id", `eq.${id}`);
-    params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+    params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
 
     const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
       method: "PATCH",
@@ -259,7 +275,7 @@ async function handleRoutePost(request, env) {
     const existingId = existing[0].id;
     const patchParams = new URLSearchParams();
     patchParams.set("id", `eq.${existingId}`);
-    patchParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+    patchParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
     
     inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${patchParams.toString()}`, {
       method: "PATCH",
@@ -271,7 +287,7 @@ async function handleRoutePost(request, env) {
   } else {
     // 기존 row가 없으면 POST (신규 생성)
     const insertParams = new URLSearchParams();
-    insertParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+    insertParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
     
     inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${insertParams.toString()}`, {
       method: "POST",
@@ -311,7 +327,7 @@ async function handleRouteDelete(request, env) {
 
   // 대상 필터
   const params = new URLSearchParams();
-  params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+  params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
 
   if (typeof id === "number") {
     params.set("id", `eq.${id}`);

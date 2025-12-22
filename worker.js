@@ -241,18 +241,44 @@ async function handleRoutePost(request, env) {
     return json({ row }, 200, { "Cache-Control": "no-store" });
   }
 
-  // id가 없으면 upsert (camp+full_code unique 필요)
-  const upsertParams = new URLSearchParams();
-  upsertParams.set("on_conflict", "camp,full_code");
-  upsertParams.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
-
-  const inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${upsertParams.toString()}`, {
-    method: "POST",
-    headers: {
-      Prefer: "resolution=merge-duplicates,return=representation"
-    },
-    body: JSON.stringify(patch)
+  // id가 없으면 먼저 기존 row 조회 후 있으면 PATCH, 없으면 POST
+  const queryParams = new URLSearchParams();
+  queryParams.set("camp", `eq.${camp}`);
+  queryParams.set("full_code", `eq.${code}`);
+  queryParams.set("select", "id");
+  
+  const existing = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, {
+    method: "GET"
   });
+
+  let inserted;
+  if (Array.isArray(existing) && existing.length > 0) {
+    // 기존 row가 있으면 PATCH
+    const existingId = existing[0].id;
+    const patchParams = new URLSearchParams();
+    patchParams.set("id", `eq.${existingId}`);
+    patchParams.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+    
+    inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${patchParams.toString()}`, {
+      method: "PATCH",
+      headers: {
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify(patch)
+    });
+  } else {
+    // 기존 row가 없으면 POST (신규 생성)
+    const insertParams = new URLSearchParams();
+    insertParams.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
+    
+    inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${insertParams.toString()}`, {
+      method: "POST",
+      headers: {
+        Prefer: "return=representation"
+      },
+      body: JSON.stringify(patch)
+    });
+  }
 
   const row = Array.isArray(inserted) ? inserted[0] : inserted;
   if (row && row.full_code) {

@@ -523,9 +523,9 @@
           const p = makePolygon(latlngs, color, color, 1);
           p.setMap(map);
 
-          // 클릭으로 편집 진입
+          // 클릭으로 편집 진입 (그리기 모드가 아닐 때만)
           kakao.maps.event.addListener(p, "click", () => {
-            startEditing(id);
+            if (!drawMode) startEditing(id);
           });
 
           polygons.push(p);
@@ -562,13 +562,13 @@
   let MID_IMG = null;
 
   function makeHandleImage(fill="#ffffff", stroke="#111827") {
-    // SVG 데이터 URI
+    // SVG 데이터 URI (작은 크기)
     const svg =
-      `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18">
-        <circle cx="9" cy="9" r="7" fill="${fill}" stroke="${stroke}" stroke-width="2"/>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+        <circle cx="6" cy="6" r="5" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
       </svg>`;
     const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(18,18), { offset: new kakao.maps.Point(9,9) });
+    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(12,12), { offset: new kakao.maps.Point(6,6) });
   }
 
   function stopEditing() {
@@ -770,8 +770,18 @@
   function addDrawPoint(latlng) {
     drawPoints.push(latlng);
 
+    // 작은 점 마커 생성
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <circle cx="5" cy="5" r="4" fill="#ffffff" stroke="#0b1220" stroke-width="1.5"/>
+    </svg>`;
+    const markerImageSrc = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    const markerImage = new kakao.maps.MarkerImage(markerImageSrc, new kakao.maps.Size(10, 10), {
+      offset: new kakao.maps.Point(5, 5)
+    });
+
     const m = new kakao.maps.Marker({
       position: latlng,
+      image: markerImage,
       zIndex: 30
     });
     m.setMap(map);
@@ -835,8 +845,8 @@
     const poly = makePolygon(drawPoints.slice(), color, color, 5);
     poly.setMap(map);
     kakao.maps.event.addListener(poly, "click", () => {
-      // 클릭하면 편집 대상으로 유지
-      if (rowId) startEditing(rowId);
+      // 클릭하면 편집 대상으로 유지 (그리기 모드가 아닐 때만)
+      if (rowId && !drawMode) startEditing(rowId);
     });
 
     // rowId가 없으면 임시로 생성(저장하면 실제 row 생김). 이 경우 id 맵핑이 없어서 편집 상태 관리를 위해 임시 ID를 부여.
@@ -989,17 +999,24 @@
 
       const polygon_wgs84 = id ? getCurrentEditedPolygonWgs84ById(selectedRouteId || id) : null;
 
+      // ID가 없으면 camp+code로 upsert (백엔드에서 unique constraint 확인)
       const payload = {
-        id: (typeof id === "number" ? id : undefined), // 숫자 ID만 전송
         camp,
         code,
         polygon_wgs84,
         vendor_name: vendorNameInput.value.trim() || null,
         vendor_business_number: vendorBizInput.value.trim() || null
       };
+      
+      // ID가 숫자면 추가 (update용)
+      if (typeof id === "number") {
+        payload.id = id;
+      }
 
+      log(`저장 payload: ${JSON.stringify(payload, null, 2)}`);
       setStatus("POST /route 요청", "OK");
       const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
+      log(`저장 응답: ${JSON.stringify(res)}`);
       setStatus(`저장 완료`, "OK");
 
       // 저장 후 재조회(실제 id 반영)
@@ -1042,15 +1059,30 @@
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
 
       let id = selectedRouteId;
+      
+      // 임시 ID를 실제 ID로 변환 시도
+      if (id && typeof id === "string" && id.startsWith("tmp_")) {
+        const actualRow = routeRows.find(r => 
+          (r.camp||"") === camp && (r.full_code||"") === code
+        );
+        if (actualRow && typeof actualRow.id === "number") {
+          id = actualRow.id;
+        } else {
+          id = undefined;
+        }
+      }
+      
       const payload = {
-        id: (typeof id === "number" ? id : undefined),
         camp,
         code,
         vendor_name: clear ? null : (vendorNameInput.value.trim() || null),
         vendor_business_number: clear ? null : (vendorBizInput.value.trim() || null),
-        // polygon은 건드리지 않음
-        polygon_wgs84: undefined
+        // polygon은 건드리지 않음 (명시적으로 제외)
       };
+      
+      if (typeof id === "number") {
+        payload.id = id;
+      }
 
       setStatus(clear ? "벤더 비우기 저장" : "벤더 저장", "OK");
       await apiJson("POST", ROUTE_ENDPOINT, payload);

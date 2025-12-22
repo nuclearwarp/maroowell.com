@@ -201,12 +201,17 @@
         <button id="labelToggleBtn" class="btn">라우트 라벨 ON</button>
         <button id="resetBtn" class="btn">지도 초기화</button>
       </div>
+      <div style="height:8px"></div>
+      <div class="row">
+        <button id="shareBtn" class="btn ok" style="width:100%;">🔗 공유 링크 생성</button>
+      </div>
 
       <div class="help">
         - 편집: 폴리곤 클릭 → 꼭짓점 드래그로 수정, 우클릭으로 점 삭제<br/>
         - 새로 그리기: Enter로 완료, 우클릭으로 취소, ESC로 나가기<br/>
         - 구역 추가: 같은 코드에 폴리곤 추가 (다구역 지원)<br/>
-        - 지도 정렬: OSM 도로/건물 오버레이 표시
+        - 지도 정렬: OSM 도로/건물 오버레이 표시<br/>
+        - <strong>공유 링크</strong>: 다른 사람에게 보낼 수 있는 읽기 전용 지도 링크 생성
       </div>
     </div>
 
@@ -260,6 +265,7 @@
   const deliveryNaviBtn = $("deliveryNaviBtn");
   const deliverySaveBtn = $("deliverySaveBtn");
   const deliveryClearBtn = $("deliveryClearBtn");
+  const shareBtn = $("shareBtn");
 
   const logEl = $("log");
   const statusPill = $("statusPill");
@@ -1624,6 +1630,46 @@
     setStatus("지도 초기화 완료.", "OK");
   }
 
+  // ====== 공유 링크 생성 ======
+  function generateShareLink() {
+    const camp = campInput.value.trim();
+    const code = codeInput.value.trim();
+    
+    if (!camp) {
+      setStatus("캠프 정보를 입력해주세요.", "WARN");
+      return;
+    }
+    
+    // 현재 도메인 기준으로 share.html 링크 생성
+    const shareUrl = new URL("/share.html", location.origin);
+    shareUrl.searchParams.set("camp", camp);
+    if (code) {
+      shareUrl.searchParams.set("code", code);
+    }
+    
+    const url = shareUrl.toString();
+    
+    // 클립보드 복사
+    navigator.clipboard.writeText(url).then(() => {
+      setStatus("공유 링크가 클립보드에 복사되었습니다!", "OK");
+      
+      // 확인 팝업 표시
+      const confirmed = confirm(
+        `공유 링크가 복사되었습니다!\n\n${url}\n\n새 탭에서 미리보기를 여시겠습니까?`
+      );
+      
+      if (confirmed) {
+        window.open(url, "_blank");
+      }
+    }).catch(err => {
+      // 클립보드 복사 실패 시 프롬프트로 표시
+      prompt("공유 링크 (Ctrl+C로 복사):", url);
+      setStatus("공유 링크를 생성했습니다.", "OK");
+    });
+    
+    log(`공유 링크 생성: ${url}`);
+  }
+
   // ====== 지도 이벤트(그리기 모드 + 커스텀 드래그) ======
   function attachMapEvents() {
     // 클릭: 점 추가
@@ -1740,6 +1786,8 @@
       deliveryNaviBtn.addEventListener("click", openKakaoNavi);
       deliverySaveBtn.addEventListener("click", () => saveDeliveryOnly(false));
       deliveryClearBtn.addEventListener("click", () => saveDeliveryOnly(true));
+
+      shareBtn.addEventListener("click", generateShareLink);
 
       setStatus("지도 로드 완료", "OK");
 

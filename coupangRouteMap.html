@@ -661,17 +661,26 @@
             const newPos = vMarker.getPosition();
             const currentPath = polygon.getPath();
             
-            // MVCArray인 경우 setAt으로 직접 수정 (더 효율적)
-            if (currentPath && typeof currentPath.setAt === 'function') {
-              currentPath.setAt(index, newPos);
+            // 항상 배열로 변환해서 안전하게 처리
+            const pathArray = [];
+            if (currentPath && typeof currentPath.getLength === 'function') {
+              // MVCArray 형식
+              for (let j = 0; j < currentPath.getLength(); j++) {
+                pathArray.push(j === index ? newPos : currentPath.getAt(j));
+              }
             } else if (Array.isArray(currentPath)) {
-              // 배열인 경우 배열로 변환 후 점 업데이트
-              const pathArray = [];
+              // 일반 배열 형식
               for (let j = 0; j < currentPath.length; j++) {
                 pathArray.push(j === index ? newPos : currentPath[j]);
               }
-              polygon.setPath(pathArray);
+            } else {
+              console.warn("Unknown path format:", currentPath);
+              return;
             }
+            
+            // 배열로 setPath (확실한 방법)
+            polygon.setPath(pathArray);
+            
             // 라벨 위치도 업데이트(선택된 라우트만)
             updateSelectedLabels();
           });
@@ -759,8 +768,18 @@
     const color = row.color || colorFor(code);
 
     for (const p of polygons) {
-      const path = p.getPath();
-      if (!path || path.length < 3) continue;
+      const rawPath = p.getPath();
+      // MVCArray든 배열이든 일반 배열로 변환
+      const path = [];
+      if (rawPath && typeof rawPath.getLength === 'function') {
+        for (let i = 0; i < rawPath.getLength(); i++) {
+          path.push(rawPath.getAt(i));
+        }
+      } else if (Array.isArray(rawPath)) {
+        path.push(...rawPath);
+      }
+      
+      if (path.length < 3) continue;
       const c = centroidOfLatLngs(path);
       const label = createLabelOverlay(code, c, color);
       label.setMap(map);

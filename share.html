@@ -291,15 +291,17 @@
           <span id="campAddress">주소 정보 로딩 중...</span>
           <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사</button>
         </div>
-        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
-          <div class="camp-badge" id="campBadge">-</div>
-          <div class="camp-badge" id="codeBadge" style="display:none; background:rgba(255,77,109,.15); border-color:rgba(255,77,109,.3); color:#FF4D6D;">-</div>
+        <div style="margin-top:12px; color:#00C2FF; font-size:14px; font-weight:600;" id="naviDescription">
+          현재위치 > 캠프까지 길찾기
         </div>
       </div>
       
       <div class="navi-buttons">
-        <button class="btn primary" id="naviBtn" style="display:none;">
-          🚗 현재위치 → 캠프 길찾기
+        <button class="btn primary" id="naviToCampBtn" style="display:none;">
+          🎵 캠프가는길♪ 카카오지도로 연결
+        </button>
+        <button class="btn" id="naviToDeliveryBtn" style="display:none; background:linear-gradient(135deg, #22C55E 0%, #16A34A 100%); border-color:#22C55E; color:#fff;">
+          🚗 캠프 → 배송지 네비연결
         </button>
       </div>
     </div>
@@ -339,11 +341,11 @@
   
   const $ = (id) => document.getElementById(id);
   const loading = $("loading");
-  const naviBtn = $("naviBtn");
+  const naviToCampBtn = $("naviToCampBtn");
+  const naviToDeliveryBtn = $("naviToDeliveryBtn");
   const campName = $("campName");
   const campAddress = $("campAddress");
-  const campBadge = $("campBadge");
-  const codeBadge = $("codeBadge");
+  const naviDescription = $("naviDescription");
   const copyAddressBtn = $("copyAddressBtn");
   const addressPanel = $("addressPanel");
   const addressList = $("addressList");
@@ -537,7 +539,7 @@
     });
   }
   
-  // 라우트 선택 모달 렌더링
+  // 라우트 선택 모달 렌더링 (현재위치 → 캠프)
   function showRouteModal() {
     if (allRoutes.length === 0) {
       alert("라우트 정보가 없습니다.");
@@ -570,6 +572,40 @@
       item.onclick = () => {
         routeModal.classList.remove("visible");
         openNaviToCamp(route);
+      };
+      
+      routeList.appendChild(item);
+    });
+    
+    routeModal.classList.add("visible");
+  }
+  
+  // 배송지 선택 모달 (캠프 → 배송지)
+  function showDeliveryListModal() {
+    if (!addressRows || addressRows.length === 0) {
+      alert("배송지 정보가 없습니다.");
+      return;
+    }
+    
+    routeList.innerHTML = "";
+    
+    addressRows.forEach((addr, idx) => {
+      const item = document.createElement("div");
+      item.className = "route-item";
+      
+      const addressText = addr.address || addr.full_address || "주소 없음";
+      const dong = addr.dong ? `(${addr.dong})` : "";
+      const zipcode = addr.zipcode ? `우편번호: ${addr.zipcode}` : "";
+      
+      item.innerHTML = `
+        <div class="route-item-code">${idx + 1}번 배송지</div>
+        <div class="route-item-info">${addressText} ${dong}</div>
+        <div class="route-item-info">${zipcode}</div>
+      `;
+      
+      item.onclick = () => {
+        routeModal.classList.remove("visible");
+        openNaviToAddress(addr);
       };
       
       routeList.appendChild(item);
@@ -701,19 +737,13 @@
       routeData = data.rows[0]; // 첫 번째 라우트를 기본으로 사용
       
       // 헤더 UI 업데이트
-      const displayName = routeData.delivery_location_name || camp || "캠프";
+      const displayName = routeData.delivery_location_name || "캠프";
       const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
       const displayCode = code || (allRoutes.length === 1 ? allRoutes[0].full_code || allRoutes[0].code : "");
       
-      campName.textContent = `📍 ${displayName}`;
+      // 캠프명 표시: "김포1 식사동MB" 형식
+      campName.textContent = `📍 ${camp} ${displayName}`;
       campAddress.textContent = displayAddress;
-      campBadge.textContent = camp;
-      
-      // 코드 배지 표시
-      if (displayCode) {
-        codeBadge.textContent = displayCode;
-        codeBadge.style.display = "inline-block";
-      }
       
       // 주소가 있으면 복사 버튼 표시
       if (displayAddress && displayAddress !== "주소 정보 없음") {
@@ -722,7 +752,11 @@
       
       // 네비 버튼 표시
       if (routeData.delivery_location_name || routeData.delivery_location_address) {
-        naviBtn.style.display = "block";
+        naviToCampBtn.style.display = "block";
+        // 배송지가 있으면 배송지 네비 버튼도 표시
+        if (addressRows && addressRows.length > 0) {
+          naviToDeliveryBtn.style.display = "block";
+        }
       }
       
       // 폴리곤 그리기
@@ -737,6 +771,11 @@
         const addrData = await apiGet(addrUrl.toString());
         addressRows = addrData?.rows || [];
         renderAddressList();
+        
+        // 배송지가 있으면 배송지 네비 버튼 표시
+        if (addressRows && addressRows.length > 0) {
+          naviToDeliveryBtn.style.display = "block";
+        }
       } catch (addrErr) {
         console.warn("배송지 로드 실패:", addrErr);
       }
@@ -772,8 +811,11 @@
       const zoomControl = new kakao.maps.ZoomControl();
       map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
       
-      // 네비 버튼 바인딩 - 라우트 선택 모달 표시
-      naviBtn.onclick = showRouteModal;
+      // 캠프로 가는 네비 버튼 - 현재 위치에서 캠프까지
+      naviToCampBtn.onclick = showRouteModal;
+      
+      // 배송지로 가는 네비 버튼 - 캠프에서 배송지까지 (배송지 목록 모달)
+      naviToDeliveryBtn.onclick = showDeliveryListModal;
       
       // 주소 복사 버튼 바인딩
       copyAddressBtn.onclick = () => {

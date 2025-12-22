@@ -649,9 +649,14 @@
         // 드래그 중/후 갱신
         kakao.maps.event.addListener(vMarker, "drag", () => {
           const newPos = vMarker.getPosition();
-          const newPath = polygon.getPath();
-          newPath.setAt(i, newPos);
-          polygon.setPath(newPath);
+          const pth = polygon.getPath();
+          const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+          // 배열로 변환 후 점 업데이트
+          const pathArray = [];
+          for (let j = 0; j < len; j++) {
+            pathArray.push(j === i ? newPos : (Array.isArray(pth) ? pth[j] : pth.getAt(j)));
+          }
+          polygon.setPath(pathArray);
           // 라벨 위치도 업데이트(선택된 라우트만)
           updateSelectedLabels();
         });
@@ -662,12 +667,19 @@
         // 우클릭: 점 삭제(최소 3개 유지)
         kakao.maps.event.addListener(vMarker, "rightclick", () => {
           const pth = polygon.getPath();
-          if (pth.length <= 3) {
+          const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+          if (len <= 3) {
             setStatus("점 삭제 불가: 최소 3개 꼭짓점 유지 필요", "WARN");
             return;
           }
-          pth.removeAt(i);
-          polygon.setPath(pth);
+          // 배열로 변환 후 점 삭제
+          const pathArray = [];
+          for (let j = 0; j < len; j++) {
+            if (j !== i) {
+              pathArray.push(Array.isArray(pth) ? pth[j] : pth.getAt(j));
+            }
+          }
+          polygon.setPath(pathArray);
           updateSelectedLabels();
           rebuildHandles();
         });
@@ -695,8 +707,16 @@
 
         kakao.maps.event.addListener(midMarker, "click", () => {
           const pth = polygon.getPath();
-          pth.insertAt(i+1, mid);
-          polygon.setPath(pth);
+          const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+          // 배열로 변환 후 점 추가
+          const pathArray = [];
+          for (let j = 0; j < len; j++) {
+            pathArray.push(Array.isArray(pth) ? pth[j] : pth.getAt(j));
+            if (j === i) {
+              pathArray.push(mid);
+            }
+          }
+          polygon.setPath(pathArray);
           updateSelectedLabels();
           rebuildHandles();
         });

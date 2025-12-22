@@ -923,19 +923,72 @@
       const code = codeInput.value.trim();
       if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
 
-      const url = new URL(ROUTE_ENDPOINT);
-      url.searchParams.set("camp", camp);
-      url.searchParams.set("mode", "prefix");
-      if (code) url.searchParams.set("code", code);
-
-      const data = await apiGet(url.toString());
+      // 여러 코드를 쉼표로 구분해서 입력한 경우 처리
+      const codes = code ? code.split(/[,\s]+/).map(c => c.trim()).filter(c => c) : [];
       
-      if (!data || !data.rows) {
-        setStatus("서버 응답 오류", "ERR");
+      let allRows = [];
+      
+      if (codes.length === 0) {
+        // 코드가 없으면 camp 전체 조회
+        const url = new URL(ROUTE_ENDPOINT);
+        url.searchParams.set("camp", camp);
+        url.searchParams.set("mode", "prefix");
+        
+        const data = await apiGet(url.toString());
+        
+        if (!data || !data.rows) {
+          setStatus("서버 응답 오류", "ERR");
+          return;
+        }
+        
+        allRows = data.rows;
+      } else if (codes.length === 1) {
+        // 단일 코드
+        const url = new URL(ROUTE_ENDPOINT);
+        url.searchParams.set("camp", camp);
+        url.searchParams.set("mode", "prefix");
+        url.searchParams.set("code", codes[0]);
+        
+        const data = await apiGet(url.toString());
+        
+        if (!data || !data.rows) {
+          setStatus("서버 응답 오류", "ERR");
+          return;
+        }
+        
+        allRows = data.rows;
+      } else {
+        // 여러 코드를 각각 조회해서 병합
+        setStatus(`${codes.length}개 라우트 조회 중...`, "OK");
+        
+        for (const singleCode of codes) {
+          try {
+            const url = new URL(ROUTE_ENDPOINT);
+            url.searchParams.set("camp", camp);
+            url.searchParams.set("mode", "prefix");
+            url.searchParams.set("code", singleCode);
+            
+            const data = await apiGet(url.toString());
+            
+            if (data && data.rows && data.rows.length > 0) {
+              allRows.push(...data.rows);
+              log(`${singleCode}: ${data.rows.length}개 발견`);
+            } else {
+              log(`${singleCode}: 데이터 없음`);
+            }
+          } catch (err) {
+            log(`${singleCode}: 조회 실패 - ${err.message}`);
+          }
+        }
+      }
+      
+      if (allRows.length === 0) {
+        setStatus("조회된 라우트가 없습니다.", "WARN");
+        clearAllOverlays();
         return;
       }
       
-      renderRoutes(data.rows);
+      renderRoutes(allRows);
     } catch (e) {
       console.error(e);
       const errMsg = e.message || String(e);

@@ -141,40 +141,39 @@
 
       <div style="height:10px"></div>
       <div class="row">
-        <button id="vendorSaveBtn" class="btn ok">벤더 저장(선택/입력코드)</button>
+        <button id="vendorSaveBtn" class="btn ok">벤더 저장</button>
         <button id="vendorClearBtn" class="btn danger">벤더 비우기</button>
       </div>
 
       <div class="help">
-        - 벤더 저장: 선택된 라우트(id)가 있으면 그 row 수정, 없으면 camp+code 기준 업서트<br/>
-        - 벤더 검색 기능은 제외(요청사항 반영)
+        - 선택된 라우트의 벤더 정보만 업데이트합니다
       </div>
     </div>
 
     <div class="group">
       <div class="row">
-        <button id="loadBtn" class="btn">불러오기(GET)</button>
+        <button id="loadBtn" class="btn">불러오기</button>
         <button id="drawNewBtn" class="btn warn">새로 그리기</button>
         <button id="drawAddBtn" class="btn warn">구역 추가</button>
       </div>
       <div style="height:8px"></div>
       <div class="row">
-        <button id="addrBtn" class="btn">주소검색</button>
-        <button id="saveBtn" class="btn ok">저장(POST)</button>
+        <button id="saveBtn" class="btn ok">저장</button>
         <button id="deletePolyBtn" class="btn danger">폴리곤 삭제</button>
+        <button id="alignBtn" class="btn">지도 정렬</button>
       </div>
       <div style="height:8px"></div>
       <div class="row">
-        <button id="alignBtn" class="btn">지도 정렬(OSM)</button>
+        <button id="addrBtn" class="btn">주소검색</button>
         <button id="labelToggleBtn" class="btn">라우트 라벨 ON</button>
         <button id="resetBtn" class="btn">지도 초기화</button>
       </div>
 
       <div class="help">
-        - 편집: 지도에서 라우트(폴리곤) 클릭 → 꼭짓점 핸들 표시(드래그로 수정)<br/>
-        - 새로 그리기: 지도 클릭으로 점 추가, <b>Enter키</b>로 완료, 우클릭으로 마지막 점 취소, ESC로 취소<br/>
-        - 구역 추가: 같은 코드에 폴리곤을 하나 더 추가(다구역 지원)<br/>
-        - 폴리곤 삭제: 해당 코드의 polygon_wgs84를 null로 저장(행 삭제 아님)
+        - 편집: 폴리곤 클릭 → 꼭짓점 드래그로 수정, 우클릭으로 점 삭제<br/>
+        - 새로 그리기: Enter로 완료, 우클릭으로 취소, ESC로 나가기<br/>
+        - 구역 추가: 같은 코드에 폴리곤 추가 (다구역 지원)<br/>
+        - 지도 정렬: OSM 도로/건물 오버레이 표시
       </div>
     </div>
 
@@ -187,9 +186,7 @@
     </div>
 
     <div class="help small" style="margin-top:10px;">
-      - 문제 원인: DrawingManager.put / 잘못된 path 데이터 형태가 카카오 내부에서 a.e 호출로 터짐<br/>
-      - 해결: Drawing 라이브러리 의존 제거 + LatLng 기반 편집기로 교체<br/>
-      - API 오류: 백엔드에서 "subsubroutes.color" 컬럼을 찾지 못함 → 백엔드 SQL 쿼리 수정 필요
+      💡 팁: 중간 점(회색)을 클릭하면 새 꼭짓점 추가, 꼭짓점 우클릭으로 삭제
     </div>
   </div>
 
@@ -341,27 +338,16 @@
 
   // ====== 유틸: polygon_wgs84 파싱 ======
   function parsePolygonWgs84(v, debugId = "") {
-    if (!v) {
-      if (debugId) log(`parsePolygonWgs84(${debugId}): null/undefined 입력`);
-      return null;
-    }
-    if (Array.isArray(v)) {
-      if (debugId) log(`parsePolygonWgs84(${debugId}): 배열 형식 OK (${v.length}개 링)`);
-      return v;
-    }
+    if (!v) return null;
+    if (Array.isArray(v)) return v;
     if (typeof v === "string") {
       try {
         const p = JSON.parse(v);
-        if (Array.isArray(p)) {
-          if (debugId) log(`parsePolygonWgs84(${debugId}): 문자열 → 배열 파싱 성공 (${p.length}개 링)`);
-          return p;
-        }
-        if (debugId) log(`parsePolygonWgs84(${debugId}): 파싱 결과가 배열이 아님: ${typeof p}`);
+        if (Array.isArray(p)) return p;
       } catch (e) {
-        if (debugId) log(`parsePolygonWgs84(${debugId}): JSON 파싱 실패: ${e.message}`);
+        if (debugId) log(`⚠ 폴리곤 파싱 실패: ${debugId}`);
       }
     }
-    if (debugId) log(`parsePolygonWgs84(${debugId}): 지원하지 않는 타입: ${typeof v}`);
     return null;
   }
 
@@ -455,7 +441,6 @@
       const color = row.color || colorFor(code);
       const debugId = `${camp}/${code}(id=${id})`;
       
-      log(`폴리곤 파싱 시도: ${debugId}`);
       const poly = parsePolygonWgs84(row.polygon_wgs84, debugId);
 
       const polygons = [];
@@ -473,56 +458,33 @@
         // 첫 번째 요소로 형식 판단
         const first = poly[0];
         if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
-          // 형식 2: 단일 링 (점 객체 배열)
-          log(`  → 폴리곤 데이터 처리 중: 단일 링 (${poly.length}개 점)`);
           rings = [poly];
         } else if (Array.isArray(first)) {
-          // 배열의 배열
           const firstOfFirst = first[0];
           if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst) {
-            // 형식 1: 다중 링 (각 링이 점 객체 배열)
-            log(`  → 폴리곤 데이터 처리 중: ${poly.length}개 링`);
             rings = poly;
           } else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
-            // 형식 3: 다중 링 (GeoJSON 스타일)
-            log(`  → 폴리곤 데이터 처리 중: ${poly.length}개 링 (GeoJSON)`);
             rings = poly;
           } else if (typeof firstOfFirst === 'number') {
-            // 형식 4: 단일 링 (GeoJSON 스타일)
-            log(`  → 폴리곤 데이터 처리 중: 단일 링 (${poly.length}개 점, GeoJSON)`);
             rings = [poly];
-          } else {
-            log(`  ✗ 알 수 없는 폴리곤 데이터 형식`);
           }
-        } else {
-          log(`  ✗ 지원하지 않는 폴리곤 데이터 형식`);
         }
 
         for (let i=0; i<rings.length; i++) {
           const ring = rings[i];
-          if (!Array.isArray(ring) || ring.length < 3) {
-            log(`  ⚠ 링 ${i}: 유효하지 않음 (길이 ${ring?.length || 0})`);
-            continue;
-          }
+          if (!Array.isArray(ring) || ring.length < 3) continue;
 
           // 두 형식 모두 지원: [lng, lat] 배열 또는 {lat, lng} 객체
           const latlngs = ring.map(pt => {
             if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
-              // {lat, lng} 형식
               return new kakao.maps.LatLng(pt.lat, pt.lng);
             } else if (Array.isArray(pt) && pt.length >= 2) {
-              // [lng, lat] 형식
               return new kakao.maps.LatLng(pt[1], pt[0]);
             }
             return null;
           }).filter(ll => ll !== null);
 
-          if (latlngs.length < 3) {
-            log(`  ⚠ 링 ${i}: 변환 후 유효한 좌표 부족 (${latlngs.length}개)`);
-            continue;
-          }
-
-          log(`  ✓ 링 ${i}: 폴리곤 생성 (좌표 ${latlngs.length}개)`);
+          if (latlngs.length < 3) continue;
           const p = makePolygon(latlngs, color, color, 1);
           p.setMap(map);
 
@@ -542,8 +504,6 @@
             labels.push(label);
           }
         }
-      } else {
-        log(`  ✗ 폴리곤 데이터 없음 또는 유효하지 않음`);
       }
 
       overlayById.set(id, { row, polygons, labels });
@@ -553,10 +513,9 @@
     
     if (any) {
       map.setBounds(bounds);
-      setStatus(`불러오기 완료. ${routeRows.length}개 row, ${totalPolygons}개 폴리곤 표시`, "OK");
+      setStatus(`${routeRows.length}개 라우트 로드 완료`, "OK");
     } else {
-      setStatus(`불러오기 완료. 표시 가능한 polygon_wgs84 row가 없습니다. (${routeRows.length}개 row 로드됨)`, "WARN");
-      log(`→ 해결 방법: "새로 그리기" 버튼으로 폴리곤을 그려서 저장하세요.`);
+      setStatus(`폴리곤 데이터 없음. 새로 그리기로 생성하세요.`, "WARN");
     }
   }
 
@@ -651,8 +610,6 @@
         path.push(Array.isArray(rawPath) ? rawPath[i] : rawPath.getAt(i));
       }
       
-      log(`  rebuildHandles: polygon path 변환 완료 (${path.length}개 점, 원본 타입: ${Array.isArray(rawPath) ? 'Array' : 'MVCArray'})`);
-      
       if (path.length < 3) continue;
 
       // Vertex handles (커스텀 드래그 구현)
@@ -666,12 +623,9 @@
           });
           
           vMarker.setMap(map);
-          
-          log(`  → vertex ${index} 핸들 생성 완료`);
 
           // 마우스 다운: 드래그 시작
           kakao.maps.event.addListener(vMarker, "mousedown", (e) => {
-            log(`  🟢 드래그 시작: vertex ${index}`);
             draggingVertex = { marker: vMarker, polygon, index };
             map.setDraggable(false); // 지도 드래그 비활성화
             
@@ -974,20 +928,12 @@
       url.searchParams.set("mode", "prefix");
       if (code) url.searchParams.set("code", code);
 
-      setStatus(`GET /route 요청: ${url.toString()}`, "OK");
       const data = await apiGet(url.toString());
       
       if (!data || !data.rows) {
-        setStatus("서버 응답 데이터가 올바르지 않습니다.", "ERR");
-        log(`응답: ${JSON.stringify(data)}`);
+        setStatus("서버 응답 오류", "ERR");
         return;
       }
-      
-      log(`불러온 데이터: ${data.rows.length}개 row`);
-      data.rows.forEach((row, idx) => {
-        const polyStatus = row.polygon_wgs84 ? `폴리곤 있음 (${Array.isArray(row.polygon_wgs84) ? row.polygon_wgs84.length : '1'}개)` : '폴리곤 없음';
-        log(`  [${idx}] ${row.camp} / ${row.full_code} (id=${row.id}): ${polyStatus}`);
-      });
       
       renderRoutes(data.rows);
     } catch (e) {
@@ -1044,12 +990,6 @@
 
       // 폴리곤 데이터는 polygonSourceId로 가져오기 (임시 ID든 실제 ID든 overlayById에 있는 키)
       const polygon_wgs84 = polygonSourceId ? getCurrentEditedPolygonWgs84ById(polygonSourceId) : null;
-      
-      if (!polygon_wgs84) {
-        log(`⚠ 경고: 폴리곤 데이터가 없습니다. polygonSourceId=${polygonSourceId}`);
-      } else {
-        log(`✓ 폴리곤 데이터 수집 완료: ${polygon_wgs84.length}개 링`);
-      }
 
       // ID가 없으면 먼저 해당 camp+code가 존재하는지 GET으로 확인
       if (!actualId) {
@@ -1061,10 +1001,7 @@
         });
         if (existingRow && typeof existingRow.id === "number") {
           actualId = existingRow.id;
-          log(`기존 row 발견: ${camp}/${code} (id=${actualId})`);
         } else {
-          // routeRows에 없으면 서버에 직접 확인
-          log(`routeRows에 없음. 서버에서 ${camp}/${code} 조회 시도...`);
           try {
             const url = new URL(ROUTE_ENDPOINT);
             url.searchParams.set("camp", camp);
@@ -1073,12 +1010,9 @@
             const checkData = await apiGet(url.toString());
             if (checkData && checkData.rows && checkData.rows.length > 0) {
               actualId = checkData.rows[0].id;
-              log(`서버에서 기존 row 발견 (id=${actualId})`);
-            } else {
-              log(`새 row 생성 예정: ${camp}/${code}`);
             }
           } catch (checkErr) {
-            log(`서버 조회 실패 (신규 생성 시도): ${checkErr.message}`);
+            // 신규 생성
           }
         }
       }
@@ -1092,19 +1026,11 @@
         vendor_business_number: vendorBizInput.value.trim() || null
       };
       
-      // actualId가 숫자면 추가 (update용)
       if (typeof actualId === "number") {
         payload.id = actualId;
-        log(`기존 row 업데이트 모드 (id=${actualId})`);
-      } else {
-        // 새 row 생성 모드: id 필드를 아예 포함하지 않음
-        log(`새 row 생성 모드 (camp=${camp}, code=${code})`);
       }
 
-      log(`저장 payload: ${JSON.stringify(payload, null, 2)}`);
-      setStatus("POST /route 요청", "OK");
       const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
-      log(`저장 응답: ${JSON.stringify(res)}`);
       setStatus(`저장 완료`, "OK");
 
       // 저장 후 재조회(실제 id 반영)
@@ -1353,7 +1279,6 @@
     const handleMouseUp = () => {
       if (!draggingVertex) return;
       
-      log(`  🔴 드래그 종료: vertex ${draggingVertex.index}`);
       draggingVertex = null;
       map.setDraggable(true); // 지도 드래그 재활성화
       rebuildHandles(); // 미드포인트 재생성

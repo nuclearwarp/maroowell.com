@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
   <title>Maroowell 우편번호 검색기</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
 
   <style>
     :root {
@@ -23,7 +24,7 @@
     }
     header{
       display:flex;
-      gap:12px;
+      gap:8px;
       align-items:center;
       padding:12px 16px;
       height:var(--headerH);
@@ -33,7 +34,7 @@
       top:0;
       z-index:5
     }
-    header h1{font-size:16px;margin:0}
+    header h1{font-size:18px;font-weight:800;letter-spacing:0.2px;margin:0}
     #app{
       display:grid;
       grid-template-columns:360px 1fr;
@@ -177,6 +178,9 @@
 </head>
 <body>
   <header>
+    <a href="/coupangRouteMap.html" style="display:flex;align-items:center">
+      <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
+    </a>
     <h1>Maroowell 우편번호 검색기</h1>
     <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
   </header>
@@ -239,6 +243,7 @@
       ]
     };
 
+    // Worker API 엔드포인트 (배포 후 실제 URL로 변경 필요)
     const ZIP_API = "https://zip.maroowell.com/?zipcode=";
     const $ = (sel) => document.querySelector(sel);
 
@@ -603,54 +608,57 @@
     function polygonsFrom5179(polygon5179, color, zip) {
       if (!Array.isArray(polygon5179) || !polygon5179.length) return [];
 
-      // polygon5179 가 [[x,y], ...] 형식 / 혹은 [ [ [x,y]... ], [ ... ] ] 형식
-      const rings =
-        Array.isArray(polygon5179[0]) &&
-        typeof polygon5179[0][0] === "number"
-          ? [polygon5179]
-          : polygon5179;
-
       const polys = [];
 
-      rings.forEach((ring, idx) => {
-        const path = [];
-        ring.forEach((pt, i) => {
-          if (!Array.isArray(pt) || pt.length < 2) return;
-          const x = Number(pt[0]);
-          const y = Number(pt[1]);
-          if (!isFinite(x) || !isFinite(y)) return;
+      // MultiPolygon 형식 처리: [[[[x,y], ...]]]
+      // 각 polygon (외부 배열의 각 요소) 처리
+      polygon5179.forEach((polygon, polyIdx) => {
+        if (!Array.isArray(polygon)) return;
+        
+        // 각 polygon의 rings 처리
+        polygon.forEach((ring, ringIdx) => {
+          if (!Array.isArray(ring)) return;
+          
+          const path = [];
+          ring.forEach((pt, ptIdx) => {
+            if (!Array.isArray(pt) || pt.length < 2) return;
+            const x = Number(pt[0]);
+            const y = Number(pt[1]);
+            if (!isFinite(x) || !isFinite(y)) return;
 
-          const { lat, lon } = convertPoint(x, y);
-          if (!isFinite(lat) || !isFinite(lon)) return;
+            const { lat, lon } = convertPoint(x, y);
+            if (!isFinite(lat) || !isFinite(lon)) return;
 
-          path.push(new kakao.maps.LatLng(lat, lon));
+            path.push(new kakao.maps.LatLng(lat, lon));
 
-          if (idx === 0 && i < 3) {
-            console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
-          }
+            // 첫 3개 포인트만 로그
+            if (polyIdx === 0 && ringIdx === 0 && ptIdx < 3) {
+              console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
+            }
+          });
+
+          console.log(`[ZIP ${zip}] polygon ${polyIdx} ring ${ringIdx} path length`, path.length);
+
+          if (path.length < 3) return;
+
+          const poly = new kakao.maps.Polygon({
+            map: state.map,
+            path,
+            strokeWeight: 6,
+            strokeColor: color,
+            strokeOpacity: 1,
+            strokeStyle: "solid",
+            fillColor: color,
+            fillOpacity: 0.25
+          });
+          polys.push(poly);
         });
-
-        console.log(`[ZIP ${zip}] ring ${idx} path length`, path.length);
-
-        if (path.length < 3) return;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path,
-          strokeWeight: 4,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.45
-        });
-        polys.push(poly);
       });
 
       return polys;
     }
 
-    // ZIP API 호출해서 그리기
+    // Worker API 호출해서 그리기
     async function drawSelected() {
       const targets = [...state.selectedZips].filter(
         (z) => !state.polygons.has(z)

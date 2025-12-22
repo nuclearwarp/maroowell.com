@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>배송 지도 공유</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1a2d;
+      --txt:#e6eefc;
+      --muted:#93a4c7;
+      --line:rgba(255,255,255,.08);
+      --btn:#162744;
+      --btn2:#1a2f55;
+    }
+    *{box-sizing:border-box; margin:0; padding:0;}
+    html,body{height:100%; font-family:system-ui, -apple-system, "Noto Sans KR", sans-serif; background:var(--bg); color:var(--txt);}
+    
+    .container{display:flex; flex-direction:column; height:100vh;}
+    
+    /* 헤더 - 모바일 중심 */
+    .header{
+      background:linear-gradient(135deg, #1a2f55 0%, #0f1a2d 100%);
+      padding:20px;
+      border-bottom:2px solid var(--line);
+      box-shadow:0 4px 12px rgba(0,0,0,.3);
+      text-align:center;
+    }
+    .header-content{
+      max-width:600px;
+      margin:0 auto;
+    }
+    .camp-info{
+      margin-bottom:16px;
+    }
+    .camp-name{
+      font-size:24px; 
+      font-weight:800; 
+      margin-bottom:8px; 
+      letter-spacing:0.3px;
+      color:#00C2FF;
+    }
+    .camp-address{
+      font-size:14px; 
+      color:var(--muted); 
+      line-height:1.5;
+      margin-bottom:4px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+    .copy-btn{
+      background:rgba(0,194,255,.15);
+      border:1px solid rgba(0,194,255,.3);
+      color:#00C2FF;
+      padding:4px 8px;
+      border-radius:6px;
+      cursor:pointer;
+      font-size:12px;
+      transition:all 0.2s;
+      white-space:nowrap;
+    }
+    .copy-btn:hover{
+      background:rgba(0,194,255,.25);
+      border-color:#00C2FF;
+    }
+    .camp-badge{
+      display:inline-block;
+      padding:6px 14px;
+      border-radius:999px;
+      background:rgba(0,194,255,.15);
+      border:1px solid rgba(0,194,255,.3);
+      font-size:13px;
+      color:#00C2FF;
+      font-weight:600;
+      margin-top:8px;
+    }
+    
+    /* 네비 버튼 영역 */
+    .navi-buttons{
+      display:flex;
+      gap:8px;
+      flex-direction:column;
+    }
+    .btn{
+      width:100%;
+      padding:14px 20px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:var(--btn);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:700;
+      font-size:15px;
+      white-space:nowrap;
+      transition:all 0.2s;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+    .btn:hover{background:var(--btn2); transform:translateY(-1px);}
+    .btn.primary{
+      background:linear-gradient(135deg, #00C2FF 0%, #0088CC 100%);
+      border-color:#00C2FF;
+      color:#fff;
+      box-shadow:0 4px 12px rgba(0,194,255,.25);
+      font-size:16px;
+      padding:16px 20px;
+    }
+    .btn.primary:hover{
+      box-shadow:0 6px 16px rgba(0,194,255,.35);
+    }
+    
+    /* 지도 */
+    .map-container{flex:1; position:relative;}
+    #map{position:absolute; inset:0;}
+    
+    /* 배송지 목록 패널 */
+    .address-panel{
+      position:absolute;
+      bottom:20px;
+      left:20px;
+      max-width:360px;
+      max-height:60vh;
+      background:rgba(15,26,45,.95);
+      backdrop-filter:blur(10px);
+      border:1px solid var(--line);
+      border-radius:16px;
+      box-shadow:0 8px 24px rgba(0,0,0,.4);
+      overflow:hidden;
+      display:none; /* 배송지가 있을 때만 표시 */
+    }
+    .address-panel.visible{display:block;}
+    .panel-header{
+      padding:16px 18px;
+      border-bottom:1px solid var(--line);
+      font-weight:700;
+      font-size:15px;
+      background:rgba(0,0,0,.2);
+    }
+    .address-list{
+      max-height:calc(60vh - 60px);
+      overflow-y:auto;
+      padding:10px;
+    }
+    .address-item{
+      padding:14px 16px;
+      margin-bottom:8px;
+      background:rgba(0,0,0,.15);
+      border:1px solid var(--line);
+      border-radius:12px;
+      font-size:13px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      transition:all 0.2s;
+    }
+    .address-item:hover{background:rgba(0,0,0,.25); border-color:#00C2FF;}
+    .address-info{flex:1; min-width:0;}
+    .address-text{font-weight:600; color:var(--txt); margin-bottom:4px; word-break:break-all;}
+    .address-meta{color:var(--muted); font-size:12px;}
+    .address-item .btn{
+      padding:10px 16px; 
+      font-size:14px; 
+      width:100%;
+      border-radius:8px;
+    }
+    
+    /* 로딩 오버레이 */
+    .loading{
+      position:absolute;
+      inset:0;
+      background:rgba(11,18,32,.85);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      z-index:100;
+      flex-direction:column;
+      gap:12px;
+    }
+    .spinner{
+      width:40px;
+      height:40px;
+      border:4px solid rgba(255,255,255,.1);
+      border-top-color:#00C2FF;
+      border-radius:50%;
+      animation:spin 0.8s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg);}}
+    .loading-text{font-size:14px; color:var(--muted);}
+    
+    /* 라벨 - 캠프 표시 크게 */
+    .route-label{
+      padding:8px 16px;
+      border-radius:12px;
+      background:rgba(0,0,0,.75);
+      color:#fff;
+      font-size:16px;
+      border:2px solid rgba(255,255,255,.3);
+      white-space:nowrap;
+      box-shadow:0 4px 16px rgba(0,0,0,.5);
+      font-weight:800;
+      letter-spacing:0.3px;
+      backdrop-filter:blur(4px);
+    }
+    
+    /* 라우트 선택 모달 */
+    .route-modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.8);
+      backdrop-filter:blur(8px);
+      z-index:1000;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+    .route-modal.visible{display:flex;}
+    .route-modal-content{
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:24px;
+      max-width:500px;
+      width:100%;
+      max-height:80vh;
+      overflow-y:auto;
+    }
+    .route-modal-title{
+      font-size:20px;
+      font-weight:800;
+      margin-bottom:16px;
+      text-align:center;
+    }
+    .route-item{
+      padding:16px;
+      margin-bottom:12px;
+      background:rgba(0,0,0,.2);
+      border:1px solid var(--line);
+      border-radius:12px;
+      cursor:pointer;
+      transition:all 0.2s;
+    }
+    .route-item:hover{
+      background:rgba(0,0,0,.3);
+      border-color:#00C2FF;
+      transform:translateY(-2px);
+    }
+    .route-item-code{
+      font-size:18px;
+      font-weight:700;
+      color:#00C2FF;
+      margin-bottom:8px;
+    }
+    .route-item-info{
+      font-size:13px;
+      color:var(--muted);
+    }
+    
+    /* 반응형 */
+    @media (max-width: 768px){
+      .address-panel{
+        left:10px;
+        right:10px;
+        bottom:10px;
+        max-width:none;
+      }
+      .route-modal-content{
+        padding:20px;
+      }
+    }
+  </style>
+
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
+</head>
+
+<body>
+<div class="container">
+  <!-- 헤더 -->
+  <div class="header">
+    <div class="header-content">
+      <div class="camp-info">
+        <div class="camp-name" id="campName">📍 배송 구역 안내</div>
+        <div class="camp-address">
+          <span id="campAddress">주소 정보 로딩 중...</span>
+          <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사</button>
+        </div>
+        <div class="camp-badge" id="campBadge">-</div>
+      </div>
+      
+      <div class="navi-buttons">
+        <button class="btn primary" id="naviBtn" style="display:none;">
+          🚗 캠프 → 배송지 길찾기
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 라우트 선택 모달 -->
+  <div class="route-modal" id="routeModal">
+    <div class="route-modal-content">
+      <div class="route-modal-title">배송지 선택</div>
+      <div id="routeList"></div>
+    </div>
+  </div>
+  
+  <!-- 지도 -->
+  <div class="map-container">
+    <div id="map"></div>
+    
+    <!-- 로딩 -->
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div class="loading-text">지도 데이터 로딩 중...</div>
+    </div>
+    
+    <!-- 배송지 목록 패널 -->
+    <div class="address-panel" id="addressPanel">
+      <div class="panel-header">📦 배송지 목록</div>
+      <div class="address-list" id="addressList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const API_BASE = "https://route.maroowell.com";
+  const ROUTE_ENDPOINT = `${API_BASE}/route`;
+  const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
+  
+  const $ = (id) => document.getElementById(id);
+  const loading = $("loading");
+  const naviBtn = $("naviBtn");
+  const campName = $("campName");
+  const campAddress = $("campAddress");
+  const campBadge = $("campBadge");
+  const copyAddressBtn = $("copyAddressBtn");
+  const addressPanel = $("addressPanel");
+  const addressList = $("addressList");
+  const routeModal = $("routeModal");
+  const routeList = $("routeList");
+  
+  let map, geocoder;
+  let allRoutes = []; // 모든 라우트 저장
+  let routeData = null; // 현재 선택된 라우트
+  let addressRows = [];
+  
+  // URL 파라미터 추출
+  const params = new URLSearchParams(location.search);
+  const camp = params.get("camp") || "";
+  const code = params.get("code") || "";
+  
+  // 컬러 팔레트
+  const COLOR_PALETTE = [
+    "#00C2FF", "#FF4D6D", "#FFD166", "#06D6A0", "#A78BFA",
+    "#F97316", "#22C55E", "#E11D48", "#3B82F6", "#F59E0B"
+  ];
+  
+  function hashCode(str) {
+    let h = 0;
+    for (let i=0;i<str.length;i++){
+      h = (h<<5) - h + str.charCodeAt(i);
+      h |= 0;
+    }
+    return Math.abs(h);
+  }
+  
+  function colorFor(code) {
+    return COLOR_PALETTE[hashCode(code) % COLOR_PALETTE.length];
+  }
+  
+  // API 호출
+  async function apiGet(url) {
+    const res = await fetch(url, { method:"GET" });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!res.ok) {
+      const msg = json?.error || text || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return json;
+  }
+  
+  // 폴리곤 파싱
+  function parsePolygonWgs84(v) {
+    if (!v) return null;
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string") {
+      try {
+        const p = JSON.parse(v);
+        if (Array.isArray(p)) return p;
+      } catch (e) {}
+    }
+    return null;
+  }
+  
+  // 폴리곤 중심점 계산
+  function centroidOfLatLngs(latlngs) {
+    let latSum=0, lngSum=0;
+    for (const ll of latlngs) { 
+      latSum += ll.getLat(); 
+      lngSum += ll.getLng(); 
+    }
+    return new kakao.maps.LatLng(latSum/latlngs.length, lngSum/latlngs.length);
+  }
+  
+  // 라벨 생성 - 캠프 이름만 표시
+  function createLabel(text, position, color) {
+    const el = document.createElement("div");
+    el.className = "route-label";
+    el.style.borderColor = color;
+    el.style.background = `linear-gradient(135deg, ${color}33, ${color}55)`;
+    el.innerHTML = `📦 ${text}`;
+    
+    return new kakao.maps.CustomOverlay({
+      position,
+      content: el,
+      yAnchor: 0.5,
+      zIndex: 10
+    });
+  }
+  
+  // 폴리곤 그리기
+  function drawPolygons(rows) {
+    if (!rows || rows.length === 0) return;
+    
+    const bounds = new kakao.maps.LatLngBounds();
+    let hasPolygon = false;
+    
+    for (const row of rows) {
+      const fullCode = row.full_code || row.code || "";
+      const color = row.color || colorFor(fullCode);
+      const poly = parsePolygonWgs84(row.polygon_wgs84);
+      
+      if (!poly || !Array.isArray(poly) || poly.length === 0) continue;
+      
+      // 데이터 형식 자동 감지
+      let rings = [];
+      const first = poly[0];
+      
+      if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
+        rings = [poly];
+      } else if (Array.isArray(first)) {
+        const firstOfFirst = first[0];
+        if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst) {
+          rings = poly;
+        } else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
+          rings = poly;
+        } else if (typeof firstOfFirst === 'number') {
+          rings = [poly];
+        }
+      }
+      
+      for (const ring of rings) {
+        if (!Array.isArray(ring) || ring.length < 3) continue;
+        
+        const latlngs = ring.map(pt => {
+          if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
+            return new kakao.maps.LatLng(pt.lat, pt.lng);
+          } else if (Array.isArray(pt) && pt.length >= 2) {
+            return new kakao.maps.LatLng(pt[1], pt[0]);
+          }
+          return null;
+        }).filter(ll => ll !== null);
+        
+        if (latlngs.length < 3) continue;
+        
+        // 폴리곤 생성
+        const polygon = new kakao.maps.Polygon({
+          path: latlngs,
+          strokeWeight: 5,
+          strokeColor: color,
+          strokeOpacity: 1.0,
+          strokeStyle: "solid",
+          fillColor: color,
+          fillOpacity: 0.20,
+          zIndex: 1
+        });
+        polygon.setMap(map);
+        
+        // 라벨 생성 - 라우트 번호 표시
+        const center = centroidOfLatLngs(latlngs);
+        const label = createLabel(fullCode, center, color);
+        label.setMap(map);
+        
+        latlngs.forEach(ll => bounds.extend(ll));
+        hasPolygon = true;
+      }
+    }
+    
+    if (hasPolygon) {
+      map.setBounds(bounds);
+    }
+  }
+  
+  // 배송지 목록 렌더링
+  function renderAddressList() {
+    if (!addressRows || addressRows.length === 0) {
+      addressPanel.classList.remove("visible");
+      return;
+    }
+    
+    addressPanel.classList.add("visible");
+    addressList.innerHTML = "";
+    
+    addressRows.forEach((addr, idx) => {
+      const item = document.createElement("div");
+      item.className = "address-item";
+      
+      const addressText = addr.address || addr.full_address || "주소 없음";
+      const dong = addr.dong ? `(${addr.dong})` : "";
+      const zipcode = addr.zipcode ? `우편번호: ${addr.zipcode}` : "";
+      
+      item.innerHTML = `
+        <div class="address-info">
+          <div class="address-text">${idx + 1}. ${addressText} ${dong}</div>
+          <div class="address-meta">${zipcode}</div>
+        </div>
+        <button class="btn">🚗 길찾기</button>
+      `;
+      
+      const btn = item.querySelector("button");
+      btn.onclick = () => openNaviToAddress(addr);
+      
+      addressList.appendChild(item);
+    });
+  }
+  
+  // 라우트 선택 모달 렌더링
+  function showRouteModal() {
+    if (allRoutes.length === 0) {
+      alert("라우트 정보가 없습니다.");
+      return;
+    }
+    
+    if (allRoutes.length === 1) {
+      // 라우트가 하나면 바로 실행
+      openNaviToCamp(allRoutes[0]);
+      return;
+    }
+    
+    // 여러 라우트가 있으면 선택 모달 표시
+    routeList.innerHTML = "";
+    
+    allRoutes.forEach((route, idx) => {
+      const item = document.createElement("div");
+      item.className = "route-item";
+      
+      const routeCode = route.full_code || route.code || `라우트 ${idx + 1}`;
+      const routeName = route.delivery_location_name || "입차지";
+      const routeAddr = route.delivery_location_address || "주소 없음";
+      
+      item.innerHTML = `
+        <div class="route-item-code">${routeCode}</div>
+        <div class="route-item-info">${routeName}</div>
+        <div class="route-item-info">${routeAddr}</div>
+      `;
+      
+      item.onclick = () => {
+        routeModal.classList.remove("visible");
+        openNaviToCamp(route);
+      };
+      
+      routeList.appendChild(item);
+    });
+    
+    routeModal.classList.add("visible");
+  }
+  
+  // 모달 닫기
+  routeModal.onclick = (e) => {
+    if (e.target === routeModal) {
+      routeModal.classList.remove("visible");
+    }
+  };
+  
+  // 배송지로 네비 실행
+  function openNaviToAddress(addr) {
+    if (!routeData || !routeData.delivery_location_address) {
+      alert("입차지 정보가 없습니다.");
+      return;
+    }
+    
+    const addressText = addr.address || addr.full_address;
+    if (!addressText) {
+      alert("배송지 주소 정보가 없습니다.");
+      return;
+    }
+    
+    const deliveryAddress = routeData.delivery_location_address;
+    const deliveryName = routeData.delivery_location_name || "입차지";
+    
+    // 입차지와 배송지 주소를 좌표로 변환
+    geocoder.addressSearch(deliveryAddress, (startResult, startStatus) => {
+      if (startStatus !== kakao.maps.services.Status.OK || !startResult?.length) {
+        alert("입차지 주소를 찾을 수 없습니다.");
+        return;
+      }
+      
+      const startLat = Number(startResult[0].y);
+      const startLng = Number(startResult[0].x);
+      
+      // 배송지 주소 검색
+      geocoder.addressSearch(addressText, (endResult, endStatus) => {
+        if (endStatus !== kakao.maps.services.Status.OK || !endResult?.length) {
+          alert("배송지 주소를 찾을 수 없습니다.");
+          return;
+        }
+        
+        const endLat = Number(endResult[0].y);
+        const endLng = Number(endResult[0].x);
+        
+        // 카카오내비 URL
+        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        let naviUrl;
+        
+        if (isMobile) {
+          naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
+        } else {
+          naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(addressText)},${endLat},${endLng}`;
+        }
+        
+        window.location.href = naviUrl;
+      });
+    });
+  }
+  
+  // 캠프까지 네비
+  function openNaviToCamp(route) {
+    if (!route || !route.delivery_location_address) {
+      alert("입차지 정보가 없습니다.");
+      return;
+    }
+    
+    const deliveryAddress = route.delivery_location_address;
+    const deliveryName = route.delivery_location_name || "입차지";
+    
+    geocoder.addressSearch(deliveryAddress, (result, status) => {
+      if (status !== kakao.maps.services.Status.OK || !result?.length) {
+        alert("입차지 주소를 찾을 수 없습니다.");
+        return;
+      }
+      
+      const lat = Number(result[0].y);
+      const lng = Number(result[0].x);
+      
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      let naviUrl;
+      
+      if (isMobile) {
+        naviUrl = `kakaomap://place?p=${lat},${lng}`;
+      } else {
+        naviUrl = `https://map.kakao.com/link/map/${encodeURIComponent(deliveryName)},${lat},${lng}`;
+      }
+      
+      window.location.href = naviUrl;
+    });
+  }
+  
+  // 데이터 로드
+  async function loadData() {
+    try {
+      if (!camp) {
+        throw new Error("캠프 정보가 없습니다. (camp 파라미터 필요)");
+      }
+      
+      // 라우트 데이터 로드
+      const url = new URL(ROUTE_ENDPOINT);
+      url.searchParams.set("camp", camp);
+      if (code) {
+        url.searchParams.set("code", code);
+        url.searchParams.set("mode", "prefix");
+      } else {
+        url.searchParams.set("mode", "prefix");
+      }
+      
+      const data = await apiGet(url.toString());
+      
+      if (!data || !data.rows || data.rows.length === 0) {
+        throw new Error("라우트 데이터를 찾을 수 없습니다.");
+      }
+      
+      // 모든 라우트 저장
+      allRoutes = data.rows;
+      routeData = data.rows[0]; // 첫 번째 라우트를 기본으로 사용
+      
+      // 헤더 UI 업데이트
+      const displayName = routeData.delivery_location_name || camp || "캠프";
+      const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
+      
+      campName.textContent = `📍 ${displayName}`;
+      campAddress.textContent = displayAddress;
+      campBadge.textContent = camp;
+      
+      // 주소가 있으면 복사 버튼 표시
+      if (displayAddress && displayAddress !== "주소 정보 없음") {
+        copyAddressBtn.style.display = "inline-block";
+      }
+      
+      // 네비 버튼 표시
+      if (routeData.delivery_location_name || routeData.delivery_location_address) {
+        naviBtn.style.display = "block";
+      }
+      
+      // 폴리곤 그리기
+      drawPolygons(data.rows);
+      
+      // 배송지 목록 로드
+      try {
+        const addrUrl = new URL(ADDRESS_ENDPOINT);
+        addrUrl.searchParams.set("camp", camp);
+        if (code) addrUrl.searchParams.set("code", code);
+        
+        const addrData = await apiGet(addrUrl.toString());
+        addressRows = addrData?.rows || [];
+        renderAddressList();
+      } catch (addrErr) {
+        console.warn("배송지 로드 실패:", addrErr);
+      }
+      
+      loading.style.display = "none";
+      
+    } catch (err) {
+      console.error(err);
+      loading.innerHTML = `
+        <div style="text-align:center; color:#FF4D6D;">
+          <div style="font-size:48px; margin-bottom:16px;">⚠️</div>
+          <div style="font-size:16px; font-weight:700; margin-bottom:8px;">데이터 로드 실패</div>
+          <div style="font-size:13px; color:var(--muted);">${err.message}</div>
+        </div>
+      `;
+    }
+  }
+  
+  // 초기화
+  function init() {
+    kakao.maps.load(() => {
+      const center = new kakao.maps.LatLng(37.5665, 126.978);
+      map = new kakao.maps.Map($("map"), { 
+        center, 
+        level: 8,
+        draggable: true,
+        scrollwheel: true,
+        disableDoubleClickZoom: false
+      });
+      geocoder = new kakao.maps.services.Geocoder();
+      
+      // 줌 컨트롤 추가
+      const zoomControl = new kakao.maps.ZoomControl();
+      map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
+      
+      // 네비 버튼 바인딩 - 라우트 선택 모달 표시
+      naviBtn.onclick = showRouteModal;
+      
+      // 주소 복사 버튼 바인딩
+      copyAddressBtn.onclick = () => {
+        const address = campAddress.textContent;
+        navigator.clipboard.writeText(address).then(() => {
+          const originalText = copyAddressBtn.textContent;
+          copyAddressBtn.textContent = "✓ 복사됨";
+          setTimeout(() => {
+            copyAddressBtn.textContent = originalText;
+          }, 2000);
+        }).catch(err => {
+          alert("복사 실패: " + err.message);
+        });
+      };
+      
+      loadData();
+    });
+  }
+  
+  init();
+})();
+</script>
+</body>
+</html>

@@ -46,19 +46,30 @@ export default {
       // ---------------------------------------------------
       const apiUrl = "https://www.juso.go.kr/api/totalMap/selectKarbSbdList";
       
-      // POST 요청으로 우편번호 전달
-      const formData = new URLSearchParams();
-      formData.append("sbdno", zipcode);
+      // JSON 페이로드 생성 (브라우저 요청과 동일한 구조)
+      const payload = {
+        params_sido_val: null,
+        params_sido_data: [],
+        params_sgg_val: null,
+        params_sgg_data: [],
+        search_result: [{
+          sbdno: zipcode
+        }]
+      };
 
       const apiRes = await fetch(apiUrl, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Referer": "https://maroowell.com/",
-          "Origin": "https://maroowell.com",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/plain, */*",
+          "Origin": "https://www.juso.go.kr",
+          "Referer": "https://www.juso.go.kr/map/totalMapView",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+          "Sec-Fetch-Site": "same-origin",
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Dest": "empty",
         },
-        body: formData.toString(),
+        body: JSON.stringify(payload),
       });
 
       if (!apiRes.ok) {

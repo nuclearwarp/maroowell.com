@@ -46,6 +46,11 @@ export default {
         return cors(await handleAddressesGet(url, env));
       }
 
+      // share 또는 share.html 동적 메타 태그 처리
+      if ((path === "/share" || path === "/share.html") && request.method === "GET") {
+        return await handleShareHtml(url, env);
+      }
+
       // 우편번호 경계 API (루트 경로에서 zipcode 파라미터로 처리)
       if (path === "/" && request.method === "GET") {
         const zipcode = url.searchParams.get("zipcode");
@@ -559,6 +564,95 @@ async function handleZipGet(zipcode) {
       500
     );
   }
+}
+
+// ---------- /share 동적 메타 태그 처리 ----------
+async function handleShareHtml(url, env) {
+  const camp = (url.searchParams.get("camp") || "").trim();
+  const code = (url.searchParams.get("code") || "").trim();
+  
+  let ogTitle = "배송 지도 공유";
+  let ogDescription = "배송 구역 및 경로를 확인하세요";
+  
+  // camp와 code가 있으면 동적 타이틀 생성
+  if (camp) {
+    try {
+      // 라우트 정보 조회
+      const queryParams = new URLSearchParams();
+      queryParams.set("select", "delivery_location_name,full_code");
+      queryParams.set("camp", `eq.${camp}`);
+      if (code) {
+        queryParams.set("full_code", `like.${code}%`);
+      }
+      queryParams.set("limit", "1");
+      
+      const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, {
+        method: "GET"
+      });
+      
+      if (Array.isArray(rows) && rows.length > 0) {
+        const locationName = rows[0].delivery_location_name || "";
+        const fullCode = rows[0].full_code || code || "";
+        
+        ogTitle = `📍 ${camp}`;
+        if (locationName) {
+          ogTitle += ` ${locationName}`;
+        }
+        if (fullCode) {
+          ogTitle += ` ${fullCode}`;
+        }
+        ogDescription = `${camp}${locationName ? ' ' + locationName : ''}${fullCode ? ' ' + fullCode : ''} 배송 구역을 확인하세요`;
+      } else if (code) {
+        ogTitle = `📍 ${camp} ${code}`;
+        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`;
+      } else {
+        ogTitle = `📍 ${camp} 배송지도`;
+        ogDescription = `${camp} 배송 구역을 확인하세요`;
+      }
+    } catch (e) {
+      console.error('라우트 정보 조회 실패:', e);
+      // 오류가 발생해도 camp 정보만으로 타이틀 생성
+      if (code) {
+        ogTitle = `📍 ${camp} ${code}`;
+        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`;
+      } else {
+        ogTitle = `📍 ${camp} 배송지도`;
+        ogDescription = `${camp} 배송 구역을 확인하세요`;
+      }
+    }
+  }
+  
+  // 원본 share.html을 maroowell.com에서 fetch (GitHub Pages)
+  const baseUrl = 'https://maroowell.com';
+  const htmlRes = await fetch(`${baseUrl}/share.html`, {
+    headers: {
+      'User-Agent': 'maroowell-route-worker/1.0'
+    }
+  });
+  
+  if (!htmlRes.ok) {
+    // fallback: share.html을 찾지 못하면 에러 메시지
+    return json({ error: 'Failed to fetch share.html from maroowell.com' }, 502);
+  }
+  
+  let html = await htmlRes.text();
+  
+  // 메타 태그 교체 (HTML 엔티티는 이미 브라우저가 처리하므로 그대로 사용)
+  html = html
+    .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${ogTitle}" />`)
+    .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${ogDescription}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${ogTitle}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${ogDescription}" />`)
+    .replace(/<title>[^<]*<\/title>/, `<title>${ogTitle}</title>`);
+  
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=60",
+      "Access-Control-Allow-Origin": "*"
+    }
+  });
 }
 
 // ---------- /osm GET (Overpass) ----------

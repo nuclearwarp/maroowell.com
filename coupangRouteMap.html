@@ -1043,7 +1043,7 @@
         log(`✓ 폴리곤 데이터 수집 완료: ${polygon_wgs84.length}개 링`);
       }
 
-      // ID가 없으면 먼저 해당 camp+code가 존재하는지 확인
+      // ID가 없으면 먼저 해당 camp+code가 존재하는지 GET으로 확인
       if (!actualId) {
         // routeRows에서 동일한 camp+code를 찾아서 ID 사용 (필드명 여러 개 시도)
         const existingRow = routeRows.find(r => {
@@ -1055,12 +1055,27 @@
           actualId = existingRow.id;
           log(`기존 row 발견: ${camp}/${code} (id=${actualId})`);
         } else {
-          log(`새 row 생성 예정: ${camp}/${code}`);
-          log(`routeRows 검색 실패. 전체 routeRows: ${JSON.stringify(routeRows.map(r => ({id: r.id, camp: r.camp, code: r.full_code || r.code})))}`);
+          // routeRows에 없으면 서버에 직접 확인
+          log(`routeRows에 없음. 서버에서 ${camp}/${code} 조회 시도...`);
+          try {
+            const url = new URL(ROUTE_ENDPOINT);
+            url.searchParams.set("camp", camp);
+            url.searchParams.set("code", code);
+            url.searchParams.set("mode", "exact");
+            const checkData = await apiGet(url.toString());
+            if (checkData && checkData.rows && checkData.rows.length > 0) {
+              actualId = checkData.rows[0].id;
+              log(`서버에서 기존 row 발견 (id=${actualId})`);
+            } else {
+              log(`새 row 생성 예정: ${camp}/${code}`);
+            }
+          } catch (checkErr) {
+            log(`서버 조회 실패 (신규 생성 시도): ${checkErr.message}`);
+          }
         }
       }
       
-      // ID가 없으면 camp+code로 upsert
+      // payload 구성
       const payload = {
         camp,
         code,
@@ -1076,43 +1091,13 @@
       } else {
         // 새 row 생성 모드: id 필드를 아예 포함하지 않음
         log(`새 row 생성 모드 (camp=${camp}, code=${code})`);
-        log(`백엔드가 camp+code 조합으로 upsert 처리해야 함`);
       }
 
       log(`저장 payload: ${JSON.stringify(payload, null, 2)}`);
       setStatus("POST /route 요청", "OK");
-      
-      try {
-        const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
-        log(`저장 응답: ${JSON.stringify(res)}`);
-        setStatus(`저장 완료`, "OK");
-      } catch (err) {
-        // ON CONFLICT 에러면 GET으로 먼저 ID 찾아서 재시도
-        if (err.message && err.message.includes("ON CONFLICT")) {
-          log(`ON CONFLICT 에러 발생. GET으로 기존 row ID 조회 시도...`);
-          try {
-            const url = new URL(ROUTE_ENDPOINT);
-            url.searchParams.set("camp", camp);
-            url.searchParams.set("code", code);
-            url.searchParams.set("mode", "exact");
-            const data = await apiGet(url.toString());
-            if (data && data.rows && data.rows.length > 0) {
-              const existingId = data.rows[0].id;
-              log(`기존 row 발견 (id=${existingId}). 업데이트 재시도...`);
-              payload.id = existingId;
-              const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
-              log(`저장 응답: ${JSON.stringify(res)}`);
-              setStatus(`저장 완료 (기존 row 업데이트)`, "OK");
-            } else {
-              throw err; // 여전히 실패하면 원래 에러 발생
-            }
-          } catch (retryErr) {
-            throw err; // 재시도 실패하면 원래 에러 발생
-          }
-        } else {
-          throw err;
-        }
-      }
+      const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
+      log(`저장 응답: ${JSON.stringify(res)}`);
+      setStatus(`저장 완료`, "OK");
 
       // 저장 후 재조회(실제 id 반영)
       await loadRoutes();

@@ -48,6 +48,25 @@
       color:var(--muted); 
       line-height:1.5;
       margin-bottom:4px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+    .copy-btn{
+      background:rgba(0,194,255,.15);
+      border:1px solid rgba(0,194,255,.3);
+      color:#00C2FF;
+      padding:4px 8px;
+      border-radius:6px;
+      cursor:pointer;
+      font-size:12px;
+      transition:all 0.2s;
+      white-space:nowrap;
+    }
+    .copy-btn:hover{
+      background:rgba(0,194,255,.25);
+      border-color:#00C2FF;
     }
     .camp-badge{
       display:inline-block;
@@ -268,13 +287,16 @@
     <div class="header-content">
       <div class="camp-info">
         <div class="camp-name" id="campName">📍 배송 구역 안내</div>
-        <div class="camp-address" id="campAddress">주소 정보 로딩 중...</div>
+        <div class="camp-address">
+          <span id="campAddress">주소 정보 로딩 중...</span>
+          <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사</button>
+        </div>
         <div class="camp-badge" id="campBadge">-</div>
       </div>
       
       <div class="navi-buttons">
         <button class="btn primary" id="naviBtn" style="display:none;">
-          🚗 캠프로 길찾기
+          🚗 캠프 → 배송지 길찾기
         </button>
       </div>
     </div>
@@ -318,6 +340,7 @@
   const campName = $("campName");
   const campAddress = $("campAddress");
   const campBadge = $("campBadge");
+  const copyAddressBtn = $("copyAddressBtn");
   const addressPanel = $("addressPanel");
   const addressList = $("addressList");
   const routeModal = $("routeModal");
@@ -411,9 +434,6 @@
     const bounds = new kakao.maps.LatLngBounds();
     let hasPolygon = false;
     
-    // 캠프 이름 가져오기 (첫 번째 라우트에서)
-    const campDisplayName = (routeData?.delivery_location_name || camp || "캠프").substring(0, 10);
-    
     for (const row of rows) {
       const fullCode = row.full_code || row.code || "";
       const color = row.color || colorFor(fullCode);
@@ -465,9 +485,9 @@
         });
         polygon.setMap(map);
         
-        // 라벨 생성 - 캠프 이름 표시
+        // 라벨 생성 - 라우트 번호 표시
         const center = centroidOfLatLngs(latlngs);
-        const label = createLabel(campDisplayName, center, color);
+        const label = createLabel(fullCode, center, color);
         label.setMap(map);
         
         latlngs.forEach(ll => bounds.extend(ll));
@@ -677,7 +697,12 @@
       
       campName.textContent = `📍 ${displayName}`;
       campAddress.textContent = displayAddress;
-      campBadge.textContent = `${camp}${code ? ' • ' + code : ''}`;
+      campBadge.textContent = camp;
+      
+      // 주소가 있으면 복사 버튼 표시
+      if (displayAddress && displayAddress !== "주소 정보 없음") {
+        copyAddressBtn.style.display = "inline-block";
+      }
       
       // 네비 버튼 표시
       if (routeData.delivery_location_name || routeData.delivery_location_address) {
@@ -733,6 +758,20 @@
       
       // 네비 버튼 바인딩 - 라우트 선택 모달 표시
       naviBtn.onclick = showRouteModal;
+      
+      // 주소 복사 버튼 바인딩
+      copyAddressBtn.onclick = () => {
+        const address = campAddress.textContent;
+        navigator.clipboard.writeText(address).then(() => {
+          const originalText = copyAddressBtn.textContent;
+          copyAddressBtn.textContent = "✓ 복사됨";
+          setTimeout(() => {
+            copyAddressBtn.textContent = originalText;
+          }, 2000);
+        }).catch(err => {
+          alert("복사 실패: " + err.message);
+        });
+      };
       
       loadData();
     });

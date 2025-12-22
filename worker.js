@@ -46,6 +46,14 @@ export default {
         return cors(await handleAddressesGet(url, env));
       }
 
+      // 우편번호 경계 API (루트 경로에서 zipcode 파라미터로 처리)
+      if (path === "/" && request.method === "GET") {
+        const zipcode = url.searchParams.get("zipcode");
+        if (zipcode) {
+          return cors(await handleZipGet(zipcode));
+        }
+      }
+
       return cors(json({ error: "Not Found" }, 404));
     } catch (e) {
       return cors(json({ error: e?.message || String(e) }, 500));
@@ -418,6 +426,138 @@ async function handleAddressesGet(url, env) {
     // 테이블이 없거나 컬럼이 다를 수 있음
     console.error('addresses 조회 실패:', e);
     return json({ error: e.message, rows: [] }, 200);
+  }
+}
+
+// ---------- /zip GET (행안부 WFS) ----------
+async function handleZipGet(zipcode) {
+  try {
+    if (!zipcode) {
+      return json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400);
+    }
+
+    // ---------------------------------------------------
+    // 1) 행안부 WFS(BAS) 호출 – basId = 기초구역번호(=zipcode)
+    // ---------------------------------------------------
+    const ts = Date.now();
+
+    const wfsUrl =
+      `https://www.juso.go.kr/wfs.do` +
+      `?callback=callback` +
+      `&svcType=WFS` +
+      `&typeName=BAS` +
+      `&basId=${encodeURIComponent(zipcode)}` +
+      `&maxFeatures=1` +
+      `&_=${ts}`;
+
+    const wfsRes = await fetch(wfsUrl, {
+      headers: {
+        Referer: "https://maroowell.com/",
+        Origin: "https://maroowell.com",
+      },
+    });
+
+    if (!wfsRes.ok) {
+      return json(
+        {
+          error: "WFS 호출 실패",
+          status: wfsRes.status,
+        },
+        502
+      );
+    }
+
+    const text = await wfsRes.text();
+
+    // ---------------------------------------------------
+    // 2) callback(...) 랩핑에서 xmlStr만 안전하게 추출
+    // ---------------------------------------------------
+    const xmlMatch = text.match(
+      /xmlStr'\s*:\s*'([\s\S]*?)'\s*}\s*\)\s*;?\s*$/
+    );
+
+    if (!xmlMatch) {
+      return json(
+        {
+          error: "WFS 응답에서 xmlStr를 찾지 못함",
+          rawSample: text.slice(0, 200),
+        },
+        500
+      );
+    }
+
+    // 싱글쿼트 안에 들어있는 XML 문자열
+    let xml = xmlMatch[1];
+
+    // 이스케이프된 문자 정리
+    xml = xml.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+
+    // ---------------------------------------------------
+    // 3) gml:coordinates 에서 폴리곤 좌표(EPSG:5179) 파싱
+    // ---------------------------------------------------
+    const coordsMatch = xml.match(
+      /<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/
+    );
+
+    if (!coordsMatch) {
+      return json(
+        {
+          error: "gml:coordinates 태그를 찾지 못함",
+          xmlSample: xml.slice(0, 300),
+        },
+        500
+      );
+    }
+
+    const coordText = coordsMatch[1].trim(); // "x,y x,y x,y ..."
+    const polygon5179 = coordText
+      .split(/\s+/) // 공백 기준 분리
+      .map((pair) => {
+        const [xStr, yStr] = pair.split(",");
+        const x = Number(xStr);
+        const y = Number(yStr);
+        return [x, y];
+      })
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+
+    if (polygon5179.length === 0) {
+      return json(
+        {
+          error: "좌표 파싱 결과가 비어 있음",
+          coordSample: coordText.slice(0, 200),
+        },
+        500
+      );
+    }
+
+    // ---------------------------------------------------
+    // 4) 중심점 x_code / y_code 추출
+    // ---------------------------------------------------
+    const xMatch = xml.match(/<kais_tmp:x_code>([^<]+)<\/kais_tmp:x_code>/);
+    const yMatch = xml.match(/<kais_tmp:y_code>([^<]+)<\/kais_tmp:y_code>/);
+
+    const center5179 =
+      xMatch && yMatch ? [Number(xMatch[1]), Number(yMatch[1])] : null;
+
+    // ---------------------------------------------------
+    // 5) 프론트에서 쓰기 좋은 JSON으로 응답
+    // ---------------------------------------------------
+    const result = {
+      zipcode,
+      srid: 5179,
+      center5179,
+      polygon5179,
+    };
+
+    return json(result);
+  } catch (err) {
+    return json(
+      {
+        error: "Worker 내부 예외 발생",
+        detail: String(err),
+      },
+      500
+    );
   }
 }
 

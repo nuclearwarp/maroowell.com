@@ -1202,23 +1202,92 @@
     }
   }
 
-  // ====== 카카오내비 연동 (주소 기반) ======
-  function openKakaoNavi() {
-    const name = deliveryNameInput.value.trim() || "입차지";
-    const addr = deliveryAddrInput.value.trim();
+  // ====== 폴리곤 중심점 계산 ======
+  function getRouteCenter() {
+    if (!selectedRouteId || !overlayById.has(selectedRouteId)) return null;
     
-    if (!addr) {
+    const pack = overlayById.get(selectedRouteId);
+    const polygons = pack.polygons;
+    
+    if (!polygons || polygons.length === 0) return null;
+    
+    // 모든 폴리곤의 점들을 모아서 전체 중심점 계산
+    const allPoints = [];
+    for (const poly of polygons) {
+      const path = poly.getPath();
+      if (!path) continue;
+      
+      const len = Array.isArray(path) ? path.length : (path.getLength ? path.getLength() : 0);
+      for (let i = 0; i < len; i++) {
+        const pt = Array.isArray(path) ? path[i] : path.getAt(i);
+        if (pt) allPoints.push(pt);
+      }
+    }
+    
+    if (allPoints.length === 0) return null;
+    
+    return centroidOfLatLngs(allPoints);
+  }
+
+  // ====== 카카오내비 연동 (출발지→도착지 경로 안내) ======
+  async function openKakaoNavi() {
+    const deliveryName = deliveryNameInput.value.trim() || "입차지";
+    const deliveryAddr = deliveryAddrInput.value.trim();
+    
+    if (!deliveryAddr) {
       setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
       return;
     }
     
-    // 카카오맵 검색 URL (주소 기반)
-    // 모바일에서는 카카오맵 앱이 자동으로 실행됩니다
-    const searchUrl = `https://map.kakao.com/link/search/${encodeURIComponent(addr)}`;
+    if (!selectedRouteId) {
+      setStatus("라우트를 먼저 선택해주세요.", "WARN");
+      return;
+    }
     
-    window.open(searchUrl, "_blank");
-    setStatus(`카카오맵 실행: ${name} (${addr})`, "OK");
-    log(`카카오맵 검색: ${addr}`);
+    setStatus("경로 계산 중...", "OK");
+    
+    // 1. 입차지 주소를 좌표로 변환
+    geocoder.addressSearch(deliveryAddr, (result, status) => {
+      if (status !== kakao.maps.services.Status.OK || !result?.length) {
+        setStatus("입차지 주소를 찾을 수 없습니다. 정확한 주소를 입력해주세요.", "ERR");
+        return;
+      }
+      
+      const startLat = Number(result[0].y);
+      const startLng = Number(result[0].x);
+      
+      // 2. 라우트 중심점 계산
+      const routeCenter = getRouteCenter();
+      if (!routeCenter) {
+        setStatus("라우트 폴리곤이 없습니다.", "ERR");
+        return;
+      }
+      
+      const endLat = routeCenter.getLat();
+      const endLng = routeCenter.getLng();
+      
+      const pack = overlayById.get(selectedRouteId);
+      const routeName = pack.row.full_code || "라우트";
+      
+      // 3. 카카오내비 URL 생성 (출발지→도착지 경로 안내)
+      // 모바일: kakaomap://route 스킴
+      // 웹: 카카오맵 길찾기 URL
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      let naviUrl;
+      if (isMobile) {
+        // 모바일: 카카오맵 앱 URL 스킴 (출발지, 도착지)
+        naviUrl = `kakaomap://route?sp=${startLng},${startLat}&ep=${endLng},${endLat}&by=CAR`;
+      } else {
+        // PC: 카카오맵 웹 (목적지만 설정 가능, 출발지는 현재 위치로 자동 설정됨)
+        // 대신 도착지 좌표로 길찾기 페이지 열기
+        naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(routeName)},${endLat},${endLng}`;
+      }
+      
+      window.open(naviUrl, "_blank");
+      setStatus(`카카오내비 실행: ${deliveryName} → ${routeName}`, "OK");
+      log(`경로 안내: ${deliveryName} (${startLat.toFixed(4)}, ${startLng.toFixed(4)}) → ${routeName} (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
+    });
   }
 
   // ====== 입차지 저장/비우기 ======

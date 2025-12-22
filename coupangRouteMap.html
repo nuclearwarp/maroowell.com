@@ -634,7 +634,10 @@
 
     for (const polygon of editPolygons) {
       const rawPath = polygon.getPath();
-      if (!rawPath) continue;
+      if (!rawPath) {
+        log(`⚠ rebuildHandles: polygon.getPath()가 null`);
+        continue;
+      }
       
       // 배열로 변환 (MVCArray든 Array든)
       const path = [];
@@ -643,6 +646,8 @@
         path.push(Array.isArray(rawPath) ? rawPath[i] : rawPath.getAt(i));
       }
       
+      log(`  rebuildHandles: polygon path 변환 완료 (${path.length}개 점, 원본 타입: ${Array.isArray(rawPath) ? 'Array' : 'MVCArray'})`);
+      
       if (path.length < 3) continue;
 
       // Vertex handles
@@ -650,14 +655,19 @@
         ((index) => {
           const vMarker = new kakao.maps.Marker({
             position: path[index],
-            draggable: true,
             image: VERTEX_IMG,
             zIndex: 20
           });
           vMarker.setMap(map);
+          
+          // draggable 속성을 생성 후 명시적으로 설정 (일부 케이스에서 생성자 옵션이 무시되는 버그 회피)
+          vMarker.setDraggable(true);
+          
+          log(`  → vertex ${index} 핸들 생성 완료 (draggable: ${vMarker.getDraggable()})`);
 
           // 드래그 중/후 갱신
           kakao.maps.event.addListener(vMarker, "drag", () => {
+            log(`  드래그 이벤트 발생: vertex ${index}`);
             const newPos = vMarker.getPosition();
             const currentPath = polygon.getPath();
             

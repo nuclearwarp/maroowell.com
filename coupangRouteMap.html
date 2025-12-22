@@ -164,13 +164,18 @@
 
       <div style="height:10px"></div>
       <div class="row">
-        <button id="deliveryNaviBtn" class="btn warn">카카오내비</button>
+        <button id="deliveryNaviBtn" class="btn warn">🧭 현재위치→캠프</button>
         <button id="deliverySaveBtn" class="btn ok">입차지 저장</button>
         <button id="deliveryClearBtn" class="btn danger">입차지 비우기</button>
       </div>
+      <div style="height:8px"></div>
+      <div class="row">
+        <button id="campToDeliveryNaviBtn" class="btn ok" style="width:100%;">🚗 캠프 → 배송지 카카오지도 연동♪</button>
+      </div>
 
       <div class="help">
-        - 카카오내비: 입력한 주소로 카카오맵/내비 실행<br/>
+        - 🧭 현재위치→캠프: 모바일 기반 현재 위치에서 캠프까지 경로 안내<br/>
+        - 🚗 캠프→배송지: 캠프에서 선택한 배송지까지 경로 안내<br/>
         - 선택된 라우트의 입차지 정보만 업데이트합니다
       </div>
     </div>
@@ -1410,7 +1415,7 @@
     return centroidOfLatLngs(allPoints);
   }
 
-  // ====== 카카오내비 연동 (출발지→도착지 경로 안내) ======
+  // ====== 카카오내비 연동 (현재위치→캠프 경로 안내) ======
   async function openKakaoNavi() {
     const deliveryName = deliveryNameInput.value.trim() || "입차지";
     const deliveryAddr = deliveryAddrInput.value.trim();
@@ -1420,55 +1425,75 @@
       return;
     }
     
-    if (!selectedRouteId) {
-      setStatus("라우트를 먼저 선택해주세요.", "WARN");
-      return;
-    }
+    setStatus("경로 계산 중: 현재 위치 → 캠프", "OK");
     
-    setStatus("경로 계산 중...", "OK");
-    
-    // 1. 입차지 주소를 좌표로 변환
+    // 입차지 주소를 좌표로 변환
     geocoder.addressSearch(deliveryAddr, (result, status) => {
       if (status !== kakao.maps.services.Status.OK || !result?.length) {
         setStatus("입차지 주소를 찾을 수 없습니다. 정확한 주소를 입력해주세요.", "ERR");
         return;
       }
       
-      const startLat = Number(result[0].y);
-      const startLng = Number(result[0].x);
+      const endLat = Number(result[0].y);
+      const endLng = Number(result[0].x);
       
-      // 2. 라우트 중심점 계산
-      const routeCenter = getRouteCenter();
-      if (!routeCenter) {
-        setStatus("라우트 폴리곤이 없습니다.", "ERR");
-        return;
-      }
-      
-      const endLat = routeCenter.getLat();
-      const endLng = routeCenter.getLng();
-      
-      const pack = overlayById.get(selectedRouteId);
-      const routeName = pack.row.full_code || "라우트";
-      
-      // 3. 카카오내비 URL 생성 (출발지→도착지 경로 안내)
-      // 모바일: kakaomap://route 스킴
-      // 웹: 카카오맵 길찾기 URL (출발지 + 도착지)
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       
       let naviUrl;
       if (isMobile) {
-        // 모바일: 카카오맵 앱 URL 스킴 (출발지, 도착지)
-        naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
+        // 모바일: 카카오맵 앱 URL 스킴 (현재 위치를 자동으로 출발지로 사용)
+        // sp 파라미터를 생략하면 카카오맵 앱이 자동으로 현재 위치를 출발지로 설정
+        naviUrl = `kakaomap://route?ep=${endLat},${endLng}&by=CAR`;
+        // 모바일 앱 URL 스킴은 window.location.href로 열어야 앱이 제대로 실행됨
+        window.location.href = naviUrl;
       } else {
-        // PC: 카카오맵 웹 길찾기 (올바른 URL 형식)
-        // 형식: https://map.kakao.com/link/from/출발지명,위도,경도/to/목적지명,위도,경도
-        naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(routeName)},${endLat},${endLng}`;
+        // PC: 카카오맵 웹 길찾기 (현재 위치는 웹에서 자동으로 설정)
+        // to만 지정하면 카카오맵에서 현재 위치를 출발지로 자동 설정
+        naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(deliveryName)},${endLat},${endLng}`;
+        window.open(naviUrl, "_blank");
       }
       
-      window.open(naviUrl, "_blank");
-      setStatus(`카카오내비 실행: ${deliveryName} → ${routeName}`, "OK");
-      log(`경로 안내: ${deliveryName} (${startLat.toFixed(4)}, ${startLng.toFixed(4)}) → ${routeName} (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
+      setStatus(`카카오내비 실행: 현재 위치 → ${deliveryName}`, "OK");
+      log(`경로 안내: 현재 위치 → ${deliveryName} (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
     });
+  }
+
+  // ====== 캠프→배송지 네비 (배송지 선택 후 경로 안내) ======
+  async function openCampToDeliveryNavi() {
+    const deliveryAddr = deliveryAddrInput.value.trim();
+    
+    if (!deliveryAddr) {
+      setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
+      return;
+    }
+
+    if (!addressRows || addressRows.length === 0) {
+      setStatus("배송지 목록이 없습니다. 라우트를 먼저 선택해주세요.", "WARN");
+      return;
+    }
+
+    // 배송지가 1개면 바로 실행, 여러 개면 선택하도록
+    if (addressRows.length === 1) {
+      await openNaviToAddress(addressRows[0]);
+    } else {
+      // 간단한 선택 프롬프트 (또는 모달 구현 가능)
+      let message = "배송지를 선택하세요:\n\n";
+      addressRows.forEach((addr, idx) => {
+        const addressText = addr.address || addr.full_address || "주소 없음";
+        message += `${idx + 1}. ${addressText}\n`;
+      });
+      message += "\n번호를 입력하세요:";
+      
+      const choice = prompt(message);
+      if (!choice) return;
+      
+      const index = parseInt(choice) - 1;
+      if (index >= 0 && index < addressRows.length) {
+        await openNaviToAddress(addressRows[index]);
+      } else {
+        setStatus("잘못된 번호입니다.", "WARN");
+      }
+    }
   }
 
   // ====== 입차지 저장/비우기 ======
@@ -1786,6 +1811,11 @@
       deliveryNaviBtn.addEventListener("click", openKakaoNavi);
       deliverySaveBtn.addEventListener("click", () => saveDeliveryOnly(false));
       deliveryClearBtn.addEventListener("click", () => saveDeliveryOnly(true));
+      
+      const campToDeliveryNaviBtn = $("campToDeliveryNaviBtn");
+      if (campToDeliveryNaviBtn) {
+        campToDeliveryNaviBtn.addEventListener("click", openCampToDeliveryNavi);
+      }
 
       shareBtn.addEventListener("click", generateShareLink);
 

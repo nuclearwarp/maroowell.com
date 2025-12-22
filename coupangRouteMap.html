@@ -982,23 +982,48 @@
         }
       }
 
-      // id가 임시 ID(문자열)인 경우, routeRows에서 실제 ID 찾기
-      if (id && typeof id === "string" && id.startsWith("tmp_")) {
+      // 폴리곤 데이터 수집 (임시 ID 또는 실제 ID 모두 사용)
+      const polygonSourceId = id; // 폴리곤 데이터를 가져올 ID 보관
+      let actualId = id; // 백엔드에 전송할 실제 ID
+      
+      // actualId가 임시 ID(문자열)인 경우, routeRows에서 실제 ID 찾기
+      if (actualId && typeof actualId === "string" && actualId.startsWith("tmp_")) {
         const actualRow = routeRows.find(r => 
           (r.camp||"") === camp && (r.full_code||"") === code
         );
         if (actualRow && typeof actualRow.id === "number") {
-          id = actualRow.id;
-          log(`임시 ID를 실제 ID로 변환: ${selectedRouteId} → ${id}`);
+          actualId = actualRow.id;
+          log(`임시 ID를 실제 ID로 변환: ${polygonSourceId} → ${actualId}`);
         } else {
-          // 실제 row가 없으면 id를 제거하여 새로 생성
-          id = undefined;
+          // 실제 row가 없으면 actualId를 undefined로 (새로 생성)
+          actualId = undefined;
           log(`실제 row가 없음. 새로 생성합니다.`);
         }
       }
 
-      const polygon_wgs84 = id ? getCurrentEditedPolygonWgs84ById(selectedRouteId || id) : null;
+      // 폴리곤 데이터는 polygonSourceId로 가져오기 (임시 ID든 실제 ID든 overlayById에 있는 키)
+      const polygon_wgs84 = polygonSourceId ? getCurrentEditedPolygonWgs84ById(polygonSourceId) : null;
+      
+      if (!polygon_wgs84) {
+        log(`⚠ 경고: 폴리곤 데이터가 없습니다. polygonSourceId=${polygonSourceId}`);
+      } else {
+        log(`✓ 폴리곤 데이터 수집 완료: ${polygon_wgs84.length}개 링`);
+      }
 
+      // ID가 없으면 먼저 해당 camp+code가 존재하는지 확인
+      if (!actualId) {
+        // routeRows에서 동일한 camp+code를 찾아서 ID 사용
+        const existingRow = routeRows.find(r => 
+          (r.camp||"") === camp && (r.full_code||"") === code
+        );
+        if (existingRow && typeof existingRow.id === "number") {
+          actualId = existingRow.id;
+          log(`기존 row 발견: ${camp}/${code} (id=${actualId})`);
+        } else {
+          log(`새 row 생성 예정: ${camp}/${code}`);
+        }
+      }
+      
       // ID가 없으면 camp+code로 upsert (백엔드에서 unique constraint 확인)
       const payload = {
         camp,
@@ -1008,9 +1033,12 @@
         vendor_business_number: vendorBizInput.value.trim() || null
       };
       
-      // ID가 숫자면 추가 (update용)
-      if (typeof id === "number") {
-        payload.id = id;
+      // actualId가 숫자면 추가 (update용)
+      if (typeof actualId === "number") {
+        payload.id = actualId;
+        log(`기존 row 업데이트 모드 (id=${actualId})`);
+      } else {
+        log(`새 row 생성 모드 (camp=${camp}, code=${code})`);
       }
 
       log(`저장 payload: ${JSON.stringify(payload, null, 2)}`);

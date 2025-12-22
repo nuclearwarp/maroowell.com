@@ -291,12 +291,15 @@
           <span id="campAddress">주소 정보 로딩 중...</span>
           <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사</button>
         </div>
-        <div class="camp-badge" id="campBadge">-</div>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:8px;">
+          <div class="camp-badge" id="campBadge">-</div>
+          <div class="camp-badge" id="codeBadge" style="display:none; background:rgba(255,77,109,.15); border-color:rgba(255,77,109,.3); color:#FF4D6D;">-</div>
+        </div>
       </div>
       
       <div class="navi-buttons">
         <button class="btn primary" id="naviBtn" style="display:none;">
-          🚗 캠프 → 배송지 길찾기
+          🚗 현재위치 → 캠프 길찾기
         </button>
       </div>
     </div>
@@ -340,6 +343,7 @@
   const campName = $("campName");
   const campAddress = $("campAddress");
   const campBadge = $("campBadge");
+  const codeBadge = $("codeBadge");
   const copyAddressBtn = $("copyAddressBtn");
   const addressPanel = $("addressPanel");
   const addressList = $("addressList");
@@ -632,7 +636,7 @@
     });
   }
   
-  // 캠프까지 네비
+  // 캠프까지 네비 (현재위치 → 캠프 경로 안내)
   function openNaviToCamp(route) {
     if (!route || !route.delivery_location_address) {
       alert("입차지 정보가 없습니다.");
@@ -642,25 +646,30 @@
     const deliveryAddress = route.delivery_location_address;
     const deliveryName = route.delivery_location_name || "입차지";
     
+    // 입차지 주소를 좌표로 변환
     geocoder.addressSearch(deliveryAddress, (result, status) => {
       if (status !== kakao.maps.services.Status.OK || !result?.length) {
-        alert("입차지 주소를 찾을 수 없습니다.");
+        alert("입차지 주소를 찾을 수 없습니다. 정확한 주소를 확인해주세요.");
         return;
       }
       
-      const lat = Number(result[0].y);
-      const lng = Number(result[0].x);
+      const endLat = Number(result[0].y);
+      const endLng = Number(result[0].x);
       
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       let naviUrl;
       
       if (isMobile) {
-        naviUrl = `kakaomap://place?p=${lat},${lng}`;
+        // 모바일: 카카오맵 앱 URL 스킴 (현재 위치를 자동으로 출발지로 사용)
+        // sp 파라미터를 생략하면 카카오맵 앱이 자동으로 현재 위치를 출발지로 설정
+        naviUrl = `kakaomap://route?ep=${endLat},${endLng}&by=CAR`;
       } else {
-        naviUrl = `https://map.kakao.com/link/map/${encodeURIComponent(deliveryName)},${lat},${lng}`;
+        // PC: 카카오맵 웹 길찾기 (현재 위치는 웹에서 자동으로 설정)
+        // to만 지정하면 카카오맵에서 현재 위치를 출발지로 자동 설정
+        naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(deliveryName)},${endLat},${endLng}`;
       }
       
-      window.location.href = naviUrl;
+      window.open(naviUrl, "_blank");
     });
   }
   
@@ -694,10 +703,17 @@
       // 헤더 UI 업데이트
       const displayName = routeData.delivery_location_name || camp || "캠프";
       const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
+      const displayCode = code || (allRoutes.length === 1 ? allRoutes[0].full_code || allRoutes[0].code : "");
       
       campName.textContent = `📍 ${displayName}`;
       campAddress.textContent = displayAddress;
       campBadge.textContent = camp;
+      
+      // 코드 배지 표시
+      if (displayCode) {
+        codeBadge.textContent = displayCode;
+        codeBadge.style.display = "inline-block";
+      }
       
       // 주소가 있으면 복사 버튼 표시
       if (displayAddress && displayAddress !== "주소 정보 없음") {

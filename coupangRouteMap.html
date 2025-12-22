@@ -633,8 +633,17 @@
     editHandles = [];
 
     for (const polygon of editPolygons) {
-      const path = polygon.getPath(); // kakao.maps.LatLng[]
-      if (!path || path.length < 3) continue;
+      const rawPath = polygon.getPath();
+      if (!rawPath) continue;
+      
+      // 배열로 변환 (MVCArray든 Array든)
+      const path = [];
+      const len = Array.isArray(rawPath) ? rawPath.length : (rawPath.getLength ? rawPath.getLength() : 0);
+      for (let i = 0; i < len; i++) {
+        path.push(Array.isArray(rawPath) ? rawPath[i] : rawPath.getAt(i));
+      }
+      
+      if (path.length < 3) continue;
 
       // Vertex handles
       for (let i=0;i<path.length;i++) {
@@ -650,12 +659,12 @@
           // 드래그 중/후 갱신
           kakao.maps.event.addListener(vMarker, "drag", () => {
             const newPos = vMarker.getPosition();
-            const pth = polygon.getPath();
-            const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+            const currentPath = polygon.getPath();
+            const currentLen = Array.isArray(currentPath) ? currentPath.length : (currentPath.getLength ? currentPath.getLength() : 0);
             // 배열로 변환 후 점 업데이트
             const pathArray = [];
-            for (let j = 0; j < len; j++) {
-              pathArray.push(j === index ? newPos : (Array.isArray(pth) ? pth[j] : pth.getAt(j)));
+            for (let j = 0; j < currentLen; j++) {
+              pathArray.push(j === index ? newPos : (Array.isArray(currentPath) ? currentPath[j] : currentPath.getAt(j)));
             }
             polygon.setPath(pathArray);
             // 라벨 위치도 업데이트(선택된 라우트만)
@@ -1051,7 +1060,7 @@
         }
       }
       
-      // ID가 없으면 camp+code로 upsert (백엔드에서 unique constraint 확인)
+      // ID가 없으면 camp+code로 upsert
       const payload = {
         camp,
         code,
@@ -1065,14 +1074,45 @@
         payload.id = actualId;
         log(`기존 row 업데이트 모드 (id=${actualId})`);
       } else {
+        // 새 row 생성 모드: id 필드를 아예 포함하지 않음
         log(`새 row 생성 모드 (camp=${camp}, code=${code})`);
+        log(`백엔드가 camp+code 조합으로 upsert 처리해야 함`);
       }
 
       log(`저장 payload: ${JSON.stringify(payload, null, 2)}`);
       setStatus("POST /route 요청", "OK");
-      const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
-      log(`저장 응답: ${JSON.stringify(res)}`);
-      setStatus(`저장 완료`, "OK");
+      
+      try {
+        const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
+        log(`저장 응답: ${JSON.stringify(res)}`);
+        setStatus(`저장 완료`, "OK");
+      } catch (err) {
+        // ON CONFLICT 에러면 GET으로 먼저 ID 찾아서 재시도
+        if (err.message && err.message.includes("ON CONFLICT")) {
+          log(`ON CONFLICT 에러 발생. GET으로 기존 row ID 조회 시도...`);
+          try {
+            const url = new URL(ROUTE_ENDPOINT);
+            url.searchParams.set("camp", camp);
+            url.searchParams.set("code", code);
+            url.searchParams.set("mode", "exact");
+            const data = await apiGet(url.toString());
+            if (data && data.rows && data.rows.length > 0) {
+              const existingId = data.rows[0].id;
+              log(`기존 row 발견 (id=${existingId}). 업데이트 재시도...`);
+              payload.id = existingId;
+              const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
+              log(`저장 응답: ${JSON.stringify(res)}`);
+              setStatus(`저장 완료 (기존 row 업데이트)`, "OK");
+            } else {
+              throw err; // 여전히 실패하면 원래 에러 발생
+            }
+          } catch (retryErr) {
+            throw err; // 재시도 실패하면 원래 에러 발생
+          }
+        } else {
+          throw err;
+        }
+      }
 
       // 저장 후 재조회(실제 id 반영)
       await loadRoutes();

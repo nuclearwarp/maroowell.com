@@ -652,22 +652,28 @@
 
       // Vertex handles
       for (let i=0;i<path.length;i++) {
-        ((index) => {
+        ((index, polygon) => {
           const vMarker = new kakao.maps.Marker({
             position: path[index],
             image: VERTEX_IMG,
+            clickable: true,
             zIndex: 20
           });
-          vMarker.setMap(map);
           
-          // draggable 속성을 생성 후 명시적으로 설정 (일부 케이스에서 생성자 옵션이 무시되는 버그 회피)
+          // 지도에 추가한 후 draggable 설정 (순서 중요)
+          vMarker.setMap(map);
           vMarker.setDraggable(true);
           
           log(`  → vertex ${index} 핸들 생성 완료 (draggable: ${vMarker.getDraggable()})`);
 
-          // 드래그 중/후 갱신
+          // 드래그 시작 이벤트
+          kakao.maps.event.addListener(vMarker, "dragstart", () => {
+            log(`  🟢 dragstart: vertex ${index}`);
+          });
+
+          // 드래그 중 이벤트
           kakao.maps.event.addListener(vMarker, "drag", () => {
-            log(`  드래그 이벤트 발생: vertex ${index}`);
+            log(`  🔵 drag: vertex ${index}`);
             const newPos = vMarker.getPosition();
             const currentPath = polygon.getPath();
             
@@ -694,7 +700,10 @@
             // 라벨 위치도 업데이트(선택된 라우트만)
             updateSelectedLabels();
           });
+          
+          // 드래그 종료 이벤트
           kakao.maps.event.addListener(vMarker, "dragend", () => {
+            log(`  🔴 dragend: vertex ${index}`);
             rebuildHandles(); // 미드포인트 재생성 포함
           });
 
@@ -719,12 +728,12 @@
           });
 
           editHandles.push(vMarker);
-        })(i);
+        })(i, polygon);
       }
 
       // Midpoint handles (점 추가)
       for (let i=0;i<path.length;i++) {
-        ((index) => {
+        ((index, polygon) => {
           const a = path[index];
           const b = path[(index+1)%path.length];
 
@@ -758,7 +767,7 @@
           });
 
           editHandles.push(midMarker);
-        })(i);
+        })(i, polygon);
       }
     }
   }
@@ -1006,16 +1015,6 @@
       });
       
       renderRoutes(data.rows);
-
-      // 입력한 code가 있고, 해당 row가 존재하면 자동 선택
-      if (code) {
-        for (const [id, pack] of overlayById.entries()) {
-          if ((pack.row.camp||"") === camp && (pack.row.full_code||"") === code) {
-            startEditing(id);
-            break;
-          }
-        }
-      }
     } catch (e) {
       console.error(e);
       const errMsg = e.message || String(e);

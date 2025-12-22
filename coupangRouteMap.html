@@ -670,10 +670,16 @@
           log(`  → vertex ${index} 핸들 생성 완료`);
 
           // 마우스 다운: 드래그 시작
-          kakao.maps.event.addListener(vMarker, "mousedown", () => {
+          kakao.maps.event.addListener(vMarker, "mousedown", (e) => {
             log(`  🟢 드래그 시작: vertex ${index}`);
             draggingVertex = { marker: vMarker, polygon, index };
             map.setDraggable(false); // 지도 드래그 비활성화
+            
+            // 기본 동작 방지
+            if (e && e.domEvent) {
+              e.domEvent.preventDefault();
+              e.domEvent.stopPropagation();
+            }
           });
 
           // 우클릭: 점 삭제(최소 3개 유지)
@@ -1306,11 +1312,21 @@
       popDrawPoint();
     });
     
-    // 마우스 이동: 커스텀 드래그 처리
-    kakao.maps.event.addListener(map, "mousemove", (mouseEvent) => {
+    // 마우스 이동: 커스텀 드래그 처리 (전역)
+    const handleMouseMove = (e) => {
       if (!draggingVertex) return;
       
-      const newPos = mouseEvent.latLng;
+      // 화면 좌표를 지도 좌표로 변환
+      const mapDiv = map.getNode();
+      const rect = mapDiv.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      // Projection을 사용해 픽셀 → LatLng 변환
+      const proj = map.getProjection();
+      const point = new kakao.maps.Point(x, y);
+      const newPos = proj.coordsFromContainerPoint(point);
+      
       const { marker, polygon, index } = draggingVertex;
       
       // 마커 위치 업데이트
@@ -1332,17 +1348,20 @@
       
       // 라벨 업데이트
       updateSelectedLabels();
-    });
+    };
     
-    // 마우스 업: 드래그 종료
-    kakao.maps.event.addListener(map, "mouseup", () => {
+    const handleMouseUp = () => {
       if (!draggingVertex) return;
       
       log(`  🔴 드래그 종료: vertex ${draggingVertex.index}`);
       draggingVertex = null;
       map.setDraggable(true); // 지도 드래그 재활성화
       rebuildHandles(); // 미드포인트 재생성
-    });
+    };
+    
+    // 전역 이벤트 리스너 등록
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
 
     // ESC: 취소, Enter: 완료
     window.addEventListener("keydown", (e) => {

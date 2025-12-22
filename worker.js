@@ -42,6 +42,10 @@ export default {
         return cors(await handleOsmGet(url));
       }
 
+      if (path === "/addresses" && request.method === "GET") {
+        return cors(await handleAddressesGet(url, env));
+      }
+
       return cors(json({ error: "Not Found" }, 404));
     } catch (e) {
       return cors(json({ error: e?.message || String(e) }, 500));
@@ -50,6 +54,7 @@ export default {
 };
 
 const ROUTE_TABLE = "subsubroutes";
+const ADDRESS_TABLE = "addresses"; // 배송지 테이블 (필요 시 수정)
 
 // ---------- helpers ----------
 function cors(res) {
@@ -356,6 +361,64 @@ async function handleRouteDelete(request, env) {
   }
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /addresses GET ----------
+async function handleAddressesGet(url, env) {
+  const camp = (url.searchParams.get("camp") || "").trim();
+  const code = (url.searchParams.get("code") || "").trim();
+
+  if (!camp) return json({ error: "camp is required" }, 400);
+
+  // 배송지 테이블에서 조회
+  // 예상 컬럼: id, camp, full_code, address, center_wgs84, zipcode 등
+  const select = [
+    "id",
+    "camp",
+    "full_code",
+    "address",
+    "center_wgs84",
+    "zipcode",
+    "detail",
+    "dong",
+    "created_at"
+  ].join(",");
+
+  const params = new URLSearchParams();
+  params.set("select", select);
+  params.set("camp", `eq.${camp}`);
+  params.set("order", "full_code.asc,address.asc");
+
+  if (code) {
+    // prefix 검색
+    params.set("full_code", `like.${code}%`);
+  }
+
+  try {
+    const rows = await supabaseFetch(env, `/rest/v1/${ADDRESS_TABLE}?${params.toString()}`, {
+      method: "GET"
+    });
+
+    // center_wgs84 파싱 (문자열 → 객체)
+    if (Array.isArray(rows)) {
+      rows.forEach(row => {
+        if (row && row.center_wgs84 && typeof row.center_wgs84 === 'string') {
+          try {
+            row.center_wgs84 = JSON.parse(row.center_wgs84);
+          } catch (e) {
+            console.error('center_wgs84 파싱 실패:', e);
+            row.center_wgs84 = null;
+          }
+        }
+      });
+    }
+
+    return json({ rows: rows || [] }, 200, { "Cache-Control": "no-store" });
+  } catch (e) {
+    // 테이블이 없거나 컬럼이 다를 수 있음
+    console.error('addresses 조회 실패:', e);
+    return json({ error: e.message, rows: [] }, 200);
+  }
 }
 
 // ---------- /osm GET (Overpass) ----------

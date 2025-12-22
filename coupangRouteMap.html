@@ -169,6 +169,14 @@
       </div>
     </div>
 
+    <div class="group" id="addressListGroup" style="display:none">
+      <div class="label">배송지 목록 (입차지→배송지 네비)</div>
+      <div id="addressList" style="max-height:300px; overflow-y:auto; margin-top:8px;"></div>
+      <div class="help small" style="margin-top:8px;">
+        각 배송지로 가는 경로를 카카오내비로 확인할 수 있습니다
+      </div>
+    </div>
+
     <div class="group">
       <div class="row">
         <button id="loadBtn" class="btn">불러오기</button>
@@ -221,6 +229,7 @@
   const API_BASE = "https://route.maroowell.com"; // 필요시 변경
   const ROUTE_ENDPOINT = `${API_BASE}/route`;
   const OSM_ENDPOINT = `${API_BASE}/osm`;
+  const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
 
   // ====== DOM ======
   const $ = (id) => document.getElementById(id);
@@ -287,6 +296,7 @@
 
   /** @type {Array<any>} */
   let routeRows = []; // API에서 받은 row들
+  let addressRows = []; // 배송지 목록
 
   /**
    * rowId -> { row, polygons: kakao.maps.Polygon[], labels: kakao.maps.CustomOverlay[] }
@@ -592,6 +602,11 @@
     const code = row.full_code || "";
     const camp = row.camp || "";
     selectedInfo.textContent = `선택: ${camp} / ${code} (id=${routeId})`;
+    
+    // 선택한 라우트의 배송지 목록 불러오기
+    campInput.value = camp;
+    codeInput.value = code;
+    loadAddresses().catch(err => log(`배송지 로드 실패: ${err.message}`));
 
     // 벤더 UI 로드
     vendorNameInput.value = row.vendor_name || "";
@@ -950,6 +965,156 @@
     return out.length ? out : null;
   }
 
+  // ====== 배송지 목록 불러오기 ======
+  async function loadAddresses() {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) return;
+
+      const url = new URL(ADDRESS_ENDPOINT);
+      url.searchParams.set("camp", camp);
+      if (code) url.searchParams.set("code", code);
+
+      const data = await apiGet(url.toString());
+      addressRows = data?.rows || [];
+      
+      renderAddressList();
+      log(`배송지 ${addressRows.length}개 로드 완료`);
+    } catch (e) {
+      console.error('배송지 로드 실패:', e);
+      addressRows = [];
+      renderAddressList();
+    }
+  }
+
+  // ====== 배송지 목록 렌더링 ======
+  function renderAddressList() {
+    const container = document.getElementById("addressList");
+    const group = document.getElementById("addressListGroup");
+    
+    if (!addressRows || addressRows.length === 0) {
+      group.style.display = "none";
+      container.innerHTML = "";
+      return;
+    }
+
+    group.style.display = "block";
+    container.innerHTML = "";
+
+    addressRows.forEach((addr, idx) => {
+      const item = document.createElement("div");
+      item.style.cssText = `
+        padding: 8px;
+        margin-bottom: 6px;
+        background: rgba(0,0,0,0.15);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 12px;
+      `;
+
+      const addressText = addr.address || addr.full_address || "주소 없음";
+      const dong = addr.dong ? `<span style="color:var(--muted)">(${addr.dong})</span>` : "";
+      
+      item.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; color:var(--txt); margin-bottom:2px;">
+              ${idx + 1}. ${addressText} ${dong}
+            </div>
+            <div style="color:var(--muted); font-size:11px;">
+              ${addr.zipcode ? `우편번호: ${addr.zipcode}` : ""}
+            </div>
+          </div>
+          <button class="btn" style="padding:6px 12px; font-size:11px; white-space:nowrap;" 
+                  data-addr-id="${addr.id}">
+            네비
+          </button>
+        </div>
+      `;
+
+      const naviBtn = item.querySelector("button");
+      naviBtn.onclick = () => openNaviToAddress(addr);
+
+      container.appendChild(item);
+    });
+  }
+
+  // ====== 배송지로 네비 실행 ======
+  async function openNaviToAddress(addr) {
+    const deliveryAddr = deliveryAddrInput.value.trim();
+    
+    if (!deliveryAddr) {
+      setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
+      return;
+    }
+
+    if (!addr.center_wgs84) {
+      setStatus("배송지 좌표(center_wgs84)가 없습니다.", "ERR");
+      return;
+    }
+
+    setStatus(`경로 계산 중: 입차지 → ${addr.address || "배송지"}`, "OK");
+
+    // 1. 입차지 주소를 좌표로 변환
+    geocoder.addressSearch(deliveryAddr, (result, status) => {
+      if (status !== kakao.maps.services.Status.OK || !result?.length) {
+        setStatus("입차지 주소를 찾을 수 없습니다.", "ERR");
+        return;
+      }
+
+      const startLat = Number(result[0].y);
+      const startLng = Number(result[0].x);
+
+      // 2. 배송지 좌표 추출
+      let endLat, endLng;
+      
+      if (typeof addr.center_wgs84 === 'object') {
+        // {lat, lng} 또는 {latitude, longitude} 형식
+        endLat = addr.center_wgs84.lat || addr.center_wgs84.latitude;
+        endLng = addr.center_wgs84.lng || addr.center_wgs84.lon || addr.center_wgs84.longitude;
+      } else if (Array.isArray(addr.center_wgs84) && addr.center_wgs84.length >= 2) {
+        // [lng, lat] 또는 [lat, lng] 형식 (GeoJSON은 [lng, lat])
+        // 일반적으로 경도가 더 크므로 판별
+        const [first, second] = addr.center_wgs84;
+        if (Math.abs(first) > Math.abs(second)) {
+          // first가 경도 (126.x > 37.x)
+          endLng = first;
+          endLat = second;
+        } else {
+          // first가 위도
+          endLat = first;
+          endLng = second;
+        }
+      }
+
+      if (!endLat || !endLng || !isFinite(endLat) || !isFinite(endLng)) {
+        setStatus("배송지 좌표 형식이 올바르지 않습니다.", "ERR");
+        log(`center_wgs84: ${JSON.stringify(addr.center_wgs84)}`);
+        return;
+      }
+
+      const deliveryName = deliveryNameInput.value.trim() || "입차지";
+      const addressName = addr.address || "배송지";
+
+      // 3. 카카오내비 URL 생성
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      
+      let naviUrl;
+      if (isMobile) {
+        // 모바일: 카카오맵 앱 URL 스킴
+        naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
+      } else {
+        // PC: 카카오맵 웹 길찾기
+        naviUrl = `https://map.kakao.com/?sName=${encodeURIComponent(deliveryName)}&sX=${startLng}&sY=${startLat}&eName=${encodeURIComponent(addressName)}&eX=${endLng}&eY=${endLat}`;
+      }
+
+      window.open(naviUrl, "_blank");
+      setStatus(`네비 실행: ${deliveryName} → ${addressName}`, "OK");
+      log(`경로: (${startLat.toFixed(4)}, ${startLng.toFixed(4)}) → (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
+    });
+  }
+
   // ====== 불러오기 ======
   async function loadRoutes() {
     try {
@@ -1027,6 +1192,9 @@
       }
       
       renderRoutes(allRows);
+      
+      // 배송지 목록도 자동으로 불러오기
+      await loadAddresses();
     } catch (e) {
       console.error(e);
       const errMsg = e.message || String(e);

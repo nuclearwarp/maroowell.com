@@ -277,6 +277,9 @@
   let editHandles = []; // kakao.maps.Marker[]
   let editPolygons = []; // kakao.maps.Polygon[]
   let labelOn = true;
+  
+  // 커스텀 드래그 상태
+  let draggingVertex = null; // { marker, polygon, index }
 
   // 그리기 상태
   let drawMode = null; // "new" | "add" | null
@@ -575,6 +578,8 @@
     editHandles.forEach(m => m.setMap(null));
     editHandles = [];
     editPolygons = [];
+    draggingVertex = null; // 드래그 상태 초기화
+    map.setDraggable(true); // 지도 드래그 재활성화
 
     // 선택 강조 해제(원복)
     for (const {row, polygons} of overlayById.values()) {
@@ -650,7 +655,7 @@
       
       if (path.length < 3) continue;
 
-      // Vertex handles
+      // Vertex handles (커스텀 드래그 구현)
       for (let i=0;i<path.length;i++) {
         ((index, polygon) => {
           const vMarker = new kakao.maps.Marker({
@@ -660,51 +665,15 @@
             zIndex: 20
           });
           
-          // 지도에 추가한 후 draggable 설정 (순서 중요)
           vMarker.setMap(map);
-          vMarker.setDraggable(true);
           
-          log(`  → vertex ${index} 핸들 생성 완료 (draggable: ${vMarker.getDraggable()})`);
+          log(`  → vertex ${index} 핸들 생성 완료`);
 
-          // 드래그 시작 이벤트
-          kakao.maps.event.addListener(vMarker, "dragstart", () => {
-            log(`  🟢 dragstart: vertex ${index}`);
-          });
-
-          // 드래그 중 이벤트
-          kakao.maps.event.addListener(vMarker, "drag", () => {
-            log(`  🔵 drag: vertex ${index}`);
-            const newPos = vMarker.getPosition();
-            const currentPath = polygon.getPath();
-            
-            // 항상 배열로 변환해서 안전하게 처리
-            const pathArray = [];
-            if (currentPath && typeof currentPath.getLength === 'function') {
-              // MVCArray 형식
-              for (let j = 0; j < currentPath.getLength(); j++) {
-                pathArray.push(j === index ? newPos : currentPath.getAt(j));
-              }
-            } else if (Array.isArray(currentPath)) {
-              // 일반 배열 형식
-              for (let j = 0; j < currentPath.length; j++) {
-                pathArray.push(j === index ? newPos : currentPath[j]);
-              }
-            } else {
-              console.warn("Unknown path format:", currentPath);
-              return;
-            }
-            
-            // 배열로 setPath (확실한 방법)
-            polygon.setPath(pathArray);
-            
-            // 라벨 위치도 업데이트(선택된 라우트만)
-            updateSelectedLabels();
-          });
-          
-          // 드래그 종료 이벤트
-          kakao.maps.event.addListener(vMarker, "dragend", () => {
-            log(`  🔴 dragend: vertex ${index}`);
-            rebuildHandles(); // 미드포인트 재생성 포함
+          // 마우스 다운: 드래그 시작
+          kakao.maps.event.addListener(vMarker, "mousedown", () => {
+            log(`  🟢 드래그 시작: vertex ${index}`);
+            draggingVertex = { marker: vMarker, polygon, index };
+            map.setDraggable(false); // 지도 드래그 비활성화
           });
 
           // 우클릭: 점 삭제(최소 3개 유지)
@@ -1322,7 +1291,7 @@
     setStatus("지도 초기화 완료.", "OK");
   }
 
-  // ====== 지도 이벤트(그리기 모드) ======
+  // ====== 지도 이벤트(그리기 모드 + 커스텀 드래그) ======
   function attachMapEvents() {
     // 클릭: 점 추가
     kakao.maps.event.addListener(map, "click", (mouseEvent) => {
@@ -1335,6 +1304,44 @@
     kakao.maps.event.addListener(map, "rightclick", () => {
       if (!drawMode) return;
       popDrawPoint();
+    });
+    
+    // 마우스 이동: 커스텀 드래그 처리
+    kakao.maps.event.addListener(map, "mousemove", (mouseEvent) => {
+      if (!draggingVertex) return;
+      
+      const newPos = mouseEvent.latLng;
+      const { marker, polygon, index } = draggingVertex;
+      
+      // 마커 위치 업데이트
+      marker.setPosition(newPos);
+      
+      // 폴리곤 경로 업데이트
+      const currentPath = polygon.getPath();
+      const pathArray = [];
+      if (currentPath && typeof currentPath.getLength === 'function') {
+        for (let j = 0; j < currentPath.getLength(); j++) {
+          pathArray.push(j === index ? newPos : currentPath.getAt(j));
+        }
+      } else if (Array.isArray(currentPath)) {
+        for (let j = 0; j < currentPath.length; j++) {
+          pathArray.push(j === index ? newPos : currentPath[j]);
+        }
+      }
+      polygon.setPath(pathArray);
+      
+      // 라벨 업데이트
+      updateSelectedLabels();
+    });
+    
+    // 마우스 업: 드래그 종료
+    kakao.maps.event.addListener(map, "mouseup", () => {
+      if (!draggingVertex) return;
+      
+      log(`  🔴 드래그 종료: vertex ${draggingVertex.index}`);
+      draggingVertex = null;
+      map.setDraggable(true); // 지도 드래그 재활성화
+      rebuildHandles(); // 미드포인트 재생성
     });
 
     // ESC: 취소, Enter: 완료

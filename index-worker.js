@@ -52,9 +52,22 @@ export default {
         params_sido_data: [],
         params_sgg_val: null,
         params_sgg_data: [],
-        search_result: [{
-          sbdno: zipcode
-        }]
+        search_result: [],
+        result_count: 0,
+        result_offset: 0,
+        ctpvCd: "",
+        lgvReplcCd: "",
+        districtNo: zipcode,  // 우편번호를 districtNo에 넣음
+        pageable: {
+          first: 0,
+          totalRecords: 0,
+          currentRecords: 0,
+          totalPages: 0,
+          page: 0,
+          size: 10,
+          linkSize: 5,
+          orders: [{ property: "", direction: "" }]
+        }
       };
 
       const apiRes = await fetch(apiUrl, {
@@ -108,6 +121,14 @@ export default {
       }
 
       const item = data.results.content[0];
+      
+      // 메타데이터
+      const metadata = {
+        ctpvNm: item.ctpvNm,        // 시도명
+        sigNm: item.sigNm,          // 시군구명
+        sbdno: item.sbdno,          // 우편번호
+        lgvReplcCd: item.lgvReplcCd // 법정동코드
+      };
       
       if (!item.geom) {
         return jsonResp(
@@ -178,12 +199,7 @@ export default {
         srid: 5179,
         center5179,
         polygon5179,
-        metadata: {
-          ctprvNm: item.ctprvNm,    // 시도명
-          sgnNm: item.sgnNm,          // 시군구명
-          sbdno: item.sbdno,          // 우편번호
-          lawneucod: item.lawneucod,  // 법정동코드
-        }
+        metadata
       };
 
       return jsonResp(result);

@@ -239,7 +239,8 @@
       ]
     };
 
-    // 더 이상 Worker API를 사용하지 않음 - 브라우저에서 직접 WFS API 호출
+    // Worker API 엔드포인트 (배포 후 실제 URL로 변경 필요)
+    const ZIP_API = "https://zip.maroowell.com/?zipcode=";
     const $ = (sel) => document.querySelector(sel);
 
     const parseZips = (raw) =>
@@ -650,7 +651,7 @@
       return polys;
     }
 
-    // 브라우저에서 직접 WFS API 호출해서 그리기
+    // Worker API 호출해서 그리기
     async function drawSelected() {
       const targets = [...state.selectedZips].filter(
         (z) => !state.polygons.has(z)
@@ -661,20 +662,25 @@
 
       for (const zip of targets) {
         try {
-          // 행안부 WFS API 직접 호출 (JSONP 방식)
-          const polygon5179 = await fetchZipPolygon(zip);
-          
-          if (!polygon5179 || !polygon5179.length) {
-            console.warn("[ZIP] 폴리곤 데이터 없음", zip);
+          const url = `${ZIP_API}${encodeURIComponent(zip)}`;
+          const res = await fetch(url, { cache: "no-store" });
+          const data = await res.json();
+          console.log("[ZIP] 로드 완료", zip, data);
+
+          if (
+            !Array.isArray(data.polygon5179) ||
+            !data.polygon5179.length
+          ) {
             notFound.push(zip);
             continue;
           }
 
-          console.log("[ZIP] 로드 완료", zip, polygon5179.length, "points");
-
           const color = pickColor(zip);
-          const polys = polygonsFrom5179(polygon5179, color, zip);
-          
+          const polys = polygonsFrom5179(
+            data.polygon5179,
+            color,
+            zip
+          );
           if (!polys.length) {
             console.warn("[ZIP] 폴리곤 생성 실패", zip);
             notFound.push(zip);
@@ -694,89 +700,6 @@
           `폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`
         );
       }
-    }
-
-    // 행안부 WFS API로 우편번호 경계 폴리곤 가져오기 (JSONP)
-    async function fetchZipPolygon(zipcode) {
-      return new Promise((resolve, reject) => {
-        const callbackName = `wfsCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const ts = Date.now();
-        
-        // 전역 콜백 함수 등록
-        window[callbackName] = function(response) {
-          try {
-            // cleanup
-            delete window[callbackName];
-            document.body.removeChild(script);
-            
-            // response에서 xmlStr 추출
-            if (!response || !response.result || !response.result.featureCollection) {
-              resolve(null);
-              return;
-            }
-            
-            const xmlStr = response.result.featureCollection.xmlStr;
-            if (!xmlStr) {
-              resolve(null);
-              return;
-            }
-            
-            // gml:coordinates 파싱
-            const coordsMatch = xmlStr.match(/<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/);
-            if (!coordsMatch) {
-              console.warn("[ZIP] gml:coordinates 없음", zipcode);
-              resolve(null);
-              return;
-            }
-            
-            const coordText = coordsMatch[1].trim();
-            const polygon5179 = coordText
-              .split(/\s+/)
-              .map((pair) => {
-                const [xStr, yStr] = pair.split(",");
-                const x = Number(xStr);
-                const y = Number(yStr);
-                return [x, y];
-              })
-              .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-            
-            resolve(polygon5179.length > 0 ? polygon5179 : null);
-          } catch (err) {
-            console.error("[ZIP] 파싱 에러", err);
-            resolve(null);
-          }
-        };
-        
-        // JSONP script 태그 생성
-        const script = document.createElement("script");
-        script.src = 
-          `https://www.juso.go.kr/wfs.do` +
-          `?callback=${callbackName}` +
-          `&svcType=WFS` +
-          `&typeName=BAS` +
-          `&basId=${encodeURIComponent(zipcode)}` +
-          `&maxFeatures=1` +
-          `&_=${ts}`;
-        
-        script.onerror = () => {
-          delete window[callbackName];
-          document.body.removeChild(script);
-          reject(new Error("WFS API 호출 실패"));
-        };
-        
-        // 타임아웃 설정 (10초)
-        setTimeout(() => {
-          if (window[callbackName]) {
-            delete window[callbackName];
-            if (script.parentNode) {
-              document.body.removeChild(script);
-            }
-            reject(new Error("WFS API 타임아웃"));
-          }
-        }, 10000);
-        
-        document.body.appendChild(script);
-      });
     }
 
     // ------- path 에서 LatLng 전부 뽑기 ------- //

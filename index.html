@@ -173,7 +173,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
 
   <!-- Kakao 지도 SDK -->
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
+  <!--
+    로드뷰 포함 지도 기능은 SDK 로드 완료 후 초기화되어야 안정적입니다.
+    autoload=false로 둔 뒤 kakao.maps.load() 콜백에서 createMap/bindUI를 실행합니다.
+  -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services&autoload=false"></script>
 </head>
 <body>
   <header>
@@ -645,6 +649,14 @@
           fillColor: color,
           fillOpacity: 0.25
         });
+
+        // 폴리곤이 지도 클릭 이벤트를 가로채는 경우가 있어서,
+        // 로드뷰 모드일 땐 폴리곤 클릭도 로드뷰 진입으로 처리한다.
+        kakao.maps.event.addListener(poly, "click", (mouseEvent) => {
+          if (!state.roadviewOn) return;
+          if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+        });
+
         polys.push(poly);
       });
 
@@ -764,9 +776,16 @@
     }
 
     // ------- DOM 로드 시 초기화 ------- //
+    // SDK 로드 완료 후 실행(로드뷰 포함 안정화)
     document.addEventListener("DOMContentLoaded", () => {
-      createMap();
-      bindUI();
+      if (!(window.kakao && kakao.maps && typeof kakao.maps.load === "function")) {
+        alert("카카오 지도 SDK 로딩 실패");
+        return;
+      }
+      kakao.maps.load(() => {
+        createMap();
+        bindUI();
+      });
     });
   </script>
 </body>

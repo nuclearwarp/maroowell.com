@@ -7,10 +7,10 @@
 ```sql
 ALTER TABLE subsubroutes 
 ADD COLUMN delivery_location_name text,
-ADD COLUMN delivery_location_address text,
-ADD COLUMN delivery_location_lat float8,
-ADD COLUMN delivery_location_lng float8;
+ADD COLUMN delivery_location_address text;
 ```
+
+> **참고**: 좌표 필드(`delivery_location_lat`, `delivery_location_lng`)는 선택사항이며, 주소만으로도 카카오맵/내비가 작동합니다.
 
 ## 2. 데이터 입력 형식
 
@@ -22,7 +22,6 @@ ADD COLUMN delivery_location_lng float8;
 4. 좌측 패널의 **"입차지 정보"** 섹션에서:
    - **입차지 이름**: 예) `본캠프`, `식사동MB`, `중산캠프`
    - **입차지 주소**: 예) `경기 김포시 양촌읍 대포산단로 73`
-   - **주소→좌표** 버튼 클릭하여 위도/경도 자동 입력
    - **입차지 저장** 버튼 클릭
 
 ### 방법 2: API를 통한 직접 입력
@@ -34,9 +33,7 @@ curl -X POST https://route.maroowell.com/route \
     "camp": "김포1",
     "code": "101",
     "delivery_location_name": "본캠프",
-    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73",
-    "delivery_location_lat": 37.5946,
-    "delivery_location_lng": 126.7251
+    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73"
   }'
 ```
 
@@ -47,18 +44,14 @@ curl -X POST https://route.maroowell.com/route \
 UPDATE subsubroutes 
 SET 
   delivery_location_name = '본캠프',
-  delivery_location_address = '경기 김포시 양촌읍 대포산단로 73',
-  delivery_location_lat = 37.5946,
-  delivery_location_lng = 126.7251
+  delivery_location_address = '경기 김포시 양촌읍 대포산단로 73'
 WHERE camp = '김포1' AND full_code = '101';
 
 -- 또는 여러 서브라우트에 동일한 입차지 적용
 UPDATE subsubroutes 
 SET 
   delivery_location_name = '식사동MB',
-  delivery_location_address = '경기 고양시 일산동구 고양대로1080번길 24',
-  delivery_location_lat = 37.6634,
-  delivery_location_lng = 126.7706
+  delivery_location_address = '경기 고양시 일산동구 고양대로1080번길 24'
 WHERE camp = '김포1' AND full_code LIKE '101A%';
 ```
 
@@ -66,11 +59,11 @@ WHERE camp = '김포1' AND full_code LIKE '101A%';
 
 ### 김포1 캠프
 
-| 서브라우트 | 입차지 이름 | 주소 | 위도 | 경도 |
-|---------|---------|------|------|------|
-| 101 | 본캠프 | 경기 김포시 양촌읍 대포산단로 73 | 37.5946 | 126.7251 |
-| 101A | 식사동MB | 경기 고양시 일산동구 고양대로1080번길 24 | 37.6634 | 126.7706 |
-| 101B | 본캠프 | 경기 김포시 양촌읍 대포산단로 73 | 37.5946 | 126.7251 |
+| 서브라우트 | 입차지 이름 | 주소 |
+|---------|---------|------|
+| 101 | 본캠프 | 경기 김포시 양촌읍 대포산단로 73 |
+| 101A | 식사동MB | 경기 고양시 일산동구 고양대로1080번길 24 |
+| 101B | 본캠프 | 경기 김포시 양촌읍 대포산단로 73 |
 
 ### JSON 배치 입력 예시
 
@@ -82,25 +75,19 @@ WHERE camp = '김포1' AND full_code LIKE '101A%';
     "camp": "김포1",
     "code": "101",
     "delivery_location_name": "본캠프",
-    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73",
-    "delivery_location_lat": 37.5946,
-    "delivery_location_lng": 126.7251
+    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73"
   },
   {
     "camp": "김포1",
     "code": "101A",
     "delivery_location_name": "식사동MB",
-    "delivery_location_address": "경기 고양시 일산동구 고양대로1080번길 24",
-    "delivery_location_lat": 37.6634,
-    "delivery_location_lng": 126.7706
+    "delivery_location_address": "경기 고양시 일산동구 고양대로1080번길 24"
   },
   {
     "camp": "김포1",
     "code": "102",
     "delivery_location_name": "본캠프",
-    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73",
-    "delivery_location_lat": 37.5946,
-    "delivery_location_lng": 126.7251
+    "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73"
   }
 ]
 ```
@@ -108,36 +95,25 @@ WHERE camp = '김포1' AND full_code LIKE '101A%';
 ## 4. 카카오내비 연동
 
 입차지 정보를 입력한 후, UI에서 **"카카오내비"** 버튼을 클릭하면:
-- **모바일**: 카카오내비 앱이 실행되어 해당 위치로 경로 안내
-- **PC**: 카카오맵 웹페이지가 열려 해당 위치 표시
+- **모바일**: 카카오맵 앱이 실행되어 해당 주소 검색
+- **PC**: 카카오맵 웹페이지가 열려 해당 주소 검색
 
-URL 스킴:
-- 앱: `kakaomap://route?ep={경도},{위도}&by=CAR`
-- 웹: `https://map.kakao.com/link/to/{이름},{위도},{경도}`
+URL 형식:
+- `https://map.kakao.com/link/search/{주소}`
 
-## 5. 좌표 찾는 방법
+> **장점**: 좌표 입력 없이 주소만으로 바로 카카오맵/내비 실행 가능!
 
-### 방법 1: UI 사용 (가장 쉬움)
-1. 입차지 주소를 입력
-2. "주소→좌표" 버튼 클릭
-3. 자동으로 위도/경도가 입력됨
+## 5. 주소 입력 팁
 
-### 방법 2: 카카오맵에서 직접 확인
-1. https://map.kakao.com/ 접속
-2. 주소 검색
-3. 해당 위치 우클릭 → "여기가 어디야?"
-4. URL에서 좌표 확인: `?map_type=TYPE_MAP&itemId={ID}&urlLevel=3&urlX={경도}&urlY={위도}`
+### 정확한 주소 입력
+- **도로명 주소** 사용 권장: `경기 김포시 양촌읍 대포산단로 73`
+- **지번 주소**도 가능: `경기 김포시 양촌읍 대포리 123-4`
+- 건물명이 있으면 더 정확: `경기 김포시 양촌읍 대포산단로 73 (마루웰 물류센터)`
 
-### 방법 3: Geocoding API 사용
-```javascript
-const geocoder = new kakao.maps.services.Geocoder();
-geocoder.addressSearch('경기 김포시 양촌읍 대포산단로 73', (result, status) => {
-  if (status === kakao.maps.services.Status.OK) {
-    console.log('위도:', result[0].y);
-    console.log('경도:', result[0].x);
-  }
-});
-```
+### 주소 찾는 방법
+1. **네이버/다음 지도**에서 검색
+2. **우편번호 검색**으로 확인
+3. 건물명으로 검색 후 도로명 주소 복사
 
 ## 6. 데이터 확인
 
@@ -163,8 +139,6 @@ curl "https://route.maroowell.com/route?camp=김포1&code=101"
       "full_code": "101",
       "delivery_location_name": "본캠프",
       "delivery_location_address": "경기 김포시 양촌읍 대포산단로 73",
-      "delivery_location_lat": 37.5946,
-      "delivery_location_lng": 126.7251,
       "vendor_name": "홍길동",
       "vendor_business_number": "123-45-67890"
     }
@@ -174,10 +148,10 @@ curl "https://route.maroowell.com/route?camp=김포1&code=101"
 
 ## 7. 주의사항
 
-1. **위도/경도 정확도**: 소수점 6자리까지 입력 (약 0.1m 정확도)
-2. **동일 캠프의 여러 서브라우트**: 같은 입차지를 사용하는 경우 같은 값을 입력
+1. **주소 정확성**: 도로명 주소를 정확하게 입력하면 카카오맵이 더 정확하게 찾습니다
+2. **동일 캠프의 여러 서브라우트**: 같은 입차지를 사용하는 경우 같은 주소를 입력
 3. **입차지 없는 서브라우트**: 입력하지 않으면 `null`로 저장되며, 네비 기능은 비활성화됨
-4. **주소 변경**: 입차지 주소가 변경되면 "주소→좌표" 버튼을 다시 눌러 좌표 업데이트 필요
+4. **카카오맵 검색**: 주소가 애매한 경우 카카오맵이 여러 결과를 보여줍니다
 
 ## 8. 캠프 테이블 (camps) 활용
 
@@ -195,8 +169,9 @@ curl "https://route.maroowell.com/route?camp=김포1&code=101"
 
 ```javascript
 const data = [
-  { camp: "김포1", code: "101", name: "본캠프", address: "경기 김포시 양촌읍 대포산단로 73", lat: 37.5946, lng: 126.7251 },
-  { camp: "김포1", code: "101A", name: "식사동MB", address: "경기 고양시 일산동구 고양대로1080번길 24", lat: 37.6634, lng: 126.7706 },
+  { camp: "김포1", code: "101", name: "본캠프", address: "경기 김포시 양촌읍 대포산단로 73" },
+  { camp: "김포1", code: "101A", name: "식사동MB", address: "경기 고양시 일산동구 고양대로1080번길 24" },
+  { camp: "김포1", code: "102", name: "본캠프", address: "경기 김포시 양촌읍 대포산단로 73" },
   // ... 더 추가
 ];
 
@@ -208,9 +183,7 @@ for (const item of data) {
       camp: item.camp,
       code: item.code,
       delivery_location_name: item.name,
-      delivery_location_address: item.address,
-      delivery_location_lat: item.lat,
-      delivery_location_lng: item.lng
+      delivery_location_address: item.address
     })
   });
   console.log(`✓ ${item.camp} ${item.code}`);

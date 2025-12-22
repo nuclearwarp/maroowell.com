@@ -604,48 +604,51 @@
     function polygonsFrom5179(polygon5179, color, zip) {
       if (!Array.isArray(polygon5179) || !polygon5179.length) return [];
 
-      // polygon5179 가 [[x,y], ...] 형식 / 혹은 [ [ [x,y]... ], [ ... ] ] 형식
-      const rings =
-        Array.isArray(polygon5179[0]) &&
-        typeof polygon5179[0][0] === "number"
-          ? [polygon5179]
-          : polygon5179;
-
       const polys = [];
 
-      rings.forEach((ring, idx) => {
-        const path = [];
-        ring.forEach((pt, i) => {
-          if (!Array.isArray(pt) || pt.length < 2) return;
-          const x = Number(pt[0]);
-          const y = Number(pt[1]);
-          if (!isFinite(x) || !isFinite(y)) return;
+      // MultiPolygon 형식 처리: [[[[x,y], ...]]]
+      // 각 polygon (외부 배열의 각 요소) 처리
+      polygon5179.forEach((polygon, polyIdx) => {
+        if (!Array.isArray(polygon)) return;
+        
+        // 각 polygon의 rings 처리
+        polygon.forEach((ring, ringIdx) => {
+          if (!Array.isArray(ring)) return;
+          
+          const path = [];
+          ring.forEach((pt, ptIdx) => {
+            if (!Array.isArray(pt) || pt.length < 2) return;
+            const x = Number(pt[0]);
+            const y = Number(pt[1]);
+            if (!isFinite(x) || !isFinite(y)) return;
 
-          const { lat, lon } = convertPoint(x, y);
-          if (!isFinite(lat) || !isFinite(lon)) return;
+            const { lat, lon } = convertPoint(x, y);
+            if (!isFinite(lat) || !isFinite(lon)) return;
 
-          path.push(new kakao.maps.LatLng(lat, lon));
+            path.push(new kakao.maps.LatLng(lat, lon));
 
-          if (idx === 0 && i < 3) {
-            console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
-          }
+            // 첫 3개 포인트만 로그
+            if (polyIdx === 0 && ringIdx === 0 && ptIdx < 3) {
+              console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
+            }
+          });
+
+          console.log(`[ZIP ${zip}] polygon ${polyIdx} ring ${ringIdx} path length`, path.length);
+
+          if (path.length < 3) return;
+
+          const poly = new kakao.maps.Polygon({
+            map: state.map,
+            path,
+            strokeWeight: 6,
+            strokeColor: color,
+            strokeOpacity: 1,
+            strokeStyle: "solid",
+            fillColor: color,
+            fillOpacity: 0.25
+          });
+          polys.push(poly);
         });
-
-        console.log(`[ZIP ${zip}] ring ${idx} path length`, path.length);
-
-        if (path.length < 3) return;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path,
-          strokeWeight: 6,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.25
-        });
-        polys.push(poly);
       });
 
       return polys;

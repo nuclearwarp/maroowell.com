@@ -11,7 +11,7 @@
  *  - full_code (text)
  *  - polygon_wgs84 (jsonb / text)  <-- JSON 저장 권장
  *  - color (text) [OPTIONAL]
- *  - vendor (text)                 <-- 추가 권장
+ *  - vendor_name (text)            <-- 추가 권장
  *  - vendor_business_number (text) <-- 추가 권장
  *  - created_at / updated_at ...
  */
@@ -117,7 +117,7 @@ async function handleRouteGet(url, env) {
     "camp",
     "full_code",
     "polygon_wgs84",
-    "vendor",
+    "vendor_name",
     "vendor_business_number",
     "created_at",
     "updated_at"
@@ -205,7 +205,7 @@ async function handleRoutePost(request, env) {
   };
 
   // 선택 저장 (color는 DB에 컬럼이 없으므로 제외)
-  if (Object.prototype.hasOwnProperty.call(body, "vendor")) patch.vendor = body.vendor ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "vendor_name")) patch.vendor_name = body.vendor_name ?? null;
   if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number")) {
     patch.vendor_business_number = body.vendor_business_number ?? null;
   }
@@ -215,7 +215,7 @@ async function handleRoutePost(request, env) {
   if (typeof id === "number") {
     const params = new URLSearchParams();
     params.set("id", `eq.${id}`);
-    params.set("select", "id,camp,full_code,polygon_wgs84,vendor,vendor_business_number,created_at,updated_at");
+    params.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
 
     const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
       method: "PATCH",
@@ -244,7 +244,7 @@ async function handleRoutePost(request, env) {
   // id가 없으면 upsert (camp+full_code unique 필요)
   const upsertParams = new URLSearchParams();
   upsertParams.set("on_conflict", "camp,full_code");
-  upsertParams.set("select", "id,camp,full_code,polygon_wgs84,vendor,vendor_business_number,created_at,updated_at");
+  upsertParams.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
 
   const inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${upsertParams.toString()}`, {
     method: "POST",
@@ -283,7 +283,7 @@ async function handleRouteDelete(request, env) {
 
   // 대상 필터
   const params = new URLSearchParams();
-  params.set("select", "id,camp,full_code,polygon_wgs84,vendor,vendor_business_number,created_at,updated_at");
+  params.set("select", "id,camp,full_code,polygon_wgs84,vendor_name,vendor_business_number,created_at,updated_at");
 
   if (typeof id === "number") {
     params.set("id", `eq.${id}`);

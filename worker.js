@@ -8,7 +8,7 @@
  * NOTE:
  *  - maroowell.com/share* 라우트가 Worker에 걸려있는 상태에서
  *    Worker가 템플릿을 maroowell.com/share.html 로 fetch하면 재귀가 납니다.
- *  - 그래서 템플릿은 "/_share.html" (정적 파일)로 분리해서 fetch합니다.
+ *  - 그래서 템플릿은 "www" 서브도메인(Worker 미적용)에서 가져오도록 구성합니다.
  */
 
 export default {
@@ -64,16 +64,24 @@ export default {
 const ROUTE_TABLE = "subsubroutes";
 const ADDRESS_TABLE = "addresses";
 
-// 템플릿(정적 share.html 복사본) — 반드시 GitHub Pages에 업로드해두세요.
-const SHARE_TEMPLATE_URL = "https://maroowell.com/_share.html";
+/**
+ * ✅ 템플릿은 "www"에서 가져오기 (Worker 라우트 미적용이라 재귀 방지)
+ * - www.maroowell.com/share.html 은 GitHub Pages 정적 파일이어야 합니다.
+ */
+const SHARE_TEMPLATE_URL = "https://www.maroowell.com/share.html";
 
-// 브라우저 탭 파비콘
+/**
+ * ✅ 브라우저 탭 파비콘 (HTML <link rel="icon">)
+ * - 실제로 https://maroowell.com/favicon.ico 가 200으로 열려야 합니다.
+ */
 const FAVICON_URL = "https://maroowell.com/favicon.ico?v=2";
 
-// 카톡 미리보기 이미지(og:image)
-// favicon(ico)은 작아서 카톡에서 안 뜰 수 있습니다.
-// 가능하면 512 png 만들어서 여길 교체하세요.
-const OG_IMAGE_URL = "https://maroowell.com/favicon.ico?v=2";
+/**
+ * ✅ 카톡/메신저 미리보기 "썸네일"은 favicon이 아니라 og:image 입니다.
+ * - ico는 플랫폼이 무시하는 경우가 많아서 512 PNG를 추천합니다.
+ * - 예) /og.png (512x512) 만들어두고 아래 URL로 바꾸세요.
+ */
+const OG_IMAGE_URL = "https://maroowell.com/og.png?v=2"; // 없으면 업로드 필요
 
 // ---------- helpers ----------
 function cors(res) {
@@ -235,11 +243,7 @@ async function handleRoutePost(request, env) {
 
   const hasPoly = Object.prototype.hasOwnProperty.call(body, "polygon_wgs84");
 
-  const patch = {
-    camp,
-    code: code,
-    full_code: code
-  };
+  const patch = { camp, code, full_code: code };
 
   if (Object.prototype.hasOwnProperty.call(body, "vendor_name")) patch.vendor_name = body.vendor_name ?? null;
   if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number")) patch.vendor_business_number = body.vendor_business_number ?? null;
@@ -308,7 +312,7 @@ async function handleRoutePost(request, env) {
   return json({ row }, 200, { "Cache-Control": "no-store" });
 }
 
-// ---------- /route DELETE (polygon_wgs84=null) ----------
+// ---------- /route DELETE ----------
 async function handleRouteDelete(request, env) {
   const body = await readJson(request);
   const id = body.id;
@@ -388,15 +392,12 @@ async function handleAddressesGet(url, env) {
   }
 }
 
-// ---------- /zip GET (행안부 WFS) ----------
+// ---------- /zip GET ----------
 async function handleZipGet(zipcode) {
   try {
-    if (!zipcode) {
-      return json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400);
-    }
+    if (!zipcode) return json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400);
 
     const ts = Date.now();
-
     const wfsUrl =
       `https://www.juso.go.kr/wfs.do` +
       `?callback=callback` +
@@ -407,43 +408,27 @@ async function handleZipGet(zipcode) {
       `&_=${ts}`;
 
     const wfsRes = await fetch(wfsUrl, {
-      headers: {
-        Referer: "https://maroowell.com/",
-        Origin: "https://maroowell.com",
-      },
+      headers: { Referer: "https://maroowell.com/", Origin: "https://maroowell.com" }
     });
 
-    if (!wfsRes.ok) {
-      return json({ error: "WFS 호출 실패", status: wfsRes.status }, 502);
-    }
+    if (!wfsRes.ok) return json({ error: "WFS 호출 실패", status: wfsRes.status }, 502);
 
     const text = await wfsRes.text();
-
     const xmlMatch = text.match(/xmlStr'\s*:\s*'([\s\S]*?)'\s*}\s*\)\s*;?\s*$/);
-    if (!xmlMatch) {
-      return json({ error: "WFS 응답에서 xmlStr를 찾지 못함", rawSample: text.slice(0, 200) }, 500);
-    }
+    if (!xmlMatch) return json({ error: "WFS 응답에서 xmlStr를 찾지 못함", rawSample: text.slice(0, 200) }, 500);
 
-    let xml = xmlMatch[1];
-    xml = xml.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+    let xml = xmlMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, "\\");
 
     const coordsMatch = xml.match(/<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/);
-    if (!coordsMatch) {
-      return json({ error: "gml:coordinates 태그를 찾지 못함", xmlSample: xml.slice(0, 300) }, 500);
-    }
+    if (!coordsMatch) return json({ error: "gml:coordinates 태그를 찾지 못함", xmlSample: xml.slice(0, 300) }, 500);
 
     const coordText = coordsMatch[1].trim();
     const polygon5179 = coordText
       .split(/\s+/)
-      .map((pair) => {
-        const [xStr, yStr] = pair.split(",");
-        return [Number(xStr), Number(yStr)];
-      })
+      .map(pair => pair.split(",").map(Number))
       .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
 
-    if (polygon5179.length === 0) {
-      return json({ error: "좌표 파싱 결과가 비어 있음", coordSample: coordText.slice(0, 200) }, 500);
-    }
+    if (polygon5179.length === 0) return json({ error: "좌표 파싱 결과가 비어 있음", coordSample: coordText.slice(0, 200) }, 500);
 
     const xMatch = xml.match(/<kais_tmp:x_code>([^<]+)<\/kais_tmp:x_code>/);
     const yMatch = xml.match(/<kais_tmp:y_code>([^<]+)<\/kais_tmp:y_code>/);
@@ -508,22 +493,23 @@ async function handleShareHtml(url, env) {
         ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
       }
     } catch (e) {
-      if (code) {
-        ogTitle = `${camp} ${code}`.trim();
-        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
-      } else {
-        ogTitle = `${camp} 배송지도`.trim();
-        ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
-      }
+      ogTitle = code ? `${camp} ${code}`.trim() : `${camp} 배송지도`.trim();
+      ogDescription = code
+        ? `${camp} ${code} 배송 구역을 확인하세요`.trim()
+        : `${camp} 배송 구역을 확인하세요`.trim();
     }
   }
 
-  // 템플릿 HTML fetch (정적 /_share.html)
+  // ✅ 템플릿 HTML fetch (www에서 정적 share.html 가져오기)
   const htmlRes = await fetch(SHARE_TEMPLATE_URL, {
     headers: { "User-Agent": "maroowell-route-worker/1.0" }
   });
+
   if (!htmlRes.ok) {
-    return json({ error: "Failed to fetch /_share.html template" }, 502);
+    return json(
+      { error: "Failed to fetch share template", template: SHARE_TEMPLATE_URL, status: htmlRes.status },
+      502
+    );
   }
 
   let html = await htmlRes.text();
@@ -547,6 +533,8 @@ async function handleShareHtml(url, env) {
   html = upsertHeadTag(html, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}" />`);
   html = upsertHeadTag(html, /<meta\s+property=["']og:site_name["'][^>]*>/i, `<meta property="og:site_name" content="Maroowell" />`);
   html = upsertHeadTag(html, /<meta\s+property=["']og:url["'][^>]*>/i, `<meta property="og:url" content="${safeUrl}" />`);
+
+  // og:image (카톡 썸네일)
   html = upsertHeadTag(html, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeImg}" />`);
   html = upsertHeadTag(html, /<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="Maroowell" />`);
 
@@ -556,12 +544,10 @@ async function handleShareHtml(url, env) {
   html = upsertHeadTag(html, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${safeDesc}" />`);
   html = upsertHeadTag(html, /<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${safeImg}" />`);
 
-  // favicon (절대경로로 강제)
-  html = html.replace(
-    /<link\s+rel=["']icon["'][^>]*>/gi,
-    `<link rel="icon" type="image/x-icon" href="${safeFav}" />`
-  );
+  // favicon (절대경로로 강제 + 종류 확장)
+  html = html.replace(/<link\s+rel=["']icon["'][^>]*>/gi, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
   html = upsertHeadTag(html, /<link\s+rel=["']icon["'][^>]*>/i, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
+  html = upsertHeadTag(html, /<link\s+rel=["']shortcut icon["'][^>]*>/i, `<link rel="shortcut icon" href="${safeFav}" />`);
   html = upsertHeadTag(html, /<link\s+rel=["']apple-touch-icon["'][^>]*>/i, `<link rel="apple-touch-icon" href="${safeFav}" />`);
 
   return new Response(html, {
@@ -598,7 +584,6 @@ out geom;
 `;
 
   const overpassUrl = "https://overpass-api.de/api/interpreter";
-
   const res = await fetch(overpassUrl, {
     method: "POST",
     headers: {
@@ -609,9 +594,7 @@ out geom;
   });
 
   const text = await res.text();
-  if (!res.ok) {
-    return json({ error: `Overpass error: ${text || res.status}` }, 502);
-  }
+  if (!res.ok) return json({ error: `Overpass error: ${text || res.status}` }, 502);
 
   let data;
   try { data = JSON.parse(text); } catch {

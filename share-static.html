@@ -1,905 +1,641 @@
-<!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>배송 지도 공유</title>
+/**
+ * Cloudflare Worker - route API + share OG/Twitter + v=yyyymmddHHMM 자동 부여
+ *
+ * ENV:
+ *  - SUPABASE_URL
+ *  - SUPABASE_SERVICE_ROLE_KEY
+ *
+ * NOTE:
+ *  - maroowell.com/share* 라우트가 Worker에 걸려있는 상태에서
+ *    Worker가 템플릿을 maroowell.com/share.html 로 fetch하면 재귀가 납니다.
+ *  - 그래서 템플릿은 "/_share.html" (정적 파일)로 분리해서 fetch합니다.
+ */
 
-  <!-- Open Graph / 링크 미리보기 메타 태그 -->
-  <meta property="og:type" content="website" />
-  <meta property="og:title" content="배송 지도 공유" />
-  <meta property="og:description" content="배송 구역 및 경로를 확인하세요" />
-  <meta property="og:site_name" content="Maroowell" />
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      const url = new URL(request.url);
+      const path = url.pathname;
 
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="배송 지도 공유" />
-  <meta name="twitter:description" content="배송 구역 및 경로를 확인하세요" />
-
-  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-
-  <style>
-    :root{
-      --bg:#0b1220;
-      --panel:#0f1a2d;
-      --txt:#e6eefc;
-      --muted:#93a4c7;
-      --line:rgba(255,255,255,.08);
-      --btn:#162744;
-      --btn2:#1a2f55;
-    }
-    *{box-sizing:border-box; margin:0; padding:0;}
-    html,body{height:100%; font-family:system-ui, -apple-system, "Noto Sans KR", sans-serif; background:var(--bg); color:var(--txt);}
-
-    .container{display:flex; flex-direction:column; height:100vh;}
-
-    /* 헤더 - 모바일 중심 */
-    .header{
-      background:linear-gradient(135deg, #1a2f55 0%, #0f1a2d 100%);
-      padding:20px;
-      border-bottom:2px solid var(--line);
-      box-shadow:0 4px 12px rgba(0,0,0,.3);
-      text-align:center;
-    }
-    .header-content{
-      max-width:600px;
-      margin:0 auto;
-    }
-    .camp-info{
-      margin-bottom:16px;
-    }
-    .camp-name{
-      font-size:24px;
-      font-weight:800;
-      margin-bottom:8px;
-      letter-spacing:0.3px;
-      color:#00C2FF;
-    }
-    .camp-address{
-      font-size:14px;
-      color:var(--muted);
-      line-height:1.5;
-      margin-bottom:4px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px;
-    }
-    .copy-btn{
-      background:rgba(0,194,255,.15);
-      border:1px solid rgba(0,194,255,.3);
-      color:#00C2FF;
-      padding:4px 8px;
-      border-radius:6px;
-      cursor:pointer;
-      font-size:12px;
-      transition:all 0.2s;
-      white-space:nowrap;
-    }
-    .copy-btn:hover{
-      background:rgba(0,194,255,.25);
-      border-color:#00C2FF;
-    }
-
-    /* 네비 버튼 영역 */
-    .navi-buttons{
-      display:flex;
-      gap:8px;
-      flex-direction:column;
-    }
-    .btn{
-      width:100%;
-      padding:14px 20px;
-      border-radius:12px;
-      border:1px solid var(--line);
-      background:var(--btn);
-      color:var(--txt);
-      cursor:pointer;
-      font-weight:700;
-      font-size:15px;
-      white-space:nowrap;
-      transition:all 0.2s;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px;
-    }
-    .btn:hover{background:var(--btn2); transform:translateY(-1px);}
-    .btn.primary{
-      background:linear-gradient(135deg, #00C2FF 0%, #0088CC 100%);
-      border-color:#00C2FF;
-      color:#fff;
-      box-shadow:0 4px 12px rgba(0,194,255,.25);
-      font-size:16px;
-      padding:16px 20px;
-    }
-    .btn.primary:hover{
-      box-shadow:0 6px 16px rgba(0,194,255,.35);
-    }
-
-    /* 지도 */
-    .map-container{flex:1; position:relative;}
-    #map{position:absolute; inset:0;}
-
-    /* 배송지 목록 패널 */
-    .address-panel{
-      position:absolute;
-      bottom:20px;
-      left:20px;
-      max-width:360px;
-      max-height:60vh;
-      background:rgba(15,26,45,.95);
-      backdrop-filter:blur(10px);
-      border:1px solid var(--line);
-      border-radius:16px;
-      box-shadow:0 8px 24px rgba(0,0,0,.4);
-      overflow:hidden;
-      display:none; /* 배송지가 있을 때만 표시 */
-    }
-    .address-panel.visible{display:block;}
-    .panel-header{
-      padding:16px 18px;
-      border-bottom:1px solid var(--line);
-      font-weight:700;
-      font-size:15px;
-      background:rgba(0,0,0,.2);
-    }
-    .address-list{
-      max-height:calc(60vh - 60px);
-      overflow-y:auto;
-      padding:10px;
-    }
-    .address-item{
-      padding:14px 16px;
-      margin-bottom:8px;
-      background:rgba(0,0,0,.15);
-      border:1px solid var(--line);
-      border-radius:12px;
-      font-size:13px;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      transition:all 0.2s;
-    }
-    .address-item:hover{background:rgba(0,0,0,.25); border-color:#00C2FF;}
-    .address-info{flex:1; min-width:0;}
-    .address-text{font-weight:600; color:var(--txt); margin-bottom:4px; word-break:break-all;}
-    .address-meta{color:var(--muted); font-size:12px;}
-    .address-item .btn{
-      padding:10px 16px;
-      font-size:14px;
-      width:100%;
-      border-radius:8px;
-    }
-
-    /* 로딩 오버레이 */
-    .loading{
-      position:absolute;
-      inset:0;
-      background:rgba(11,18,32,.85);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      z-index:100;
-      flex-direction:column;
-      gap:12px;
-    }
-    .spinner{
-      width:40px;
-      height:40px;
-      border:4px solid rgba(255,255,255,.1);
-      border-top-color:#00C2FF;
-      border-radius:50%;
-      animation:spin 0.8s linear infinite;
-    }
-    @keyframes spin{to{transform:rotate(360deg);}}
-    .loading-text{font-size:14px; color:var(--muted);}
-
-    /* 라벨 - 캠프 표시 크게 */
-    .route-label{
-      padding:6px 12px;
-      border-radius:12px;
-      background:rgba(0,0,0,.25);
-      color:#fff;
-      font-size:14px;
-      border:2px solid rgba(255,255,255,.22);
-      white-space:nowrap;
-      box-shadow:0 3px 10px rgba(0,0,0,.35);
-      font-weight:800;
-      letter-spacing:0.2px;
-      backdrop-filter:blur(4px);
-    }
-
-    /* 라우트 선택 모달 */
-    .route-modal{
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,.8);
-      backdrop-filter:blur(8px);
-      z-index:1000;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      padding:20px;
-    }
-    .route-modal.visible{display:flex;}
-    .route-modal-content{
-      background:var(--panel);
-      border:1px solid var(--line);
-      border-radius:16px;
-      padding:24px;
-      max-width:500px;
-      width:100%;
-      max-height:80vh;
-      overflow-y:auto;
-    }
-    .route-modal-title{
-      font-size:20px;
-      font-weight:800;
-      margin-bottom:16px;
-      text-align:center;
-    }
-    .route-item{
-      padding:16px;
-      margin-bottom:12px;
-      background:rgba(0,0,0,.2);
-      border:1px solid var(--line);
-      border-radius:12px;
-      cursor:pointer;
-      transition:all 0.2s;
-    }
-    .route-item:hover{
-      background:rgba(0,0,0,.3);
-      border-color:#00C2FF;
-      transform:translateY(-2px);
-    }
-    .route-item-code{
-      font-size:18px;
-      font-weight:700;
-      color:#00C2FF;
-      margin-bottom:8px;
-    }
-    .route-item-info{
-      font-size:13px;
-      color:var(--muted);
-    }
-
-    /* 반응형 */
-    @media (max-width: 768px){
-      .address-panel{
-        left:10px;
-        right:10px;
-        bottom:10px;
-        max-width:none;
+      // CORS preflight
+      if (request.method === "OPTIONS") {
+        return cors(new Response("", { status: 204 }));
       }
-      .route-modal-content{
-        padding:20px;
+
+      if (path === "/health") {
+        return cors(json({ ok: true }));
       }
+
+      if (path === "/route") {
+        if (request.method === "GET") return cors(await handleRouteGet(url, env));
+        if (request.method === "POST") return cors(await handleRoutePost(request, env));
+        if (request.method === "DELETE") return cors(await handleRouteDelete(request, env));
+        return cors(json({ error: "Method Not Allowed" }, 405));
+      }
+
+      if (path === "/osm" && request.method === "GET") {
+        return cors(await handleOsmGet(url));
+      }
+
+      if (path === "/addresses" && request.method === "GET") {
+        return cors(await handleAddressesGet(url, env));
+      }
+
+      // 공유 미리보기(OG/Twitter/파비콘 + v 자동)
+      if ((path === "/share" || path === "/share.html") && request.method === "GET") {
+        return await handleShareHtml(url, env);
+      }
+
+      // 우편번호 경계 API (루트 경로에서 zipcode 파라미터로 처리)
+      if (path === "/" && request.method === "GET") {
+        const zipcode = url.searchParams.get("zipcode");
+        if (zipcode) {
+          return cors(await handleZipGet(zipcode));
+        }
+      }
+
+      return cors(json({ error: "Not Found" }, 404));
+    } catch (e) {
+      return cors(json({ error: e?.message || String(e) }, 500));
     }
-  </style>
+  }
+};
 
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
-</head>
+const ROUTE_TABLE = "subsubroutes";
+const ADDRESS_TABLE = "addresses";
 
-<body>
-<div class="container">
-  <!-- 헤더 -->
-  <div class="header">
-    <div class="header-content">
-      <div class="camp-info">
-        <div class="camp-name" id="campName">📍 배송 구역 안내</div>
-        <div class="camp-address">
-          <span id="campAddress">주소 정보 로딩 중...</span>
-          <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사2</button>
-        </div>
-      </div>
+// 템플릿(정적 share.html 복사본) — 반드시 GitHub Pages에 업로드해두세요.
+const SHARE_TEMPLATE_URL = "https://maroowell.com/_share.html";
 
-      <div class="navi-buttons">
-        <button class="btn primary" id="naviToCampBtn">
-          🧭 현재위치 → 캠프까지 길찾기
-        </button>
+// 브라우저 탭 파비콘
+const FAVICON_URL = "https://maroowell.com/favicon.ico?v=2";
 
-        <!-- addresses 로드와 무관하게 항상 보이도록 -->
-        <button class="btn" id="naviToDeliveryBtn"
-          style="background:linear-gradient(135deg, #22C55E 0%, #16A34A 100%); border-color:#22C55E; color:#fff;">
-          &lt; 캠프 → 배송지 카카오지도 연동♪ &gt;
-        </button>
-      </div>
-    </div>
-  </div>
+// 카톡 미리보기 이미지(og:image)
+// favicon(ico)은 작아서 카톡에서 안 뜰 수 있습니다.
+// 가능하면 512 png 만들어서 여길 교체하세요.
+const OG_IMAGE_URL = "https://maroowell.com/favicon.ico?v=2";
 
-  <!-- 라우트 선택 모달 -->
-  <div class="route-modal" id="routeModal">
-    <div class="route-modal-content">
-      <div class="route-modal-title" id="routeModalTitle">배송지 선택</div>
-      <div id="routeList"></div>
-    </div>
-  </div>
+// ---------- helpers ----------
+function cors(res) {
+  const h = new Headers(res.headers);
+  h.set("Access-Control-Allow-Origin", "*");
+  h.set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  h.set("Access-Control-Max-Age", "86400");
+  return new Response(res.body, { status: res.status, headers: h });
+}
 
-  <!-- 지도 -->
-  <div class="map-container">
-    <div id="map"></div>
+function json(obj, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8", ...extraHeaders }
+  });
+}
 
-    <!-- 로딩 -->
-    <div class="loading" id="loading">
-      <div class="spinner"></div>
-      <div class="loading-text">지도 데이터 로딩 중...</div>
-    </div>
+async function readJson(request) {
+  const text = await request.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { throw new Error("Invalid JSON body"); }
+}
 
-    <!-- 배송지 목록 패널 -->
-    <div class="address-panel" id="addressPanel">
-      <div class="panel-header">📦 배송지 목록</div>
-      <div class="address-list" id="addressList"></div>
-    </div>
-  </div>
-</div>
+function mustEnv(env, k) {
+  const v = env[k];
+  if (!v) throw new Error(`Missing ENV: ${k}`);
+  return v;
+}
 
-<script>
-(() => {
-  const API_BASE = "https://route.maroowell.com";
-  const ROUTE_ENDPOINT = `${API_BASE}/route`;
-  const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
+async function supabaseFetch(env, pathWithQuery, init = {}) {
+  const base = mustEnv(env, "SUPABASE_URL");
+  const key = mustEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
 
-  const $ = (id) => document.getElementById(id);
+  const url = `${base}${pathWithQuery}`;
+  const headers = new Headers(init.headers || {});
+  headers.set("apikey", key);
+  headers.set("Authorization", `Bearer ${key}`);
+  headers.set("Content-Type", headers.get("Content-Type") || "application/json");
 
-  function updateMetaTags(title, description) {
-    document.title = title;
+  const res = await fetch(url, { ...init, headers });
+  const text = await res.text();
 
-    let ogTitle = document.querySelector('meta[property="og:title"]');
-    if (ogTitle) ogTitle.setAttribute('content', title);
-
-    let ogDesc = document.querySelector('meta[property="og:description"]');
-    if (ogDesc) ogDesc.setAttribute('content', description);
-
-    let twitterTitle = document.querySelector('meta[name="twitter:title"]');
-    if (twitterTitle) twitterTitle.setAttribute('content', title);
-
-    let twitterDesc = document.querySelector('meta[name="twitter:description"]');
-    if (twitterDesc) twitterDesc.setAttribute('content', description);
+  if (!res.ok) {
+    let msg = text || `HTTP ${res.status}`;
+    try {
+      const j = JSON.parse(text);
+      msg = j?.message || j?.error || msg;
+    } catch {}
+    throw new Error(msg);
   }
 
-  const loading = $("loading");
-  const naviToCampBtn = $("naviToCampBtn");
-  const naviToDeliveryBtn = $("naviToDeliveryBtn");
-  const campName = $("campName");
-  const campAddress = $("campAddress");
-  const copyAddressBtn = $("copyAddressBtn");
-  const addressPanel = $("addressPanel");
-  const addressList = $("addressList");
-  const routeModal = $("routeModal");
-  const routeList = $("routeList");
-  const routeModalTitle = $("routeModalTitle");
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
 
-  let map, geocoder;
-  let allRoutes = [];
-  let routeData = null;
-  let addressRows = [];
+function escapeHtmlAttr(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-  const params = new URLSearchParams(location.search);
-  const camp = params.get("camp") || "";
-  const code = params.get("code") || "";
+function upsertHeadTag(html, matchRegex, newTag) {
+  if (matchRegex.test(html)) return html.replace(matchRegex, newTag);
+  const headOpen = html.match(/<head[^>]*>/i);
+  if (headOpen) return html.replace(/<head[^>]*>/i, headOpen[0] + "\n  " + newTag);
+  return newTag + "\n" + html;
+}
 
+function getKstYYYYMMDDHHMM() {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000); // UTC+9
+  const yyyy = String(kst.getUTCFullYear());
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(kst.getUTCDate()).padStart(2, "0");
+  const HH = String(kst.getUTCHours()).padStart(2, "0");
+  const MM = String(kst.getUTCMinutes()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}${HH}${MM}`;
+}
+
+// ---------- /route GET ----------
+async function handleRouteGet(url, env) {
+  const camp = (url.searchParams.get("camp") || "").trim();
+  const code = (url.searchParams.get("code") || "").trim();
+  const mode = (url.searchParams.get("mode") || "prefix").trim(); // prefix | exact
+
+  if (!camp) return json({ error: "camp is required" }, 400);
+
+  const select = [
+    "id",
+    "camp",
+    "code",
+    "full_code",
+    "polygon_wgs84",
+    "vendor_name",
+    "vendor_business_number",
+    "delivery_location_name",
+    "delivery_location_address",
+    "delivery_location_lat",
+    "delivery_location_lng",
+    "created_at",
+    "updated_at"
+  ].join(",");
+
+  const params = new URLSearchParams();
+  params.set("select", select);
+  params.set("camp", `eq.${camp}`);
+  params.set("order", "full_code.asc");
+
+  if (code) {
+    if (mode === "exact") params.set("full_code", `eq.${code}`);
+    else params.set("full_code", `like.${code}%`);
+  }
+
+  const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, { method: "GET" });
+
+  if (Array.isArray(rows)) {
+    rows.forEach(row => {
+      if (row && row.full_code && !row.color) row.color = generateColor(row.full_code);
+      if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === "string") {
+        try { row.polygon_wgs84 = JSON.parse(row.polygon_wgs84); } catch { row.polygon_wgs84 = null; }
+      }
+    });
+  }
+
+  return json({ rows: rows || [] }, 200, { "Cache-Control": "no-store" });
+}
+
+// 프론트엔드와 동일한 색상 생성 로직
+function generateColor(code) {
   const COLOR_PALETTE = [
     "#00C2FF", "#FF4D6D", "#FFD166", "#06D6A0", "#A78BFA",
-    "#F97316", "#22C55E", "#E11D48", "#3B82F6", "#F59E0B"
+    "#F97316", "#22C55E", "#E11D48", "#3B82F6", "#F59E0B",
+    "#14B8A6", "#8B5CF6", "#84CC16", "#EC4899", "#0EA5E9",
+    "#EF4444", "#10B981", "#FBBF24", "#6366F1", "#FB7185"
   ];
 
-  function hashCode(str) {
-    let h = 0;
-    for (let i=0;i<str.length;i++){
-      h = (h<<5) - h + str.charCodeAt(i);
-      h |= 0;
-    }
-    return Math.abs(h);
+  let h = 0;
+  for (let i = 0; i < code.length; i++) {
+    h = (h << 5) - h + code.charCodeAt(i);
+    h |= 0;
   }
-  function colorFor(code) {
-    return COLOR_PALETTE[hashCode(code) % COLOR_PALETTE.length];
-  }
+  return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
+}
 
-  async function apiGet(url) {
-    const res = await fetch(url, { method:"GET" });
-    const text = await res.text();
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch {}
-    if (!res.ok) {
-      const msg = json?.error || text || `HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-    return json;
-  }
+// ---------- /route POST (upsert) ----------
+async function handleRoutePost(request, env) {
+  const body = await readJson(request);
 
-  function parsePolygonWgs84(v) {
-    if (!v) return null;
-    if (Array.isArray(v)) return v;
-    if (typeof v === "string") {
-      try {
-        const p = JSON.parse(v);
-        if (Array.isArray(p)) return p;
-      } catch (e) {}
-    }
-    return null;
-  }
+  const camp = (body.camp || "").trim();
+  const code = (body.code || "").trim();
+  const id = body.id;
 
-  function centroidOfLatLngs(latlngs) {
-    let latSum=0, lngSum=0;
-    for (const ll of latlngs) {
-      latSum += ll.getLat();
-      lngSum += ll.getLng();
-    }
-    return new kakao.maps.LatLng(latSum/latlngs.length, lngSum/latlngs.length);
-  }
+  if (!camp) return json({ error: "camp is required" }, 400);
+  if (!code) return json({ error: "code is required" }, 400);
 
-  function createLabel(text, position, color) {
-    const el = document.createElement("div");
-    el.className = "route-label";
-    el.style.borderColor = color;
-    el.style.background = `linear-gradient(135deg, ${color}14, ${color}26)`;
-    el.innerHTML = `📦 ${text}`;
+  const hasPoly = Object.prototype.hasOwnProperty.call(body, "polygon_wgs84");
 
-    return new kakao.maps.CustomOverlay({
-      position,
-      content: el,
-      yAnchor: 0.5,
-      zIndex: 10
-    });
-  }
-
-  // 폴리곤(또는 링)에서 좌표 배열({lat,lng}[]) 추출
-  function extractRingLatLngs(poly) {
-    if (!poly) return [];
-    const first = poly[0];
-
-    let ring = null;
-
-    // [ {lat,lng}, ... ]
-    if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
-      ring = poly;
-    }
-    // [ [..], [..] ] 형태들
-    else if (Array.isArray(first)) {
-      const firstOfFirst = first[0];
-
-      // [ [ {lat,lng}... ], [ {lat,lng}... ] ]  => 첫 링
-      if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst && 'lng' in firstOfFirst) {
-        ring = first;
-      }
-      // [ [ [lng,lat], ... ], ... ] => 첫 링
-      else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
-        ring = first;
-      }
-      // [ [lng,lat], ... ]
-      else if (typeof firstOfFirst === 'number') {
-        ring = poly;
-      }
-    }
-
-    if (!Array.isArray(ring)) return [];
-
-    const latlngs = ring.map(pt => {
-      // {lat,lng}
-      if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
-        return { lat: Number(pt.lat), lng: Number(pt.lng) };
-      }
-      // [lng,lat]
-      if (Array.isArray(pt) && pt.length >= 2) {
-        return { lat: Number(pt[1]), lng: Number(pt[0]) };
-      }
-      return null;
-    }).filter(v => v && isFinite(v.lat) && isFinite(v.lng));
-
-    return latlngs;
-  }
-
-  // 서브라우트(폴리곤) 중심점(평균)으로 배송지 좌표 대체
-  function centroidLatLngOfPolygonWgs84(polygon_wgs84) {
-    const poly = parsePolygonWgs84(polygon_wgs84);
-    if (!poly) return null;
-
-    const ring = extractRingLatLngs(poly);
-    if (!ring || ring.length < 3) return null;
-
-    let latSum = 0, lngSum = 0;
-    for (const p of ring) {
-      latSum += p.lat;
-      lngSum += p.lng;
-    }
-    return { lat: latSum / ring.length, lng: lngSum / ring.length };
-  }
-
-  function drawPolygons(rows) {
-    if (!rows || rows.length === 0) return;
-
-    const bounds = new kakao.maps.LatLngBounds();
-    let hasPolygon = false;
-
-    for (const row of rows) {
-      const fullCode = row.full_code || row.code || "";
-      const color = row.color || colorFor(fullCode);
-      const poly = parsePolygonWgs84(row.polygon_wgs84);
-
-      if (!poly || !Array.isArray(poly) || poly.length === 0) continue;
-
-      let rings = [];
-      const first = poly[0];
-
-      if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
-        rings = [poly];
-      } else if (Array.isArray(first)) {
-        const firstOfFirst = first[0];
-        if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst && 'lng' in firstOfFirst) {
-          rings = poly;
-        } else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
-          rings = poly;
-        } else if (typeof firstOfFirst === 'number') {
-          rings = [poly];
-        }
-      }
-
-      for (const ring of rings) {
-        if (!Array.isArray(ring) || ring.length < 3) continue;
-
-        const latlngs = ring.map(pt => {
-          if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
-            return new kakao.maps.LatLng(pt.lat, pt.lng);
-          } else if (Array.isArray(pt) && pt.length >= 2) {
-            return new kakao.maps.LatLng(pt[1], pt[0]);
-          }
-          return null;
-        }).filter(ll => ll !== null);
-
-        if (latlngs.length < 3) continue;
-
-        const polygon = new kakao.maps.Polygon({
-          path: latlngs,
-          strokeWeight: 5,
-          strokeColor: color,
-          strokeOpacity: 1.0,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.20,
-          zIndex: 1
-        });
-        polygon.setMap(map);
-
-        const center = centroidOfLatLngs(latlngs);
-        const label = createLabel(fullCode, center, color);
-        label.setMap(map);
-
-        latlngs.forEach(ll => bounds.extend(ll));
-        hasPolygon = true;
-      }
-    }
-
-    if (hasPolygon) {
-      map.setBounds(bounds);
-    }
-  }
-
-  function renderAddressList() {
-    if (!addressRows || addressRows.length === 0) {
-      addressPanel.classList.remove("visible");
-      return;
-    }
-
-    addressPanel.classList.add("visible");
-    addressList.innerHTML = "";
-
-    addressRows.forEach((addr, idx) => {
-      const item = document.createElement("div");
-      item.className = "address-item";
-
-      const addressText = addr.address || addr.full_address || "주소 없음";
-      const dong = addr.dong ? `(${addr.dong})` : "";
-      const zipcode = addr.zipcode ? `우편번호: ${addr.zipcode}` : "";
-
-      item.innerHTML = `
-        <div class="address-info">
-          <div class="address-text">${idx + 1}. ${addressText} ${dong}</div>
-          <div class="address-meta">${zipcode}</div>
-        </div>
-        <button class="btn">🚗 길찾기</button>
-      `;
-
-      const btn = item.querySelector("button");
-      btn.onclick = () => openNaviToAddress(addr);
-
-      addressList.appendChild(item);
-    });
-  }
-
-  routeModal.onclick = (e) => {
-    if (e.target === routeModal) {
-      routeModal.classList.remove("visible");
-    }
+  const patch = {
+    camp,
+    code: code,
+    full_code: code
   };
 
-  // Promise 기반 지오코딩
-  function geocodeAsync(address) {
-    return new Promise((resolve, reject) => {
-      geocoder.addressSearch(address, (result, status) => {
-        if (status !== kakao.maps.services.Status.OK || !result?.length) {
-          reject(new Error("주소를 찾을 수 없습니다."));
-          return;
+  if (Object.prototype.hasOwnProperty.call(body, "vendor_name")) patch.vendor_name = body.vendor_name ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number")) patch.vendor_business_number = body.vendor_business_number ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_name")) patch.delivery_location_name = body.delivery_location_name ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_address")) patch.delivery_location_address = body.delivery_location_address ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lat")) patch.delivery_location_lat = body.delivery_location_lat ?? null;
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lng")) patch.delivery_location_lng = body.delivery_location_lng ?? null;
+  if (hasPoly) patch.polygon_wgs84 = body.polygon_wgs84 ?? null;
+
+  if (typeof id === "number") {
+    const params = new URLSearchParams();
+    params.set("id", `eq.${id}`);
+    params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
+
+    const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+
+    const row = Array.isArray(updated) ? updated[0] : updated;
+    if (row && row.full_code) row.color = generateColor(row.full_code);
+    if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === "string") {
+      try { row.polygon_wgs84 = JSON.parse(row.polygon_wgs84); } catch { row.polygon_wgs84 = null; }
+    }
+
+    return json({ row }, 200, { "Cache-Control": "no-store" });
+  }
+
+  const queryParams = new URLSearchParams();
+  queryParams.set("camp", `eq.${camp}`);
+  queryParams.set("full_code", `eq.${code}`);
+  queryParams.set("select", "id");
+
+  const existing = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, { method: "GET" });
+
+  let inserted;
+  if (Array.isArray(existing) && existing.length > 0) {
+    const existingId = existing[0].id;
+    const patchParams = new URLSearchParams();
+    patchParams.set("id", `eq.${existingId}`);
+    patchParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
+
+    inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${patchParams.toString()}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+  } else {
+    const insertParams = new URLSearchParams();
+    insertParams.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
+
+    inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${insertParams.toString()}`, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+  }
+
+  const row = Array.isArray(inserted) ? inserted[0] : inserted;
+  if (row && row.full_code) row.color = generateColor(row.full_code);
+  if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === "string") {
+    try { row.polygon_wgs84 = JSON.parse(row.polygon_wgs84); } catch { row.polygon_wgs84 = null; }
+  }
+
+  return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /route DELETE (polygon_wgs84=null) ----------
+async function handleRouteDelete(request, env) {
+  const body = await readJson(request);
+  const id = body.id;
+  const camp = (body.camp || "").trim();
+  const code = (body.code || "").trim();
+
+  if (typeof id !== "number" && (!camp || !code)) {
+    return json({ error: "id OR (camp + code) is required" }, 400);
+  }
+
+  const params = new URLSearchParams();
+  params.set("select", "id,camp,code,full_code,polygon_wgs84,vendor_name,vendor_business_number,delivery_location_name,delivery_location_address,delivery_location_lat,delivery_location_lng,created_at,updated_at");
+
+  if (typeof id === "number") {
+    params.set("id", `eq.${id}`);
+  } else {
+    params.set("camp", `eq.${camp}`);
+    params.set("full_code", `eq.${code}`);
+  }
+
+  const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ polygon_wgs84: null })
+  });
+
+  const row = Array.isArray(updated) ? updated[0] : updated;
+  if (row && row.full_code) row.color = generateColor(row.full_code);
+  if (row && row.polygon_wgs84 && typeof row.polygon_wgs84 === "string") {
+    try { row.polygon_wgs84 = JSON.parse(row.polygon_wgs84); } catch { row.polygon_wgs84 = null; }
+  }
+
+  return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /addresses GET ----------
+async function handleAddressesGet(url, env) {
+  const camp = (url.searchParams.get("camp") || "").trim();
+  const code = (url.searchParams.get("code") || "").trim();
+
+  if (!camp) return json({ error: "camp is required" }, 400);
+
+  const select = [
+    "id",
+    "camp",
+    "full_code",
+    "address",
+    "center_wgs84",
+    "zipcode",
+    "detail",
+    "dong",
+    "created_at"
+  ].join(",");
+
+  const params = new URLSearchParams();
+  params.set("select", select);
+  params.set("camp", `eq.${camp}`);
+  params.set("order", "full_code.asc,address.asc");
+
+  if (code) params.set("full_code", `like.${code}%`);
+
+  try {
+    const rows = await supabaseFetch(env, `/rest/v1/${ADDRESS_TABLE}?${params.toString()}`, { method: "GET" });
+
+    if (Array.isArray(rows)) {
+      rows.forEach(row => {
+        if (row && row.center_wgs84 && typeof row.center_wgs84 === "string") {
+          try { row.center_wgs84 = JSON.parse(row.center_wgs84); } catch { row.center_wgs84 = null; }
         }
-        resolve({ lat: Number(result[0].y), lng: Number(result[0].x) });
       });
+    }
+
+    return json({ rows: rows || [] }, 200, { "Cache-Control": "no-store" });
+  } catch (e) {
+    console.error("addresses 조회 실패:", e);
+    return json({ error: e.message, rows: [] }, 200);
+  }
+}
+
+// ---------- /zip GET (행안부 WFS) ----------
+async function handleZipGet(zipcode) {
+  try {
+    if (!zipcode) {
+      return json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400);
+    }
+
+    const ts = Date.now();
+
+    const wfsUrl =
+      `https://www.juso.go.kr/wfs.do` +
+      `?callback=callback` +
+      `&svcType=WFS` +
+      `&typeName=BAS` +
+      `&basId=${encodeURIComponent(zipcode)}` +
+      `&maxFeatures=1` +
+      `&_=${ts}`;
+
+    const wfsRes = await fetch(wfsUrl, {
+      headers: {
+        Referer: "https://maroowell.com/",
+        Origin: "https://maroowell.com",
+      },
+    });
+
+    if (!wfsRes.ok) {
+      return json({ error: "WFS 호출 실패", status: wfsRes.status }, 502);
+    }
+
+    const text = await wfsRes.text();
+
+    const xmlMatch = text.match(/xmlStr'\s*:\s*'([\s\S]*?)'\s*}\s*\)\s*;?\s*$/);
+    if (!xmlMatch) {
+      return json({ error: "WFS 응답에서 xmlStr를 찾지 못함", rawSample: text.slice(0, 200) }, 500);
+    }
+
+    let xml = xmlMatch[1];
+    xml = xml.replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+
+    const coordsMatch = xml.match(/<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/);
+    if (!coordsMatch) {
+      return json({ error: "gml:coordinates 태그를 찾지 못함", xmlSample: xml.slice(0, 300) }, 500);
+    }
+
+    const coordText = coordsMatch[1].trim();
+    const polygon5179 = coordText
+      .split(/\s+/)
+      .map((pair) => {
+        const [xStr, yStr] = pair.split(",");
+        return [Number(xStr), Number(yStr)];
+      })
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+
+    if (polygon5179.length === 0) {
+      return json({ error: "좌표 파싱 결과가 비어 있음", coordSample: coordText.slice(0, 200) }, 500);
+    }
+
+    const xMatch = xml.match(/<kais_tmp:x_code>([^<]+)<\/kais_tmp:x_code>/);
+    const yMatch = xml.match(/<kais_tmp:y_code>([^<]+)<\/kais_tmp:y_code>/);
+    const center5179 = xMatch && yMatch ? [Number(xMatch[1]), Number(yMatch[1])] : null;
+
+    return json({ zipcode, srid: 5179, center5179, polygon5179 });
+  } catch (err) {
+    return json({ error: "Worker 내부 예외 발생", detail: String(err) }, 500);
+  }
+}
+
+// ---------- /share 동적 메타 태그 처리 (+ v 자동 부여) ----------
+async function handleShareHtml(url, env) {
+  // ✅ v 파라미터 없으면: KST 기준 yyyymmddHHMM 생성해서 302 리다이렉트
+  const v = (url.searchParams.get("v") || "").trim();
+  const isValidV = /^\d{12}$/.test(v);
+  if (!isValidV) {
+    const v2 = getKstYYYYMMDDHHMM();
+    const newUrl = new URL(url.toString());
+    newUrl.searchParams.set("v", v2);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: newUrl.toString(),
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*"
+      }
     });
   }
 
-  // 캠프(입차지) 좌표 가져오기: (1) lat/lng 필드 있으면 사용 (2) 주소 지오코딩
-  async function getCampLatLng() {
-    if (!routeData) throw new Error("캠프 데이터가 없습니다.");
+  const camp = (url.searchParams.get("camp") || "").trim();
+  const code = (url.searchParams.get("code") || "").trim();
 
-    const lat =
-      Number(routeData.delivery_location_lat ?? routeData.delivery_lat ?? routeData.lat ?? routeData.y);
-    const lng =
-      Number(routeData.delivery_location_lng ?? routeData.delivery_lng ?? routeData.lng ?? routeData.x);
+  let ogTitle = "배송 지도 공유";
+  let ogDescription = "배송 구역 및 경로를 확인하세요";
 
-    if (isFinite(lat) && isFinite(lng)) return { lat, lng };
-
-    const addr = routeData.delivery_location_address;
-    if (!addr) throw new Error("캠프 주소가 없습니다.");
-    return await geocodeAsync(addr);
-  }
-
-  function openKakaoRoute({ sp, ep, spName, epName }) {
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-    if (isMobile) {
-      // 모바일: kakaomap://route
-      let url = `kakaomap://route?by=CAR`;
-      if (sp) url += `&sp=${sp.lat},${sp.lng}`;
-      if (ep) url += `&ep=${ep.lat},${ep.lng}`;
-      window.location.href = url;
-      return;
-    }
-
-    // PC: 링크
-    if (sp && ep) {
-      const url =
-        `https://map.kakao.com/link/from/${encodeURIComponent(spName || "출발")},${sp.lat},${sp.lng}` +
-        `/to/${encodeURIComponent(epName || "도착")},${ep.lat},${ep.lng}`;
-      window.open(url, "_blank");
-    } else if (ep) {
-      const url =
-        `https://map.kakao.com/link/to/${encodeURIComponent(epName || "목적지")},${ep.lat},${ep.lng}`;
-      window.open(url, "_blank");
-    }
-  }
-
-  // 상단 버튼: 현재위치 -> 캠프(입차지) : 모달 없이 바로
-  async function openNaviCurrentToCamp() {
+  if (camp) {
     try {
-      const campLatLng = await getCampLatLng();
-      const epName = routeData?.delivery_location_name || camp || "캠프";
-      openKakaoRoute({ ep: campLatLng, epName });
-    } catch (e) {
-      alert("캠프 길찾기 실패: " + e.message);
-    }
-  }
+      const queryParams = new URLSearchParams();
+      queryParams.set("select", "delivery_location_name,delivery_location_address,full_code");
+      queryParams.set("camp", `eq.${camp}`);
+      if (code) queryParams.set("full_code", `like.${code}%`);
+      queryParams.set("limit", "1");
+      queryParams.set("order", "full_code.asc");
 
-  // 하단 버튼: 캠프 -> 서브라우트 배송지(좌표) 선택 모달
-  function showSubrouteModalForDelivery() {
-    if (!allRoutes || allRoutes.length === 0) {
-      alert("라우트 정보가 없습니다.");
-      return;
-    }
+      const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, { method: "GET" });
 
-    // 1개면 바로 실행
-    if (allRoutes.length === 1) {
-      openNaviCampToSubroute(allRoutes[0]);
-      return;
-    }
+      if (Array.isArray(rows) && rows.length > 0) {
+        const locationName = (rows[0].delivery_location_name || "").trim();
+        const locationAddr = (rows[0].delivery_location_address || "").trim();
+        const fullCode = (rows[0].full_code || code || "").trim();
 
-    routeModalTitle.textContent = "배송지 선택(서브라우트)";
-    routeList.innerHTML = "";
-
-    allRoutes.forEach((r, idx) => {
-      const item = document.createElement("div");
-      item.className = "route-item";
-
-      const routeCode = r.full_code || r.code || `서브라우트 ${idx + 1}`;
-      const info1 = "캠프 → 선택 구역 중심(좌표) 길찾기";
-
-      item.innerHTML = `
-        <div class="route-item-code">${routeCode}</div>
-        <div class="route-item-info">${info1}</div>
-      `;
-
-      item.onclick = () => {
-        routeModal.classList.remove("visible");
-        openNaviCampToSubroute(r);
-      };
-
-      routeList.appendChild(item);
-    });
-
-    routeModal.classList.add("visible");
-  }
-
-  // 캠프 -> 서브라우트(배송지 좌표) 길찾기
-  async function openNaviCampToSubroute(route) {
-    try {
-      const sp = await getCampLatLng();
-      const spName = routeData?.delivery_location_name || camp || "캠프";
-
-      // (1) 서브라우트 자체에 좌표 필드가 있으면 우선 사용
-      const lat =
-        Number(route.delivery_lat ?? route.delivery_location_lat ?? route.lat ?? route.y);
-      const lng =
-        Number(route.delivery_lng ?? route.delivery_location_lng ?? route.lng ?? route.x);
-
-      let ep = null;
-      if (isFinite(lat) && isFinite(lng)) {
-        ep = { lat, lng };
+        ogTitle = `${camp}${locationName ? " " + locationName : ""}${fullCode ? " " + fullCode : ""}`.trim();
+        ogDescription = `${camp}${locationName ? " " + locationName : ""}${fullCode ? " " + fullCode : ""} 배송 구역을 확인하세요`.trim();
+        if (locationAddr) ogDescription = `${locationAddr} · ${ogDescription}`;
+      } else if (code) {
+        ogTitle = `${camp} ${code}`.trim();
+        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
       } else {
-        // (2) 없으면 폴리곤 중심점으로 대체
-        ep = centroidLatLngOfPolygonWgs84(route.polygon_wgs84);
+        ogTitle = `${camp} 배송지도`.trim();
+        ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
       }
-
-      if (!ep) throw new Error("서브라우트 배송지 좌표를 만들 수 없습니다.");
-
-      const epName = route.full_code || route.code || "배송지";
-      openKakaoRoute({ sp, ep, spName, epName });
     } catch (e) {
-      alert("배송지 연동 실패: " + e.message);
+      if (code) {
+        ogTitle = `${camp} ${code}`.trim();
+        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
+      } else {
+        ogTitle = `${camp} 배송지도`.trim();
+        ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
+      }
     }
   }
 
-  // 주소(패널)에서 캠프->주소 길찾기 (좌표 있으면 좌표 우선, 없으면 지오코딩)
-  function openNaviToAddress(addr) {
-    if (!routeData) {
-      alert("캠프 데이터 로딩 중입니다.");
-      return;
+  // 템플릿 HTML fetch (정적 /_share.html)
+  const htmlRes = await fetch(SHARE_TEMPLATE_URL, {
+    headers: { "User-Agent": "maroowell-route-worker/1.0" }
+  });
+  if (!htmlRes.ok) {
+    return json({ error: "Failed to fetch /_share.html template" }, 502);
+  }
+
+  let html = await htmlRes.text();
+
+  const safeTitle = escapeHtmlAttr(ogTitle);
+  const safeDesc = escapeHtmlAttr(ogDescription);
+  const safeUrl = escapeHtmlAttr(url.toString());
+  const safeImg = escapeHtmlAttr(OG_IMAGE_URL);
+  const safeFav = escapeHtmlAttr(FAVICON_URL);
+
+  // title
+  if (/<title[^>]*>[\s\S]*?<\/title>/i.test(html)) {
+    html = html.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`);
+  } else {
+    html = upsertHeadTag(html, /$^/i, `<title>${safeTitle}</title>`);
+  }
+
+  // OG
+  html = upsertHeadTag(html, /<meta\s+property=["']og:type["'][^>]*>/i, `<meta property="og:type" content="website" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${safeTitle}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:site_name["'][^>]*>/i, `<meta property="og:site_name" content="Maroowell" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:url["'][^>]*>/i, `<meta property="og:url" content="${safeUrl}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeImg}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="Maroowell" />`);
+
+  // Twitter
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:card["'][^>]*>/i, `<meta name="twitter:card" content="summary_large_image" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${safeTitle}" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${safeDesc}" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${safeImg}" />`);
+
+  // favicon (절대경로로 강제)
+  html = html.replace(
+    /<link\s+rel=["']icon["'][^>]*>/gi,
+    `<link rel="icon" type="image/x-icon" href="${safeFav}" />`
+  );
+  html = upsertHeadTag(html, /<link\s+rel=["']icon["'][^>]*>/i, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
+  html = upsertHeadTag(html, /<link\s+rel=["']apple-touch-icon["'][^>]*>/i, `<link rel="apple-touch-icon" href="${safeFav}" />`);
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*"
     }
+  });
+}
 
-    const addressText = addr.address || addr.full_address;
-
-    const endLat = Number(addr.lat ?? addr.latitude ?? addr.y);
-    const endLng = Number(addr.lng ?? addr.longitude ?? addr.x);
-
-    (async () => {
-      try {
-        const sp = await getCampLatLng();
-        const spName = routeData?.delivery_location_name || camp || "캠프";
-
-        // 주소 row에 좌표가 있으면 바로 사용
-        if (isFinite(endLat) && isFinite(endLng)) {
-          openKakaoRoute({
-            sp,
-            ep: { lat: endLat, lng: endLng },
-            spName,
-            epName: addressText || "배송지"
-          });
-          return;
-        }
-
-        // 없으면 기존처럼 주소 지오코딩
-        if (!addressText) throw new Error("배송지 주소 정보가 없습니다.");
-        const ep = await geocodeAsync(addressText);
-
-        openKakaoRoute({
-          sp,
-          ep,
-          spName,
-          epName: addressText
-        });
-      } catch (e) {
-        alert("길찾기 실패: " + e.message);
-      }
-    })();
+// ---------- /osm GET (Overpass) ----------
+async function handleOsmGet(url) {
+  const bboxStr = (url.searchParams.get("bbox") || "").trim();
+  const parts = bboxStr.split(",").map(Number);
+  if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) {
+    return json({ error: "bbox is required: minLng,minLat,maxLng,maxLat" }, 400);
   }
 
-  async function loadData() {
-    try {
-      if (!camp) throw new Error("캠프 정보가 없습니다. (camp 파라미터 필요)");
+  const [minLng, minLat, maxLng, maxLat] = parts;
+  const bbox = `${minLat},${minLng},${maxLat},${maxLng}`;
 
-      /* route 로드 */
-      const url = new URL(ROUTE_ENDPOINT);
-      url.searchParams.set("camp", camp);
-      url.searchParams.set("mode", "prefix");
-      if (code) url.searchParams.set("code", code);
+  const query = `
+[out:json][timeout:25];
+(
+  way["highway"](${bbox});
+);
+out geom;
+(
+  way["building"](${bbox});
+);
+out geom;
+`;
 
-      const data = await apiGet(url.toString());
-      if (!data || !data.rows || data.rows.length === 0) throw new Error("라우트 데이터를 찾을 수 없습니다.");
+  const overpassUrl = "https://overpass-api.de/api/interpreter";
 
-      allRoutes = data.rows;
-      routeData = data.rows[0];
+  const res = await fetch(overpassUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+      "User-Agent": "maroowell-route-worker/1.0"
+    },
+    body: `data=${encodeURIComponent(query)}`
+  });
 
-      const displayName = routeData.delivery_location_name || "캠프";
-      const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
-      const displayCode = code || (allRoutes.length === 1 ? (allRoutes[0].full_code || allRoutes[0].code || "") : "");
-
-      campName.textContent = `📍 ${camp} ${displayName}`;
-      campAddress.textContent = displayAddress;
-
-      let pageTitle = `${camp} ${displayName}`;
-      if (displayCode) pageTitle += ` ${displayCode}`;
-      const pageDescription = `${pageTitle} 배송 구역을 확인하세요`;
-      updateMetaTags(pageTitle, pageDescription);
-
-      if (displayAddress && displayAddress !== "주소 정보 없음") {
-        copyAddressBtn.style.display = "inline-block";
-      }
-
-      drawPolygons(data.rows);
-
-      /* addresses 로드 (패널 용도: 실패해도 전체는 정상) */
-      try {
-        const addrUrl = new URL(ADDRESS_ENDPOINT);
-        addrUrl.searchParams.set("camp", camp);
-
-        if (code) {
-          addrUrl.searchParams.set("code", code);
-          addrUrl.searchParams.set("mode", "prefix");
-        }
-
-        const addrData = await apiGet(addrUrl.toString());
-        addressRows = addrData?.rows || [];
-        renderAddressList();
-      } catch (addrErr) {
-        console.warn("배송지 로드 실패(패널):", addrErr);
-      }
-
-      loading.style.display = "none";
-
-    } catch (err) {
-      console.error(err);
-      loading.innerHTML = `
-        <div style="text-align:center; color:#FF4D6D;">
-          <div style="font-size:48px; margin-bottom:16px;">⚠️</div>
-          <div style="font-size:16px; font-weight:700; margin-bottom:8px;">데이터 로드 실패</div>
-          <div style="font-size:13px; color:var(--muted);">${err.message}</div>
-        </div>
-      `;
-    }
+  const text = await res.text();
+  if (!res.ok) {
+    return json({ error: `Overpass error: ${text || res.status}` }, 502);
   }
 
-  function init() {
-    kakao.maps.load(() => {
-      const center = new kakao.maps.LatLng(37.5665, 126.978);
-      map = new kakao.maps.Map($("map"), {
-        center,
-        level: 8,
-        draggable: true,
-        scrollwheel: true,
-        disableDoubleClickZoom: false
-      });
-      geocoder = new kakao.maps.services.Geocoder();
-
-      const zoomControl = new kakao.maps.ZoomControl();
-      map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
-
-      // 핵심 변경:
-      // 상단 버튼 = 바로 캠프 길찾기
-      naviToCampBtn.onclick = () => {
-        if (!routeData) return alert("데이터 로딩 중...");
-        openNaviCurrentToCamp();
-      };
-
-      // 하단 버튼 = 서브라우트(배송지) 선택 모달
-      naviToDeliveryBtn.onclick = () => {
-        if (!routeData) return alert("데이터 로딩 중...");
-        showSubrouteModalForDelivery();
-      };
-
-      copyAddressBtn.onclick = () => {
-        const address = campAddress.textContent;
-        navigator.clipboard.writeText(address).then(() => {
-          const originalText = copyAddressBtn.textContent;
-          copyAddressBtn.textContent = "✓ 복사됨";
-          setTimeout(() => { copyAddressBtn.textContent = originalText; }, 2000);
-        }).catch(err => {
-          alert("복사 실패: " + err.message);
-        });
-      };
-
-      loadData();
-    });
+  let data;
+  try { data = JSON.parse(text); } catch {
+    return json({ error: "Overpass returned invalid JSON" }, 502);
   }
 
-  init();
-})();
-</script>
-</body>
-</html>
+  const elements = data?.elements || [];
+  const roads = [];
+  const buildings = [];
+
+  for (const el of elements) {
+    if (!el || !el.type || !Array.isArray(el.geometry)) continue;
+    const coords = el.geometry
+      .filter(g => typeof g?.lat === "number" && typeof g?.lon === "number")
+      .map(g => [g.lon, g.lat]);
+
+    if (coords.length < 2) continue;
+
+    const isHighway = el.tags && el.tags.highway;
+    const isBuilding = el.tags && el.tags.building;
+
+    if (isHighway) roads.push({ id: el.id, coords });
+    else if (isBuilding && coords.length >= 3) buildings.push({ id: el.id, coords });
+  }
+
+  return json({ roads, buildings }, 200, { "Cache-Control": "public, max-age=60" });
+}

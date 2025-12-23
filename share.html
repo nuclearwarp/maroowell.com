@@ -377,7 +377,7 @@
 
   const params = new URLSearchParams(location.search);
   const camp = params.get("camp") || "";
-  const code = params.get("code") || "";
+  const code = (params.get("code") || "").replace(/&.*$/,"").trim();
 
   const COLOR_PALETTE = [
     "#00C2FF", "#FF4D6D", "#FFD166", "#06D6A0", "#A78BFA",
@@ -792,19 +792,40 @@
 
   async function loadData() {
     try {
-      if (!camp) throw new Error("캠프 정보가 없습니다. (camp 파라미터 필요)");
+      if (!camp) throw new Error("캠프 정보가 없습니다. (camp 파라미터 필요)");/* route 로드 */
+const codes = code ? code.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [];
 
-      /* route 로드 */
-      const url = new URL(ROUTE_ENDPOINT);
-      url.searchParams.set("camp", camp);
-      url.searchParams.set("mode", "prefix");
-      if (code) url.searchParams.set("code", code);
+const fetchRoutes = async (singleCode) => {
+  const u = new URL(ROUTE_ENDPOINT);
+  u.searchParams.set("camp", camp);
+  u.searchParams.set("mode", "prefix");
+  if (singleCode) u.searchParams.set("code", singleCode);
+  const d = await apiGet(u.toString());
+  return d?.rows || [];
+};
 
-      const data = await apiGet(url.toString());
-      if (!data || !data.rows || data.rows.length === 0) throw new Error("라우트 데이터를 찾을 수 없습니다.");
+let rows = [];
+if (codes.length <= 1) {
+  rows = await fetchRoutes(codes[0] || "");
+} else {
+  for (const c of codes) {
+    const part = await fetchRoutes(c);
+    if (part && part.length) rows.push(...part);
+  }
+  // 중복 제거 (id 우선)
+  const seen = new Set();
+  rows = rows.filter(r => {
+    const k = (r && r.id != null) ? String(r.id) : `${r?.camp||""}/${r?.full_code||r?.code||""}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 
-      allRoutes = data.rows;
-      routeData = data.rows[0];
+if (!rows.length) throw new Error("라우트 데이터를 찾을 수 없습니다.");
+
+allRoutes = rows;
+routeData = rows[0];
 
       const displayName = routeData.delivery_location_name || "캠프";
       const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
@@ -822,21 +843,42 @@
         copyAddressBtn.style.display = "inline-block";
       }
 
-      drawPolygons(data.rows);
+      drawPolygons(allRoutes);
 
       /* addresses 로드 (패널 용도: 실패해도 전체는 정상) */
-      try {
-        const addrUrl = new URL(ADDRESS_ENDPOINT);
-        addrUrl.searchParams.set("camp", camp);
+      try {const codes = code ? code.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [];
+let merged = [];
 
-        if (code) {
-          addrUrl.searchParams.set("code", code);
-          addrUrl.searchParams.set("mode", "prefix");
-        }
+const fetchAddrs = async (singleCode) => {
+  const au = new URL(ADDRESS_ENDPOINT);
+  au.searchParams.set("camp", camp);
+  if (singleCode) {
+    au.searchParams.set("code", singleCode);
+    au.searchParams.set("mode", "prefix");
+  }
+  const ad = await apiGet(au.toString());
+  return ad?.rows || [];
+};
 
-        const addrData = await apiGet(addrUrl.toString());
-        addressRows = addrData?.rows || [];
-        renderAddressList();
+if (codes.length <= 1) {
+  merged = await fetchAddrs(codes[0] || "");
+} else {
+  for (const c of codes) {
+    const part = await fetchAddrs(c);
+    if (part && part.length) merged.push(...part);
+  }
+  // 중복 제거 (id 우선)
+  const seen = new Set();
+  merged = merged.filter(r => {
+    const k = (r && r.id != null) ? String(r.id) : (r?.address || r?.full_address || JSON.stringify(r));
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+addressRows = merged;
+renderAddressList();
       } catch (addrErr) {
         console.warn("배송지 로드 실패(패널):", addrErr);
       }

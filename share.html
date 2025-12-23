@@ -299,7 +299,7 @@
           🧭 현재위치 → 캠프까지 길찾기
         </button>
 
-        <!-- 수정: addresses 로드와 무관하게 항상 보이도록 display:none 제거 -->
+        <!-- addresses 로드와 무관하게 항상 보이도록 -->
         <button class="btn" id="naviToDeliveryBtn"
           style="background:linear-gradient(135deg, #22C55E 0%, #16A34A 100%); border-color:#22C55E; color:#fff;">
           &lt; 캠프 → 배송지 카카오지도 연동♪ &gt;
@@ -311,7 +311,7 @@
   <!-- 라우트 선택 모달 -->
   <div class="route-modal" id="routeModal">
     <div class="route-modal-content">
-      <div class="route-modal-title">배송지 선택</div>
+      <div class="route-modal-title" id="routeModalTitle">배송지 선택</div>
       <div id="routeList"></div>
     </div>
   </div>
@@ -368,6 +368,7 @@
   const addressList = $("addressList");
   const routeModal = $("routeModal");
   const routeList = $("routeList");
+  const routeModalTitle = $("routeModalTitle");
 
   let map, geocoder;
   let allRoutes = [];
@@ -441,6 +442,68 @@
       yAnchor: 0.5,
       zIndex: 10
     });
+  }
+
+  // 폴리곤(또는 링)에서 좌표 배열({lat,lng}[]) 추출
+  function extractRingLatLngs(poly) {
+    if (!poly) return [];
+    const first = poly[0];
+
+    let ring = null;
+
+    // [ {lat,lng}, ... ]
+    if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
+      ring = poly;
+    }
+    // [ [..], [..] ] 형태들
+    else if (Array.isArray(first)) {
+      const firstOfFirst = first[0];
+
+      // [ [ {lat,lng}... ], [ {lat,lng}... ] ]  => 첫 링
+      if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst && 'lng' in firstOfFirst) {
+        ring = first;
+      }
+      // [ [ [lng,lat], ... ], ... ] => 첫 링
+      else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
+        ring = first;
+      }
+      // [ [lng,lat], ... ]
+      else if (typeof firstOfFirst === 'number') {
+        ring = poly;
+      }
+    }
+
+    if (!Array.isArray(ring)) return [];
+
+    const latlngs = ring.map(pt => {
+      // {lat,lng}
+      if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
+        return { lat: Number(pt.lat), lng: Number(pt.lng) };
+      }
+      // [lng,lat]
+      if (Array.isArray(pt) && pt.length >= 2) {
+        return { lat: Number(pt[1]), lng: Number(pt[0]) };
+      }
+      return null;
+    }).filter(v => v && isFinite(v.lat) && isFinite(v.lng));
+
+    return latlngs;
+  }
+
+  // 서브라우트(폴리곤) 중심점(평균)으로 배송지 좌표 대체
+  function centroidLatLngOfPolygonWgs84(polygon_wgs84) {
+    const poly = parsePolygonWgs84(polygon_wgs84);
+    if (!poly) return null;
+
+    const ring = extractRingLatLngs(poly);
+    if (!ring || ring.length < 3) return null;
+
+    let latSum = 0, lngSum = 0;
+    for (const p of ring) {
+      latSum += p.lat;
+      lngSum += p.lng;
+    }
+    return { lat: latSum / ring.length, lng: lngSum / ring.length };
   }
 
   function drawPolygons(rows) {
@@ -544,156 +607,187 @@
     });
   }
 
-  function showRouteModal() {
-    if (allRoutes.length === 0) {
-      alert("라우트 정보가 없습니다.");
-      return;
-    }
-    if (allRoutes.length === 1) {
-      openNaviToCamp(allRoutes[0]);
-      return;
-    }
-
-    routeList.innerHTML = "";
-    allRoutes.forEach((route, idx) => {
-      const item = document.createElement("div");
-      item.className = "route-item";
-
-      const routeCode = route.full_code || route.code || `라우트 ${idx + 1}`;
-      const routeName = route.delivery_location_name || "입차지";
-      const routeAddr = route.delivery_location_address || "주소 없음";
-
-      item.innerHTML = `
-        <div class="route-item-code">${routeCode}</div>
-        <div class="route-item-info">${routeName}</div>
-        <div class="route-item-info">${routeAddr}</div>
-      `;
-
-      item.onclick = () => {
-        routeModal.classList.remove("visible");
-        routeData = route;        /* 선택한 라우트를 현재 라우트로 갱신 */
-        openNaviToCamp(route);
-      };
-
-      routeList.appendChild(item);
-    });
-
-    routeModal.classList.add("visible");
-  }
-
-  function showDeliveryListModal() {
-    if (!addressRows || addressRows.length === 0) {
-      alert("배송지 정보가 없습니다. (addresses 결과 0개)");
-      return;
-    }
-
-    routeList.innerHTML = "";
-    addressRows.forEach((addr, idx) => {
-      const item = document.createElement("div");
-      item.className = "route-item";
-
-      const addressText = addr.address || addr.full_address || "주소 없음";
-      const dong = addr.dong ? `(${addr.dong})` : "";
-      const zipcode = addr.zipcode ? `우편번호: ${addr.zipcode}` : "";
-
-      item.innerHTML = `
-        <div class="route-item-code">${idx + 1}번 배송지</div>
-        <div class="route-item-info">${addressText} ${dong}</div>
-        <div class="route-item-info">${zipcode}</div>
-      `;
-
-      item.onclick = () => {
-        routeModal.classList.remove("visible");
-        openNaviToAddress(addr);
-      };
-
-      routeList.appendChild(item);
-    });
-
-    routeModal.classList.add("visible");
-  }
-
   routeModal.onclick = (e) => {
     if (e.target === routeModal) {
       routeModal.classList.remove("visible");
     }
   };
 
-  function openNaviToAddress(addr) {
-    if (!routeData || !routeData.delivery_location_address) {
-      alert("입차지 정보가 없습니다.");
-      return;
-    }
-
-    const addressText = addr.address || addr.full_address;
-    if (!addressText) {
-      alert("배송지 주소 정보가 없습니다.");
-      return;
-    }
-
-    const deliveryAddress = routeData.delivery_location_address;
-    const deliveryName = routeData.delivery_location_name || "입차지";
-
-    geocoder.addressSearch(deliveryAddress, (startResult, startStatus) => {
-      if (startStatus !== kakao.maps.services.Status.OK || !startResult?.length) {
-        alert("입차지 주소를 찾을 수 없습니다.");
-        return;
-      }
-
-      const startLat = Number(startResult[0].y);
-      const startLng = Number(startResult[0].x);
-
-      geocoder.addressSearch(addressText, (endResult, endStatus) => {
-        if (endStatus !== kakao.maps.services.Status.OK || !endResult?.length) {
-          alert("배송지 주소를 찾을 수 없습니다.");
+  // Promise 기반 지오코딩
+  function geocodeAsync(address) {
+    return new Promise((resolve, reject) => {
+      geocoder.addressSearch(address, (result, status) => {
+        if (status !== kakao.maps.services.Status.OK || !result?.length) {
+          reject(new Error("주소를 찾을 수 없습니다."));
           return;
         }
-
-        const endLat = Number(endResult[0].y);
-        const endLng = Number(endResult[0].x);
-
-        const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        let naviUrl;
-
-        if (isMobile) {
-          naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
-        } else {
-          naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(addressText)},${endLat},${endLng}`;
-        }
-
-        window.location.href = naviUrl;
+        resolve({ lat: Number(result[0].y), lng: Number(result[0].x) });
       });
     });
   }
 
-  function openNaviToCamp(route) {
-    if (!route || !route.delivery_location_address) {
-      alert("입차지 정보가 없습니다.");
+  // 캠프(입차지) 좌표 가져오기: (1) lat/lng 필드 있으면 사용 (2) 주소 지오코딩
+  async function getCampLatLng() {
+    if (!routeData) throw new Error("캠프 데이터가 없습니다.");
+
+    const lat =
+      Number(routeData.delivery_location_lat ?? routeData.delivery_lat ?? routeData.lat ?? routeData.y);
+    const lng =
+      Number(routeData.delivery_location_lng ?? routeData.delivery_lng ?? routeData.lng ?? routeData.x);
+
+    if (isFinite(lat) && isFinite(lng)) return { lat, lng };
+
+    const addr = routeData.delivery_location_address;
+    if (!addr) throw new Error("캠프 주소가 없습니다.");
+    return await geocodeAsync(addr);
+  }
+
+  function openKakaoRoute({ sp, ep, spName, epName }) {
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      // 모바일: kakaomap://route
+      let url = `kakaomap://route?by=CAR`;
+      if (sp) url += `&sp=${sp.lat},${sp.lng}`;
+      if (ep) url += `&ep=${ep.lat},${ep.lng}`;
+      window.location.href = url;
       return;
     }
 
-    const deliveryAddress = route.delivery_location_address;
-    const deliveryName = route.delivery_location_name || "입차지";
+    // PC: 링크
+    if (sp && ep) {
+      const url =
+        `https://map.kakao.com/link/from/${encodeURIComponent(spName || "출발")},${sp.lat},${sp.lng}` +
+        `/to/${encodeURIComponent(epName || "도착")},${ep.lat},${ep.lng}`;
+      window.open(url, "_blank");
+    } else if (ep) {
+      const url =
+        `https://map.kakao.com/link/to/${encodeURIComponent(epName || "목적지")},${ep.lat},${ep.lng}`;
+      window.open(url, "_blank");
+    }
+  }
 
-    geocoder.addressSearch(deliveryAddress, (result, status) => {
-      if (status !== kakao.maps.services.Status.OK || !result?.length) {
-        alert("입차지 주소를 찾을 수 없습니다. 정확한 주소를 확인해주세요.");
-        return;
-      }
+  // 상단 버튼: 현재위치 -> 캠프(입차지) : 모달 없이 바로
+  async function openNaviCurrentToCamp() {
+    try {
+      const campLatLng = await getCampLatLng();
+      const epName = routeData?.delivery_location_name || camp || "캠프";
+      openKakaoRoute({ ep: campLatLng, epName });
+    } catch (e) {
+      alert("캠프 길찾기 실패: " + e.message);
+    }
+  }
 
-      const endLat = Number(result[0].y);
-      const endLng = Number(result[0].x);
+  // 하단 버튼: 캠프 -> 서브라우트 배송지(좌표) 선택 모달
+  function showSubrouteModalForDelivery() {
+    if (!allRoutes || allRoutes.length === 0) {
+      alert("라우트 정보가 없습니다.");
+      return;
+    }
 
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    // 1개면 바로 실행
+    if (allRoutes.length === 1) {
+      openNaviCampToSubroute(allRoutes[0]);
+      return;
+    }
 
-      if (isMobile) {
-        const naviUrl = `kakaomap://route?ep=${endLat},${endLng}&by=CAR`;
-        window.location.href = naviUrl;
-      } else {
-        const naviUrl = `https://map.kakao.com/link/to/${encodeURIComponent(deliveryName)},${endLat},${endLng}`;
-        window.open(naviUrl, "_blank");
-      }
+    routeModalTitle.textContent = "배송지 선택(서브라우트)";
+    routeList.innerHTML = "";
+
+    allRoutes.forEach((r, idx) => {
+      const item = document.createElement("div");
+      item.className = "route-item";
+
+      const routeCode = r.full_code || r.code || `서브라우트 ${idx + 1}`;
+      const info1 = "캠프 → 선택 구역 중심(좌표) 길찾기";
+
+      item.innerHTML = `
+        <div class="route-item-code">${routeCode}</div>
+        <div class="route-item-info">${info1}</div>
+      `;
+
+      item.onclick = () => {
+        routeModal.classList.remove("visible");
+        openNaviCampToSubroute(r);
+      };
+
+      routeList.appendChild(item);
     });
+
+    routeModal.classList.add("visible");
+  }
+
+  // 캠프 -> 서브라우트(배송지 좌표) 길찾기
+  async function openNaviCampToSubroute(route) {
+    try {
+      const sp = await getCampLatLng();
+      const spName = routeData?.delivery_location_name || camp || "캠프";
+
+      // (1) 서브라우트 자체에 좌표 필드가 있으면 우선 사용
+      const lat =
+        Number(route.delivery_lat ?? route.delivery_location_lat ?? route.lat ?? route.y);
+      const lng =
+        Number(route.delivery_lng ?? route.delivery_location_lng ?? route.lng ?? route.x);
+
+      let ep = null;
+      if (isFinite(lat) && isFinite(lng)) {
+        ep = { lat, lng };
+      } else {
+        // (2) 없으면 폴리곤 중심점으로 대체
+        ep = centroidLatLngOfPolygonWgs84(route.polygon_wgs84);
+      }
+
+      if (!ep) throw new Error("서브라우트 배송지 좌표를 만들 수 없습니다.");
+
+      const epName = route.full_code || route.code || "배송지";
+      openKakaoRoute({ sp, ep, spName, epName });
+    } catch (e) {
+      alert("배송지 연동 실패: " + e.message);
+    }
+  }
+
+  // 주소(패널)에서 캠프->주소 길찾기 (좌표 있으면 좌표 우선, 없으면 지오코딩)
+  function openNaviToAddress(addr) {
+    if (!routeData) {
+      alert("캠프 데이터 로딩 중입니다.");
+      return;
+    }
+
+    const addressText = addr.address || addr.full_address;
+
+    const endLat = Number(addr.lat ?? addr.latitude ?? addr.y);
+    const endLng = Number(addr.lng ?? addr.longitude ?? addr.x);
+
+    (async () => {
+      try {
+        const sp = await getCampLatLng();
+        const spName = routeData?.delivery_location_name || camp || "캠프";
+
+        // 주소 row에 좌표가 있으면 바로 사용
+        if (isFinite(endLat) && isFinite(endLng)) {
+          openKakaoRoute({
+            sp,
+            ep: { lat: endLat, lng: endLng },
+            spName,
+            epName: addressText || "배송지"
+          });
+          return;
+        }
+
+        // 없으면 기존처럼 주소 지오코딩
+        if (!addressText) throw new Error("배송지 주소 정보가 없습니다.");
+        const ep = await geocodeAsync(addressText);
+
+        openKakaoRoute({
+          sp,
+          ep,
+          spName,
+          epName: addressText
+        });
+      } catch (e) {
+        alert("길찾기 실패: " + e.message);
+      }
+    })();
   }
 
   async function loadData() {
@@ -730,30 +824,21 @@
 
       drawPolygons(data.rows);
 
-      /* 수정: 배송지 버튼은 addresses 로드 여부와 무관하게 항상 표시 */
-      naviToDeliveryBtn.style.display = "block";
-
-      /* addresses 로드 */
+      /* addresses 로드 (패널 용도: 실패해도 전체는 정상) */
       try {
         const addrUrl = new URL(ADDRESS_ENDPOINT);
         addrUrl.searchParams.set("camp", camp);
 
         if (code) {
           addrUrl.searchParams.set("code", code);
-          /* 핵심 수정: route와 동일하게 prefix 모드 적용 */
           addrUrl.searchParams.set("mode", "prefix");
         }
 
         const addrData = await apiGet(addrUrl.toString());
         addressRows = addrData?.rows || [];
         renderAddressList();
-
-        /* 수정: 주소 개수(0개 포함)에 상관없이 버튼 유지 */
-        naviToDeliveryBtn.style.display = "block";
       } catch (addrErr) {
-        console.warn("배송지 로드 실패:", addrErr);
-        /* 수정: 로드 실패해도 버튼은 숨기지 않음 */
-        naviToDeliveryBtn.style.display = "block";
+        console.warn("배송지 로드 실패(패널):", addrErr);
       }
 
       loading.style.display = "none";
@@ -785,8 +870,18 @@
       const zoomControl = new kakao.maps.ZoomControl();
       map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
 
-      naviToCampBtn.onclick = showRouteModal;
-      naviToDeliveryBtn.onclick = showDeliveryListModal;
+      // 핵심 변경:
+      // 상단 버튼 = 바로 캠프 길찾기
+      naviToCampBtn.onclick = () => {
+        if (!routeData) return alert("데이터 로딩 중...");
+        openNaviCurrentToCamp();
+      };
+
+      // 하단 버튼 = 서브라우트(배송지) 선택 모달
+      naviToDeliveryBtn.onclick = () => {
+        if (!routeData) return alert("데이터 로딩 중...");
+        showSubrouteModalForDelivery();
+      };
 
       copyAddressBtn.onclick = () => {
         const address = campAddress.textContent;

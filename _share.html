@@ -121,6 +121,104 @@
     .map-container{flex:1; position:relative;}
     #map{position:absolute; inset:0;}
 
+    /* 지도 툴바(위성/로드뷰) */
+    .map-toolbar{
+      position:absolute;
+      top:12px;
+      right:12px;
+      z-index:200;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      pointer-events:auto;
+    }
+    .tool-btn{
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(15,26,45,.88);
+      backdrop-filter:blur(10px);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:800;
+      font-size:13px;
+      box-shadow:0 8px 18px rgba(0,0,0,.30);
+      transition:all .15s ease;
+      white-space:nowrap;
+    }
+    .tool-btn:hover{transform:translateY(-1px); border-color:rgba(0,194,255,.35)}
+    .tool-btn.on{
+      border-color:rgba(0,194,255,.55);
+      box-shadow:0 10px 20px rgba(0,194,255,.15);
+    }
+
+    /* 로드뷰 바텀시트 */
+    .roadview-wrap{
+      position:absolute;
+      left:10px;
+      right:10px;
+      bottom:10px;
+      height:42vh;
+      min-height:260px;
+      background:rgba(15,26,45,.96);
+      backdrop-filter:blur(10px);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:16px;
+      box-shadow:0 12px 28px rgba(0,0,0,.45);
+      z-index:300;
+      overflow:hidden;
+      display:none;
+    }
+    .roadview-wrap.visible{display:block;}
+    .roadview-header{
+      height:44px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 12px 0 14px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      color:var(--txt);
+      font-weight:800;
+      font-size:13px;
+      background:rgba(0,0,0,.18);
+    }
+    .roadview-actions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    .rv-mini-btn{
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.18);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:800;
+      font-size:12px;
+    }
+    .rv-mini-btn:hover{border-color:rgba(0,194,255,.35)}
+    #roadview{
+      width:100%;
+      height:calc(100% - 44px);
+      background:#000;
+    }
+    .rv-hint{
+      position:absolute;
+      left:16px;
+      top:58px;
+      z-index:400;
+      padding:8px 10px;
+      border-radius:12px;
+      background:rgba(0,0,0,.55);
+      color:#fff;
+      border:1px solid rgba(255,255,255,.12);
+      font-size:12px;
+      font-weight:700;
+      display:none;
+    }
+    .rv-hint.visible{display:block;}
+
     /* 배송지 목록 패널 */
     .address-panel{
       position:absolute;
@@ -135,6 +233,7 @@
       box-shadow:0 8px 24px rgba(0,0,0,.4);
       overflow:hidden;
       display:none; /* 배송지가 있을 때만 표시 */
+      z-index:150;
     }
     .address-panel.visible{display:block;}
     .panel-header{
@@ -197,11 +296,11 @@
 
     /* 라벨 - 캠프 표시 크게 */
     .route-label{
-      padding:6px 12px;
+      padding:5px 10px;
       border-radius:12px;
-      background:rgba(0,0,0,.25);
+      background:rgba(0,0,0,.10);
       color:#fff;
-      font-size:14px;
+      font-size:12px;
       border:2px solid rgba(255,255,255,.22);
       white-space:nowrap;
       box-shadow:0 3px 10px rgba(0,0,0,.35);
@@ -275,6 +374,16 @@
       .route-modal-content{
         padding:20px;
       }
+      .roadview-wrap{
+        left:10px;
+        right:10px;
+        bottom:10px;
+        height:45vh;
+      }
+      .map-toolbar{
+        right:10px;
+        top:10px;
+      }
     }
   </style>
 
@@ -290,7 +399,7 @@
         <div class="camp-name" id="campName">📍 배송 구역 안내</div>
         <div class="camp-address">
           <span id="campAddress">주소 정보 로딩 중...</span>
-          <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사1</button>
+          <button class="copy-btn" id="copyAddressBtn" style="display:none;">📋 복사</button>
         </div>
       </div>
 
@@ -302,7 +411,7 @@
         <!-- addresses 로드와 무관하게 항상 보이도록 -->
         <button class="btn" id="naviToDeliveryBtn"
           style="background:linear-gradient(135deg, #22C55E 0%, #16A34A 100%); border-color:#22C55E; color:#fff;">
-          &lt; 캠프 → 배송지 카카오지도 연동♪ &gt;
+           캠프 → 배송지 카카오지도 연동♪
         </button>
       </div>
     </div>
@@ -319,6 +428,25 @@
   <!-- 지도 -->
   <div class="map-container">
     <div id="map"></div>
+
+    <!-- 지도 툴바 -->
+    <div class="map-toolbar">
+      <button class="tool-btn" id="mapTypeBtn">🛰 위성</button>
+      <button class="tool-btn" id="roadviewBtn">🧿 로드뷰</button>
+    </div>
+
+    <!-- 로드뷰 -->
+    <div class="roadview-wrap" id="roadviewWrap">
+      <div class="roadview-header">
+        <div>🧿 로드뷰 (지도 클릭으로 위치 변경)</div>
+        <div class="roadview-actions">
+          <button class="rv-mini-btn" id="rvToCenterBtn">📍 지도중심</button>
+          <button class="rv-mini-btn" id="rvCloseBtn">닫기</button>
+        </div>
+      </div>
+      <div class="rv-hint" id="rvHint">로드뷰가 켜져 있습니다. 지도에서 보고 싶은 지점을 탭하세요.</div>
+      <div id="roadview"></div>
+    </div>
 
     <!-- 로딩 -->
     <div class="loading" id="loading">
@@ -370,14 +498,33 @@
   const routeList = $("routeList");
   const routeModalTitle = $("routeModalTitle");
 
+  // 지도 툴바
+  const mapTypeBtn = $("mapTypeBtn");
+  const roadviewBtn = $("roadviewBtn");
+  const roadviewWrap = $("roadviewWrap");
+  const rvCloseBtn = $("rvCloseBtn");
+  const rvToCenterBtn = $("rvToCenterBtn");
+  const rvHint = $("rvHint");
+
   let map, geocoder;
+
+  // 로드뷰
+  let roadview = null;
+  let roadviewClient = null;
+  let roadviewVisible = false;
+  let roadviewMarker = null;
+  let lastRoadviewLatLng = null;
+
+  // 위성
+  let isSatellite = false;
+
   let allRoutes = [];
   let routeData = null;
   let addressRows = [];
 
   const params = new URLSearchParams(location.search);
   const camp = params.get("camp") || "";
-  const code = params.get("code") || "";
+  const code = (params.get("code") || "").replace(/&.*$/,"").trim();
 
   const COLOR_PALETTE = [
     "#00C2FF", "#FF4D6D", "#FFD166", "#06D6A0", "#A78BFA",
@@ -448,7 +595,6 @@
   function extractRingLatLngs(poly) {
     if (!poly) return [];
     const first = poly[0];
-
     let ring = null;
 
     // [ {lat,lng}, ... ]
@@ -667,7 +813,7 @@
     }
   }
 
-  // 상단 버튼: 현재위치 -> 캠프(입차지) : 모달 없이 바로
+  // 상단 버튼: 현재위치 -> 캠프(입차지)
   async function openNaviCurrentToCamp() {
     try {
       const campLatLng = await getCampLatLng();
@@ -746,7 +892,7 @@
     }
   }
 
-  // 주소(패널)에서 캠프->주소 길찾기 (좌표 있으면 좌표 우선, 없으면 지오코딩)
+  // 주소(패널)에서 캠프->주소 길찾기
   function openNaviToAddress(addr) {
     if (!routeData) {
       alert("캠프 데이터 로딩 중입니다.");
@@ -774,7 +920,7 @@
           return;
         }
 
-        // 없으면 기존처럼 주소 지오코딩
+        // 없으면 주소 지오코딩
         if (!addressText) throw new Error("배송지 주소 정보가 없습니다.");
         const ep = await geocodeAsync(addressText);
 
@@ -790,21 +936,117 @@
     })();
   }
 
+  // ====== 위성 토글 ======
+  function toggleSatellite() {
+    isSatellite = !isSatellite;
+
+    if (isSatellite) {
+      // HYBRID = 위성 + 라벨(도로명 등)
+      map.setMapTypeId(kakao.maps.MapTypeId.HYBRID);
+      mapTypeBtn.textContent = "🗺 일반";
+      mapTypeBtn.classList.add("on");
+    } else {
+      map.setMapTypeId(kakao.maps.MapTypeId.ROADMAP);
+      mapTypeBtn.textContent = "🛰 위성";
+      mapTypeBtn.classList.remove("on");
+    }
+  }
+
+  // ====== 로드뷰 ======
+  function ensureRoadview() {
+    if (roadview && roadviewClient) return;
+
+    roadviewClient = new kakao.maps.RoadviewClient();
+    roadview = new kakao.maps.Roadview($("roadview"));
+
+    // 로드뷰 위치 마커(지도 위)
+    roadviewMarker = new kakao.maps.Marker({
+      position: map.getCenter()
+    });
+  }
+
+  function showRoadviewHint(on) {
+    rvHint.classList.toggle("visible", !!on);
+  }
+
+  function setRoadviewAt(latlng) {
+    ensureRoadview();
+
+    lastRoadviewLatLng = latlng;
+
+    // 50m 반경 내 pano 찾기 (필요하면 80~100으로 늘려도 됨)
+    roadviewClient.getNearestPanoId(latlng, 50, (panoId) => {
+      if (!panoId) {
+        alert("이 위치 근처에 로드뷰가 없습니다. (조금 다른 지점을 눌러보세요)");
+        return;
+      }
+      roadview.setPanoId(panoId, latlng);
+
+      // 지도 마커 표시
+      roadviewMarker.setPosition(latlng);
+      roadviewMarker.setMap(map);
+    });
+  }
+
+  function toggleRoadview() {
+    roadviewVisible = !roadviewVisible;
+
+    if (roadviewVisible) {
+      roadviewWrap.classList.add("visible");
+      roadviewBtn.classList.add("on");
+      roadviewBtn.textContent = "🧿 로드뷰 ON";
+      showRoadviewHint(true);
+
+      const center = map.getCenter();
+      setRoadviewAt(center);
+    } else {
+      roadviewWrap.classList.remove("visible");
+      roadviewBtn.classList.remove("on");
+      roadviewBtn.textContent = "🧿 로드뷰";
+      showRoadviewHint(false);
+
+      if (roadviewMarker) roadviewMarker.setMap(null);
+    }
+  }
+
   async function loadData() {
     try {
       if (!camp) throw new Error("캠프 정보가 없습니다. (camp 파라미터 필요)");
 
       /* route 로드 */
-      const url = new URL(ROUTE_ENDPOINT);
-      url.searchParams.set("camp", camp);
-      url.searchParams.set("mode", "prefix");
-      if (code) url.searchParams.set("code", code);
+      const codes = code ? code.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [];
 
-      const data = await apiGet(url.toString());
-      if (!data || !data.rows || data.rows.length === 0) throw new Error("라우트 데이터를 찾을 수 없습니다.");
+      const fetchRoutes = async (singleCode) => {
+        const u = new URL(ROUTE_ENDPOINT);
+        u.searchParams.set("camp", camp);
+        u.searchParams.set("mode", "prefix");
+        if (singleCode) u.searchParams.set("code", singleCode);
+        const d = await apiGet(u.toString());
+        return d?.rows || [];
+      };
 
-      allRoutes = data.rows;
-      routeData = data.rows[0];
+      let rows = [];
+      if (codes.length <= 1) {
+        rows = await fetchRoutes(codes[0] || "");
+      } else {
+        for (const c of codes) {
+          const part = await fetchRoutes(c);
+          if (part && part.length) rows.push(...part);
+        }
+        // 중복 제거 (id 우선)
+        const seen = new Set();
+        rows = rows.filter(r => {
+          const k = (r && r.id != null) ? String(r.id) : `${r?.camp||""}/${r?.full_code||r?.code||""}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+      }
+
+      if (!rows.length) throw new Error("라우트 데이터를 찾을 수 없습니다.");
+
+      allRoutes = rows;
+      routeData = rows[0];
 
       const displayName = routeData.delivery_location_name || "캠프";
       const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
@@ -822,20 +1064,42 @@
         copyAddressBtn.style.display = "inline-block";
       }
 
-      drawPolygons(data.rows);
+      drawPolygons(allRoutes);
 
       /* addresses 로드 (패널 용도: 실패해도 전체는 정상) */
       try {
-        const addrUrl = new URL(ADDRESS_ENDPOINT);
-        addrUrl.searchParams.set("camp", camp);
+        const codes = code ? code.split(/[,\s]+/).map(s => s.trim()).filter(Boolean) : [];
+        let merged = [];
 
-        if (code) {
-          addrUrl.searchParams.set("code", code);
-          addrUrl.searchParams.set("mode", "prefix");
+        const fetchAddrs = async (singleCode) => {
+          const au = new URL(ADDRESS_ENDPOINT);
+          au.searchParams.set("camp", camp);
+          if (singleCode) {
+            au.searchParams.set("code", singleCode);
+            au.searchParams.set("mode", "prefix");
+          }
+          const ad = await apiGet(au.toString());
+          return ad?.rows || [];
+        };
+
+        if (codes.length <= 1) {
+          merged = await fetchAddrs(codes[0] || "");
+        } else {
+          for (const c of codes) {
+            const part = await fetchAddrs(c);
+            if (part && part.length) merged.push(...part);
+          }
+          // 중복 제거 (id 우선)
+          const seen = new Set();
+          merged = merged.filter(r => {
+            const k = (r && r.id != null) ? String(r.id) : (r?.address || r?.full_address || JSON.stringify(r));
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
         }
 
-        const addrData = await apiGet(addrUrl.toString());
-        addressRows = addrData?.rows || [];
+        addressRows = merged;
         renderAddressList();
       } catch (addrErr) {
         console.warn("배송지 로드 실패(패널):", addrErr);
@@ -867,17 +1131,39 @@
       });
       geocoder = new kakao.maps.services.Geocoder();
 
+      // 기본 컨트롤
       const zoomControl = new kakao.maps.ZoomControl();
       map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
 
-      // 핵심 변경:
-      // 상단 버튼 = 바로 캠프 길찾기
+      // --- 위성/로드뷰 버튼 바인딩 ---
+      mapTypeBtn.onclick = toggleSatellite;
+
+      roadviewBtn.onclick = () => {
+        toggleRoadview();
+      };
+
+      rvCloseBtn.onclick = () => {
+        if (roadviewVisible) toggleRoadview();
+      };
+
+      rvToCenterBtn.onclick = () => {
+        if (!roadviewVisible) return;
+        const c = map.getCenter();
+        setRoadviewAt(c);
+      };
+
+      // 로드뷰 켜진 상태에서 지도 클릭하면 그 지점으로 로드뷰 이동
+      kakao.maps.event.addListener(map, "click", (mouseEvent) => {
+        if (!roadviewVisible) return;
+        setRoadviewAt(mouseEvent.latLng);
+      });
+
+      // --- 네비 버튼 ---
       naviToCampBtn.onclick = () => {
         if (!routeData) return alert("데이터 로딩 중...");
         openNaviCurrentToCamp();
       };
 
-      // 하단 버튼 = 서브라우트(배송지) 선택 모달
       naviToDeliveryBtn.onclick = () => {
         if (!routeData) return alert("데이터 로딩 중...");
         showSubrouteModalForDelivery();

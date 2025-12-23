@@ -320,7 +320,10 @@
   let editHandles = []; // kakao.maps.Marker[]
   let editPolygons = []; // kakao.maps.Polygon[]
   let labelOn = true;
-  
+
+  // ✅ (추가) 폴리곤 개별 삭제 X 오버레이
+  let deleteOverlays = []; // kakao.maps.CustomOverlay[]
+
   // 커스텀 드래그 상태
   let draggingVertex = null; // { marker, polygon, index }
 
@@ -467,6 +470,117 @@
     });
   }
 
+  // ====== (추가) 폴리곤 개별 삭제 X 오버레이 유틸 ======
+  function clearDeleteOverlays() {
+    deleteOverlays.forEach(o => o.setMap(null));
+    deleteOverlays = [];
+  }
+
+  function getPolygonPathAsArray(polygon) {
+    const rawPath = polygon.getPath();
+    const out = [];
+    if (!rawPath) return out;
+
+    if (Array.isArray(rawPath)) {
+      out.push(...rawPath);
+      return out;
+    }
+    if (typeof rawPath.getLength === "function" && typeof rawPath.getAt === "function") {
+      for (let i = 0; i < rawPath.getLength(); i++) out.push(rawPath.getAt(i));
+      return out;
+    }
+    return out;
+  }
+
+  function createDeleteOverlayForPolygon(polygon) {
+    const path = getPolygonPathAsArray(polygon);
+    if (!path || path.length < 3) return null;
+
+    // 중심에 X 표시
+    const pos = centroidOfLatLngs(path);
+
+    const btn = document.createElement("div");
+    btn.textContent = "×";
+    btn.title = "이 구역만 삭제";
+    btn.style.width = "22px";
+    btn.style.height = "22px";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.borderRadius = "999px";
+    btn.style.cursor = "pointer";
+    btn.style.userSelect = "none";
+    btn.style.background = "rgba(0,0,0,.72)";
+    btn.style.color = "#fff";
+    btn.style.border = "1px solid rgba(255,255,255,.22)";
+    btn.style.boxShadow = "0 3px 12px rgba(0,0,0,.45)";
+    btn.style.fontWeight = "900";
+    btn.style.fontSize = "14px";
+    btn.style.lineHeight = "1";
+
+    btn.onmouseenter = () => {
+      btn.style.background = "rgba(255,60,60,.75)";
+      btn.style.borderColor = "rgba(255,60,60,.55)";
+    };
+    btn.onmouseleave = () => {
+      btn.style.background = "rgba(0,0,0,.72)";
+      btn.style.borderColor = "rgba(255,255,255,.22)";
+    };
+
+    btn.onclick = (e) => {
+      if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+      deleteSinglePolygonOnly(polygon);
+    };
+
+    return new kakao.maps.CustomOverlay({
+      position: pos,
+      content: btn,
+      xAnchor: 0.5,
+      yAnchor: 0.5,
+      zIndex: 30
+    });
+  }
+
+  function rebuildDeleteOverlays() {
+    clearDeleteOverlays();
+    if (!selectedRouteId) return;
+    if (!editPolygons || editPolygons.length === 0) return;
+
+    for (const p of editPolygons) {
+      const overlay = createDeleteOverlayForPolygon(p);
+      if (!overlay) continue;
+      overlay.setMap(map);
+      deleteOverlays.push(overlay);
+    }
+  }
+
+  function deleteSinglePolygonOnly(targetPolygon) {
+    if (!selectedRouteId || !overlayById.has(selectedRouteId)) return;
+
+    const pack = overlayById.get(selectedRouteId);
+    if (!pack || !pack.polygons) return;
+
+    // 1) 지도에서 제거
+    targetPolygon.setMap(null);
+
+    // 2) 상태에서 제거(해당 구역만)
+    pack.polygons = pack.polygons.filter(p => p !== targetPolygon);
+    editPolygons = editPolygons.filter(p => p !== targetPolygon);
+
+    // 3) 라벨/핸들/삭제 오버레이 갱신
+    if (pack.polygons.length === 0) {
+      // 남은 구역이 없으면 편집만 정리
+      updateSelectedLabels();
+      stopEditing();
+      setStatus("해당 라우트의 구역이 모두 제거되었습니다. 저장하면 반영됩니다.", "WARN");
+      return;
+    }
+
+    updateSelectedLabels();
+    rebuildHandles(); // 내부에서 delete overlay도 재구성됨
+    setStatus("구역 1개 제거(로컬). 저장 버튼을 눌러 반영하세요.", "OK");
+  }
+
   // ====== 데이터 표시 ======
   function renderRoutes(rows) {
     clearAllOverlays();
@@ -486,28 +600,21 @@
       const camp = row.camp || row.camp_name || "";
       const color = row.color || colorFor(code);
       const debugId = `${camp}/${code}(id=${id})`;
-      
+
       const poly = parsePolygonWgs84(row.polygon_wgs84, debugId);
 
       const polygons = [];
       const labels = [];
 
       if (poly && Array.isArray(poly) && poly.length > 0) {
-        // 데이터 형식 자동 감지:
-        // 1. [ [{lat,lng}, ...], [{lat,lng}, ...] ] - 다중 링 (링 배열)
-        // 2. [ {lat,lng}, {lat,lng}, ... ] - 단일 링 (점 배열)
-        // 3. [ [[lng,lat], ...], [[lng,lat], ...] ] - 다중 링 (GeoJSON 스타일)
-        // 4. [ [lng,lat], [lng,lat], ... ] - 단일 링 (GeoJSON 스타일)
-        
         let rings = [];
-        
-        // 첫 번째 요소로 형식 판단
+
         const first = poly[0];
         if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
           rings = [poly];
         } else if (Array.isArray(first)) {
           const firstOfFirst = first[0];
-          if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst) {
+          if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst && 'lng' in firstOfFirst) {
             rings = poly;
           } else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
             rings = poly;
@@ -520,7 +627,6 @@
           const ring = rings[i];
           if (!Array.isArray(ring) || ring.length < 3) continue;
 
-          // 두 형식 모두 지원: [lng, lat] 배열 또는 {lat, lng} 객체
           const latlngs = ring.map(pt => {
             if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
               return new kakao.maps.LatLng(pt.lat, pt.lng);
@@ -534,7 +640,6 @@
           const p = makePolygon(latlngs, color, color, 1);
           p.setMap(map);
 
-          // 클릭으로 편집 진입 (그리기 모드가 아닐 때만)
           kakao.maps.event.addListener(p, "click", () => {
             if (!drawMode) startEditing(id);
           });
@@ -556,7 +661,7 @@
     }
 
     const totalPolygons = Array.from(overlayById.values()).reduce((sum, pack) => sum + pack.polygons.length, 0);
-    
+
     if (any) {
       map.setBounds(bounds);
       setStatus(`${routeRows.length}개 라우트 로드 완료`, "OK");
@@ -570,7 +675,6 @@
   let MID_IMG = null;
 
   function makeHandleImage(fill="#ffffff", stroke="#111827") {
-    // SVG 데이터 URI (작은 크기)
     const svg =
       `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">
         <circle cx="6" cy="6" r="5" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
@@ -583,8 +687,11 @@
     editHandles.forEach(m => m.setMap(null));
     editHandles = [];
     editPolygons = [];
-    draggingVertex = null; // 드래그 상태 초기화
-    map.setDraggable(true); // 지도 드래그 재활성화
+    draggingVertex = null;
+    map.setDraggable(true);
+
+    // ✅ (추가) 개별 삭제 오버레이 제거
+    clearDeleteOverlays();
 
     // 선택 강조 해제(원복)
     for (const {row, polygons} of overlayById.values()) {
@@ -604,7 +711,7 @@
   function startEditing(routeId) {
     if (!overlayById.has(routeId)) return;
 
-    stopDraw(true); // 그리기 중이면 중단
+    stopDraw(true);
     stopEditing();
 
     selectedRouteId = routeId;
@@ -614,21 +721,17 @@
     const code = row.full_code || "";
     const camp = row.camp || "";
     selectedInfo.textContent = `선택: ${camp} / ${code} (id=${routeId})`;
-    
-    // 선택한 라우트의 배송지 목록 불러오기
+
     campInput.value = camp;
     codeInput.value = code;
     loadAddresses().catch(err => log(`배송지 로드 실패: ${err.message}`));
 
-    // 벤더 UI 로드
     vendorNameInput.value = row.vendor_name || "";
     vendorBizInput.value = row.vendor_business_number || "";
 
-    // 입차지 UI 로드
     deliveryNameInput.value = row.delivery_location_name || "";
     deliveryAddrInput.value = row.delivery_location_address || "";
 
-    // 선택 폴리곤이 없으면(= polygon_wgs84 null) 편집할 게 없음 → 새로 그리기 유도
     if (!polygons || polygons.length === 0) {
       setStatus(`선택 대상 ${code}는 polygon이 없습니다. "새로 그리기"로 생성하세요.`, "WARN");
       return;
@@ -657,14 +760,13 @@
         log(`⚠ rebuildHandles: polygon.getPath()가 null`);
         continue;
       }
-      
-      // 배열로 변환 (MVCArray든 Array든)
+
       const path = [];
       const len = Array.isArray(rawPath) ? rawPath.length : (rawPath.getLength ? rawPath.getLength() : 0);
       for (let i = 0; i < len; i++) {
         path.push(Array.isArray(rawPath) ? rawPath[i] : rawPath.getAt(i));
       }
-      
+
       if (path.length < 3) continue;
 
       // Vertex handles (커스텀 드래그 구현)
@@ -676,22 +778,19 @@
             clickable: true,
             zIndex: 20
           });
-          
+
           vMarker.setMap(map);
 
-          // 마우스 다운: 드래그 시작
           kakao.maps.event.addListener(vMarker, "mousedown", (e) => {
             draggingVertex = { marker: vMarker, polygon, index };
-            map.setDraggable(false); // 지도 드래그 비활성화
-            
-            // 기본 동작 방지
+            map.setDraggable(false);
+
             if (e && e.domEvent) {
               e.domEvent.preventDefault();
               e.domEvent.stopPropagation();
             }
           });
 
-          // 우클릭: 점 삭제(최소 3개 유지)
           kakao.maps.event.addListener(vMarker, "rightclick", () => {
             const pth = polygon.getPath();
             const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
@@ -699,7 +798,6 @@
               setStatus("점 삭제 불가: 최소 3개 꼭짓점 유지 필요", "WARN");
               return;
             }
-            // 배열로 변환 후 점 삭제
             const pathArray = [];
             for (let j = 0; j < len; j++) {
               if (j !== index) {
@@ -737,7 +835,6 @@
           kakao.maps.event.addListener(midMarker, "click", () => {
             const pth = polygon.getPath();
             const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
-            // 배열로 변환 후 점 추가
             const pathArray = [];
             for (let j = 0; j < len; j++) {
               pathArray.push(Array.isArray(pth) ? pth[j] : pth.getAt(j));
@@ -754,6 +851,9 @@
         })(i, polygon);
       }
     }
+
+    // ✅ (추가) 핸들 재구성 시 X 오버레이도 함께 재구성
+    rebuildDeleteOverlays();
   }
 
   function updateSelectedLabels() {
@@ -763,7 +863,6 @@
     const { row, polygons, labels } = pack;
     if (!labelOn) return;
 
-    // 라벨 제거 후 재생성
     labels.forEach(l => l.setMap(null));
     pack.labels = [];
 
@@ -772,7 +871,6 @@
 
     for (const p of polygons) {
       const rawPath = p.getPath();
-      // MVCArray든 배열이든 일반 배열로 변환
       const path = [];
       if (rawPath && typeof rawPath.getLength === 'function') {
         for (let i = 0; i < rawPath.getLength(); i++) {
@@ -781,7 +879,7 @@
       } else if (Array.isArray(rawPath)) {
         path.push(...rawPath);
       }
-      
+
       if (path.length < 3) continue;
       const c = centroidOfLatLngs(path);
       const label = createLabelOverlay(code, c, color);
@@ -830,7 +928,6 @@
   function addDrawPoint(latlng) {
     drawPoints.push(latlng);
 
-    // 작은 점 마커 생성 (바다색)
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
       <circle cx="5" cy="5" r="4" fill="#00C2FF" stroke="#0b1220" stroke-width="1.5"/>
     </svg>`;
@@ -868,16 +965,13 @@
     const code = codeInput.value.trim();
     const color = colorFor(code);
 
-    // 선택 라우트 row가 있으면 그걸 기준으로. 없으면 camp+code로 가상의 row를 만든다고 생각(저장 시 업서트)
     let rowId = selectedRouteId;
     let row = null;
 
     if (rowId && overlayById.has(rowId)) {
       row = overlayById.get(rowId).row;
-      // 선택된 row가 다른 코드면(입력 바꿨는데) 혼동 방지: 입력 code 우선
     }
 
-    // 기존 폴리곤 제거(새로 그리기)
     if (drawMode === "new") {
       if (rowId && overlayById.has(rowId)) {
         const pack = overlayById.get(rowId);
@@ -886,7 +980,6 @@
         pack.polygons = [];
         pack.labels = [];
       } else {
-        // 선택이 없는데 새로 그리기면: 현재 camp+code와 매칭되는 row가 이미 로드되어 있으면 그걸 찾아 제거
         for (const [id, pack] of overlayById.entries()) {
           const r = pack.row;
           if ((r.camp||"") === camp && (r.full_code||"") === code) {
@@ -901,26 +994,22 @@
       }
     }
 
-    // 폴리곤 생성
     const poly = makePolygon(drawPoints.slice(), color, color, 5);
     poly.setMap(map);
     kakao.maps.event.addListener(poly, "click", () => {
-      // 클릭하면 편집 대상으로 유지 (그리기 모드가 아닐 때만)
       if (rowId && !drawMode) startEditing(rowId);
     });
 
-    // rowId가 없으면 임시로 생성(저장하면 실제 row 생김). 이 경우 id 맵핑이 없어서 편집 상태 관리를 위해 임시 ID를 부여.
     if (!rowId) {
       rowId = `tmp_${camp}_${code}`;
-      // overlayById는 id key가 string이어도 됨(맵 기준)
       overlayById.set(rowId, {
-        row: { 
-          id: rowId, 
-          camp, 
-          full_code: code, 
-          color, 
-          polygon_wgs84: null, 
-          vendor_name: vendorNameInput.value.trim(), 
+        row: {
+          id: rowId,
+          camp,
+          full_code: code,
+          color,
+          polygon_wgs84: null,
+          vendor_name: vendorNameInput.value.trim(),
           vendor_business_number: vendorBizInput.value.trim(),
           delivery_location_name: deliveryNameInput.value.trim(),
           delivery_location_address: deliveryAddrInput.value.trim()
@@ -944,7 +1033,6 @@
       pack.labels.push(label);
     }
 
-    // 그리기 종료 -> 즉시 편집 모드로 전환
     stopDraw(true);
     selectedRouteId = rowId;
     selectedInfo.textContent = `선택: ${camp} / ${code} (id=${rowId})`;
@@ -962,7 +1050,6 @@
     const polys = pack.polygons;
     if (!polys || polys.length === 0) return null;
 
-    // return: [ [ [lng,lat], ... ], [ [lng,lat], ... ] ]
     const out = [];
     for (const p of polys) {
       const path = p.getPath();
@@ -990,7 +1077,7 @@
 
       const data = await apiGet(url.toString());
       addressRows = data?.rows || [];
-      
+
       renderAddressList();
       log(`배송지 ${addressRows.length}개 로드 완료`);
     } catch (e) {
@@ -1004,7 +1091,7 @@
   function renderAddressList() {
     const container = document.getElementById("addressList");
     const group = document.getElementById("addressListGroup");
-    
+
     if (!addressRows || addressRows.length === 0) {
       group.style.display = "none";
       container.innerHTML = "";
@@ -1027,7 +1114,7 @@
 
       const addressText = addr.address || addr.full_address || "주소 없음";
       const dong = addr.dong ? `<span style="color:var(--muted)">(${addr.dong})</span>` : "";
-      
+
       item.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
           <div style="flex:1; min-width:0;">
@@ -1038,7 +1125,7 @@
               ${addr.zipcode ? `우편번호: ${addr.zipcode}` : ""}
             </div>
           </div>
-          <button class="btn" style="padding:6px 12px; font-size:11px; white-space:nowrap;" 
+          <button class="btn" style="padding:6px 12px; font-size:11px; white-space:nowrap;"
                   data-addr-id="${addr.id}">
             네비
           </button>
@@ -1055,7 +1142,7 @@
   // ====== 배송지로 네비 실행 ======
   async function openNaviToAddress(addr) {
     const deliveryAddr = deliveryAddrInput.value.trim();
-    
+
     if (!deliveryAddr) {
       setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
       return;
@@ -1068,7 +1155,6 @@
 
     setStatus(`경로 계산 중: 입차지 → ${addr.address || "배송지"}`, "OK");
 
-    // 1. 입차지 주소를 좌표로 변환
     geocoder.addressSearch(deliveryAddr, (result, status) => {
       if (status !== kakao.maps.services.Status.OK || !result?.length) {
         setStatus("입차지 주소를 찾을 수 없습니다.", "ERR");
@@ -1078,23 +1164,17 @@
       const startLat = Number(result[0].y);
       const startLng = Number(result[0].x);
 
-      // 2. 배송지 좌표 추출
       let endLat, endLng;
-      
+
       if (typeof addr.center_wgs84 === 'object') {
-        // {lat, lng} 또는 {latitude, longitude} 형식
         endLat = addr.center_wgs84.lat || addr.center_wgs84.latitude;
         endLng = addr.center_wgs84.lng || addr.center_wgs84.lon || addr.center_wgs84.longitude;
       } else if (Array.isArray(addr.center_wgs84) && addr.center_wgs84.length >= 2) {
-        // [lng, lat] 또는 [lat, lng] 형식 (GeoJSON은 [lng, lat])
-        // 일반적으로 경도가 더 크므로 판별
         const [first, second] = addr.center_wgs84;
         if (Math.abs(first) > Math.abs(second)) {
-          // first가 경도 (126.x > 37.x)
           endLng = first;
           endLat = second;
         } else {
-          // first가 위도
           endLat = first;
           endLng = second;
         }
@@ -1109,16 +1189,12 @@
       const deliveryName = deliveryNameInput.value.trim() || "입차지";
       const addressName = addr.address || "배송지";
 
-      // 3. 카카오내비 URL 생성
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      
+
       let naviUrl;
       if (isMobile) {
-        // 모바일: 카카오맵 앱 URL 스킴 (자동차 경로)
         naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
       } else {
-        // PC: 카카오맵 웹 길찾기 (올바른 URL 형식)
-        // 형식: https://map.kakao.com/link/from/출발지명,위도,경도/to/목적지명,위도,경도
         naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(addressName)},${endLat},${endLng}`;
       }
 
@@ -1139,53 +1215,49 @@
       const code = codeInput.value.trim();
       if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
 
-      // 여러 코드를 쉼표로 구분해서 입력한 경우 처리
       const codes = code ? code.split(/[,\s]+/).map(c => c.trim()).filter(c => c) : [];
-      
+
       let allRows = [];
-      
+
       if (codes.length === 0) {
-        // 코드가 없으면 camp 전체 조회
         const url = new URL(ROUTE_ENDPOINT);
         url.searchParams.set("camp", camp);
         url.searchParams.set("mode", "prefix");
-        
+
         const data = await apiGet(url.toString());
-        
+
         if (!data || !data.rows) {
           setStatus("서버 응답 오류", "ERR");
           return;
         }
-        
+
         allRows = data.rows;
       } else if (codes.length === 1) {
-        // 단일 코드
         const url = new URL(ROUTE_ENDPOINT);
         url.searchParams.set("camp", camp);
         url.searchParams.set("mode", "prefix");
         url.searchParams.set("code", codes[0]);
-        
+
         const data = await apiGet(url.toString());
-        
+
         if (!data || !data.rows) {
           setStatus("서버 응답 오류", "ERR");
           return;
         }
-        
+
         allRows = data.rows;
       } else {
-        // 여러 코드를 각각 조회해서 병합
         setStatus(`${codes.length}개 라우트 조회 중...`, "OK");
-        
+
         for (const singleCode of codes) {
           try {
             const url = new URL(ROUTE_ENDPOINT);
             url.searchParams.set("camp", camp);
             url.searchParams.set("mode", "prefix");
             url.searchParams.set("code", singleCode);
-            
+
             const data = await apiGet(url.toString());
-            
+
             if (data && data.rows && data.rows.length > 0) {
               allRows.push(...data.rows);
               log(`${singleCode}: ${data.rows.length}개 발견`);
@@ -1197,16 +1269,15 @@
           }
         }
       }
-      
+
       if (allRows.length === 0) {
         setStatus("조회된 라우트가 없습니다.", "WARN");
         clearAllOverlays();
         return;
       }
-      
+
       renderRoutes(allRows);
-      
-      // 배송지 목록도 자동으로 불러오기
+
       await loadAddresses();
     } catch (e) {
       console.error(e);
@@ -1229,10 +1300,8 @@
       if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
 
-      // 선택된 id 기준으로 폴리곤 취합. 선택이 없으면 camp+code로 찾기
       let id = selectedRouteId;
       if (!id || !overlayById.has(id)) {
-        // camp+code로 검색
         for (const [rid, pack] of overlayById.entries()) {
           if ((pack.row.camp||"") === camp && (pack.row.full_code||"") === code) {
             id = rid;
@@ -1241,31 +1310,25 @@
         }
       }
 
-      // 폴리곤 데이터 수집 (임시 ID 또는 실제 ID 모두 사용)
-      const polygonSourceId = id; // 폴리곤 데이터를 가져올 ID 보관
-      let actualId = id; // 백엔드에 전송할 실제 ID
-      
-      // actualId가 임시 ID(문자열)인 경우, routeRows에서 실제 ID 찾기
+      const polygonSourceId = id;
+      let actualId = id;
+
       if (actualId && typeof actualId === "string" && actualId.startsWith("tmp_")) {
-        const actualRow = routeRows.find(r => 
+        const actualRow = routeRows.find(r =>
           (r.camp||"") === camp && (r.full_code||"") === code
         );
         if (actualRow && typeof actualRow.id === "number") {
           actualId = actualRow.id;
           log(`임시 ID를 실제 ID로 변환: ${polygonSourceId} → ${actualId}`);
         } else {
-          // 실제 row가 없으면 actualId를 undefined로 (새로 생성)
           actualId = undefined;
           log(`실제 row가 없음. 새로 생성합니다.`);
         }
       }
 
-      // 폴리곤 데이터는 polygonSourceId로 가져오기 (임시 ID든 실제 ID든 overlayById에 있는 키)
       const polygon_wgs84 = polygonSourceId ? getCurrentEditedPolygonWgs84ById(polygonSourceId) : null;
 
-      // ID가 없으면 먼저 해당 camp+code가 존재하는지 GET으로 확인
       if (!actualId) {
-        // routeRows에서 동일한 camp+code를 찾아서 ID 사용 (필드명 여러 개 시도)
         const existingRow = routeRows.find(r => {
           const rCamp = r.camp || r.camp_name || "";
           const rCode = r.full_code || r.code || r.route_code || "";
@@ -1283,13 +1346,10 @@
             if (checkData && checkData.rows && checkData.rows.length > 0) {
               actualId = checkData.rows[0].id;
             }
-          } catch (checkErr) {
-            // 신규 생성
-          }
+          } catch (checkErr) {}
         }
       }
-      
-      // payload 구성
+
       const payload = {
         camp,
         code,
@@ -1299,7 +1359,7 @@
         delivery_location_name: deliveryNameInput.value.trim() || null,
         delivery_location_address: deliveryAddrInput.value.trim() || null
       };
-      
+
       if (typeof actualId === "number") {
         payload.id = actualId;
       }
@@ -1307,7 +1367,6 @@
       const res = await apiJson("POST", ROUTE_ENDPOINT, payload);
       setStatus(`저장 완료`, "OK");
 
-      // 저장 후 재조회(실제 id 반영)
       await loadRoutes();
     } catch (e) {
       console.error(e);
@@ -1323,7 +1382,6 @@
       if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
 
-      // 우선 선택 id가 숫자면 id로, 아니면 camp+code로
       let id = selectedRouteId;
       const payload = (typeof id === "number") ? { id } : { camp, code };
 
@@ -1347,10 +1405,9 @@
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
 
       let id = selectedRouteId;
-      
-      // 임시 ID를 실제 ID로 변환 시도
+
       if (id && typeof id === "string" && id.startsWith("tmp_")) {
-        const actualRow = routeRows.find(r => 
+        const actualRow = routeRows.find(r =>
           (r.camp||"") === camp && (r.full_code||"") === code
         );
         if (actualRow && typeof actualRow.id === "number") {
@@ -1359,16 +1416,14 @@
           id = undefined;
         }
       }
-      
+
       const payload = {
         camp,
         code,
         vendor_name: clear ? null : (vendorNameInput.value.trim() || null),
         vendor_business_number: clear ? null : (vendorBizInput.value.trim() || null),
-        // polygon은 건드리지 않음 (명시적으로 제외)
-        // 입차지도 건드리지 않음
       };
-      
+
       if (typeof id === "number") {
         payload.id = id;
       }
@@ -1386,85 +1441,76 @@
   // ====== 폴리곤 중심점 계산 ======
   function getRouteCenter() {
     if (!selectedRouteId || !overlayById.has(selectedRouteId)) return null;
-    
+
     const pack = overlayById.get(selectedRouteId);
     const polygons = pack.polygons;
-    
+
     if (!polygons || polygons.length === 0) return null;
-    
-    // 모든 폴리곤의 점들을 모아서 전체 중심점 계산
+
     const allPoints = [];
     for (const poly of polygons) {
       const path = poly.getPath();
       if (!path) continue;
-      
+
       const len = Array.isArray(path) ? path.length : (path.getLength ? path.getLength() : 0);
       for (let i = 0; i < len; i++) {
         const pt = Array.isArray(path) ? path[i] : path.getAt(i);
         if (pt) allPoints.push(pt);
       }
     }
-    
+
     if (allPoints.length === 0) return null;
-    
+
     return centroidOfLatLngs(allPoints);
   }
 
-  // ====== 카카오내비 연동 (출발지→도착지 경로 안내) ======
+  // ====== 카카오내비 연동 ======
   async function openKakaoNavi() {
     const deliveryName = deliveryNameInput.value.trim() || "입차지";
     const deliveryAddr = deliveryAddrInput.value.trim();
-    
+
     if (!deliveryAddr) {
       setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
       return;
     }
-    
+
     if (!selectedRouteId) {
       setStatus("라우트를 먼저 선택해주세요.", "WARN");
       return;
     }
-    
+
     setStatus("경로 계산 중...", "OK");
-    
-    // 1. 입차지 주소를 좌표로 변환
+
     geocoder.addressSearch(deliveryAddr, (result, status) => {
       if (status !== kakao.maps.services.Status.OK || !result?.length) {
         setStatus("입차지 주소를 찾을 수 없습니다. 정확한 주소를 입력해주세요.", "ERR");
         return;
       }
-      
+
       const startLat = Number(result[0].y);
       const startLng = Number(result[0].x);
-      
-      // 2. 라우트 중심점 계산
+
       const routeCenter = getRouteCenter();
       if (!routeCenter) {
         setStatus("라우트 폴리곤이 없습니다.", "ERR");
         return;
       }
-      
+
       const endLat = routeCenter.getLat();
       const endLng = routeCenter.getLng();
-      
+
       const pack = overlayById.get(selectedRouteId);
       const routeName = pack.row.full_code || "라우트";
-      
-      // 3. 카카오내비 URL 생성 (출발지→도착지 경로 안내)
-      // 모바일: kakaomap://route 스킴
-      // 웹: 카카오맵 길찾기 URL (출발지 + 도착지)
+
       const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-      
+
       let naviUrl;
       if (isMobile) {
-        // 모바일: 카카오맵 앱 URL 스킴 (출발지, 도착지)
         naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
       } else {
-        // PC: 카카오맵 웹 길찾기 (올바른 URL 형식)
-        // 형식: https://map.kakao.com/link/from/출발지명,위도,경도/to/목적지명,위도,경도
         naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(routeName)},${endLat},${endLng}`;
       }
-      
+
       window.open(naviUrl, "_blank");
       setStatus(`카카오내비 실행: ${deliveryName} → ${routeName}`, "OK");
       log(`경로 안내: ${deliveryName} (${startLat.toFixed(4)}, ${startLng.toFixed(4)}) → ${routeName} (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
@@ -1480,10 +1526,9 @@
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
 
       let id = selectedRouteId;
-      
-      // 임시 ID를 실제 ID로 변환 시도
+
       if (id && typeof id === "string" && id.startsWith("tmp_")) {
-        const actualRow = routeRows.find(r => 
+        const actualRow = routeRows.find(r =>
           (r.camp||"") === camp && (r.full_code||"") === code
         );
         if (actualRow && typeof actualRow.id === "number") {
@@ -1492,15 +1537,14 @@
           id = undefined;
         }
       }
-      
+
       const payload = {
         camp,
         code,
         delivery_location_name: clear ? null : (deliveryNameInput.value.trim() || null),
         delivery_location_address: clear ? null : (deliveryAddrInput.value.trim() || null),
-        // polygon과 vendor는 건드리지 않음
       };
-      
+
       if (typeof id === "number") {
         payload.id = id;
       }
@@ -1553,7 +1597,6 @@
       const roads = data?.roads || [];
       const buildings = data?.buildings || [];
 
-      // roads: polyline
       for (const r of roads) {
         if (!r.coords || r.coords.length < 2) continue;
         const path = r.coords.map(([lng,lat]) => new kakao.maps.LatLng(lat,lng));
@@ -1569,7 +1612,6 @@
         osmOverlays.push(pl);
       }
 
-      // buildings: polygon (outline)
       for (const g of buildings) {
         if (!g.coords || g.coords.length < 3) continue;
         const path = g.coords.map(([lng,lat]) => new kakao.maps.LatLng(lat,lng));
@@ -1599,7 +1641,6 @@
     labelOn = !labelOn;
     labelToggleBtn.textContent = labelOn ? "라우트 라벨 ON" : "라우트 라벨 OFF";
 
-    // 전체 라벨 재구성
     for (const [id, pack] of overlayById.entries()) {
       pack.labels.forEach(l => l.setMap(null));
       pack.labels = [];
@@ -1630,82 +1671,86 @@
     setStatus("지도 초기화 완료.", "OK");
   }
 
+  // ====== (추가) KST yyyymmddHHMM ======
+  function kstYYYYMMDDHHMM() {
+    const now = new Date();
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const yyyy = String(kst.getUTCFullYear());
+    const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(kst.getUTCDate()).padStart(2, "0");
+    const HH = String(kst.getUTCHours()).padStart(2, "0");
+    const MM = String(kst.getUTCMinutes()).padStart(2, "0");
+    return `${yyyy}${mm}${dd}${HH}${MM}`;
+  }
+
   // ====== 공유 링크 생성 ======
   function generateShareLink() {
     const camp = campInput.value.trim();
     const code = codeInput.value.trim();
-    
+
     if (!camp) {
       setStatus("캠프 정보를 입력해주세요.", "WARN");
       return;
     }
-    
-    // 현재 도메인 기준으로 share.html 링크 생성
+
     const shareUrl = new URL("/share.html", location.origin);
     shareUrl.searchParams.set("camp", camp);
     if (code) {
       shareUrl.searchParams.set("code", code);
     }
-    
+
+    // ✅ (추가) v=yyyymmddHHMM(KST) 항상 포함
+    shareUrl.searchParams.set("v", kstYYYYMMDDHHMM());
+
     const url = shareUrl.toString();
-    
-    // 클립보드 복사
+
     navigator.clipboard.writeText(url).then(() => {
       setStatus("공유 링크가 클립보드에 복사되었습니다!", "OK");
-      
-      // 확인 팝업 표시
+
       const confirmed = confirm(
         `공유 링크가 복사되었습니다!\n\n${url}\n\n새 탭에서 미리보기를 여시겠습니까?`
       );
-      
+
       if (confirmed) {
         window.open(url, "_blank");
       }
     }).catch(err => {
-      // 클립보드 복사 실패 시 프롬프트로 표시
       prompt("공유 링크 (Ctrl+C로 복사):", url);
       setStatus("공유 링크를 생성했습니다.", "OK");
     });
-    
+
     log(`공유 링크 생성: ${url}`);
   }
 
   // ====== 지도 이벤트(그리기 모드 + 커스텀 드래그) ======
   function attachMapEvents() {
-    // 클릭: 점 추가
     kakao.maps.event.addListener(map, "click", (mouseEvent) => {
       if (!drawMode) return;
       const latlng = mouseEvent.latLng;
       addDrawPoint(latlng);
     });
 
-    // 우클릭: 마지막 점 취소
     kakao.maps.event.addListener(map, "rightclick", () => {
       if (!drawMode) return;
       popDrawPoint();
     });
-    
-    // 마우스 이동: 커스텀 드래그 처리 (전역)
+
     const handleMouseMove = (e) => {
       if (!draggingVertex) return;
-      
-      // 화면 좌표를 지도 좌표로 변환
+
       const mapDiv = map.getNode();
       const rect = mapDiv.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
-      
-      // Projection을 사용해 픽셀 → LatLng 변환
+
       const proj = map.getProjection();
       const point = new kakao.maps.Point(x, y);
       const newPos = proj.coordsFromContainerPoint(point);
-      
+
       const { marker, polygon, index } = draggingVertex;
-      
-      // 마커 위치 업데이트
+
       marker.setPosition(newPos);
-      
-      // 폴리곤 경로 업데이트
+
       const currentPath = polygon.getPath();
       const pathArray = [];
       if (currentPath && typeof currentPath.getLength === 'function') {
@@ -1718,24 +1763,21 @@
         }
       }
       polygon.setPath(pathArray);
-      
-      // 라벨 업데이트
+
       updateSelectedLabels();
     };
-    
+
     const handleMouseUp = () => {
       if (!draggingVertex) return;
-      
+
       draggingVertex = null;
-      map.setDraggable(true); // 지도 드래그 재활성화
-      rebuildHandles(); // 미드포인트 재생성
+      map.setDraggable(true);
+      rebuildHandles();
     };
-    
-    // 전역 이벤트 리스너 등록
+
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
 
-    // ESC: 취소, Enter: 완료
     window.addEventListener("keydown", (e) => {
       if (drawMode) {
         if (e.key === "Escape") {
@@ -1745,7 +1787,6 @@
           finishDraw();
         }
       } else if (e.key === "Escape") {
-        // 편집모드에서 ESC 누르면 편집 해제
         if (selectedRouteId) {
           stopEditing();
           selectedRouteId = null;
@@ -1759,17 +1800,15 @@
   // ====== 초기 구동 ======
   function init() {
     kakao.maps.load(() => {
-      const center = new kakao.maps.LatLng(37.4936, 126.9019); // 대략 대림역 근처
+      const center = new kakao.maps.LatLng(37.4936, 126.9019);
       map = new kakao.maps.Map($("map"), { center, level: 6 });
       geocoder = new kakao.maps.services.Geocoder();
 
-      // 핸들 이미지 초기화 (kakao.maps.load 이후에만 가능)
       VERTEX_IMG = makeHandleImage("#ffffff", "#0b1220");
       MID_IMG = makeHandleImage("#93a4c7", "#0b1220");
 
       attachMapEvents();
 
-      // 버튼 바인딩
       loadBtn.addEventListener("click", loadRoutes);
       drawNewBtn.addEventListener("click", () => beginDraw("new"));
       drawAddBtn.addEventListener("click", () => beginDraw("add"));
@@ -1791,7 +1830,6 @@
 
       setStatus("지도 로드 완료", "OK");
 
-      // 자동 로드 (실패 시 사용자에게 안내)
       loadRoutes().catch((err) => {
         log("자동 로드 실패. 백엔드 API 확인이 필요합니다.");
         setStatus("자동 로드 실패 (백엔드 API 오류). 새로 그리기는 가능합니다.", "WARN");
@@ -1799,7 +1837,6 @@
     });
   }
 
-  // 전역 에러 로깅(카카오 내부 Script error도 최소한 표면화)
   window.addEventListener("error", (ev) => {
     const msg = ev?.message || "Script error.";
     log(`ERR window.error: ${msg}`);

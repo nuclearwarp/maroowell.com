@@ -7,7 +7,7 @@
 
   <!-- Kakao 지도 SDK (autoload=false로 로딩) -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false"></script>
-  <!-- TopoJSON (시/도, 시군구 topo-simple 지원용: 있으면 사용, 없으면 geojson fallback) -->
+  <!-- TopoJSON -->
   <script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
 
   <style>
@@ -18,8 +18,6 @@
       --muted:#6b7280;
       --line:#e5e7eb;
       --primary:#2563eb;
-      --primary-weak:rgba(37,99,235,.10);
-      --danger:#ef4444;
       --shadow: 0 10px 25px rgba(17,24,39,.08);
       --radius: 18px;
     }
@@ -67,7 +65,7 @@
       font-weight:900;
       font-size: 30px;
       letter-spacing:-0.02em;
-      color:#8b5a2b; /* 흙색 */
+      color:#8b5a2b;
       line-height: 1;
     }
 
@@ -105,7 +103,7 @@
       width: min(1400px, calc(100% - 28px));
       margin: 0 auto 24px;
       display:grid;
-      grid-template-columns: 1.7fr 0.8fr; /* 지도 크게 / 우측 작게 */
+      grid-template-columns: 1.7fr 0.8fr;
       gap: 16px;
       align-items:start;
     }
@@ -189,7 +187,7 @@
     /* Map */
     #map{
       width:100%;
-      height: 72vh; /* 크게 */
+      height: 72vh;
       min-height: 520px;
       border-radius: 16px;
       overflow:hidden;
@@ -312,24 +310,43 @@
       line-height: 1.45;
     }
 
-    /* Overlay label */
-    .overlay-bubble{
-      background:#111827;
+    /* Temporary click toast (숫자만) */
+    .overlay-count-toast{
+      background:#2563eb;
       color:#fff;
+      border-radius: 999px;
       padding: 8px 10px;
-      border-radius: 10px;
-      font-weight: 900;
-      font-size: 12px;
-      box-shadow: 0 10px 20px rgba(17,24,39,.18);
-      border: 1px solid rgba(255,255,255,.15);
+      font-weight: 1000;
+      font-size: 14px;
+      box-shadow: 0 12px 24px rgba(37,99,235,.25);
+      border: 1px solid rgba(255,255,255,.22);
       white-space:nowrap;
     }
-    .overlay-bubble .sub{
-      display:block;
-      font-weight:800;
-      color: rgba(255,255,255,.75);
-      margin-top:2px;
+
+    /* Map name label */
+    .map-name-label{
+      background: rgba(255,255,255,.88);
+      color:#111827;
+      border-radius: 10px;
+      padding: 3px 6px;
+      font-weight: 900;
       font-size: 11px;
+      border: 1px solid rgba(17,24,39,.14);
+      box-shadow: 0 8px 16px rgba(17,24,39,.10);
+      white-space:nowrap;
+    }
+
+    /* Map count badge (항상 표시 옵션) */
+    .map-count-badge{
+      background:#2563eb;
+      color:#fff;
+      border-radius: 999px;
+      padding: 2px 6px;
+      font-weight: 1000;
+      font-size: 11px;
+      box-shadow: 0 10px 18px rgba(37,99,235,.20);
+      border: 1px solid rgba(255,255,255,.20);
+      white-space:nowrap;
     }
   </style>
 </head>
@@ -420,6 +437,9 @@
 
 <script>
 (() => {
+  /* ===== 옵션 ===== */
+  const SHOW_BADGE_ON_MAP = true; // 폴리곤 중앙 숫자 배지(0이면 숨김). 원치 않으면 false.
+
   /* ---------------------------
    * 0) Sample Data
    * --------------------------- */
@@ -498,32 +518,32 @@
 대구광역시 북구 동변동 제일로지스
 대구광역시 북구 서변동 제일로지스`;
 
-  const LS_KEY = "coupangland_raw_v2";
+  const LS_KEY = "coupangland_raw_v3";
 
   /* ---------------------------
    * 1) State
    * --------------------------- */
   const state = {
     map: null,
-    overlay: null,
+    toastOverlay: null,
 
     records: [],
     vendors: [],
 
-    scope: { level: "all", sido: null, sgg: null }, // level: all | sido | sgg
+    scope: { level: "all", sido: null, sgg: null }, // all | sido | sgg
     vendorFilter: "",
 
     // boundary caches
-    sidoData: null, // geo features
-    sggData: null,  // geo features
-    dongCacheBySido: new Map(), // sidoKor -> geo features
+    sidoData: null,
+    sggData: null,
+    dongCacheBySido: new Map(),
 
-    // polygon layers
+    // polygon layers (group[])
     layerSido: [],
     layerSgg: [],
     layerDong: [],
 
-    // selected ids (for styling)
+    // selected keys
     selectedSidoKey: null,
     selectedSggKey: null,
 
@@ -556,7 +576,6 @@
     ["제주","제주특별자치도"],["jeju","제주특별자치도"],
   ]);
 
-  // 영문 시도(데이터에 Daegu 같이 들어와도 한국어로 강제)
   const SIDO_ENG_TO_KOR = new Map([
     ["Seoul","서울특별시"],["Busan","부산광역시"],["Daegu","대구광역시"],["Incheon","인천광역시"],
     ["Gwangju","광주광역시"],["Daejeon","대전광역시"],["Ulsan","울산광역시"],["Sejong","세종특별자치시"],
@@ -577,15 +596,12 @@
     if (SIDO_ENG_TO_KOR.has(s)) return SIDO_ENG_TO_KOR.get(s);
     if (SIDO_ENG_TO_KOR.has(s.replace(/\s+/g,""))) return SIDO_ENG_TO_KOR.get(s.replace(/\s+/g,""));
 
-    // 이미 정식 시도명
     if (SIDO_KOR_LIST.includes(s)) return s;
 
-    // "대구광역시" 같은 경우는 그대로
     for (const kor of SIDO_KOR_LIST) {
       if (s.includes(kor)) return kor;
     }
 
-    // 마지막 fallback: "대구광역시/Daegu" 같이 들어오면 앞부분만
     const first = s.split(/\s+/)[0];
     if (SIDO_ALIAS.has(first.toLowerCase())) return SIDO_ALIAS.get(first.toLowerCase());
 
@@ -604,10 +620,9 @@
     for (const k of keys){
       if (props[k]) return String(props[k]).trim();
     }
-    // 아무 키나 마지막 fallback
     const ks = Object.keys(props);
     for (const k of ks){
-      if (typeof props[k] === "string" && props[k].length <= 30) return props[k].trim();
+      if (typeof props[k] === "string" && props[k].length <= 40) return props[k].trim();
     }
     return "";
   }
@@ -630,20 +645,17 @@
       const vendor = parts[parts.length - 1];
       const addr = parts.slice(0, parts.length - 1);
 
-      // 기본: [sido] [..sgg..] [dong]
       let sido = normSido(addr[0]);
       let rest = addr.slice(1);
 
       if (!sido) {
-        // 시도 누락 케이스(영등포구 대림동...)
-        // 아주 단순 추정: "영등포구" -> 서울, "분당구" -> 경기, "용인시" -> 경기 등
         const first = addr[0];
         if (/(영등포구|강서구|마포구|송파구|강남구|관악구|서초구|동작구|구로구|금천구|양천구|은평구|서대문구|중구|종로구|동대문구|성동구|광진구|중랑구|노원구|도봉구|강북구)/.test(first)) sido = "서울특별시";
         else if (/(용인시|성남시|고양시|화성시|수원시|부천시|안양시|평택시|남양주시|김포시|시흥시|광명시)/.test(first)) sido = "경기도";
         else if (/(달서구|수성구|달성군|동구|북구|남구|서구)/.test(first)) sido = "대구광역시";
         else sido = null;
 
-        rest = addr; // 그대로 사용
+        rest = addr;
       }
 
       const dong = rest[rest.length - 1];
@@ -697,8 +709,7 @@
   }
 
   function dongVendors(records){
-    // dong 가나다순, vendor 가나다순
-    const m = new Map(); // dong -> Map(vendor->count)
+    const m = new Map();
     for (const r of records){
       const d = r.dong || "";
       if (!m.has(d)) m.set(d, new Map());
@@ -713,6 +724,60 @@
       lines.push(`- ${dong}: ${vstr}`);
     }
     return lines.join("\n");
+  }
+
+  /* ---------------------------
+   * 3.5) Count logic: "업체가 몇개" (유니크 업체 수)
+   * --------------------------- */
+  function countUniqueVendorsIn({level, sido, sgg, dong}){
+    const vset = new Set();
+    for (const r of state.records){
+      if (state.vendorFilter && r.vendor !== state.vendorFilter) continue;
+
+      if (level === "sido"){
+        if (r.sido !== sido) continue;
+      } else if (level === "sgg"){
+        if (r.sido !== sido || r.sgg !== sgg) continue;
+      } else if (level === "dong"){
+        if (r.sido !== sido || r.sgg !== sgg || r.dong !== dong) continue;
+      } else {
+        // all
+      }
+      if (r.vendor) vset.add(r.vendor);
+    }
+    return vset.size;
+  }
+
+  function buildVendorCountMaps(){
+    // 현재 vendorFilter 기준으로 각 레벨별 vendor distinct count map 생성
+    const mSido = new Map(); // sido -> Set(vendor)
+    const mSgg = new Map();  // `${sido}||${sgg}` -> Set(vendor)
+    const mDong = new Map(); // `${sido}||${sgg}||${dong}` -> Set(vendor)
+
+    for (const r of state.records){
+      if (state.vendorFilter && r.vendor !== state.vendorFilter) continue;
+      if (!r.vendor) continue;
+
+      if (r.sido){
+        if (!mSido.has(r.sido)) mSido.set(r.sido, new Set());
+        mSido.get(r.sido).add(r.vendor);
+      }
+      if (r.sido && r.sgg){
+        const k = `${r.sido}||${r.sgg}`;
+        if (!mSgg.has(k)) mSgg.set(k, new Set());
+        mSgg.get(k).add(r.vendor);
+      }
+      if (r.sido && r.sgg && r.dong){
+        const k = `${r.sido}||${r.sgg}||${r.dong}`;
+        if (!mDong.has(k)) mDong.set(k, new Set());
+        mDong.get(k).add(r.vendor);
+      }
+    }
+
+    const outSido = new Map(Array.from(mSido.entries()).map(([k,set])=>[k,set.size]));
+    const outSgg = new Map(Array.from(mSgg.entries()).map(([k,set])=>[k,set.size]));
+    const outDong = new Map(Array.from(mDong.entries()).map(([k,set])=>[k,set.size]));
+    return { outSido, outSgg, outDong };
   }
 
   /* ---------------------------
@@ -748,18 +813,15 @@
   }
 
   function geomToPolygonPaths(geom){
-    // return array of "path" that kakao polygon accepts
-    // Polygon: [outerRing, hole1, hole2...]
-    // MultiPolygon: [[outer, holes..], [outer, holes..], ...]
     if (!geom) return [];
     const t = geom.type;
     const c = geom.coordinates;
     if (t === "Polygon") {
       const rings = c.map(r => coordsToLatLngRing(r));
-      return [rings]; // one polygon with rings
+      return [rings];
     }
     if (t === "MultiPolygon") {
-      return c.map(poly => poly.map(r => coordsToLatLngRing(r))); // array of polygons (each polygon: rings)
+      return c.map(poly => poly.map(r => coordsToLatLngRing(r)));
     }
     return [];
   }
@@ -772,6 +834,15 @@
       }
     }
     return b;
+  }
+
+  function centerOfBounds(b){
+    const sw = b.getSouthWest();
+    const ne = b.getNorthEast();
+    return new kakao.maps.LatLng(
+      (sw.getLat() + ne.getLat()) / 2,
+      (sw.getLng() + ne.getLng()) / 2
+    );
   }
 
   function boundsIntersects(a,b){
@@ -788,12 +859,13 @@
   function clearLayer(layer){
     for (const g of layer){
       for (const poly of (g.polys||[])) poly.setMap(null);
+      if (g.nameOverlay) g.nameOverlay.setMap(null);
+      if (g.countOverlay) g.countOverlay.setMap(null);
     }
     layer.length = 0;
   }
 
   function setGroupStyle(group, mode){
-    // mode: normal | faded | selected
     const base = {
       strokeColor: "#2563eb",
       strokeOpacity: 0.85,
@@ -809,50 +881,85 @@
     }
   }
 
-  function showOverlay(latlng, title, sub){
-    try{
-      if (state.overlay) state.overlay.setMap(null);
+  function setOrUpdateOverlay(group, key, position, className, text, yAnchor){
+    if (!text) {
+      if (group[key]) group[key].setMap(null);
+      group[key] = null;
+      return;
+    }
+    if (!group[key]) {
       const el = document.createElement("div");
-      el.className = "overlay-bubble";
-      el.textContent = title;
-      if (sub){
-        const s = document.createElement("span");
-        s.className = "sub";
-        s.textContent = sub;
-        el.appendChild(s);
-      }
-      state.overlay = new kakao.maps.CustomOverlay({
-        position: latlng,
+      el.className = className;
+      el.textContent = text;
+
+      group[key] = new kakao.maps.CustomOverlay({
+        position,
         content: el,
-        yAnchor: 1.1
+        yAnchor: yAnchor ?? 0.5,
+        clickable: false,
       });
-      state.overlay.setMap(state.map);
-      setTimeout(() => {
-        if (state.overlay) state.overlay.setMap(null);
-      }, 1200);
-    }catch(e){}
+      group[key].setMap(state.map);
+    } else {
+      const el = group[key].getContent();
+      if (el && el.textContent !== text) el.textContent = text;
+      group[key].setPosition(position);
+      group[key].setMap(state.map);
+    }
   }
 
-  function drawFeatureGroups(features, layer, onClick){
-    // features -> groups
+  function showCountToast(latlng, count){
+    if (!count || count <= 0) return;
+    if (state.toastOverlay) state.toastOverlay.setMap(null);
+
+    const el = document.createElement("div");
+    el.className = "overlay-count-toast";
+    el.textContent = String(count);
+
+    state.toastOverlay = new kakao.maps.CustomOverlay({
+      position: latlng,
+      content: el,
+      yAnchor: 1.2,
+      clickable: false,
+    });
+    state.toastOverlay.setMap(state.map);
+
+    setTimeout(() => {
+      if (state.toastOverlay) state.toastOverlay.setMap(null);
+    }, 900);
+  }
+
+  function drawFeatureGroups(features, layer, onClick, options={}){
     clearLayer(layer);
 
     for (let i=0; i<features.length; i++){
       const f = features[i];
       const props = f.properties || {};
-      const name = extractNameFromProps(props) || `#${i}`;
+
+      const name = options.nameFn
+        ? cleanSpaces(options.nameFn(f, i) || "")
+        : cleanSpaces(extractNameFromProps(props) || `#${i}`);
+
+      const displayName = options.displayNameFn
+        ? cleanSpaces(options.displayNameFn(f, i) || name)
+        : name;
+
       const paths = geomToPolygonPaths(f.geometry);
       if (!paths.length) continue;
+
+      const b = boundsOfPaths(paths);
 
       const group = {
         key: `${name}__${i}`,
         name,
+        displayName,
         feature: f,
-        bounds: boundsOfPaths(paths),
-        polys: []
+        bounds: b,
+        center: centerOfBounds(b),
+        polys: [],
+        nameOverlay: null,
+        countOverlay: null,
       };
 
-      // each element in paths = rings (outer+holes)
       for (const rings of paths){
         const poly = new kakao.maps.Polygon({
           map: state.map,
@@ -868,12 +975,8 @@
           poly.setOptions({ fillOpacity: 0.10, strokeOpacity: 0.95 });
         });
         kakao.maps.event.addListener(poly, "mouseout", () => {
-          // group style 기준으로 되돌림 (hover로만 복구하면 선택 스타일이 깨질 수 있음)
-          // 현재 group 상태를 즉시 알 수 없으므로, 전체 레이어 재적용 대신 "현재 scope" 기반으로 복구
-          // 여기서는 가볍게 normal로 복구 (선택된 그룹은 click 후 전체 재적용)
           poly.setOptions({ fillOpacity: 0.04, strokeOpacity: 0.70 });
         });
-
         kakao.maps.event.addListener(poly, "click", (mouseEvent) => {
           onClick(group, mouseEvent.latLng);
         });
@@ -890,8 +993,6 @@
    * --------------------------- */
   async function ensureSidoBoundaries(){
     if (state.sidoData) return state.sidoData;
-
-    // 우선 topo-simple 시도, 없으면 geojson fallback
     const urls = [
       "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-provinces-2018-topo-simple.json",
       "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-provinces-2018-geo.json",
@@ -904,7 +1005,6 @@
 
   async function ensureSggBoundaries(){
     if (state.sggData) return state.sggData;
-
     const urls = [
       "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-municipalities-2018-topo-simple.json",
       "https://raw.githubusercontent.com/southkorea/southkorea-maps/master/kostat/2018/json/skorea-municipalities-2018-geo.json",
@@ -917,7 +1017,6 @@
 
   async function ensureDongBoundariesBySidoKor(sidoKor){
     if (state.dongCacheBySido.has(sidoKor)) return state.dongCacheBySido.get(sidoKor);
-
     const url = getDongUrlBySidoKor(sidoKor);
     const geo = await fetchJsonWithFallback([url]);
     const feats = geo.features || [];
@@ -962,7 +1061,6 @@
     const crumbs = document.getElementById("crumbs");
     const all = crumbs.querySelector('[data-action="scopeAll"]');
     const up = crumbs.querySelector('[data-action="scopeUp"]');
-
     all.classList.toggle("active", state.scope.level === "all");
     up.classList.toggle("active", state.scope.level !== "all");
   }
@@ -977,9 +1075,9 @@
     document.getElementById("badgeScope").textContent = scopeBadgeText();
     updateCrumbs();
 
-    // 오른쪽 패널 갱신
     const fr = filterRecords();
     document.getElementById("badgeCount").textContent = `데이터: ${state.records.length}건`;
+
     const kvArea = document.getElementById("kvArea");
     kvArea.innerHTML = "";
 
@@ -994,16 +1092,13 @@
     kv("업체 필터", state.vendorFilter ? state.vendorFilter : "전체");
     kv("유니크", String(uniqueCount(fr)));
 
-    // 업체 분포(가나다)
     const vd = vendorDistribution(fr);
     document.getElementById("vendorBox").textContent =
       vd.length ? vd.map(([vn,c])=>`- ${vn}: ${c}`).join("\n") : "표시할 데이터가 없습니다.";
 
-    // 동별 업체
     const dv = dongVendors(fr);
     document.getElementById("dongBox").textContent = dv || "표시할 데이터가 없습니다.";
 
-    // 목록/지도 단계 렌더
     if (state.scope.level === "all"){
       document.getElementById("listTitle").textContent = "시/도";
       await renderSidoLayer(token);
@@ -1019,42 +1114,71 @@
     }
   }
 
+  function applyLabelsAndBadges(layer, nameFn, countFn){
+    for (const g of layer){
+      const nm = nameFn(g);
+      setOrUpdateOverlay(g, "nameOverlay", g.center, "map-name-label", nm, 0.5);
+
+      if (!SHOW_BADGE_ON_MAP) {
+        setOrUpdateOverlay(g, "countOverlay", g.center, "map-count-badge", null, 0.5);
+        continue;
+      }
+
+      const cnt = countFn(g);
+      const txt = (cnt && cnt > 0) ? String(cnt) : null;
+      // 배지는 이름과 겹치면 안되니 살짝 위로
+      const pos = new kakao.maps.LatLng(g.center.getLat() - 0.015, g.center.getLng());
+      setOrUpdateOverlay(g, "countOverlay", pos, "map-count-badge", txt, 0.5);
+    }
+  }
+
   async function renderSidoLayer(token){
     const feats = await ensureSidoBoundaries();
     if (token !== state.renderToken) return;
 
-    // 시도 폴리곤 그리기
     drawFeatureGroups(feats, state.layerSido, (group, latlng) => {
-      // 시도명 한국어 정규화 (Daegu 방지)
       const rawName = group.name;
       const sidoKor = normSido(rawName) || normSido(extractNameFromProps(group.feature.properties)) || rawName;
 
       state.selectedSidoKey = group.key;
       setScopeSido(sidoKor);
 
-      showOverlay(latlng, sidoKor, "시/도 선택");
+      // 클릭 토스트: 해당 시/도 유니크 업체 수 (0이면 표시 없음)
+      const cnt = countUniqueVendorsIn({ level:"sido", sido:sidoKor });
+      showCountToast(latlng, cnt);
+    }, {
+      displayNameFn: (f) => {
+        const props = f.properties || {};
+        const raw = extractNameFromProps(props);
+        return normSido(raw) || raw;
+      }
     });
 
-    // 스타일 적용: 데이터 있는 시도는 normal, 없는 시도는 faded(아주 약하게)
     const dataSidoSet = new Set(state.records.map(r=>r.sido).filter(Boolean));
     for (const g of state.layerSido){
-      const sidoKor = normSido(g.name) || normSido(extractNameFromProps(g.feature.properties)) || g.name;
+      const sidoKor = normSido(g.displayName) || g.displayName;
       if (state.selectedSidoKey && g.key === state.selectedSidoKey) setGroupStyle(g, "selected");
       else if (dataSidoSet.size && !dataSidoSet.has(sidoKor)) setGroupStyle(g, "faded");
       else setGroupStyle(g, "normal");
     }
 
-    // deeper layers 제거
+    // 이름/배지 적용
+    const { outSido } = buildVendorCountMaps();
+    applyLabelsAndBadges(
+      state.layerSido,
+      (g) => normSido(g.displayName) || g.displayName,
+      (g) => outSido.get(normSido(g.displayName) || g.displayName) || 0
+    );
+
     clearLayer(state.layerSgg);
     clearLayer(state.layerDong);
   }
 
   async function renderSggLayer(token){
-    // 시도는 유지(사라지지 않게)
     const sidoKor = state.scope.sido;
-    // 시도 layer 스타일: 선택 강조, 나머지 약화
+
     for (const g of state.layerSido){
-      const gKor = normSido(g.name) || normSido(extractNameFromProps(g.feature.properties)) || g.name;
+      const gKor = normSido(g.displayName) || g.displayName;
       if (gKor === sidoKor) { state.selectedSidoKey = g.key; setGroupStyle(g, "selected"); }
       else setGroupStyle(g, "faded");
     }
@@ -1062,11 +1186,9 @@
     const sggFeats = await ensureSggBoundaries();
     if (token !== state.renderToken) return;
 
-    // 선택 시도의 bounds
-    const sidoGroup = state.layerSido.find(g => (normSido(g.name)||normSido(extractNameFromProps(g.feature.properties))||g.name) === sidoKor);
+    const sidoGroup = state.layerSido.find(g => (normSido(g.displayName)||g.displayName) === sidoKor);
     const sidoBounds = sidoGroup ? sidoGroup.bounds : null;
 
-    // 현재 시도와 교차하는 시군구만 그리기 (이름 필드 신뢰하지 않음)
     const filtered = sidoBounds ? sggFeats.filter(f => {
       const paths = geomToPolygonPaths(f.geometry);
       if (!paths.length) return false;
@@ -1075,43 +1197,49 @@
     }) : sggFeats;
 
     drawFeatureGroups(filtered, state.layerSgg, (group, latlng) => {
-      const name = cleanSpaces(group.name);
+      const name = cleanSpaces(group.displayName);
       state.selectedSggKey = group.key;
       setScopeSgg(sidoKor, name);
-      showOverlay(latlng, name, "시/군/구 선택");
+
+      const cnt = countUniqueVendorsIn({ level:"sgg", sido:sidoKor, sgg:name });
+      showCountToast(latlng, cnt);
+    }, {
+      displayNameFn: (f) => cleanSpaces(extractNameFromProps(f.properties || "")) // 시군구명
     });
 
-    // 스타일 적용
     for (const g of state.layerSgg){
       if (state.selectedSggKey && g.key === state.selectedSggKey) setGroupStyle(g, "selected");
       else setGroupStyle(g, "normal");
     }
 
-    // dong layer 제거
-    clearLayer(state.layerDong);
+    // 이름/배지 적용
+    const { outSgg } = buildVendorCountMaps();
+    applyLabelsAndBadges(
+      state.layerSgg,
+      (g) => g.displayName,
+      (g) => outSgg.get(`${sidoKor}||${g.displayName}`) || 0
+    );
 
-    // fit bounds
+    clearLayer(state.layerDong);
     if (sidoBounds) fitToBounds(sidoBounds);
   }
 
   async function renderDongLayer(token){
     const { sido, sgg } = state.scope;
 
-    // 시도/시군구 레이어 유지 + 스타일
     for (const g of state.layerSido){
-      const gKor = normSido(g.name) || normSido(extractNameFromProps(g.feature.properties)) || g.name;
+      const gKor = normSido(g.displayName) || g.displayName;
       if (gKor === sido) setGroupStyle(g,"selected");
       else setGroupStyle(g,"faded");
     }
     for (const g of state.layerSgg){
-      if (g.name === sgg) { state.selectedSggKey = g.key; setGroupStyle(g,"selected"); }
+      if (g.displayName === sgg) { state.selectedSggKey = g.key; setGroupStyle(g,"selected"); }
       else setGroupStyle(g,"faded");
     }
 
     const dongFeats = await ensureDongBoundariesBySidoKor(sido);
     if (token !== state.renderToken) return;
 
-    // 현재 선택 sgg에 데이터가 있는 dong set (성능/가독성)
     const dset = new Set(
       state.records
         .filter(r => r.sido===sido && r.sgg===sgg)
@@ -1119,14 +1247,14 @@
         .filter(Boolean)
     );
 
-    // 선택된 sgg bounds로 교차 필터 + 데이터 dong만
-    const sggGroup = state.layerSgg.find(g => g.name === sgg);
+    const sggGroup = state.layerSgg.find(g => g.displayName === sgg);
     const sggBounds = sggGroup ? sggGroup.bounds : null;
 
     const filtered = dongFeats.filter(f => {
-      const adm = (f.properties && (f.properties.adm_nm || f.properties.ADM_NM)) ? String(f.properties.adm_nm || f.properties.ADM_NM) : "";
-      const tokens = adm.split(/\s+/).filter(Boolean);
-      const dongName = tokens.length ? tokens[tokens.length - 1] : extractNameFromProps(f.properties);
+      const props = f.properties || {};
+      const adm = props.adm_nm || props.ADM_NM || "";
+      const tks = String(adm).split(/\s+/).filter(Boolean);
+      const dongName = tks.length ? tks[tks.length - 1] : extractNameFromProps(props);
       if (dset.size && !dset.has(dongName)) return false;
 
       if (!sggBounds) return true;
@@ -1137,18 +1265,27 @@
     });
 
     drawFeatureGroups(filtered, state.layerDong, (group, latlng) => {
-      // dong 클릭 시는 “선택”만 보여주고 scope는 유지 (동 단위는 아직 scope로 확장하지 않음)
-      const props = group.feature.properties || {};
-      const adm = props.adm_nm || props.ADM_NM || "";
-      const tks = String(adm).split(/\s+/).filter(Boolean);
-      const dongName = tks.length ? tks[tks.length - 1] : group.name;
-      showOverlay(latlng, dongName, "동/읍/면");
+      const dongName = group.displayName;
+      const cnt = countUniqueVendorsIn({ level:"dong", sido:sido, sgg:sgg, dong:dongName });
+      showCountToast(latlng, cnt);
+    }, {
+      displayNameFn: (f) => {
+        const props = f.properties || {};
+        const adm = props.adm_nm || props.ADM_NM || "";
+        const tks = String(adm).split(/\s+/).filter(Boolean);
+        return tks.length ? tks[tks.length - 1] : cleanSpaces(extractNameFromProps(props));
+      }
     });
 
-    // dong 스타일
-    for (const g of state.layerDong){
-      setGroupStyle(g,"normal");
-    }
+    for (const g of state.layerDong) setGroupStyle(g,"normal");
+
+    // 이름/배지 적용
+    const { outDong } = buildVendorCountMaps();
+    applyLabelsAndBadges(
+      state.layerDong,
+      (g) => g.displayName,
+      (g) => outDong.get(`${sido}||${sgg}||${g.displayName}`) || 0
+    );
 
     if (sggBounds) fitToBounds(sggBounds);
   }
@@ -1176,7 +1313,7 @@
 
   function renderListSido(){
     const list = document.getElementById("levelList");
-    const m = new Map(); // sido -> count
+    const m = new Map();
     for (const r of state.records){
       if (!r.sido) continue;
       m.set(r.sido, (m.get(r.sido)||0) + 1);
@@ -1190,7 +1327,7 @@
   function renderListSgg(){
     const list = document.getElementById("levelList");
     const { sido } = state.scope;
-    const m = new Map(); // sgg -> count
+    const m = new Map();
     for (const r of state.records){
       if (r.sido !== sido) continue;
       if (!r.sgg) continue;
@@ -1205,7 +1342,7 @@
   function renderListDong(){
     const list = document.getElementById("levelList");
     const { sido, sgg } = state.scope;
-    const m = new Map(); // dong -> count
+    const m = new Map();
     for (const r of state.records){
       if (r.sido !== sido) continue;
       if (r.sgg !== sgg) continue;
@@ -1216,19 +1353,11 @@
       .sort((a,b)=>a[0].localeCompare(b[0],"ko"))
       .map(([d,c]) => ({ key:d, label:d, count:c }));
     renderList(list, items, null, (it) => {
-      // 동 클릭은 scope 확장은 아직 안함. (원하면 다음 단계에서 동 scope 추가 가능)
-      // 대신 지도에서 해당 dong 폴리곤이 있으면 overlay 표시
-      const match = state.layerDong.find(g => {
-        const props = g.feature.properties || {};
-        const adm = props.adm_nm || props.ADM_NM || "";
-        const tks = String(adm).split(/\s+/).filter(Boolean);
-        const dn = tks.length ? tks[tks.length - 1] : g.name;
-        return dn === it.key;
-      });
+      const match = state.layerDong.find(g => g.displayName === it.key);
       if (match) {
         fitToBounds(match.bounds);
-        const center = match.bounds.getSouthWest(); // 간단히 한 점 사용
-        showOverlay(center, it.key, "동/읍/면");
+        const cnt = countUniqueVendorsIn({ level:"dong", sido, sgg, dong: it.key });
+        showCountToast(match.center, cnt);
       }
     });
   }
@@ -1242,22 +1371,16 @@
 
     const tokens = q.split(/\s+|\/|,/).filter(Boolean);
 
-    // 1) 시도 먼저 찾기
     let sido = null;
     for (const t of tokens){
       const s = normSido(t);
       if (s) { sido = s; break; }
     }
-
-    // 2) 시도 없으면 현재 scope 시도 유지(있으면)
     if (!sido && state.scope.level !== "all") sido = state.scope.sido;
 
-    // 3) 시군구 후보: 시도 이후 토큰들 중 조합
     let sgg = null;
     if (sido){
-      // 데이터 내에서 가장 잘 맞는 sgg 찾기
       const candidates = Array.from(new Set(state.records.filter(r=>r.sido===sido).map(r=>r.sgg).filter(Boolean)));
-      // 토큰 조합으로 포함 매칭
       const joined = tokens.join(" ");
       sgg = candidates.find(c => joined.includes(c)) || null;
     }
@@ -1284,12 +1407,8 @@
 
   function applyRaw(rawText){
     state.records = parseRaw(rawText);
-
-    // 시도 비어있는 레코드는 현재 단계에서 표시/경계 필터링이 힘드니 그대로 두되,
-    // 검색/필터에서 혼선을 줄이려면 여기서 보정 로직을 더 넣으면 됨.
     state.vendors = buildVendors(state.records);
     syncVendorSelect();
-
     document.getElementById("badgeCount").textContent = `데이터: ${state.records.length}건`;
   }
 
@@ -1334,8 +1453,6 @@ ${dv}
       center: new kakao.maps.LatLng(36.5, 127.9),
       level: 13
     });
-
-    // 폴리곤 클릭 시 “사라지는 느낌” 방지: 초기부터 시도 레이어를 그리고 유지
     render();
   }
 
@@ -1353,7 +1470,6 @@ ${dv}
       const raw = rawEl.value;
       localStorage.setItem(LS_KEY, raw);
       applyRaw(raw);
-      // 경계 캐시/레이어는 유지하되 scope 전체부터 다시 안정적으로 랜더
       setScopeAll();
     });
 
@@ -1366,6 +1482,7 @@ ${dv}
 
     document.getElementById("vendorSel").addEventListener("change", (e) => {
       state.vendorFilter = e.target.value || "";
+      // 필터 변경 시 지도 라벨/배지도 같이 갱신되어야 하므로 render()
       render();
     });
 
@@ -1386,7 +1503,6 @@ ${dv}
       if (act === "scopeUp") scopeUp();
     });
 
-    // Kakao load
     kakao.maps.load(initMap);
   }
 

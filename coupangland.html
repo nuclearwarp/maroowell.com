@@ -430,12 +430,13 @@
     SIGUNGU_URLS: [
       "https://cdn.jsdelivr.net/gh/southkorea/southkorea-maps@master/kostat/2018/json/skorea-municipalities-2018-geo.json",
     ],
+    // 원격 먼저 → 로컬(404 스팸 줄이기)
     DONG_URL_TEMPLATE: (sidoName) => {
       const fname = `hangjeongdong_${sidoName}.geojson`;
       return [
-        `./boundaries/${fname}`,
         `https://cdn.jsdelivr.net/gh/raqoon886/Local_HangJeongDong@master/${fname}`,
         `https://raw.githubusercontent.com/raqoon886/Local_HangJeongDong/master/${fname}`,
+        `./boundaries/${fname}`,
       ];
     }
   };
@@ -459,25 +460,19 @@
 대구광역시 동구 검사동 정직한물류
 대구광역시 달서구 감삼동 에스제이
 대구광역시 수성구 만촌동 수성영업소
-대구광역시 북구 국우동 제일로직스
-대구광역시 북구 학정동 제일로직스
-대구광역시 북구 동호동 제일로직스
-대구광역시 북구 사수동 제일로직스
-대구광역시 북구 금호동 제일로직스
-대구광역시 북구 팔달동 제일로직스
-대구광역시 북구 침산동 제일로직스
-대구광역시 북구 대현동 제일로직스
-대구광역시 동구 신천동 제일로직스
-대구광역시 동구 신암동 제일로직스
-대구광역시 수성구 두산동 제일로직스
-대구광역시 수성구 파동 제일로직스
-대구광역시 수성구 범어동 제일로직스
-대구광역시 달서구 두류동 제일로직스
-대구광역시 달서구 성당동 제일로직스
-대구광역시 남구 대명동 제일로직스
-대구광역시 북구 칠성동 제일로직스
-대구광역시 북구 동변동 제일로직스
-대구광역시 북구 서변동 제일로직스`;
+대구광역시 북구 국우동 제일로지스
+대구광역시 북구 학정동 제일로지스
+대구광역시 북구 동호동 제일로지스
+대구광역시 북구 사수동 제일로지스
+대구광역시 북구 금호동 제일로지스
+대구광역시 북구 팔달동 제일로지스
+대구광역시 북구 침산동 제일로지스
+대구광역시 북구 대현동 제일로지스
+대구광역시 동구 신천동 제일로지스
+대구광역시 동구 신암동 제일로지스
+대구광역시 수성구 두산동 제일로지스
+대구광역시 수성구 파동 제일로지스
+경상북도 경산시 중산동 제일로지스`;
 
   const els = {
     map: document.getElementById('map'),
@@ -522,31 +517,43 @@
     polygons: [],
     labels: [],
     renderSeq: 0,
+
+    // 렌더 겹침 방지(“뜨다 마네” 방지)
+    renderInFlight: false,
+    pendingRender: false,
   };
 
   function showLoading(on){ els.mapLoading.classList.toggle('show', !!on); }
   function norm(s){ return (s||"").toString().trim(); }
   function normLoose(s){ return norm(s).replace(/\s+/g,""); }
 
-  // “범어1동” -> “범어동”
-  function dongKey(s){
-    let x = normLoose(s);
-    x = x.replace(/(\d+)동$/u, "동");
-    x = x.replace(/제(\d+)동$/u, "동");
+  // ===== 동 정규화 핵심 (일부만 나오는 문제 해결 포인트) =====
+  // - 범어1동/범어2동/제1동 -> 범어동
+  // - 동인동1가/동인동2가 -> 동인동
+  // - 칠성동1가/칠성동2가 -> 칠성동
+  function dongCanon(s){
+    let x = norm(s);
+    if (!x) return "";
+    x = x.replace(/\s+/g,"");
+
+    // “제1동/1동/2동 …” -> “동”
+    x = x.replace(/제?\d+동$/u, "동");
+
+    // “…1가/…2가” -> 가 제거(대표 동으로 합치기)
+    x = x.replace(/\d+가$/u, "");
+
+    // 혹시 남아있을 수 있는 “제1가” 같은 형태 정리
+    x = x.replace(/제?\d+가$/u, "");
+
     return x;
   }
-  function sigunguKey(s){ return normLoose(s); }
 
+  function sigunguKey(s){ return normLoose(s); }
   function sameSigungu(a,b){
     const A = sigunguKey(a), B = sigunguKey(b);
     if (!A || !B) return false;
     if (A === B) return true;
     return A.includes(B) || B.includes(A);
-  }
-  function sameDong(a,b){
-    const A = dongKey(a), B = dongKey(b);
-    if (!A || !B) return false;
-    return A === B;
   }
 
   const SIDO_ALIAS = new Map([
@@ -648,7 +655,7 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
-  // 주소 파서
+  // ===== 데이터 파싱 =====
   const GU_TO_SIDO = new Map([
     ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],["일산서구","경기도"],
   ]);
@@ -733,6 +740,7 @@
     const vf = norm(state.vendorFilter);
     return state.records.filter(r => !vf || r.vendor === vf);
   }
+
   function recordsInScope(){
     const recs = filteredRecords();
     const s = norm(state.selectedSido);
@@ -743,12 +751,14 @@
       return true;
     });
   }
+
   function vendorDistList(){
     const recs = recordsInScope();
     const m = new Map();
     for (const r of recs) m.set(r.vendor, (m.get(r.vendor)||0)+1);
     return Array.from(m.entries()).sort((a,b)=>a[0].localeCompare(b[0],'ko'));
   }
+
   function dongByVendorList(){
     const recs = recordsInScope();
     const m = new Map();
@@ -834,27 +844,13 @@
       if (lv >= 6) return "sigungu";
       return "dong";
     }
-
     if (hasSido && !hasSigungu){
       if (lv >= 10) return "sido";
       if (lv >= 7) return "sigungu";
       return "dong";
     }
-
     if (lv >= 8) return "sigungu";
     return "dong";
-  }
-
-  function vendorCountForRegion(level, sidoName, sigunguName, dongName){
-    const vf = norm(state.vendorFilter);
-    const recs = state.records.filter(r => {
-      if (vf && r.vendor !== vf) return false;
-      if (sidoName && normLoose(r.sido) !== normLoose(sidoName)) return false;
-      if (sigunguName && !sameSigungu(r.sigungu, sigunguName)) return false;
-      if (dongName && !sameDong(r.dong, dongName)) return false;
-      return true;
-    });
-    return new Set(recs.map(r => r.vendor)).size;
   }
 
   function makeLabelOverlay(lat, lng, name, count, onClick){
@@ -931,18 +927,11 @@
   function getSigunguSidoFromFeature(f){
     const p = f?.properties || {};
     const candidates = [
-      p.CTP_KOR_NM,
-      p.province,
-      p.NAME_1,
-      p.SIDO,
-      p.sido,
-      // adm_nm이나 name 전체에서 "서울특별시" 같은 게 들어있는 경우
+      p.CTP_KOR_NM, p.province, p.NAME_1, p.SIDO, p.sido,
       norm(p.adm_nm||"").split(/\s+/g)[0],
-      // name이 "대구광역시 중구"처럼 공백 포함일 때만 첫 토큰 사용
       (norm(p.name||"").includes(" ") ? norm(p.name||"").split(/\s+/g)[0] : ""),
       (norm(p.SIG_KOR_NM||"").includes(" ") ? norm(p.SIG_KOR_NM||"").split(/\s+/g)[0] : ""),
     ].map(x => normalizeSidoName(norm(x))).filter(Boolean);
-
     return candidates[0] || "";
   }
 
@@ -954,13 +943,25 @@
     return n;
   }
 
+  function vendorCountForCanonDong(sidoName, sigunguName, canonDong){
+    const vf = norm(state.vendorFilter);
+    const recs = state.records.filter(r => {
+      if (vf && r.vendor !== vf) return false;
+      if (sidoName && normLoose(r.sido) !== normLoose(sidoName)) return false;
+      if (sigunguName && !sameSigungu(r.sigungu, sigunguName)) return false;
+      if (canonDong && dongCanon(r.dong) !== canonDong) return false;
+      return true;
+    });
+    return new Set(recs.map(r => r.vendor)).size;
+  }
+
   async function renderMap(){
     const mySeq = ++state.renderSeq;
-    let desired = getDesiredLayerByZoom();
-
+    state.renderInFlight = true;
     showLoading(true);
 
     try{
+      let desired = getDesiredLayerByZoom();
       const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
       if (mySeq !== state.renderSeq) return;
 
@@ -970,12 +971,11 @@
       const focusSido = state.selectedSido || pickSidoByCenter(sidoGeo, centerPt) || "";
       const focusSigungu = state.selectedSigungu || pickSigunguByCenter(sigunguGeo, focusSido, centerPt) || "";
 
-      // 동 로드 실패시 빈화면 방지: sigungu로 강등
       let dongGeo = null;
       if (desired === "dong"){
         if (!focusSido){
           desired = "sigungu";
-        }else{
+        } else {
           dongGeo = await tryLoadDongForSido(focusSido);
           if (!dongGeo) desired = "sigungu";
         }
@@ -986,11 +986,9 @@
 
       clearMapObjects();
 
-      // 스타일
       const styleSIDO = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.55, fillColor:'#2563eb', fillOpacity:0.04 };
       const styleSIG  = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.60, fillColor:'#2563eb', fillOpacity:0.05 };
       const styleDONG = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.65, fillColor:'#2563eb', fillOpacity:0.06 };
-      // 선택된 시도 외곽선은 항상 보이게(“시 단위도 안뜸” 차단)
       const styleSIDO_HL = { strokeWeight: 5, strokeColor:'#1d4ed8', strokeOpacity:0.75, fillColor:'#1d4ed8', fillOpacity:0.01 };
 
       if (desired === "sido"){
@@ -1008,23 +1006,20 @@
           const nm = normalizeSidoName(f.__fixedName || getFeatureName(f));
           const c = featureCentroid(f);
           if (!c) continue;
-          const vcnt = vendorCountForRegion("sido", nm, "", "");
+          const vcnt = new Set(filteredRecords().filter(r => normLoose(r.sido)===normLoose(nm)).map(r=>r.vendor)).size;
           makeLabelOverlay(c.lat, c.lng, nm, vcnt, () => selectSido(nm, f));
         }
         return;
       }
 
-      // ===== sigungu / dong 공통: 선택(또는 중심) 시도 외곽선 먼저 그림 =====
+      // 선택/중심 시도 외곽선 항상 표시
       if (focusSido){
         const sidoFeat = findSidoFeatureByName(sidoGeo, focusSido);
-        if (sidoFeat){
-          drawFeaturePolygons([sidoFeat], styleSIDO_HL, () => {});
-        }
+        if (sidoFeat) drawFeaturePolygons([sidoFeat], styleSIDO_HL, () => {});
       }
 
       if (desired === "sigungu"){
         const focus = normalizeSidoName(focusSido);
-
         const featsAll = sigunguGeo.features || [];
         let feats = featsAll;
 
@@ -1032,30 +1027,20 @@
           feats = featsAll.filter(f => {
             const p = f.properties || {};
             const s = getSigunguSidoFromFeature(f);
-
-            // 1) 명시 필드로 매칭
             if (s && normLoose(s) === normLoose(focus)) return true;
 
-            // 2) name/adm_nm 전체문자열에 focus가 포함되는 케이스
             const blob = `${norm(p.name)} ${norm(p.adm_nm)} ${norm(p.SIG_KOR_NM)} ${norm(p.NAME_1)} ${norm(p.province)} ${norm(p.CTP_KOR_NM)}`;
             if (blob && blob.includes(focus)) return true;
 
-            // 3) 정보가 너무 빈약하면 일단 살려둠(빈 화면 방지)
             if (!s && !blob.trim()) return true;
-
             return false;
           });
 
-          // 핵심: 필터가 0개면 “필터 포기하고 전체를 그림”
-          if (feats.length === 0){
-            console.warn("[SIGUNGU] filter result=0, fallback to ALL features");
-            feats = featsAll;
-          }
+          if (feats.length === 0) feats = featsAll; // 빈 화면 방지
         }
 
         drawFeaturePolygons(feats, styleSIG, (f, nm0) => {
           const nmRaw = norm(nm0);
-          // 라벨은 보통 “중구”처럼만 나오게 시도명 prefix 제거
           const nm = stripSidoPrefix(nmRaw, focus);
           selectSigungu(focus, nm || nmRaw, f);
         });
@@ -1065,15 +1050,32 @@
           const nm = stripSidoPrefix(raw, focus) || raw;
           const c = featureCentroid(f);
           if (!c) continue;
-          const vcnt = vendorCountForRegion("sigungu", focus, nm, "");
+
+          const vcnt = new Set(
+            filteredRecords()
+              .filter(r => (!focus || normLoose(r.sido)===normLoose(focus)) && sameSigungu(r.sigungu, nm))
+              .map(r => r.vendor)
+          ).size;
+
           makeLabelOverlay(c.lat, c.lng, nm, vcnt, () => selectSigungu(focus, nm, f));
         }
         return;
       }
 
-      // dong
+      // ===== dong =====
       const focusS = normalizeSidoName(focusSido);
       const focusG = norm(focusSigungu);
+
+      // 1) “데이터 있는 동” 기준의 canonical set 만들기 (여기가 핵심)
+      const vf = norm(state.vendorFilter);
+      const dataCanonSet = new Set(
+        state.records
+          .filter(r => (!vf || r.vendor===vf) &&
+                       (!focusS || normLoose(r.sido)===normLoose(focusS)) &&
+                       (!focusG || sameSigungu(r.sigungu, focusG)))
+          .map(r => dongCanon(r.dong))
+          .filter(Boolean)
+      );
 
       const featsAll = dongGeo?.features || [];
       const feats = featsAll.filter(f => {
@@ -1091,33 +1093,53 @@
       const featsToDraw = [];
       for (const f of feats){
         const n = dongGetNames(f);
-        const dongName = n.dong;
-        const vcnt = vendorCountForRegion("dong", focusS, focusG, dongName);
-        if (state.showAllDongs || vcnt > 0){
-          f.__dongName = dongName;
+        const rawDong = n.dong;
+        const canon = dongCanon(rawDong);
+        f.__dongRaw = rawDong;
+        f.__dongCanon = canon;
+
+        if (state.showAllDongs){
           featsToDraw.push(f);
+        } else {
+          // “데이터 있는 동”이면: canon 기준 포함이면 무조건 그림 (1가/2가도 같이 살림)
+          if (canon && dataCanonSet.has(canon)) featsToDraw.push(f);
         }
       }
 
       drawFeaturePolygons(featsToDraw, styleDONG, () => {});
 
+      // 라벨은 canon 기준 1회만
+      const labeled = new Set();
       for (const f of featsToDraw){
-        const n = dongGetNames(f);
-        const dongName = f.__dongName || n.dong;
-        const vcnt = vendorCountForRegion("dong", focusS, focusG, dongName);
-        if (vcnt <= 0) continue;
+        const canon = f.__dongCanon || dongCanon(dongGetNames(f).dong);
+        if (!canon) continue;
+
+        // showAllDongs=true라도 라벨은 “데이터 있는 동”만(0 라벨 난사 방지)
+        if (!dataCanonSet.has(canon)) continue;
+        if (labeled.has(canon)) continue;
 
         const c = featureCentroid(f);
         if (!c) continue;
-        makeLabelOverlay(c.lat, c.lng, dongName, vcnt, () => {});
+
+        const vcnt = vendorCountForCanonDong(focusS, focusG, canon);
+        if (vcnt <= 0) continue;
+
+        labeled.add(canon);
+        makeLabelOverlay(c.lat, c.lng, canon, vcnt, () => {});
       }
 
     } finally {
       if (mySeq === state.renderSeq) showLoading(false);
+      state.renderInFlight = false;
+
+      if (state.pendingRender){
+        state.pendingRender = false;
+        scheduleRender();
+      }
     }
   }
 
-  // 중심점 기반 focus 선택(폴리곤 포함판정)
+  // 중심점 기반 focus 선택
   function pointInRing(pt, ring){
     let inside = false;
     for (let i=0, j=ring.length-1; i<ring.length; j=i++){
@@ -1161,7 +1183,7 @@
     const candidates = feats.filter(f => {
       if (!fs) return true;
       const s = getSigunguSidoFromFeature(f);
-      if (!s) return true; // 빈 화면 방지
+      if (!s) return true;
       return normLoose(s) === normLoose(fs);
     });
 
@@ -1238,6 +1260,10 @@
 
   let renderTimer = null;
   function scheduleRender(){
+    if (state.renderInFlight){
+      state.pendingRender = true;
+      return;
+    }
     if (renderTimer) clearTimeout(renderTimer);
     renderTimer = setTimeout(() => { renderMap().catch(console.error); }, 80);
   }
@@ -1292,9 +1318,10 @@
       return;
     }
 
-    const dongSet = new Set(state.records.map(r => dongKey(r.dong)));
-    if (dongSet.has(dongKey(q))){
-      const r = state.records.find(x => sameDong(x.dong, q));
+    // 동 검색도 canon 기준으로
+    const dongSet = new Set(state.records.map(r => dongCanon(r.dong)));
+    if (dongSet.has(dongCanon(q))){
+      const r = state.records.find(x => dongCanon(x.dong) === dongCanon(q));
       if (r){
         state.selectedSido = r.sido;
         state.selectedSigungu = r.sigungu;
@@ -1332,7 +1359,7 @@
   }
 
   function exportUniqueList(){
-    const rows = recordsInScope().map(r => `${r.sido} ${r.sigungu} ${r.dong} ${r.vendor}`)
+    const rows = recordsInScope().map(r => `${r.sido} ${r.sigungu} ${r.dong} ${normalizeVendorName(r.vendor)}`)
       .sort((a,b)=>a.localeCompare(b,'ko'));
     const text = rows.join("\n");
     navigator.clipboard.writeText(text).then(() => alert("유니크 목록 복사 완료"))

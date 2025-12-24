@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>Maroowell Login</title>
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0f1a2d; --txt:#e6eefc; --muted:#93a4c7;
+      --line:rgba(255,255,255,.10); --btn:#162744; --btn2:#1a2f55;
+      --ok:#1a5a3a; --danger:#6b1b1b; --cyan:#00C2FF;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif; background:var(--bg); color:var(--txt);}
+    .wrap{min-height:100%; display:flex; align-items:center; justify-content:center; padding:24px;}
+    .card{
+      width:100%; max-width:520px;
+      background:linear-gradient(180deg,#0f1a2d,#091225);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 12px 40px rgba(0,0,0,.35);
+    }
+    .head{padding:10px 10px 14px}
+    .title{font-size:22px; font-weight:900;}
+    .sub{margin-top:6px; font-size:13px; color:var(--muted); line-height:1.45;}
+    .tabs{display:flex; gap:8px; padding:10px;}
+    .tab{
+      flex:1; padding:10px 12px; border-radius:999px; border:1px solid var(--line);
+      background:rgba(0,0,0,.18); color:var(--txt); font-weight:900; cursor:pointer;
+    }
+    .tab.active{border-color:rgba(0,194,255,.45); background:rgba(0,194,255,.10)}
+    .panel{padding:10px;}
+    .group{
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.18);
+      border-radius:14px;
+      padding:14px;
+      margin-bottom:12px;
+    }
+    .label{font-size:12px; color:var(--muted); margin:6px 0;}
+    input{
+      width:100%; padding:12px; border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.20); color:var(--txt); outline:none;
+    }
+    input:focus{border-color:rgba(0,194,255,.45)}
+    .row{display:flex; gap:10px; margin-top:10px; align-items:center;}
+    .btn{
+      flex:1; padding:12px 14px; border-radius:12px; border:1px solid var(--line);
+      background:var(--btn); color:var(--txt); font-weight:900; cursor:pointer;
+    }
+    .btn:hover{background:var(--btn2)}
+    .btn.cyan{background:linear-gradient(135deg,var(--cyan),#0088cc); border-color:rgba(0,194,255,.55); color:#fff;}
+    .btn.cyan:hover{filter:brightness(1.06)}
+    .btn.ok{background:rgba(26,90,58,.35); border-color:rgba(0,255,140,.18)}
+    .btn.ok:hover{background:rgba(26,90,58,.55)}
+    .status{
+      margin-top:10px; font-size:12px; padding:10px 12px; border-radius:12px;
+      border:1px solid var(--line); background:rgba(0,0,0,.18); white-space:pre-wrap; line-height:1.5;
+    }
+    a{color:var(--cyan); text-decoration:none}
+    a:hover{text-decoration:underline}
+    code{color:var(--cyan)}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head">
+      <div class="title">Maroowell Login</div>
+      <div class="sub">
+        초대 기반 운영(Invite Only) 권장: Supabase에서 Public Sign-ups OFF로 두는 게 맞습니다.<br/>
+        로그인 성공 시 <code>index.html</code>로 이동합니다.
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" id="tabLogin">로그인</button>
+      <button class="tab" id="tabAccount">비밀번호 설정</button>
+      <button class="tab" id="tabHelp">안내</button>
+    </div>
+
+    <div class="panel" id="panelLogin">
+      <div class="group">
+        <div class="label">이메일</div>
+        <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
+        <div class="label" style="margin-top:10px;">비밀번호</div>
+        <input id="password" type="password" placeholder="********" autocomplete="current-password" />
+        <div class="row">
+          <button class="btn cyan" id="btnSignIn">로그인</button>
+          <button class="btn" id="btnMagic">이메일 링크 로그인</button>
+        </div>
+        <div class="status" id="statusLogin">READY</div>
+      </div>
+
+      <div class="group">
+        <div class="sub" style="margin:0;">
+          이미 로그인된 상태면 자동으로 이동합니다.<br/>
+          공유 페이지는 <code>/share.html</code>만 공개로 유지하세요.
+        </div>
+        <div class="status" id="statusSession">세션 확인 중...</div>
+        <div class="row">
+          <button class="btn ok" id="btnGoIndex">index.html로 이동</button>
+          <button class="btn" id="btnLogout">로그아웃</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="panelAccount" style="display:none;">
+      <div class="group">
+        <div class="sub" style="margin:0 0 10px;">
+          초대메일로 가입한 경우 여기서 비밀번호를 설정할 수 있습니다(로그인 상태 필요).
+        </div>
+        <div class="label">새 비밀번호</div>
+        <input id="newPassword" type="password" placeholder="********" autocomplete="new-password" />
+        <div class="label" style="margin-top:10px;">새 비밀번호 확인</div>
+        <input id="newPassword2" type="password" placeholder="********" autocomplete="new-password" />
+        <div class="row">
+          <button class="btn ok" id="btnUpdatePassword">비밀번호 설정/변경</button>
+        </div>
+        <div class="status" id="statusAccount">READY</div>
+      </div>
+    </div>
+
+    <div class="panel" id="panelHelp" style="display:none;">
+      <div class="group">
+        <div class="sub" style="margin:0;">
+          <b>권장 구조</b><br/>
+          - <code>login.html</code>: 로그인 게이트(첫 화면)<br/>
+          - <code>index.html</code>: 앱(로그인 필수)<br/>
+          - <code>share.html</code>: 공개<br/><br/>
+          <b>Supabase Auth 설정</b><br/>
+          - Public sign-ups OFF<br/>
+          - Redirect URL: <code>https://maroowell.com/login.html</code> 등록
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // =========================
+  // TODO: 여기에 Supabase 값 넣기
+  // =========================
+  const SUPABASE_URL = "https://YOUR_PROJECT.supabase.co";
+  const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+  const DEFAULT_NEXT = "/index.html";
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const $ = (id) => document.getElementById(id);
+
+  const tabLogin = $("tabLogin");
+  const tabAccount = $("tabAccount");
+  const tabHelp = $("tabHelp");
+  const panelLogin = $("panelLogin");
+  const panelAccount = $("panelAccount");
+  const panelHelp = $("panelHelp");
+
+  const email = $("email");
+  const password = $("password");
+  const btnSignIn = $("btnSignIn");
+  const btnMagic = $("btnMagic");
+  const statusLogin = $("statusLogin");
+
+  const statusSession = $("statusSession");
+  const btnGoIndex = $("btnGoIndex");
+  const btnLogout = $("btnLogout");
+
+  const newPassword = $("newPassword");
+  const newPassword2 = $("newPassword2");
+  const btnUpdatePassword = $("btnUpdatePassword");
+  const statusAccount = $("statusAccount");
+
+  const params = new URLSearchParams(location.search);
+  const next = params.get("next") || DEFAULT_NEXT;
+
+  function showTab(which) {
+    tabLogin.classList.toggle("active", which === "login");
+    tabAccount.classList.toggle("active", which === "account");
+    tabHelp.classList.toggle("active", which === "help");
+
+    panelLogin.style.display = which === "login" ? "" : "none";
+    panelAccount.style.display = which === "account" ? "" : "none";
+    panelHelp.style.display = which === "help" ? "" : "none";
+  }
+
+  tabLogin.onclick = () => showTab("login");
+  tabAccount.onclick = () => showTab("account");
+  tabHelp.onclick = () => showTab("help");
+
+  function setStatus(el, msg){ el.textContent = msg; }
+
+  function safeNextUrl(u) {
+    // 외부 오픈리다이렉트 방지: 같은 origin의 상대경로만 허용
+    if (!u) return DEFAULT_NEXT;
+    if (u.startsWith("http://") || u.startsWith("https://")) return DEFAULT_NEXT;
+    if (!u.startsWith("/")) return DEFAULT_NEXT;
+    return u;
+  }
+
+  async function refreshSession() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setStatus(statusSession, "세션 없음 (미로그인)");
+      return null;
+    }
+    setStatus(statusSession, `로그인됨: ${session.user.email || session.user.id}`);
+    return session;
+  }
+
+  async function redirectIfLoggedIn() {
+    const s = await refreshSession();
+    if (s) {
+      location.replace(safeNextUrl(next));
+    }
+  }
+
+  btnGoIndex.onclick = async () => {
+    const s = await refreshSession();
+    if (!s) return alert("로그인이 필요합니다.");
+    location.href = safeNextUrl(next);
+  };
+
+  btnLogout.onclick = async () => {
+    await supabase.auth.signOut();
+    await refreshSession();
+    alert("로그아웃 완료");
+  };
+
+  btnSignIn.onclick = async () => {
+    try {
+      setStatus(statusLogin, "로그인 중...");
+      const em = (email.value || "").trim().toLowerCase();
+      const pw = password.value || "";
+      if (!em) throw new Error("이메일을 입력하세요.");
+      if (!pw) throw new Error("비밀번호를 입력하세요.");
+
+      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
+      if (error) throw error;
+
+      setStatus(statusLogin, "로그인 성공 → 이동");
+      location.replace(safeNextUrl(next));
+    } catch (e) {
+      setStatus(statusLogin, "로그인 실패: " + (e?.message || String(e)));
+    }
+  };
+
+  btnMagic.onclick = async () => {
+    try {
+      setStatus(statusLogin, "이메일 링크 발송 중...");
+      const em = (email.value || "").trim().toLowerCase();
+      if (!em) throw new Error("이메일을 입력하세요.");
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email: em,
+        options: {
+          // 메일 링크 클릭 후 돌아올 주소
+          emailRedirectTo: location.origin + "/login.html"
+        }
+      });
+      if (error) throw error;
+
+      setStatus(statusLogin, "이메일 링크를 보냈습니다. 메일함 확인 후 링크 클릭하세요.");
+    } catch (e) {
+      setStatus(statusLogin, "발송 실패: " + (e?.message || String(e)));
+    }
+  };
+
+  btnUpdatePassword.onclick = async () => {
+    try {
+      setStatus(statusAccount, "비밀번호 변경 중...");
+      const s = await refreshSession();
+      if (!s) throw new Error("로그인이 필요합니다.");
+
+      const p1 = newPassword.value || "";
+      const p2 = newPassword2.value || "";
+      if (p1.length < 8) throw new Error("비밀번호는 최소 8자 이상 권장");
+      if (p1 !== p2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
+
+      const { error } = await supabase.auth.updateUser({ password: p1 });
+      if (error) throw error;
+
+      setStatus(statusAccount, "비밀번호 설정/변경 완료");
+      newPassword.value = "";
+      newPassword2.value = "";
+    } catch (e) {
+      setStatus(statusAccount, "실패: " + (e?.message || String(e)));
+    }
+  };
+
+  (async () => {
+    // 세션 변화 감지
+    supabase.auth.onAuthStateChange(async () => {
+      await refreshSession();
+      // 로그인 이벤트면 이동
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) location.replace(safeNextUrl(next));
+    });
+
+    // 이미 로그인 상태면 바로 이동
+    await redirectIfLoggedIn();
+  })();
+})();
+</script>
+</body>
+</html>

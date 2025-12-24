@@ -1,0 +1,1310 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>CoupangLand | MaruWell</title>
+
+  <meta name="robots" content="noindex" />
+  <meta name="description" content="지역별 대리점/라우트 현황을 시/도 지도 기반으로 조회하는 임시 페이지" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="CoupangLand | MaruWell" />
+  <meta property="og:description" content="시/도 지도 클릭 → 시/군/구 → 동 단위 라우트/대리점 현황 조회" />
+  <meta property="og:site_name" content="MaroWell" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#111a2e;
+      --panel2:#0f1730;
+      --line:rgba(255,255,255,.10);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.68);
+      --muted2:rgba(255,255,255,.54);
+      --accent:#6ee7ff;
+      --accent2:#a78bfa;
+      --danger:#ff4d4f;
+      --ok:#34d399;
+      --chip:rgba(255,255,255,.08);
+      --chip2:rgba(255,255,255,.12);
+      --shadow: 0 14px 40px rgba(0,0,0,.35);
+      --radius: 16px;
+      --radius2: 12px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background: radial-gradient(1100px 700px at 20% 0%, rgba(110,231,255,.10), transparent 65%),
+                  radial-gradient(900px 650px at 90% 20%, rgba(167,139,250,.12), transparent 60%),
+                  var(--bg);
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    }
+    a{color:inherit}
+    .wrap{max-width:1200px; margin:0 auto; padding:18px 16px 28px}
+    header{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:12px; padding:12px 10px 18px;
+    }
+    .brand{
+      display:flex; flex-direction:column; gap:4px;
+    }
+    .brand .title{
+      font-weight:800; letter-spacing:.2px; font-size:20px;
+      display:flex; align-items:center; gap:10px;
+    }
+    .dot{
+      width:10px; height:10px; border-radius:99px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      box-shadow: 0 0 0 6px rgba(110,231,255,.10);
+    }
+    .brand .sub{color:var(--muted); font-size:13px}
+    .headerActions{
+      display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end;
+    }
+    .btn{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.06);
+      color:var(--text);
+      border-radius: 12px;
+      padding:10px 12px;
+      font-weight:700;
+      cursor:pointer;
+      transition: .15s ease;
+      user-select:none;
+    }
+    .btn:hover{transform: translateY(-1px); background: rgba(255,255,255,.09)}
+    .btn:active{transform: translateY(0px)}
+    .btn.primary{
+      border-color: rgba(110,231,255,.45);
+      background: linear-gradient(135deg, rgba(110,231,255,.18), rgba(167,139,250,.16));
+    }
+    .btn.danger{
+      border-color: rgba(255,77,79,.40);
+      background: rgba(255,77,79,.12);
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap:14px;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns:1fr}
+      header{flex-direction:column; align-items:flex-start}
+      .headerActions{width:100%; justify-content:stretch}
+      .headerActions .btn{flex:1}
+    }
+
+    .card{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border:1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .cardHead{
+      padding:14px 14px 10px;
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(0,0,0,.10);
+    }
+    .cardHead h2{
+      margin:0; font-size:14px; letter-spacing:.2px;
+      display:flex; align-items:center; gap:10px;
+    }
+    .pill{
+      font-size:12px; font-weight:800;
+      padding:6px 10px; border-radius:999px;
+      background: rgba(255,255,255,.08);
+      border:1px solid var(--line);
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .cardBody{padding:14px}
+
+    .searchRow{
+      display:flex; gap:10px; flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+    .input{
+      flex: 1;
+      min-width: 220px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 11px 12px;
+      outline:none;
+    }
+    .input::placeholder{color: rgba(255,255,255,.45)}
+    .hint{color: var(--muted2); font-size:12px; line-height:1.45; margin-top:8px}
+
+    /* Map */
+    .mapWrap{
+      display:grid;
+      grid-template-columns: 1.05fr .95fr;
+      gap:14px;
+      align-items:start;
+    }
+    @media (max-width: 980px){
+      .mapWrap{grid-template-columns:1fr}
+    }
+    .svgBox{
+      border:1px solid var(--line);
+      border-radius: var(--radius2);
+      background: rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .kmap{
+      width:100%;
+      height:auto;
+      display:block;
+    }
+    .kmap .region{
+      stroke: rgba(255,255,255,.35);
+      stroke-width: 1.2;
+      cursor:pointer;
+      transition: .12s ease;
+      fill: hsl(210 15% 20%); /* 기본 */
+      outline:none;
+    }
+    .kmap .region[data-has="1"]{
+      /* heat(0~1)로 명도 조절 */
+      fill: hsl(195 75% calc(22% + (1 - var(--heat, 0)) * 18%));
+      stroke: rgba(110,231,255,.45);
+    }
+    .kmap .region:hover{
+      transform: translateY(-1px);
+      filter: brightness(1.15);
+    }
+    .kmap .region.selected{
+      stroke: rgba(167,139,250,.85);
+      stroke-width: 2.4;
+      filter: brightness(1.25);
+    }
+    .kmap text{
+      fill: rgba(255,255,255,.78);
+      font-size: 13px;
+      font-weight: 800;
+      pointer-events:none;
+      text-shadow: 0 1px 0 rgba(0,0,0,.55);
+    }
+
+    .side{
+      border:1px solid var(--line);
+      border-radius: var(--radius2);
+      background: rgba(255,255,255,.03);
+      padding:12px;
+    }
+
+    /* Breadcrumb */
+    .crumbs{
+      display:flex; gap:8px; flex-wrap:wrap;
+      margin-bottom:10px;
+      align-items:center;
+    }
+    .crumb{
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.05);
+      padding:7px 10px;
+      border-radius: 999px;
+      cursor:pointer;
+      font-weight: 800;
+      font-size:12px;
+      color: var(--muted);
+      transition:.12s ease;
+    }
+    .crumb:hover{background: rgba(255,255,255,.08); transform: translateY(-1px)}
+    .crumb.active{
+      color: var(--text);
+      border-color: rgba(110,231,255,.45);
+      background: rgba(110,231,255,.10);
+    }
+
+    /* Vendor chips */
+    .chips{
+      display:flex; gap:8px; flex-wrap:wrap;
+      margin-bottom:10px;
+    }
+    .chip{
+      border:1px solid var(--line);
+      background: var(--chip);
+      border-radius: 999px;
+      padding:7px 10px;
+      cursor:pointer;
+      font-size:12px;
+      font-weight: 800;
+      color: var(--muted);
+      display:flex; gap:8px; align-items:center;
+      transition:.12s ease;
+    }
+    .chip:hover{background: var(--chip2); transform: translateY(-1px)}
+    .chip.active{
+      color: var(--text);
+      border-color: rgba(167,139,250,.55);
+      background: rgba(167,139,250,.14);
+    }
+    .badge{
+      min-width: 22px;
+      text-align:center;
+      padding:2px 7px;
+      border-radius: 999px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.12);
+      color: var(--text);
+      font-weight: 900;
+      font-size: 11px;
+    }
+
+    /* Lists */
+    .list{
+      display:flex; flex-direction:column; gap:8px;
+      margin-top: 8px;
+    }
+    .item{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:10px;
+      padding:10px 10px;
+      border-radius: 12px;
+      border:1px solid var(--line);
+      background: rgba(255,255,255,.04);
+      cursor:pointer;
+      transition:.12s ease;
+    }
+    .item:hover{background: rgba(255,255,255,.07); transform: translateY(-1px)}
+    .item .left{
+      display:flex; flex-direction:column; gap:3px;
+      min-width:0;
+    }
+    .item .name{
+      font-weight: 900;
+      font-size: 13px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .item .meta{
+      font-size: 12px;
+      color: var(--muted2);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .empty{
+      border:1px dashed rgba(255,255,255,.18);
+      background: rgba(255,255,255,.03);
+      border-radius: 12px;
+      padding:12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height:1.45;
+    }
+
+    /* Data panel */
+    details{
+      border-top:1px solid var(--line);
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+    details summary{
+      cursor:pointer;
+      font-weight: 900;
+      color: var(--text);
+      list-style:none;
+      user-select:none;
+    }
+    details summary::-webkit-details-marker{display:none}
+    .textarea{
+      width:100%;
+      min-height: 220px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.22);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 12px;
+      outline:none;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Noto Sans Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .rowBtns{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
+    .footNote{margin-top:10px; color: var(--muted2); font-size:12px; line-height:1.45}
+    .statLine{
+      margin-top:10px;
+      display:flex; gap:8px; flex-wrap:wrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .statLine b{color: var(--text)}
+    .toast{
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      max-width: 360px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(10,16,32,.92);
+      box-shadow: var(--shadow);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.35;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: .18s ease;
+      pointer-events:none;
+      z-index: 9999;
+    }
+    .toast.show{
+      opacity: 1;
+      transform: translateY(0px);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="title"><span class="dot"></span> CoupangLand <span class="pill">프론트 임시 MVP</span></div>
+        <div class="sub">시/도 지도 기반 → 시/군/구 → 동 단위로 대리점/라우트 현황을 드릴다운 조회합니다. (백엔드 없음 / localStorage 저장)</div>
+      </div>
+
+      <div class="headerActions">
+        <button class="btn primary" id="btnReset">전체 보기</button>
+        <button class="btn" id="btnCopy">현재 화면 요약 복사</button>
+        <button class="btn danger" id="btnClear">데이터 초기화</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <!-- Left -->
+      <div class="card">
+        <div class="cardHead">
+          <h2>지도 기반 조회</h2>
+          <span class="pill" id="pillData">데이터: 0건</span>
+        </div>
+        <div class="cardBody">
+          <div class="searchRow">
+            <input class="input" id="q" placeholder="검색: 예) 영등포구 / 대림동 / 용인시 수지구 / 투네스트" />
+            <button class="btn" id="btnSearch">검색</button>
+          </div>
+
+          <div class="mapWrap">
+            <div class="svgBox" aria-label="대한민국 시/도 지도">
+              <!-- 임시 시/도 지도 (정확한 행정경계 SVG로 교체 가능) -->
+              <svg class="kmap" viewBox="0 0 360 540" role="img" aria-labelledby="mapTitle">
+                <title id="mapTitle">대한민국 시/도 선택 지도</title>
+
+                <!-- Gangwon -->
+                <path class="region" id="R_GANGWON" data-sido="강원특별자치도" d="M215 40 L340 80 L330 205 L265 238 L215 180 Z"></path>
+                <text x="260" y="135">강원</text>
+
+                <!-- Gyeonggi -->
+                <path class="region" id="R_GYEONGGI" data-sido="경기도" d="M120 65 L215 40 L215 180 L170 205 L110 155 L95 110 Z"></path>
+                <text x="140" y="140">경기</text>
+
+                <!-- Seoul -->
+                <path class="region" id="R_SEOUL" data-sido="서울특별시" d="M135 108 L155 108 L155 126 L135 126 Z"></path>
+                <text x="138" y="122" style="font-size:11px;">서울</text>
+
+                <!-- Incheon -->
+                <path class="region" id="R_INCHEON" data-sido="인천광역시" d="M70 85 L120 65 L95 110 L65 118 Z"></path>
+                <text x="72" y="110" style="font-size:11px;">인천</text>
+
+                <!-- Chungnam -->
+                <path class="region" id="R_CHUNGNAM" data-sido="충청남도" d="M70 175 L170 205 L160 290 L85 270 L55 235 Z"></path>
+                <text x="88" y="235">충남</text>
+
+                <!-- Sejong -->
+                <path class="region" id="R_SEJONG" data-sido="세종특별자치시" d="M148 214 L166 214 L166 232 L148 232 Z"></path>
+                <text x="149" y="228" style="font-size:10px;">세종</text>
+
+                <!-- Daejeon -->
+                <path class="region" id="R_DAEJEON" data-sido="대전광역시" d="M140 244 L162 244 L162 264 L140 264 Z"></path>
+                <text x="141" y="259" style="font-size:10px;">대전</text>
+
+                <!-- Chungbuk -->
+                <path class="region" id="R_CHUNGBUK" data-sido="충청북도" d="M170 205 L265 238 L250 315 L160 290 Z"></path>
+                <text x="190" y="265">충북</text>
+
+                <!-- Gyeongbuk -->
+                <path class="region" id="R_GYEONGBUK" data-sido="경상북도" d="M265 238 L330 205 L350 345 L285 390 L240 365 L250 315 Z"></path>
+                <text x="285" y="310">경북</text>
+
+                <!-- Daegu -->
+                <path class="region" id="R_DAEGU" data-sido="대구광역시" d="M286 320 L304 320 L304 338 L286 338 Z"></path>
+                <text x="286" y="335" style="font-size:10px;">대구</text>
+
+                <!-- Jeonbuk -->
+                <path class="region" id="R_JEONBUK" data-sido="전북특별자치도" d="M120 295 L200 315 L185 375 L105 365 Z"></path>
+                <text x="132" y="345">전북</text>
+
+                <!-- Jeonnam -->
+                <path class="region" id="R_JEONNAM" data-sido="전라남도" d="M40 330 L120 295 L105 365 L140 430 L70 472 L20 420 Z"></path>
+                <text x="55" y="420">전남</text>
+
+                <!-- Gwangju -->
+                <path class="region" id="R_GWANGJU" data-sido="광주광역시" d="M90 385 L112 385 L112 405 L90 405 Z"></path>
+                <text x="91" y="401" style="font-size:10px;">광주</text>
+
+                <!-- Gyeongnam -->
+                <path class="region" id="R_GYEONGNAM" data-sido="경상남도" d="M185 375 L240 365 L285 390 L310 440 L220 485 L155 430 Z"></path>
+                <text x="212" y="435">경남</text>
+
+                <!-- Ulsan -->
+                <path class="region" id="R_ULSAN" data-sido="울산광역시" d="M305 405 L325 405 L325 425 L305 425 Z"></path>
+                <text x="305" y="421" style="font-size:10px;">울산</text>
+
+                <!-- Busan -->
+                <path class="region" id="R_BUSAN" data-sido="부산광역시" d="M275 440 L297 440 L297 460 L275 460 Z"></path>
+                <text x="275" y="456" style="font-size:10px;">부산</text>
+
+                <!-- Jeju -->
+                <path class="region" id="R_JEJU" data-sido="제주특별자치도" d="M120 500 L210 500 L220 525 L130 525 Z"></path>
+                <text x="155" y="520">제주</text>
+              </svg>
+
+              <div class="hint">
+                지도는 임시 벡터입니다. 운영용으로는 “정확한 행정경계 SVG(시/도/시군구)”로 교체하면 됩니다.<br />
+                현재 MVP는 “시/도는 지도 클릭”, “시/군/구 및 동은 리스트 클릭” 방식으로 구현되어 있습니다.
+              </div>
+            </div>
+
+            <div class="side">
+              <div class="crumbs" id="crumbs"></div>
+              <div class="chips" id="vendorChips"></div>
+
+              <div id="panelTitle" style="font-weight:900; margin:4px 0 6px;">목록</div>
+              <div class="list" id="list"></div>
+
+              <details>
+                <summary>데이터 입력/수정 (관리용)</summary>
+                <div style="margin-top:10px">
+                  <textarea class="textarea" id="raw"></textarea>
+                  <div class="rowBtns">
+                    <button class="btn primary" id="btnParse">파싱/적용</button>
+                    <button class="btn" id="btnLoadSample">샘플 로드</button>
+                    <button class="btn" id="btnExport">유니크 목록 내보내기</button>
+                  </div>
+                  <div class="footNote">
+                    입력 포맷(권장):<br/>
+                    - <b>[시/도] [시/군/구] [동] | [업체명]</b><br/>
+                    - 구/동만 들어오면(예: “영등포구 대림동”), 일부는 자동 추론(서울/광역시/대표 케이스)합니다. 불확실하면 “(미분류)”로 들어갑니다.<br/>
+                    - 동일 라인이 여러 번이면 <b>카운트</b>로 집계됩니다.
+                  </div>
+                  <div class="statLine" id="stats"></div>
+                </div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right -->
+      <div class="card">
+        <div class="cardHead">
+          <h2>현재 선택 상세</h2>
+          <span class="pill" id="pillSel">전체</span>
+        </div>
+        <div class="cardBody">
+          <div id="detail" class="empty">
+            좌측에서 시/도를 클릭하거나 검색하세요.
+          </div>
+
+          <div style="height:12px"></div>
+          <div class="hint">
+            구현 의도(요청하신 로직):<br/>
+            - “서울특별시” 클릭 시: 서울 내 모든 업체(예: 마루웰/투네스트) 집계 노출<br/>
+            - “강서구” 클릭 시: 강서구에 있는 업체만 노출<br/>
+            - “염창동” 클릭 시: 해당 동에 있는 업체만 노출
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const LS_KEY = "mw_coupangland_routes_v1";
+
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const el = {
+    pillData: $("#pillData"),
+    pillSel: $("#pillSel"),
+    q: $("#q"),
+    btnSearch: $("#btnSearch"),
+    btnReset: $("#btnReset"),
+    btnCopy: $("#btnCopy"),
+    btnClear: $("#btnClear"),
+    crumbs: $("#crumbs"),
+    vendorChips: $("#vendorChips"),
+    panelTitle: $("#panelTitle"),
+    list: $("#list"),
+    detail: $("#detail"),
+    raw: $("#raw"),
+    btnParse: $("#btnParse"),
+    btnLoadSample: $("#btnLoadSample"),
+    btnExport: $("#btnExport"),
+    stats: $("#stats"),
+    toast: $("#toast"),
+  };
+
+  const SIDO_ORDER = [
+    "서울특별시","부산광역시","대구광역시","인천광역시","광주광역시","대전광역시","울산광역시","세종특별자치시",
+    "경기도","강원특별자치도","충청북도","충청남도","전북특별자치도","전라남도","경상북도","경상남도","제주특별자치도"
+  ];
+
+  // 2토큰(구/동)만 들어올 때 최소한의 추론용(확장 가능)
+  const GU_HINT = {
+    // 서울 일부 예시(필요시 전체 25개로 확장)
+    "영등포구": { sido:"서울특별시", city:"영등포구" },
+    "강서구":   { sido:"서울특별시", city:"강서구" },
+    "마포구":   { sido:"서울특별시", city:"마포구" },
+
+    // 경기도 대표 케이스
+    "분당구": { sido:"경기도", city:"성남시 분당구" },
+
+    // 광역시 구 예시
+    "중구": { sido:null, city:null }, // 중구는 여러 곳이라 단독 추론 불가
+  };
+
+  const SIDO_ALIAS = new Map([
+    ["서울시","서울특별시"],
+    ["서울","서울특별시"],
+    ["부산시","부산광역시"],
+    ["부산","부산광역시"],
+    ["대구시","대구광역시"],
+    ["대구","대구광역시"],
+    ["인천시","인천광역시"],
+    ["인천","인천광역시"],
+    ["광주시","광주광역시"],
+    ["광주","광주광역시"],
+    ["대전시","대전광역시"],
+    ["대전","대전광역시"],
+    ["울산시","울산광역시"],
+    ["울산","울산광역시"],
+    ["세종","세종특별자치시"],
+    ["강원도","강원특별자치도"],
+    ["전북","전북특별자치도"],
+    ["전라북도","전북특별자치도"],
+    ["제주도","제주특별자치도"],
+    ["제주","제주특별자치도"],
+  ]);
+
+  // city(시/군/구 상위 '시') -> sido 추론 일부(확장 가능)
+  const CITY_TO_SIDO = new Map([
+    ["용인시","경기도"],
+    ["성남시","경기도"],
+    ["수원시","경기도"],
+    ["고양시","경기도"],
+    ["대구시","대구광역시"],
+    ["대구광역시","대구광역시"],
+  ]);
+
+  function toast(msg, tone="info"){
+    el.toast.textContent = msg;
+    el.toast.classList.add("show");
+    el.toast.style.borderColor = tone==="danger" ? "rgba(255,77,79,.45)" : "rgba(110,231,255,.35)";
+    el.toast.style.background = tone==="danger" ? "rgba(40,10,12,.92)" : "rgba(10,16,32,.92)";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=> el.toast.classList.remove("show"), 1900);
+  }
+
+  function normalizeSido(s){
+    if(!s) return s;
+    s = s.trim();
+    return SIDO_ALIAS.get(s) || s;
+  }
+
+  function splitVendor(line){
+    // 지원: " ... | 업체", " ... \t 업체", " ... , 업체"
+    // 단, 주소 내부 콤마 가능성 낮다고 가정(임시)
+    const raw = line.trim();
+    if(!raw) return null;
+
+    let loc = raw, vendor = "";
+    if(raw.includes("|")){
+      const parts = raw.split("|");
+      loc = (parts[0] || "").trim();
+      vendor = (parts.slice(1).join("|") || "").trim();
+    } else if(raw.includes("\t")){
+      const parts = raw.split("\t");
+      loc = (parts[0] || "").trim();
+      vendor = (parts.slice(1).join("\t") || "").trim();
+    } else if(raw.includes(",")){
+      const parts = raw.split(",");
+      // "구 동, 업체" 패턴을 가정
+      if(parts.length >= 2 && (parts[0].trim().split(/\s+/).length >= 2)) {
+        loc = parts[0].trim();
+        vendor = parts.slice(1).join(",").trim();
+      }
+    }
+
+    vendor = vendor || "마루웰(기본)";
+    return { loc, vendor };
+  }
+
+  function parseLocation(loc){
+    // 목표: {sido, sigungu, dong}
+    // 허용 입력:
+    // 1) "서울특별시 영등포구 대림동"
+    // 2) "영등포구 대림동" (일부 자동추론)
+    // 3) "용인시 수지구 동천동" (시 + 구 + 동)
+    // 4) "대구시 중구 칠성동" (광역시 + 구 + 동)
+    const tokens = (loc || "").trim().split(/\s+/).filter(Boolean);
+    if(tokens.length === 0) return null;
+
+    let sido = null, sigungu = null, dong = null;
+
+    // case A: 3+ tokens and first looks like sido
+    const t0 = normalizeSido(tokens[0]);
+    const isSidoToken = SIDO_ORDER.includes(t0) || t0.endsWith("도") || t0.endsWith("특별시") || t0.endsWith("광역시") || t0.endsWith("특별자치시") || t0.endsWith("특별자치도");
+    if(isSidoToken){
+      sido = t0;
+      if(tokens.length === 2){
+        sigungu = tokens[1];
+      } else if(tokens.length >= 3){
+        // 나머지는 sigungu/dong로
+        // "용인시 수지구 동천동"처럼 sigungu가 2토큰일 수도 있음
+        const rest = tokens.slice(1);
+        if(rest.length >= 2 && rest[0].endsWith("시") && rest[1].endsWith("구")){
+          sigungu = rest[0] + " " + rest[1];
+          dong = rest.slice(2).join(" ");
+        } else {
+          sigungu = rest[0];
+          dong = rest.slice(1).join(" ");
+        }
+      }
+      return {sido, sigungu, dong};
+    }
+
+    // case B: no explicit sido
+    if(tokens.length === 2){
+      // "구 동" 형태
+      const a = tokens[0], b = tokens[1];
+      sigungu = a;
+      dong = b;
+
+      const hint = GU_HINT[a];
+      if(hint && hint.sido){
+        sido = hint.sido;
+        sigungu = hint.city || a;
+      } else if(a.endsWith("구")){
+        // 구 단독은 여러 도시가 있어 불확실. 서울 Gu 리스트를 확장하면 여기서 처리 가능.
+        // 임시: 서울 25구 일부라도 맞추기 위해 GU_HINT에 추가 권장.
+        sido = "(미분류)";
+      } else {
+        sido = "(미분류)";
+      }
+      return {sido, sigungu, dong};
+    }
+
+    if(tokens.length >= 3){
+      // "용인시 수지구 동천동" or "대구시 중구 칠성동" etc.
+      const a = tokens[0], b = tokens[1];
+      const rest = tokens.slice(2).join(" ");
+
+      if(a.endsWith("시") && b.endsWith("구")){
+        // sigungu = "용인시 수지구"
+        sigungu = a + " " + b;
+        dong = rest || null;
+        const inferredSido = CITY_TO_SIDO.get(a) || (SIDO_ALIAS.get(a) || null);
+        sido = normalizeSido(inferredSido) || (a.includes("광역시") ? a : "(미분류)");
+      } else if(a.endsWith("시") || a.endsWith("군") || a.endsWith("구")){
+        // sigungu = a, dong = b + rest
+        sigungu = a;
+        dong = [b, rest].filter(Boolean).join(" ").trim();
+        const inferredSido = CITY_TO_SIDO.get(a) || (SIDO_ALIAS.get(a) || null);
+        sido = normalizeSido(inferredSido) || (a.includes("광역시") ? a : "(미분류)");
+      } else {
+        // 기타 불명
+        sigungu = tokens.slice(0, tokens.length-1).join(" ");
+        dong = tokens[tokens.length-1];
+        sido = "(미분류)";
+      }
+      // 대구시/서울시 같은 별칭이 sigungu에 들어온 경우 보정
+      if(sigungu && SIDO_ALIAS.has(sigungu)){
+        // 잘못 들어온 케이스 방어
+        sido = normalizeSido(sigungu);
+        sigungu = null;
+      }
+      // a가 "대구시"면 sido를 대구광역시로
+      if(!sido && SIDO_ALIAS.has(a)) sido = normalizeSido(a);
+      return {sido, sigungu, dong};
+    }
+
+    // fallback
+    return {sido:"(미분류)", sigungu: tokens[0], dong: tokens.slice(1).join(" ") || null};
+  }
+
+  function parseRaw(text){
+    const lines = (text || "")
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(s => s && !s.startsWith("#") && !s.startsWith("//"));
+
+    // aggregate by key: vendor|sido|sigungu|dong
+    const map = new Map();
+    for(const line of lines){
+      const sv = splitVendor(line);
+      if(!sv) continue;
+      const loc = parseLocation(sv.loc);
+      if(!loc) continue;
+
+      const vendor = (sv.vendor || "마루웰(기본)").trim();
+      const sido = normalizeSido(loc.sido || "(미분류)");
+      const sigungu = (loc.sigungu || "(미분류)").trim();
+      const dong = (loc.dong || "(미분류)").trim();
+
+      const key = vendor + "|" + sido + "|" + sigungu + "|" + dong;
+      map.set(key, (map.get(key) || 0) + 1);
+    }
+
+    const entries = [];
+    for(const [key, count] of map.entries()){
+      const [vendor, sido, sigungu, dong] = key.split("|");
+      entries.push({ vendor, sido, sigungu, dong, count });
+    }
+    return entries;
+  }
+
+  function saveEntries(entries){
+    localStorage.setItem(LS_KEY, JSON.stringify(entries));
+  }
+  function loadEntries(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return null;
+      const data = JSON.parse(raw);
+      if(!Array.isArray(data)) return null;
+      return data;
+    }catch(e){
+      return null;
+    }
+  }
+
+  function sampleText(){
+    // 사용자 예시 + 업체 예시를 섞어서 데모
+    return [
+      "영등포구 대림동 | 마루웰",
+      "영등포구 대림동 | 마루웰",
+      "영등포구 대림동 | 투네스트",
+      "영등포구 신길동 | 마루웰",
+      "영등포구 신길동 | 마루웰",
+      "경기도 성남시 분당구 대장동 | 마루웰",
+      "용인시 수지구 동천동 | 투네스트",
+      "용인시 수지구 동천동 | 투네스트",
+      "대구시 중구 칠성동 | 마루웰",
+      "대구시 중구 동인동 | 마루웰",
+      "대구시 중구 동인동 | 투네스트",
+      "서울시 강서구 염창동 | 투네스트"
+    ].join("\n");
+  }
+
+  const state = {
+    entries: [],
+    // selection
+    sido: null,
+    sigungu: null,
+    dong: null,
+    vendor: null,
+    // search result mode
+    searchMode: false,
+    searchResults: [],
+  };
+
+  function selectionLabel(){
+    const parts = [];
+    if(state.sido) parts.push(state.sido);
+    if(state.sigungu) parts.push(state.sigungu);
+    if(state.dong) parts.push(state.dong);
+    return parts.length ? parts.join(" > ") : "전체";
+  }
+
+  function withinSelection(e){
+    if(state.sido && e.sido !== state.sido) return false;
+    if(state.sigungu && e.sigungu !== state.sigungu) return false;
+    if(state.dong && e.dong !== state.dong) return false;
+    if(state.vendor && e.vendor !== state.vendor) return false;
+    return true;
+  }
+
+  function filteredEntries(){
+    return state.entries.filter(withinSelection);
+  }
+
+  function groupBy(entries, keyFn){
+    const m = new Map();
+    for(const e of entries){
+      const k = keyFn(e);
+      const prev = m.get(k) || { key:k, count:0, vendors:new Set() };
+      prev.count += e.count;
+      prev.vendors.add(e.vendor);
+      m.set(k, prev);
+    }
+    return Array.from(m.values());
+  }
+
+  function level(){
+    if(!state.sido) return "sido";
+    if(!state.sigungu) return "sigungu";
+    if(!state.dong) return "dong";
+    return "detail";
+  }
+
+  function renderCrumbs(){
+    el.crumbs.innerHTML = "";
+
+    const add = (label, active, onClick) => {
+      const b = document.createElement("button");
+      b.className = "crumb" + (active ? " active" : "");
+      b.textContent = label;
+      b.type = "button";
+      b.addEventListener("click", onClick);
+      el.crumbs.appendChild(b);
+    };
+
+    add("전체", !state.sido && !state.searchMode, () => {
+      state.searchMode = false;
+      state.searchResults = [];
+      state.sido = null; state.sigungu = null; state.dong = null;
+      state.vendor = null;
+      update();
+    });
+
+    if(state.searchMode){
+      add("검색결과", true, () => {});
+      return;
+    }
+
+    if(state.sido){
+      add(state.sido, !!state.sido && !state.sigungu, () => {
+        state.sigungu = null; state.dong = null; state.vendor = null;
+        update();
+      });
+    }
+    if(state.sigungu){
+      add(state.sigungu, !!state.sigungu && !state.dong, () => {
+        state.dong = null; state.vendor = null;
+        update();
+      });
+    }
+    if(state.dong){
+      add(state.dong, true, () => {});
+    }
+  }
+
+  function renderVendorChips(){
+    el.vendorChips.innerHTML = "";
+    if(state.searchMode){
+      // 검색결과에서는 vendor칩도 전체 기준으로 제공
+    }
+
+    const base = state.searchMode ? state.searchResults : state.entries;
+    // selection이 아닌 “현재 단계 기준” vendor 집계
+    const scope = base.filter(e => {
+      if(state.searchMode) return true;
+      if(state.sido && e.sido !== state.sido) return false;
+      if(state.sigungu && e.sigungu !== state.sigungu) return false;
+      if(state.dong && e.dong !== state.dong) return false;
+      return true;
+    });
+
+    const groups = groupBy(scope, e => e.vendor)
+      .sort((a,b)=> b.count - a.count);
+
+    // "전체 업체"
+    const allCount = groups.reduce((s,g)=> s+g.count, 0);
+    const allChip = document.createElement("button");
+    allChip.type = "button";
+    allChip.className = "chip" + (!state.vendor ? " active" : "");
+    allChip.innerHTML = `<span>전체 업체</span><span class="badge">${allCount}</span>`;
+    allChip.addEventListener("click", () => { state.vendor = null; update(); });
+    el.vendorChips.appendChild(allChip);
+
+    for(const g of groups){
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "chip" + (state.vendor === g.key ? " active" : "");
+      c.innerHTML = `<span>${escapeHtml(g.key)}</span><span class="badge">${g.count}</span>`;
+      c.addEventListener("click", () => {
+        state.vendor = (state.vendor === g.key) ? null : g.key;
+        update();
+      });
+      el.vendorChips.appendChild(c);
+    }
+  }
+
+  function renderList(){
+    el.list.innerHTML = "";
+
+    if(state.searchMode){
+      el.panelTitle.textContent = "검색 결과";
+      if(state.searchResults.length === 0){
+        el.list.innerHTML = `<div class="empty">검색 결과가 없습니다.</div>`;
+        return;
+      }
+      // 검색 결과는 "sido > sigungu > dong (vendor, count)" 형태로 보여주고 클릭 시 해당 위치로 이동
+      const sorted = [...state.searchResults].sort((a,b)=> b.count - a.count);
+      for(const e of sorted.slice(0, 100)){
+        const it = document.createElement("div");
+        it.className = "item";
+        it.innerHTML = `
+          <div class="left">
+            <div class="name">${escapeHtml(e.sido)} · ${escapeHtml(e.sigungu)} · ${escapeHtml(e.dong)}</div>
+            <div class="meta">${escapeHtml(e.vendor)} · ${e.count}건</div>
+          </div>
+          <span class="badge">이동</span>
+        `;
+        it.addEventListener("click", () => {
+          state.searchMode = false;
+          state.searchResults = [];
+          state.sido = e.sido;
+          state.sigungu = e.sigungu;
+          state.dong = e.dong;
+          state.vendor = e.vendor; // 검색은 보통 업체까지 특정한 의도일 가능성이 높아 자동 지정
+          update();
+        });
+        el.list.appendChild(it);
+      }
+      return;
+    }
+
+    const lvl = level();
+    const scope = filteredEntries();
+
+    if(lvl === "sido"){
+      el.panelTitle.textContent = "시/도 (지도 클릭 또는 아래 목록)";
+      const groups = groupBy(scope, e=> e.sido)
+        .sort((a,b)=> (SIDO_ORDER.indexOf(a.key) - SIDO_ORDER.indexOf(b.key)));
+
+      for(const g of groups){
+        const it = makeItem(g.key, `${g.vendors.size}개 업체 · ${g.count}건`, g.count);
+        it.addEventListener("click", () => {
+          state.sido = g.key; state.sigungu=null; state.dong=null; state.vendor=null;
+          update();
+        });
+        el.list.appendChild(it);
+      }
+      return;
+    }
+
+    if(lvl === "sigungu"){
+      el.panelTitle.textContent = "시/군/구";
+      const groups = groupBy(scope, e=> e.sigungu).sort((a,b)=> b.count - a.count);
+      for(const g of groups){
+        const it = makeItem(g.key, `${g.vendors.size}개 업체 · ${g.count}건`, g.count);
+        it.addEventListener("click", () => {
+          state.sigungu = g.key; state.dong=null; state.vendor=null;
+          update();
+        });
+        el.list.appendChild(it);
+      }
+      if(groups.length === 0){
+        el.list.innerHTML = `<div class="empty">선택된 시/도에 데이터가 없습니다.</div>`;
+      }
+      return;
+    }
+
+    if(lvl === "dong"){
+      el.panelTitle.textContent = "동 (읍/면/동)";
+      const groups = groupBy(scope, e=> e.dong).sort((a,b)=> b.count - a.count);
+      for(const g of groups){
+        const it = makeItem(g.key, `${g.vendors.size}개 업체 · ${g.count}건`, g.count);
+        it.addEventListener("click", () => {
+          state.dong = g.key;
+          update();
+        });
+        el.list.appendChild(it);
+      }
+      if(groups.length === 0){
+        el.list.innerHTML = `<div class="empty">선택된 시/군/구에 데이터가 없습니다.</div>`;
+      }
+      return;
+    }
+
+    // detail
+    el.panelTitle.textContent = "동 상세 (업체별)";
+    const byVendor = groupBy(scope, e=> e.vendor).sort((a,b)=> b.count - a.count);
+    for(const g of byVendor){
+      const it = makeItem(g.key, `총 ${g.count}건`, g.count);
+      it.addEventListener("click", () => {
+        state.vendor = (state.vendor === g.key) ? null : g.key;
+        update();
+      });
+      el.list.appendChild(it);
+    }
+    if(byVendor.length === 0){
+      el.list.innerHTML = `<div class="empty">선택된 조건에 데이터가 없습니다.</div>`;
+    }
+  }
+
+  function renderDetail(){
+    const scope = filteredEntries();
+    const total = scope.reduce((s,e)=> s+e.count, 0);
+
+    el.pillSel.textContent = selectionLabel() + (state.vendor ? ` · ${state.vendor}` : "");
+    if(total === 0){
+      el.detail.className = "empty";
+      el.detail.innerHTML = "선택된 조건에 데이터가 없습니다.";
+      return;
+    }
+
+    // 요약 테이블 비슷하게 출력
+    const uniqDong = new Set(scope.map(e=> e.dong)).size;
+    const uniqSigungu = new Set(scope.map(e=> e.sigungu)).size;
+    const uniqSido = new Set(scope.map(e=> e.sido)).size;
+    const vendors = groupBy(scope, e=> e.vendor).sort((a,b)=> b.count - a.count);
+
+    const topLines = vendors.slice(0, 6)
+      .map(v => `<div style="display:flex; justify-content:space-between; gap:10px; padding:8px 10px; border:1px solid var(--line); border-radius:12px; background: rgba(255,255,255,.04);">
+                  <div style="font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(v.key)}</div>
+                  <div style="color:var(--muted); font-weight:900;">${v.count}건</div>
+                </div>`).join("");
+
+    el.detail.className = "";
+    el.detail.innerHTML = `
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+        <div class="pill"><b>${total}</b> 건</div>
+        <div class="pill">시/도 <b>${uniqSido}</b></div>
+        <div class="pill">시/군/구 <b>${uniqSigungu}</b></div>
+        <div class="pill">동 <b>${uniqDong}</b></div>
+        <div class="pill">업체 <b>${vendors.length}</b></div>
+      </div>
+
+      <div style="font-weight:900; margin:10px 0 8px;">업체별 집계</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">${topLines}</div>
+
+      <div style="height:10px"></div>
+      <div class="hint">
+        “동 상세”에서는 (업체|시/도|시군구|동) 단위로 중복을 합산한 <b>count</b>가 표시됩니다.
+      </div>
+    `;
+  }
+
+  function updateMapHeat(){
+    // 시도 기준 카운트로 heatmap
+    const m = new Map();
+    for(const e of state.entries){
+      m.set(e.sido, (m.get(e.sido)||0) + e.count);
+    }
+    const max = Math.max(1, ...m.values());
+
+    $$(".kmap .region").forEach(p => {
+      const sido = p.getAttribute("data-sido");
+      const c = m.get(sido) || 0;
+      if(c > 0){
+        p.setAttribute("data-has","1");
+        const heat = 1 - (c / max); // 낮을수록 진하게 보이도록 반전
+        p.style.setProperty("--heat", String(heat));
+      } else {
+        p.removeAttribute("data-has");
+        p.style.removeProperty("--heat");
+      }
+
+      p.classList.toggle("selected", !!state.sido && state.sido === sido && !state.searchMode);
+    });
+  }
+
+  function makeItem(name, meta, count){
+    const it = document.createElement("div");
+    it.className = "item";
+    it.innerHTML = `
+      <div class="left">
+        <div class="name">${escapeHtml(name)}</div>
+        <div class="meta">${escapeHtml(meta)}</div>
+      </div>
+      <span class="badge">${count}</span>
+    `;
+    return it;
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, (m) => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+    }[m]));
+  }
+
+  function refreshStats(){
+    const totalRaw = (el.raw.value || "").split(/\r?\n/).filter(s=>s.trim()).length;
+    const uniq = state.entries.length;
+    const vendors = new Set(state.entries.map(e=>e.vendor)).size;
+    el.stats.innerHTML = `
+      <span>원본 라인 <b>${totalRaw}</b></span>
+      <span>유니크(업체+지역) <b>${uniq}</b></span>
+      <span>업체수 <b>${vendors}</b></span>
+    `;
+  }
+
+  function applyEntries(entries){
+    state.entries = entries;
+    saveEntries(entries);
+
+    // selection 유지하되, 기존 selection이 데이터에서 사라지면 단계적으로 해제
+    const exists = (key, val) => entries.some(e => e[key] === val);
+    if(state.sido && !exists("sido", state.sido)) state.sido = null;
+    if(state.sigungu && !exists("sigungu", state.sigungu)) state.sigungu = null;
+    if(state.dong && !exists("dong", state.dong)) state.dong = null;
+    if(state.vendor && !exists("vendor", state.vendor)) state.vendor = null;
+
+    update();
+  }
+
+  function doSearch(){
+    const q = (el.q.value || "").trim();
+    if(!q){
+      toast("검색어를 입력하세요.");
+      return;
+    }
+    const ql = q.toLowerCase();
+    const hits = state.entries.filter(e =>
+      (e.sido||"").toLowerCase().includes(ql) ||
+      (e.sigungu||"").toLowerCase().includes(ql) ||
+      (e.dong||"").toLowerCase().includes(ql) ||
+      (e.vendor||"").toLowerCase().includes(ql)
+    );
+
+    state.searchMode = true;
+    state.searchResults = hits;
+    state.vendor = null; // 검색 모드에서는 vendor 필터 강제 해제
+    update();
+    toast(`검색 결과 ${hits.length}건`);
+  }
+
+  function update(){
+    const total = state.entries.reduce((s,e)=> s+e.count, 0);
+    el.pillData.textContent = `데이터: ${total}건`;
+    el.pillSel.textContent = selectionLabel() + (state.vendor ? ` · ${state.vendor}` : "");
+
+    renderCrumbs();
+    renderVendorChips();
+    renderList();
+    renderDetail();
+    updateMapHeat();
+    refreshStats();
+  }
+
+  function bind(){
+    // map click
+    $$(".kmap .region").forEach(p => {
+      p.tabIndex = 0;
+      p.addEventListener("click", () => {
+        const sido = p.getAttribute("data-sido");
+        state.searchMode = false;
+        state.searchResults = [];
+        state.sido = sido;
+        state.sigungu = null;
+        state.dong = null;
+        state.vendor = null;
+        update();
+      });
+      p.addEventListener("keydown", (e) => {
+        if(e.key === "Enter" || e.key === " "){
+          e.preventDefault();
+          p.click();
+        }
+      });
+    });
+
+    el.btnSearch.addEventListener("click", doSearch);
+    el.q.addEventListener("keydown", (e)=> {
+      if(e.key === "Enter") doSearch();
+    });
+
+    el.btnReset.addEventListener("click", () => {
+      state.searchMode = false;
+      state.searchResults = [];
+      state.sido = null; state.sigungu = null; state.dong = null;
+      state.vendor = null;
+      update();
+      toast("전체 보기로 초기화");
+    });
+
+    el.btnCopy.addEventListener("click", async () => {
+      const scope = filteredEntries();
+      const total = scope.reduce((s,e)=> s+e.count, 0);
+      const vendors = groupBy(scope, e=> e.vendor).sort((a,b)=> b.count - a.count);
+      const lines = [
+        `[CoupangLand 요약]`,
+        `선택: ${selectionLabel()}${state.vendor ? " · "+state.vendor : ""}`,
+        `총 ${total}건`,
+        `업체: ` + vendors.map(v=> `${v.key}(${v.count})`).join(", "),
+      ];
+      try{
+        await navigator.clipboard.writeText(lines.join("\n"));
+        toast("요약을 클립보드에 복사했습니다.");
+      }catch(e){
+        toast("복사 실패(브라우저 권한 확인).", "danger");
+      }
+    });
+
+    el.btnClear.addEventListener("click", () => {
+      localStorage.removeItem(LS_KEY);
+      state.entries = [];
+      state.searchMode = false;
+      state.searchResults = [];
+      state.sido = null; state.sigungu = null; state.dong = null;
+      state.vendor = null;
+      el.raw.value = "";
+      update();
+      toast("데이터를 초기화했습니다.", "danger");
+    });
+
+    el.btnParse.addEventListener("click", () => {
+      const entries = parseRaw(el.raw.value || "");
+      applyEntries(entries);
+      toast("파싱/적용 완료");
+    });
+
+    el.btnLoadSample.addEventListener("click", () => {
+      el.raw.value = sampleText();
+      toast("샘플을 로드했습니다.");
+      refreshStats();
+    });
+
+    el.btnExport.addEventListener("click", async () => {
+      // 유니크 목록(업체|시도|시군구|동|count) TSV
+      const rows = state.entries
+        .slice()
+        .sort((a,b)=> (a.sido+b.sigungu+b.dong+a.vendor).localeCompare(b.sido+b.sigungu+b.dong+a.vendor))
+        .map(e => `${e.sido}\t${e.sigungu}\t${e.dong}\t${e.vendor}\t${e.count}`);
+      const out = ["sido\tsigungu\tdong\tvendor\tcount", ...rows].join("\n");
+      try{
+        await navigator.clipboard.writeText(out);
+        toast("유니크 목록(TSV)을 복사했습니다.");
+      }catch(e){
+        toast("내보내기 실패(브라우저 권한 확인).", "danger");
+      }
+    });
+  }
+
+  function boot(){
+    // 초기 데이터
+    const saved = loadEntries();
+    if(saved && saved.length){
+      state.entries = saved;
+      el.raw.value = ""; // 운영에서는 원본을 굳이 저장하지 않아도 됨
+    } else {
+      el.raw.value = sampleText();
+      state.entries = parseRaw(el.raw.value);
+      saveEntries(state.entries);
+    }
+
+    bind();
+    update();
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

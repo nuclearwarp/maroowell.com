@@ -259,14 +259,7 @@
 대구광역시 달성군 화원읍 태호물류
 대구광역시 동구 검사동 정직한물류
 대구광역시 달서구 감삼동 에스제이
-대구광역시 수성구 만촌동 수성영업소
-대구광역시 북구 국우동 제일로지스
-대구광역시 북구 학정동 제일로지스
-대구광역시 북구 칠성동 제일로지스
-대구광역시 중구 동인동 제일로지스
-대구광역시 수성구 범어동 제일로지스
-대구광역시 수성구 두산동 제일로지스
-대구광역시 수성구 파동 제일로지스`;
+대구광역시 수성구 만촌동 수성영업소`;
 
   const els = {
     map: document.getElementById('map'),
@@ -304,7 +297,7 @@
     selectedCity: "",
     selectedDistrict: "",
     selectedDistrictShort: "",
-    selectedDistrictFeature: null, // ✅ 선택한 “구” 폴리곤 feature 저장
+    selectedDistrictFeature: null,
 
     showAllDongs: true,
 
@@ -358,18 +351,51 @@
     return A.includes(B) || B.includes(A);
   }
 
+  // ✅ 핵심: 공백이 없어도 "고양시일산서구" -> {city:"고양시", district:"일산서구"}로 분해
   function parseCityDistrict(sigunguDisp){
     const s = norm(sigunguDisp);
     if (!s) return { city:"", district:"" };
+
+    // 1) 공백 기반(정상 케이스)
     const parts = s.split(/\s+/g).filter(Boolean);
     if (parts.length >= 2 && /(시)$/u.test(parts[0]) && /(구)$/u.test(parts[1])){
       return { city: parts[0], district: parts[1] };
     }
+
+    // 2) 공백 없는 케이스: "고양시일산서구", "성남시분당구", "용인시수지구" 등
+    const m = s.match(/^(.+?시)(.+?구)$/u);
+    if (m){
+      return { city: m[1], district: m[2] };
+    }
+
     return { city: s, district: "" };
   }
+
   function cityGroupFromRecordSigungu(sigungu){
     const p = parseCityDistrict(sigungu);
     return p.city;
+  }
+
+  // ✅ 선택 상태 자동 교정(= 지금 스샷처럼 city에 district가 붙어 들어온 상태 방지)
+  function sanitizeSelection(){
+    // city가 "고양시일산서구" 같은 형태인데 district가 비어있으면 분해해서 재배치
+    if (state.selectedSido && state.selectedCity && !state.selectedDistrict){
+      const p = parseCityDistrict(state.selectedCity);
+      if (p.city && p.district){
+        state.selectedCity = p.city;
+        state.selectedDistrict = `${p.city} ${p.district}`;
+        state.selectedDistrictShort = p.district;
+        state.selectedDistrictFeature = null;
+      }
+    }
+
+    // district는 있는데 city가 비어있으면 city를 강제로 채움
+    if (state.selectedSido && state.selectedDistrict && !state.selectedCity){
+      const p = parseCityDistrict(state.selectedDistrict);
+      if (p.city){
+        state.selectedCity = p.city;
+      }
+    }
   }
 
   async function fetchFirstJSON(urls){
@@ -470,7 +496,7 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
-  // ===== point-in-polygon (구 내부 동 필터용) =====
+  // ===== point-in-polygon =====
   function pointInRing(pt, ring){
     let inside = false;
     for (let i=0, j=ring.length-1; i<ring.length; j=i++){
@@ -590,6 +616,8 @@
   }
 
   function recordsInScope(){
+    sanitizeSelection();
+
     const recs = filteredRecords();
     const s = norm(state.selectedSido);
     const c = norm(state.selectedCity);
@@ -597,13 +625,16 @@
 
     return recs.filter(r => {
       if (s && normLoose(r.sido) !== normLoose(s)) return false;
+
       if (c){
         const rg = cityGroupFromRecordSigungu(r.sigungu);
         if (normLoose(rg) !== normLoose(c)) return false;
       }
+
       if (d){
         if (!sameSigungu(r.sigungu, d)) return false;
       }
+
       return true;
     });
   }
@@ -632,6 +663,8 @@
   }
 
   function buildScopeLabel(){
+    sanitizeSelection();
+
     const s = norm(state.selectedSido);
     const c = norm(state.selectedCity);
     const d = norm(state.selectedDistrict);
@@ -664,7 +697,6 @@
     els.dongByVendorsEmpty.style.display = dbv.length ? "none" : "block";
     for (const item of dbv){
       const li = document.createElement('li');
-      // ✅ 동별 “유니크 업체 수”를 먼저 보여주고, 뒤에 상세도 같이
       li.textContent = `${item.dong} (${item.vendors.length}업체): ${item.vendors.map(([v,c])=>`${v}(${c})`).join(", ")}`;
       els.dongByVendors.appendChild(li);
     }
@@ -713,7 +745,6 @@
     return null;
   }
 
-  // ✅ 시도 폴리곤 내부(centroid 기준)로 sigungu 안정 필터
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
@@ -795,7 +826,7 @@
     }
   }
 
-  // ===== 집계(라벨 count = 유니크 업체 수) =====
+  // ===== 라벨 count(유니크 업체 수) =====
   function vendorCountForSido(sidoName){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => (!vf || r.vendor===vf) && normLoose(r.sido)===normLoose(sidoName));
@@ -897,6 +928,8 @@
   }
 
   function currentLayerName(cityMetaMap){
+    sanitizeSelection();
+
     const s = norm(state.selectedSido);
     const c = norm(state.selectedCity);
     const d = norm(state.selectedDistrict);
@@ -918,6 +951,8 @@
     showLoading(true);
 
     try{
+      sanitizeSelection();
+
       const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
       if (mySeq !== state.renderSeq) return;
 
@@ -1010,7 +1045,6 @@
       const scopeSigOrCity = d ? d : c;
       const dongGeo = await tryLoadDongForSido(s);
       if (!dongGeo){
-        // 동 경계 못 불러오면 최소한 화면을 비우지 않도록 district로 되돌림
         state.selectedDistrict = "";
         state.selectedDistrictShort = "";
         state.selectedDistrictFeature = null;
@@ -1020,7 +1054,6 @@
       }
       if (mySeq !== state.renderSeq) return;
 
-      // ✅ “구 폴리곤 내부”로 동을 필터(문자열 매칭 의존 제거)
       const districtFeature = state.selectedDistrictFeature;
 
       const featsAll = dongGeo.features || [];
@@ -1029,7 +1062,6 @@
         const sidoOk = normLoose(normalizeSidoName(n.sido)) === normLoose(s);
         if (!sidoOk) return false;
 
-        // 구 선택이면: 구 폴리곤 내부 동만
         if (d && districtFeature){
           const c0 = featureCentroid(f);
           const bc = !c0 ? boundsCenter(featureBounds(f)) : null;
@@ -1038,17 +1070,14 @@
           return pointInFeature(pt, districtFeature);
         }
 
-        // 구 선택인데 feature 없으면(예외): 문자열 매칭 fallback
         if (d){
           return sameSigungu(norm(n.sigungu), d);
         }
 
-        // 구 미선택이면 city 기준으로 필터
         const cg = parseCityDistrict(norm(n.sigungu)).city;
         return normLoose(cg) === normLoose(c);
       });
 
-      // 선택 구 강조선(동 위에 테두리만)
       if (d && districtFeature){
         drawFeaturePolygons([districtFeature], styleDIST_HL, () => {}, () => "");
       }
@@ -1068,7 +1097,6 @@
         return n.dong;
       });
 
-      // 라벨(데이터 있는 동만): 동명 + 유니크 업체 수
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
@@ -1114,7 +1142,8 @@
   }
 
   function selectCity(cityName, meta){
-    state.selectedCity = norm(cityName);
+    const p = parseCityDistrict(cityName);
+    state.selectedCity = norm(p.city || cityName);
     state.selectedDistrict = "";
     state.selectedDistrictShort = "";
     state.selectedDistrictFeature = null;
@@ -1128,9 +1157,14 @@
   }
 
   function selectDistrict(districtFull, districtShort, feature){
+    // ✅ district를 선택하면 city도 반드시 city로 맞춘다
+    const p = parseCityDistrict(districtFull);
+    if (p.city) state.selectedCity = p.city;
+
     state.selectedDistrict = norm(districtFull);
-    state.selectedDistrictShort = norm(districtShort);
-    state.selectedDistrictFeature = feature || null; // ✅ 저장
+    state.selectedDistrictShort = norm(districtShort || p.district || "");
+    state.selectedDistrictFeature = feature || null;
+
     refreshCrumbs();
     refreshRightPanel();
 
@@ -1171,6 +1205,8 @@
   }
 
   function refreshCrumbs(){
+    sanitizeSelection();
+
     els.crumbs.innerHTML = "";
 
     const make = (label, active, onClick) => {

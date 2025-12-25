@@ -222,6 +222,12 @@
 
 <script>
 (() => {
+  const DONG_FILE_FALLBACK_SIDO = new Map([
+    // 최근 명칭 변경 케이스: GeoJSON/레포에 따라 파일명이 다를 수 있어서 다 시도
+    ["강원특별자치도", ["강원도"]],
+    ["전북특별자치도", ["전라북도","전북"]],
+  ]);
+
   const BOUNDARY = {
     SIDO_URLS: [
       "https://cdn.jsdelivr.net/gh/southkorea/southkorea-maps@master/kostat/2012/json/provinces-geo-simple.json",
@@ -230,14 +236,20 @@
     SIGUNGU_URLS: [
       "https://cdn.jsdelivr.net/gh/southkorea/southkorea-maps@master/kostat/2018/json/skorea-municipalities-2018-geo.json",
     ],
-    DONG_URL_TEMPLATE: (sidoName) => {
-      const fname = `hangjeongdong_${sidoName}.geojson`;
-      const enc = encodeURIComponent(fname);
-      return [
-        `https://cdn.jsdelivr.net/gh/raqoon886/Local_HangJeongDong@master/${enc}`,
-        `https://raw.githubusercontent.com/raqoon886/Local_HangJeongDong/master/${enc}`,
-        `./boundaries/${fname}`,
-      ];
+    // 시도명 표기(강원도/강원특별자치도 등) 차이 대응: 후보 파일명 여러 개 순차 시도
+    DONG_URLS_FOR_SIDO: (sidoNameRaw) => {
+      const s0 = normalizeSidoName(sidoNameRaw);
+      const candidates = [s0, ...(DONG_FILE_FALLBACK_SIDO.get(s0) || [])];
+
+      const urls = [];
+      for (const s of candidates){
+        const fname = `hangjeongdong_${s}.geojson`;
+        const enc = encodeURIComponent(fname);
+        urls.push(`https://cdn.jsdelivr.net/gh/raqoon886/Local_HangJeongDong@master/${enc}`);
+        urls.push(`https://raw.githubusercontent.com/raqoon886/Local_HangJeongDong/master/${enc}`);
+        urls.push(`./boundaries/${fname}`);
+      }
+      return urls;
     }
   };
 
@@ -312,16 +324,7 @@
   function norm(s){ return (s||"").toString().trim(); }
   function normLoose(s){ return norm(s).replace(/\s+/g,""); }
 
-  function dongCanon(s){
-    let x = norm(s);
-    if (!x) return "";
-    x = x.replace(/\s+/g,"");
-    x = x.replace(/제?\d+동$/u, "동");
-    x = x.replace(/\d+가$/u, "");
-    x = x.replace(/제?\d+가$/u, "");
-    return x;
-  }
-
+  // ===== 시도 동치 비교(강원도/강원특별자치도 등) =====
   const SIDO_ALIAS = new Map([
     ["Seoul","서울특별시"],["Busan","부산광역시"],["Daegu","대구광역시"],["Incheon","인천광역시"],
     ["Gwangju","광주광역시"],["Daejeon","대전광역시"],["Ulsan","울산광역시"],["Sejong","세종특별자치시"],
@@ -333,6 +336,25 @@
     const n = norm(name);
     if (SIDO_ALIAS.has(n)) return SIDO_ALIAS.get(n);
     return n;
+  }
+  function sidoKey(name){
+    // "강원도" / "강원특별자치도" -> "강원"
+    // "서울특별시" -> "서울"
+    return normLoose(normalizeSidoName(name)).replace(/(특별자치도|특별자치시|특별시|광역시|도)$/u, "");
+  }
+  function sameSido(a,b){
+    const A = sidoKey(a), B = sidoKey(b);
+    return !!A && !!B && A === B;
+  }
+
+  function dongCanon(s){
+    let x = norm(s);
+    if (!x) return "";
+    x = x.replace(/\s+/g,"");
+    x = x.replace(/제?\d+동$/u, "동");
+    x = x.replace(/\d+가$/u, "");
+    x = x.replace(/제?\d+가$/u, "");
+    return x;
   }
 
   function sigunguKey(s){ return normLoose(s); }
@@ -465,7 +487,6 @@
     return norm(p.name || p.NAME_1 || p.NAME_2 || p.NAME || p.CTP_KOR_NM || p.SIG_KOR_NM || p.adm_nm || "");
   }
 
-  // ✅ (핵심) 시군구 feature가 어떤 시도 소속인지 "속성값"으로 먼저 판별
   function getSigunguSidoFromFeature(f){
     const p = f?.properties || {};
     const cand = [
@@ -620,7 +641,7 @@
     const d = norm(state.selectedDistrict);
 
     return recs.filter(r => {
-      if (s && normLoose(r.sido) !== normLoose(s)) return false;
+      if (s && !sameSido(r.sido, s)) return false;
 
       if (c){
         const rg = cityGroupFromRecordSigungu(r.sigungu);
@@ -712,7 +733,10 @@
   async function loadDongForSido(sidoName){
     const key = normalizeSidoName(sidoName);
     if (state.cache.dongBySido.has(key)) return state.cache.dongBySido.get(key);
-    const json = await fetchFirstJSON(BOUNDARY.DONG_URL_TEMPLATE(key));
+
+    const urls = BOUNDARY.DONG_URLS_FOR_SIDO(key);
+    const json = await fetchFirstJSON(urls);
+
     state.cache.dongBySido.set(key, json);
     return json;
   }
@@ -721,25 +745,33 @@
     catch(e){ console.warn("[DONG] load failed:", e?.message || e); return null; }
   }
 
+  // ===== 변경 핵심: 시도 prefix 제거도 "동치" 기준으로 =====
   function stripSidoPrefix(name, sido){
     const n = norm(name);
     const s = norm(sido);
     if (!n || !s) return n;
+
     if (n.startsWith(s)) return norm(n.slice(s.length));
+
+    const parts = n.split(/\s+/g).filter(Boolean);
+    if (parts.length >= 2){
+      const first = parts[0];
+      if (sameSido(first, s)){
+        return norm(parts.slice(1).join(" "));
+      }
+    }
     return n;
   }
 
   function findSidoFeatureByName(sidoGeo, sidoName){
-    const target = normLoose(normalizeSidoName(sidoName));
     const feats = sidoGeo?.features || [];
     for (const f of feats){
-      const nm = normLoose(normalizeSidoName(getFeatureName(f)));
-      if (nm === target) return f;
+      const nm = normalizeSidoName(getFeatureName(f));
+      if (sameSido(nm, sidoName)) return f;
     }
     return null;
   }
 
-  // (구버전) geometry 기반 포함 판별 — fallback용
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
@@ -759,20 +791,18 @@
     return out.length ? out : feats;
   }
 
-  // ✅ (핵심) 속성 기반 우선 필터 + geometry fallback
   function filterSigunguForSido(sigunguGeo, sidoGeo, focusSido){
     const fs = normalizeSidoName(focusSido || "");
     const feats = sigunguGeo?.features || [];
     if (!fs) return feats;
 
-    // 1) 속성(CTP_KOR_NM 등)으로 먼저 걸러서 "누락 0"에 가깝게
+    // 속성값 기준 우선 + 시도 동치 비교(강원도/강원특별자치도 등)
     const byProp = feats.filter(f => {
       const s = getSigunguSidoFromFeature(f);
-      return s && normLoose(s) === normLoose(fs);
+      return s && sameSido(s, fs);
     });
     if (byProp.length) return byProp;
 
-    // 2) 속성이 없으면 geometry fallback
     const sidoFeature = findSidoFeatureByName(sidoGeo, fs);
     return filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
   }
@@ -840,14 +870,14 @@
 
   function vendorCountForSido(sidoName){
     const vf = norm(state.vendorFilter);
-    const recs = state.records.filter(r => (!vf || r.vendor===vf) && normLoose(r.sido)===normLoose(sidoName));
+    const recs = state.records.filter(r => (!vf || r.vendor===vf) && sameSido(r.sido, sidoName));
     return new Set(recs.map(r => r.vendor)).size;
   }
   function vendorCountForCity(sidoName, cityName){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
       if (vf && r.vendor!==vf) return false;
-      if (sidoName && normLoose(r.sido)!==normLoose(sidoName)) return false;
+      if (sidoName && !sameSido(r.sido, sidoName)) return false;
       const cg = cityGroupFromRecordSigungu(r.sigungu);
       if (cityName && normLoose(cg)!==normLoose(cityName)) return false;
       return true;
@@ -858,7 +888,7 @@
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
       if (vf && r.vendor!==vf) return false;
-      if (sidoName && normLoose(r.sido)!==normLoose(sidoName)) return false;
+      if (sidoName && !sameSido(r.sido, sidoName)) return false;
       if (districtFull && !sameSigungu(r.sigungu, districtFull)) return false;
       return true;
     });
@@ -868,7 +898,7 @@
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
       if (vf && r.vendor !== vf) return false;
-      if (sidoName && normLoose(r.sido) !== normLoose(sidoName)) return false;
+      if (sidoName && !sameSido(r.sido, sidoName)) return false;
 
       if (scopeSigunguOrCity){
         if (state.selectedDistrict){
@@ -924,8 +954,6 @@
     if (state.cache.cityMetaBySido.has(s)) return state.cache.cityMetaBySido.get(s);
 
     const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
-
-    // ✅ 여기서부터가 수정 핵심: "속성 기반 우선"으로 시군구를 정확히 포함
     const featsInSido = filterSigunguForSido(sigunguGeo, sidoGeo, s);
 
     const meta = buildCityMetaForSido(featsInSido, s);
@@ -1071,7 +1099,7 @@
       const featsAll = dongGeo.features || [];
       const feats = featsAll.filter(f => {
         const n = dongGetNames(f);
-        const sidoOk = normLoose(normalizeSidoName(n.sido)) === normLoose(s);
+        const sidoOk = sameSido(normalizeSidoName(n.sido), s);
         if (!sidoOk) return false;
 
         if (d && districtFeature){
@@ -1306,7 +1334,7 @@
     }
 
     const sidoTry = normalizeSidoName(q);
-    const sidoExists = new Set(state.records.map(r => r.sido)).has(sidoTry);
+    const sidoExists = state.records.some(r => sameSido(r.sido, sidoTry));
     if (sidoExists){
       state.selectedSido = sidoTry;
       state.selectedCity = "";
@@ -1357,7 +1385,7 @@
       return;
     }
 
-    const found = state.records.find(r => r.sido.includes(q) || r.sigungu.includes(q) || r.dong.includes(q));
+    const found = state.records.find(r => (r.sido||"").includes(q) || (r.sigungu||"").includes(q) || (r.dong||"").includes(q));
     if (found){
       state.selectedSido = found.sido;
       state.selectedCity = cityGroupFromRecordSigungu(found.sigungu);
@@ -1413,6 +1441,7 @@
     setRecords(parseDataText(SAMPLE_TEXT));
   }
 
+  // ===== 이벤트 =====
   els.btnSearch.addEventListener('click', () => runSearch().catch(console.error));
   els.q.addEventListener('keydown', (e) => { if (e.key === "Enter") runSearch().catch(console.error); });
 
@@ -1443,11 +1472,13 @@
     scheduleRender();
   });
 
+  // ===== 지도 초기화 =====
   function initMap(){
     const center = new kakao.maps.LatLng(36.5, 127.9);
     state.map = new kakao.maps.Map(els.map, { center, level: 13 });
   }
 
+  // ===== 부팅 =====
   initMap();
   refreshCrumbs();
   loadFromStorage();

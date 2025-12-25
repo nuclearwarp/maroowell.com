@@ -292,22 +292,16 @@
   const state = {
     records: [],
     vendorFilter: "",
-
     selectedSido: "",
     selectedCity: "",
     selectedDistrict: "",
     selectedDistrictShort: "",
     selectedDistrictFeature: null,
 
+    // ✅ 기본값: 전체 동 표시
     showAllDongs: true,
 
-    cache: {
-      sido: null,
-      sigungu: null,
-      dongBySido: new Map(),
-      cityMetaBySido: new Map(),
-    },
-
+    cache: { sido:null, sigungu:null, dongBySido:new Map(), cityMetaBySido:new Map() },
     map: null,
     polygons: [],
     labels: [],
@@ -351,18 +345,15 @@
     return A.includes(B) || B.includes(A);
   }
 
-  // ✅ 핵심: 공백이 없어도 "고양시일산서구" -> {city:"고양시", district:"일산서구"}로 분해
   function parseCityDistrict(sigunguDisp){
     const s = norm(sigunguDisp);
     if (!s) return { city:"", district:"" };
 
-    // 1) 공백 기반(정상 케이스)
     const parts = s.split(/\s+/g).filter(Boolean);
     if (parts.length >= 2 && /(시)$/u.test(parts[0]) && /(구)$/u.test(parts[1])){
       return { city: parts[0], district: parts[1] };
     }
 
-    // 2) 공백 없는 케이스: "고양시일산서구", "성남시분당구", "용인시수지구" 등
     const m = s.match(/^(.+?시)(.+?구)$/u);
     if (m){
       return { city: m[1], district: m[2] };
@@ -376,9 +367,7 @@
     return p.city;
   }
 
-  // ✅ 선택 상태 자동 교정(= 지금 스샷처럼 city에 district가 붙어 들어온 상태 방지)
   function sanitizeSelection(){
-    // city가 "고양시일산서구" 같은 형태인데 district가 비어있으면 분해해서 재배치
     if (state.selectedSido && state.selectedCity && !state.selectedDistrict){
       const p = parseCityDistrict(state.selectedCity);
       if (p.city && p.district){
@@ -388,8 +377,6 @@
         state.selectedDistrictFeature = null;
       }
     }
-
-    // district는 있는데 city가 비어있으면 city를 강제로 채움
     if (state.selectedSido && state.selectedDistrict && !state.selectedCity){
       const p = parseCityDistrict(state.selectedDistrict);
       if (p.city){
@@ -405,9 +392,7 @@
         const res = await fetch(url, { cache:"force-cache" });
         if (!res.ok) throw new Error(`HTTP ${res.status} @ ${url}`);
         return await res.json();
-      }catch(e){
-        lastErr = e;
-      }
+      }catch(e){ lastErr = e; }
     }
     throw lastErr || new Error("fetchFirstJSON failed");
   }
@@ -460,9 +445,7 @@
       const lat = (sw.getLat() + ne.getLat()) / 2;
       const lng = (sw.getLng() + ne.getLng()) / 2;
       return { lat, lng };
-    }catch(e){
-      return null;
-    }
+    }catch(e){ return null; }
   }
 
   function featureCentroid(feature){
@@ -496,7 +479,6 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
-  // ===== point-in-polygon =====
   function pointInRing(pt, ring){
     let inside = false;
     for (let i=0, j=ring.length-1; i<ring.length; j=i++){
@@ -526,7 +508,6 @@
     return false;
   }
 
-  // ===== 데이터 파싱 =====
   const GU_TO_SIDO = new Map([
     ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],
     ["일산서구","경기도"],["일산동구","경기도"],["덕양구","경기도"],
@@ -634,7 +615,6 @@
       if (d){
         if (!sameSigungu(r.sigungu, d)) return false;
       }
-
       return true;
     });
   }
@@ -702,7 +682,6 @@
     }
   }
 
-  // ===== 경계 로더 =====
   async function loadSido(){
     if (state.cache.sido) return state.cache.sido;
     const json = await fetchFirstJSON(BOUNDARY.SIDO_URLS);
@@ -759,7 +738,6 @@
         if (bc) pt = { lng: bc.lng, lat: bc.lat };
       }
       if (!pt) continue;
-
       if (pointInFeature(pt, sidoFeature)) out.push(f);
     }
     return out.length ? out : feats;
@@ -774,6 +752,7 @@
     nameEl.textContent = name;
     div.appendChild(nameEl);
 
+    // ✅ count > 0일 때만 배지 표시 (0이면 동이름만)
     if (count > 0){
       const c = document.createElement('span');
       c.className = 'count';
@@ -826,7 +805,6 @@
     }
   }
 
-  // ===== 라벨 count(유니크 업체 수) =====
   function vendorCountForSido(sidoName){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => (!vf || r.vendor===vf) && normLoose(r.sido)===normLoose(sidoName));
@@ -874,7 +852,6 @@
     return new Set(recs.map(r => r.vendor)).size;
   }
 
-  // ===== sigungu -> city 메타 =====
   function buildCityMetaForSido(sigunguFeatures, focusSido){
     const fs = normalizeSidoName(focusSido || "");
     const byCity = new Map();
@@ -887,12 +864,7 @@
       const city = parts.city || disp;
 
       if (!byCity.has(city)){
-        byCity.set(city, {
-          city,
-          hasDistricts: false,
-          bounds: new kakao.maps.LatLngBounds(),
-          features: [],
-        });
+        byCity.set(city, { city, hasDistricts: false, bounds: new kakao.maps.LatLngBounds(), features: [] });
       }
 
       const meta = byCity.get(city);
@@ -944,7 +916,6 @@
     return "dong";
   }
 
-  // ===== 렌더 =====
   async function renderMap(){
     const mySeq = ++state.renderSeq;
     state.renderInFlight = true;
@@ -1043,6 +1014,7 @@
 
       // ===== dong =====
       const scopeSigOrCity = d ? d : c;
+
       const dongGeo = await tryLoadDongForSido(s);
       if (!dongGeo){
         state.selectedDistrict = "";
@@ -1084,6 +1056,7 @@
 
       const dataCanonSet = new Set(recordsInScope().map(r => dongCanon(r.dong)).filter(Boolean));
 
+      // ✅ 폴리곤: 전체 동 모드면 전부, 데이터 동 모드면 데이터 있는 동만
       const featsToDraw = state.showAllDongs
         ? feats
         : feats.filter(f => {
@@ -1097,23 +1070,31 @@
         return n.dong;
       });
 
+      // ✅ 라벨: (전체 동 모드) 모든 동 이름 표시, count는 데이터 있을 때만 배지로
+      //         (데이터 동 모드) 데이터 있는 동만 라벨
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
-        const canon = dongCanon(n.dong);
-        if (!canon) continue;
-        if (!dataCanonSet.has(canon)) continue;
-        if (labeled.has(canon)) continue;
+        const dongName = norm(n.dong);
+        const sg = norm(n.sigungu);
+        if (!dongName) continue;
+
+        const key = `${sg}|${dongName}`;
+        if (labeled.has(key)) continue;
 
         const cc0 = featureCentroid(f);
         const cc = cc0 ? { lat:cc0.lat, lng:cc0.lng } : boundsCenter(featureBounds(f));
         if (!cc) continue;
 
-        const vcnt = vendorCountForCanonDong(s, scopeSigOrCity, canon);
-        if (vcnt <= 0) continue;
+        const canon = dongCanon(dongName);
+        const vcnt = canon ? vendorCountForCanonDong(s, scopeSigOrCity, canon) : 0;
 
-        labeled.add(canon);
-        makeLabelOverlay(cc.lat, cc.lng, canon, vcnt, () => {});
+        if (!state.showAllDongs){
+          if (!canon || !dataCanonSet.has(canon) || vcnt <= 0) continue;
+        }
+
+        labeled.add(key);
+        makeLabelOverlay(cc.lat, cc.lng, dongName, vcnt, () => {});
       }
 
     } finally {
@@ -1126,7 +1107,6 @@
     }
   }
 
-  // ===== 선택 핸들러 =====
   function selectSido(sidoName, feature){
     state.selectedSido = normalizeSidoName(sidoName);
     state.selectedCity = "";
@@ -1157,7 +1137,6 @@
   }
 
   function selectDistrict(districtFull, districtShort, feature){
-    // ✅ district를 선택하면 city도 반드시 city로 맞춘다
     const p = parseCityDistrict(districtFull);
     if (p.city) state.selectedCity = p.city;
 
@@ -1251,7 +1230,6 @@
     }
   }
 
-  // ===== 렌더 스케줄러 =====
   let renderTimer = null;
   function scheduleRender(){
     if (state.renderInFlight){
@@ -1262,7 +1240,6 @@
     renderTimer = setTimeout(() => { renderMap().catch(console.error); }, 60);
   }
 
-  // ===== 업체/데이터 =====
   function refreshVendorSelect(){
     const vendors = uniq(state.records.map(r => r.vendor)).sort((a,b)=>a.localeCompare(b,'ko'));
     const cur = state.vendorFilter;
@@ -1278,7 +1255,6 @@
     scheduleRender();
   }
 
-  // ===== 검색 =====
   async function runSearch(){
     const q = norm(els.q.value);
     if (!q){ scheduleRender(); return; }
@@ -1400,7 +1376,6 @@
     setRecords(parseDataText(SAMPLE_TEXT));
   }
 
-  // ===== 이벤트 =====
   els.btnSearch.addEventListener('click', () => runSearch().catch(console.error));
   els.q.addEventListener('keydown', (e) => { if (e.key === "Enter") runSearch().catch(console.error); });
 
@@ -1431,13 +1406,11 @@
     scheduleRender();
   });
 
-  // ===== 지도 초기화 =====
   function initMap(){
     const center = new kakao.maps.LatLng(36.5, 127.9);
     state.map = new kakao.maps.Map(els.map, { center, level: 13 });
   }
 
-  // ===== 부팅 =====
   initMap();
   refreshCrumbs();
   loadFromStorage();

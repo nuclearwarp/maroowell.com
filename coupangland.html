@@ -223,7 +223,6 @@
 <script>
 (() => {
   const DONG_FILE_FALLBACK_SIDO = new Map([
-    // 최근 명칭 변경 케이스: GeoJSON/레포에 따라 파일명이 다를 수 있어서 다 시도
     ["강원특별자치도", ["강원도"]],
     ["전북특별자치도", ["전라북도","전북"]],
   ]);
@@ -236,7 +235,6 @@
     SIGUNGU_URLS: [
       "https://cdn.jsdelivr.net/gh/southkorea/southkorea-maps@master/kostat/2018/json/skorea-municipalities-2018-geo.json",
     ],
-    // 시도명 표기(강원도/강원특별자치도 등) 차이 대응: 후보 파일명 여러 개 순차 시도
     DONG_URLS_FOR_SIDO: (sidoNameRaw) => {
       const s0 = normalizeSidoName(sidoNameRaw);
       const candidates = [s0, ...(DONG_FILE_FALLBACK_SIDO.get(s0) || [])];
@@ -309,6 +307,8 @@
     selectedDistrict: "",
     selectedDistrictShort: "",
     selectedDistrictFeature: null,
+
+    // 기본: 전체 동 표시(요청 반영)
     showAllDongs: true,
 
     cache: { sido:null, sigungu:null, dongBySido:new Map(), cityMetaBySido:new Map() },
@@ -338,8 +338,6 @@
     return n;
   }
   function sidoKey(name){
-    // "강원도" / "강원특별자치도" -> "강원"
-    // "서울특별시" -> "서울"
     return normLoose(normalizeSidoName(name)).replace(/(특별자치도|특별자치시|특별시|광역시|도)$/u, "");
   }
   function sameSido(a,b){
@@ -515,6 +513,7 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
+  // ===== Point in polygon =====
   function pointInRing(pt, ring){
     let inside = false;
     for (let i=0, j=ring.length-1; i<ring.length; j=i++){
@@ -544,6 +543,49 @@
     return false;
   }
 
+  // ===== 핵심 버그fix: 해안/길쭉한 폴리곤은 centroid가 바다로 튀는 케이스가 많음
+  // => 샘플 포인트 여러 개로 포함 판정
+  function featureSamplePoints(feature){
+    const pts = [];
+
+    const c = featureCentroid(feature);
+    if (c) pts.push({ lng: c.lng, lat: c.lat });
+
+    const bc = boundsCenter(featureBounds(feature));
+    if (bc) pts.push({ lng: bc.lng, lat: bc.lat });
+
+    const g = feature?.geometry;
+
+    const takeRing = (ring) => {
+      if (!ring || !ring.length) return;
+      const a = ring[0];
+      if (a && a.length >= 2) pts.push({ lng: a[0], lat: a[1] });
+
+      const mid = ring[Math.floor(ring.length / 2)];
+      if (mid && mid.length >= 2) pts.push({ lng: mid[0], lat: mid[1] });
+    };
+
+    if (g?.type === "Polygon"){
+      takeRing(g.coordinates?.[0]);
+    } else if (g?.type === "MultiPolygon"){
+      takeRing(g.coordinates?.[0]?.[0]);
+    }
+
+    return pts;
+  }
+  function anyPointInFeature(points, feature){
+    for (const pt of (points || [])){
+      if (!pt) continue;
+      if (pointInFeature(pt, feature)) return true;
+    }
+    return false;
+  }
+  function featureInFeatureBySamples(childFeature, parentFeature){
+    if (!childFeature || !parentFeature) return false;
+    return anyPointInFeature(featureSamplePoints(childFeature), parentFeature);
+  }
+
+  // ===== 데이터 파싱 =====
   const GU_TO_SIDO = new Map([
     ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],
     ["일산서구","경기도"],["일산동구","경기도"],["덕양구","경기도"],
@@ -718,6 +760,7 @@
     }
   }
 
+  // ===== 경계 로더 =====
   async function loadSido(){
     if (state.cache.sido) return state.cache.sido;
     const json = await fetchFirstJSON(BOUNDARY.SIDO_URLS);
@@ -745,7 +788,7 @@
     catch(e){ console.warn("[DONG] load failed:", e?.message || e); return null; }
   }
 
-  // ===== 변경 핵심: 시도 prefix 제거도 "동치" 기준으로 =====
+  // ===== 매칭 보조 =====
   function stripSidoPrefix(name, sido){
     const n = norm(name);
     const s = norm(sido);
@@ -772,23 +815,25 @@
     return null;
   }
 
+  // ===== 핵심 수정: centroid 단일판정 제거(해안 누락 해결) =====
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
 
     const out = [];
     for (const f of feats){
-      const c = featureCentroid(f);
-      let pt = null;
-      if (c) pt = { lng: c.lng, lat: c.lat };
-      else{
-        const bc = boundsCenter(featureBounds(f));
-        if (bc) pt = { lng: bc.lng, lat: bc.lat };
-      }
-      if (!pt) continue;
-      if (pointInFeature(pt, sidoFeature)) out.push(f);
+      if (featureInFeatureBySamples(f, sidoFeature)) out.push(f);
     }
-    return out.length ? out : feats;
+    if (out.length) return out;
+
+    // 마지막 fallback(그래도 최소한 잡히게)
+    const out2 = [];
+    for (const f of feats){
+      const bc = boundsCenter(featureBounds(f));
+      if (!bc) continue;
+      if (pointInFeature({ lng: bc.lng, lat: bc.lat }, sidoFeature)) out2.push(f);
+    }
+    return out2.length ? out2 : feats;
   }
 
   function filterSigunguForSido(sigunguGeo, sidoGeo, focusSido){
@@ -796,13 +841,23 @@
     const feats = sigunguGeo?.features || [];
     if (!fs) return feats;
 
-    // 속성값 기준 우선 + 시도 동치 비교(강원도/강원특별자치도 등)
+    // 1) 속성 기반
     const byProp = feats.filter(f => {
       const s = getSigunguSidoFromFeature(f);
       return s && sameSido(s, fs);
     });
     if (byProp.length) return byProp;
 
+    // 2) name/admnm 문자열 기반 (속성 비는 데이터셋 대응)
+    const byName = feats.filter(f => {
+      const raw = norm(getFeatureName(f));
+      if (!raw) return false;
+      const first = raw.split(/\s+/g)[0];
+      return first && sameSido(first, fs);
+    });
+    if (byName.length) return byName;
+
+    // 3) 지오메트리 포함 판정(샘플 포인트)
     const sidoFeature = findSidoFeatureByName(sidoGeo, fs);
     return filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
   }
@@ -844,6 +899,7 @@
     for (const f of features){
       const name = nameGetter ? nameGetter(f) : getFeatureName(f);
       const paths = geometryToLatLngPaths(f.geometry);
+
       for (const path of paths){
         const poly = new kakao.maps.Polygon({
           path,
@@ -978,6 +1034,7 @@
     return "dong";
   }
 
+  // ===== 렌더 =====
   async function renderMap(){
     const mySeq = ++state.renderSeq;
     state.renderInFlight = true;
@@ -1085,6 +1142,7 @@
 
       const dongGeo = await tryLoadDongForSido(s);
       if (!dongGeo){
+        // 동파일 없으면 한 단계 위로 후퇴
         state.selectedDistrict = "";
         state.selectedDistrictShort = "";
         state.selectedDistrictFeature = null;
@@ -1103,11 +1161,8 @@
         if (!sidoOk) return false;
 
         if (d && districtFeature){
-          const c0 = featureCentroid(f);
-          const bc = !c0 ? boundsCenter(featureBounds(f)) : null;
-          const pt = c0 ? { lng:c0.lng, lat:c0.lat } : (bc ? { lng:bc.lng, lat:bc.lat } : null);
-          if (!pt) return false;
-          return pointInFeature(pt, districtFeature);
+          // 핵심 수정: centroid 1개 말고 샘플 포인트로 포함 판정(해안 누락 방지)
+          return featureInFeatureBySamples(f, districtFeature);
         }
 
         if (d){
@@ -1137,6 +1192,7 @@
         return n.dong;
       });
 
+      // 라벨: showAllDongs면 모든 동 이름 표시(데이터 없는 동은 뱃지 0개로)
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
@@ -1172,6 +1228,7 @@
     }
   }
 
+  // ===== 선택 핸들러 =====
   function selectSido(sidoName, feature){
     state.selectedSido = normalizeSidoName(sidoName);
     state.selectedCity = "";
@@ -1295,6 +1352,7 @@
     }
   }
 
+  // ===== 렌더 스케줄러 =====
   let renderTimer = null;
   function scheduleRender(){
     if (state.renderInFlight){
@@ -1305,6 +1363,7 @@
     renderTimer = setTimeout(() => { renderMap().catch(console.error); }, 60);
   }
 
+  // ===== 업체/데이터 =====
   function refreshVendorSelect(){
     const vendors = uniq(state.records.map(r => r.vendor)).sort((a,b)=>a.localeCompare(b,'ko'));
     const cur = state.vendorFilter;
@@ -1320,6 +1379,7 @@
     scheduleRender();
   }
 
+  // ===== 검색 =====
   async function runSearch(){
     const q = norm(els.q.value);
     if (!q){ scheduleRender(); return; }

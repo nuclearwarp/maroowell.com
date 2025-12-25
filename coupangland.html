@@ -300,13 +300,11 @@
     records: [],
     vendorFilter: "",
 
-    // ✅ 클릭 기반 계층 선택
     selectedSido: "",
-    selectedCity: "",          // 경기도에서는 “고양시/용인시…” 같은 시 그룹
-    selectedDistrict: "",      // “고양시 덕양구” 같은 시+구 (구 없으면 비움)
+    selectedCity: "",
+    selectedDistrict: "",
     selectedDistrictShort: "",
 
-    // 동 표시 토글(요청대로 기본: 전체 동)
     showAllDongs: true,
 
     cache: {
@@ -328,7 +326,6 @@
   function norm(s){ return (s||"").toString().trim(); }
   function normLoose(s){ return norm(s).replace(/\s+/g,""); }
 
-  // 동 정규화(라벨/매칭용)
   function dongCanon(s){
     let x = norm(s);
     if (!x) return "";
@@ -361,9 +358,6 @@
   }
 
   // ✅ “시(그룹) / 구(디스트릭트)” 파서
-  // - "고양시 덕양구" => {city:"고양시", district:"덕양구"}
-  // - "화성시" => {city:"화성시", district:""}
-  // - "영등포구" => {city:"영등포구", district:""} (서울은 여기서 city=구로 취급)
   function parseCityDistrict(sigunguDisp){
     const s = norm(sigunguDisp);
     if (!s) return { city:"", district:"" };
@@ -476,6 +470,38 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
+  // ===== point in polygon (좌표 기반 시도-시군구 매칭용) =====
+  // ring: [[lng,lat],...], pt: {lng,lat}
+  function pointInRing(pt, ring){
+    let inside = false;
+    for (let i=0, j=ring.length-1; i<ring.length; j=i++){
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+
+      const intersect = ((yi > pt.lat) !== (yj > pt.lat)) &&
+        (pt.lng < (xj - xi) * (pt.lat - yi) / ((yj - yi) || 1e-12) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function pointInFeature(pt, feature){
+    const g = feature?.geometry;
+    if (!g) return false;
+    if (g.type === "Polygon"){
+      const ring = g.coordinates?.[0];
+      if (!ring) return false;
+      return pointInRing(pt, ring);
+    }
+    if (g.type === "MultiPolygon"){
+      for (const poly of (g.coordinates || [])){
+        const ring = poly?.[0];
+        if (ring && pointInRing(pt, ring)) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
   // ===== 데이터 파싱 =====
   const GU_TO_SIDO = new Map([
     ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],["일산서구","경기도"],["일산동구","경기도"],["덕양구","경기도"],
@@ -548,7 +574,6 @@
       out.push({sido, sigungu, dong, vendor});
     }
 
-    // 유니크(업체+지역)
     const seen = new Set();
     const uniqOut = [];
     for (const r of out){
@@ -565,7 +590,6 @@
     return state.records.filter(r => !vf || r.vendor === vf);
   }
 
-  // ✅ 현재 선택 범위(시도/시/구) 기반으로 데이터 필터
   function recordsInScope(){
     const recs = filteredRecords();
     const s = norm(state.selectedSido);
@@ -671,18 +695,6 @@
     catch(e){ console.warn("[DONG] load failed:", e?.message || e); return null; }
   }
 
-  // ===== 경계 이름/매칭 보조 =====
-  function getSigunguSidoFromFeature(f){
-    const p = f?.properties || {};
-    const candidates = [
-      p.CTP_KOR_NM, p.province, p.NAME_1, p.SIDO, p.sido,
-      norm(p.adm_nm||"").split(/\s+/g)[0],
-      (norm(p.name||"").includes(" ") ? norm(p.name||"").split(/\s+/g)[0] : ""),
-      (norm(p.SIG_KOR_NM||"").includes(" ") ? norm(p.SIG_KOR_NM||"").split(/\s+/g)[0] : ""),
-    ].map(x => normalizeSidoName(norm(x))).filter(Boolean);
-    return candidates[0] || "";
-  }
-
   function stripSidoPrefix(name, sido){
     const n = norm(name);
     const s = norm(sido);
@@ -701,27 +713,29 @@
     return null;
   }
 
-  function findSigunguFeature(sigunguGeo, focusSido, sigunguName){
+  // ✅ 시도 폴리곤 내부(centroid 기준)로 sigungu를 안정적으로 필터
+  function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
-    const fs = normalizeSidoName(focusSido || "");
-    const target = norm(sigunguName);
+    if (!sidoFeature) return feats;
 
+    const out = [];
     for (const f of feats){
-      if (fs){
-        const s = getSigunguSidoFromFeature(f);
-        if (s && normLoose(s) !== normLoose(fs)) continue;
+      const c = featureCentroid(f);
+      let pt = null;
+      if (c) pt = { lng: c.lng, lat: c.lat };
+      else{
+        const bc = boundsCenter(featureBounds(f));
+        if (bc) pt = { lng: bc.lng, lat: bc.lat };
       }
-      const raw = norm(getFeatureName(f));
-      const disp = stripSidoPrefix(raw, fs) || raw;
+      if (!pt) continue;
 
-      if (sameSigungu(disp, target) || sameSigungu(raw, target)){
-        return f;
-      }
+      if (pointInFeature(pt, sidoFeature)) out.push(f);
     }
-    return null;
+
+    // 혹시 centroid 판정이 너무 빡세서 0이면(예외), 그냥 원본 전체 리턴
+    return out.length ? out : feats;
   }
 
-  // ===== 라벨/폴리곤 =====
   function makeLabelOverlay(lat, lng, name, count, onClick){
     const div = document.createElement('div');
     div.className = 'region-label';
@@ -773,7 +787,7 @@
         state.polygons.push(poly);
 
         kakao.maps.event.addListener(poly, 'mouseover', () => {
-          poly.setOptions({ fillOpacity: Math.min(style.fillOpacity + 0.10, 0.28) });
+          poly.setOptions({ fillOpacity: Math.min(style.fillOpacity + 0.10, 0.30) });
         });
         kakao.maps.event.addListener(poly, 'mouseout', () => {
           poly.setOptions({ fillOpacity: style.fillOpacity });
@@ -789,7 +803,6 @@
     const recs = state.records.filter(r => (!vf || r.vendor===vf) && normLoose(r.sido)===normLoose(sidoName));
     return new Set(recs.map(r => r.vendor)).size;
   }
-
   function vendorCountForCity(sidoName, cityName){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
@@ -801,7 +814,6 @@
     });
     return new Set(recs.map(r => r.vendor)).size;
   }
-
   function vendorCountForDistrict(sidoName, districtFull){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
@@ -812,7 +824,6 @@
     });
     return new Set(recs.map(r => r.vendor)).size;
   }
-
   function vendorCountForCanonDong(sidoName, scopeSigunguOrCity, canonDong){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => {
@@ -820,7 +831,6 @@
       if (sidoName && normLoose(r.sido) !== normLoose(sidoName)) return false;
 
       if (scopeSigunguOrCity){
-        // district가 있으면 district로, 없으면 cityGroup로
         if (state.selectedDistrict){
           if (!sameSigungu(r.sigungu, scopeSigunguOrCity)) return false;
         }else{
@@ -835,24 +845,12 @@
     return new Set(recs.map(r => r.vendor)).size;
   }
 
-  // ===== sigungu -> city 메타(경기도에서 “시” 그룹 렌더를 위해) =====
-  function buildCityMetaForSido(sigunguGeo, focusSido){
+  // ===== sigungu -> city 메타 =====
+  function buildCityMetaForSido(sigunguFeatures, focusSido){
     const fs = normalizeSidoName(focusSido || "");
-    const featsAll = sigunguGeo?.features || [];
+    const byCity = new Map();
 
-    const byCity = new Map(); // city -> meta
-    const pickFeats = featsAll.filter(f => {
-      if (!fs) return true;
-      const s = getSigunguSidoFromFeature(f);
-      if (s && normLoose(s) === normLoose(fs)) return true;
-
-      const p = f.properties || {};
-      const blob = `${norm(p.name)} ${norm(p.adm_nm)} ${norm(p.SIG_KOR_NM)} ${norm(p.NAME_1)} ${norm(p.province)} ${norm(p.CTP_KOR_NM)}`;
-      if (blob.includes(fs)) return true;
-      return false;
-    });
-
-    for (const f of pickFeats){
+    for (const f of sigunguFeatures){
       const raw = norm(getFeatureName(f));
       const disp = stripSidoPrefix(raw, fs) || raw;
 
@@ -867,9 +865,9 @@
           features: [], // {f, disp, parts}
         });
       }
+
       const meta = byCity.get(city);
       meta.features.push({ f, disp, parts });
-
       if (parts.district) meta.hasDistricts = true;
 
       const b = featureBounds(f);
@@ -879,7 +877,6 @@
       }catch(e){}
     }
 
-    // center 계산
     for (const meta of byCity.values()){
       meta.center = boundsCenter(meta.bounds);
     }
@@ -887,24 +884,23 @@
     return byCity;
   }
 
-  function getCityMetaMap(sidoName){
-    const s = normalizeSidoName(sidoName || "");
-    return state.cache.cityMetaBySido.get(s) || null;
-  }
-
   async function ensureCityMeta(sidoName){
     const s = normalizeSidoName(sidoName || "");
     if (!s) return null;
+    if (state.cache.cityMetaBySido.has(s)) return state.cache.cityMetaBySido.get(s);
 
-    const sigunguGeo = await loadSigungu();
-    if (!state.cache.cityMetaBySido.has(s)){
-      state.cache.cityMetaBySido.set(s, buildCityMetaForSido(sigunguGeo, s));
-    }
-    return state.cache.cityMetaBySido.get(s);
+    const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
+    const sidoFeature = findSidoFeatureByName(sidoGeo, s);
+
+    // ✅ 여기서 “속한 시군구”를 properties가 아니라 geometry로 필터링
+    const featsInSido = filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
+
+    const meta = buildCityMetaForSido(featsInSido, s);
+    state.cache.cityMetaBySido.set(s, meta);
+    return meta;
   }
 
   function currentLayerName(cityMetaMap){
-    // 계층: 전국(sido) -> 시(city) -> 구(district) -> 동(dong)
     const s = norm(state.selectedSido);
     const c = norm(state.selectedCity);
     const d = norm(state.selectedDistrict);
@@ -935,19 +931,19 @@
       const c = norm(state.selectedCity);
       const d = norm(state.selectedDistrict);
 
-      const styleSIDO = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.60, fillColor:'#2563eb', fillOpacity:0.04 };
-      const styleCITY = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.22, fillColor:'#2563eb', fillOpacity:0.035 };     // “시” 그룹은 내부선 최소 느낌
-      const styleDIST = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.62, fillColor:'#2563eb', fillOpacity:0.05 };
-      const styleDONG = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.70, fillColor:'#2563eb', fillOpacity:0.06 };
+      const styleSIDO = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.62, fillColor:'#2563eb', fillOpacity:0.04 };
 
-      // 레이어 결정(줌 무관)
+      // ✅ CITY 레벨이 너무 연하면 “없어진 것처럼” 보일 수 있어서 살짝 진하게
+      const styleCITY = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.40, fillColor:'#2563eb', fillOpacity:0.045 };
+
+      const styleDIST = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.65, fillColor:'#2563eb', fillOpacity:0.06 };
+      const styleDONG = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.72, fillColor:'#2563eb', fillOpacity:0.07 };
+
       let cityMetaMap = null;
       if (s) cityMetaMap = await ensureCityMeta(s);
       if (mySeq !== state.renderSeq) return;
 
       const layer = currentLayerName(cityMetaMap);
-
-      // 동 토글은 dong에서만 표시
       els.dongToggleWrap.style.display = (layer === "dong") ? "flex" : "none";
 
       if (layer === "sido"){
@@ -960,26 +956,22 @@
 
         for (const f of feats){
           const nm = normalizeSidoName(f.__fixedName || getFeatureName(f));
-          const c0 = featureCentroid(f) || boundsCenter(featureBounds(f));
-          if (!c0) continue;
+          const cc = featureCentroid(f) || boundsCenter(featureBounds(f));
+          if (!cc) continue;
           const vcnt = vendorCountForSido(nm);
-          makeLabelOverlay(c0.lat, c0.lng, nm, vcnt, () => selectSido(nm, f));
+          makeLabelOverlay(cc.lat, cc.lng, nm, vcnt, () => selectSido(nm, f));
         }
         return;
       }
 
       if (layer === "city"){
-        // ✅ 시도 내 “시 그룹” 렌더: 실제 폴리곤은 sigungu(시/구) 조각들이지만 클릭은 city로 묶는다.
-        const byCity = cityMetaMap || buildCityMetaForSido(sigunguGeo, s);
-
+        const byCity = cityMetaMap || new Map();
         for (const meta of byCity.values()){
-          // meta.features 각각을 그리되, 클릭은 “city 선택”
           drawFeaturePolygons(meta.features.map(x=>x.f), styleCITY, () => selectCity(meta.city, meta), (f) => {
             const raw = norm(getFeatureName(f));
             return stripSidoPrefix(raw, s) || raw;
           });
 
-          // 라벨은 city 1개만
           const cc = meta.center;
           if (!cc) continue;
           const vcnt = vendorCountForCity(s, meta.city);
@@ -989,10 +981,8 @@
       }
 
       if (layer === "district"){
-        // ✅ 선택된 city의 하위 “구” 렌더 (고양시 -> 덕양구/일산동구/일산서구)
         const meta = cityMetaMap?.get(c);
         if (!meta){
-          // 메타 없으면 city로 되돌림
           state.selectedCity = "";
           refreshCrumbs(); refreshRightPanel();
           scheduleRender();
@@ -1000,7 +990,7 @@
         }
 
         const feats = meta.features
-          .filter(x => !!x.parts.district) // district만 (구 없는 시면 district 레이어 안씀)
+          .filter(x => !!x.parts.district)
           .map(x => {
             x.f.__districtShort = x.parts.district;
             x.f.__districtFull = `${x.parts.city} ${x.parts.district}`;
@@ -1023,19 +1013,9 @@
       }
 
       // ===== dong =====
-      // dong 렌더는:
-      // - district 선택이 있으면 district 기준
-      // - district 선택이 없으면(구 없는 시/구) city 기준
       const scopeSigOrCity = d ? d : c;
       const dongGeo = await tryLoadDongForSido(s);
-      if (!dongGeo){
-        // 동 경계 실패 시 district(또는 city)로 대체
-        if (c){
-          // district 없으면 city 레벨 유지
-          scheduleRender();
-        }
-        return;
-      }
+      if (!dongGeo) return;
       if (mySeq !== state.renderSeq) return;
 
       const featsAll = dongGeo.features || [];
@@ -1045,16 +1025,13 @@
         if (!sidoOk) return false;
 
         if (d){
-          // district full match
           return sameSigungu(norm(n.sigungu), d);
         }else{
-          // city group match (구 없는 시/구)
           const cg = parseCityDistrict(norm(n.sigungu)).city;
           return normLoose(cg) === normLoose(c);
         }
       });
 
-      // “데이터 있는 동” 셋 (라벨/필터용)
       const dataCanonSet = new Set(
         recordsInScope().map(r => dongCanon(r.dong)).filter(Boolean)
       );
@@ -1072,7 +1049,6 @@
         return n.dong;
       });
 
-      // 라벨은 “데이터 있는 동”만(혼잡 방지)
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
@@ -1090,6 +1066,7 @@
         labeled.add(canon);
         makeLabelOverlay(cc.lat, cc.lng, canon, vcnt, () => {});
       }
+
     } finally {
       if (mySeq === state.renderSeq) showLoading(false);
       state.renderInFlight = false;
@@ -1121,7 +1098,6 @@
     refreshCrumbs();
     refreshRightPanel();
 
-    // city bounds로 이동
     if (meta?.bounds && !meta.bounds.isEmpty()){
       state.map.setBounds(meta.bounds);
     }
@@ -1163,57 +1139,7 @@
     }
     refreshCrumbs();
     refreshRightPanel();
-    zoomToSelectedScope().finally(() => scheduleRender());
-  }
-
-  async function zoomToSelectedScope(){
-    const s = norm(state.selectedSido);
-    const c = norm(state.selectedCity);
-    const d = norm(state.selectedDistrict);
-
-    const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
-
-    if (!s){
-      state.map.setLevel(13);
-      state.map.setCenter(new kakao.maps.LatLng(36.5, 127.9));
-      return;
-    }
-
-    // sido
-    if (s && !c){
-      const f = findSidoFeatureByName(sidoGeo, s);
-      if (f){
-        const b = featureBounds(f);
-        if (!b.isEmpty()) state.map.setBounds(b);
-      }
-      return;
-    }
-
-    // city
-    if (s && c && !d){
-      const cityMetaMap = await ensureCityMeta(s);
-      const meta = cityMetaMap?.get(c);
-      if (meta?.bounds && !meta.bounds.isEmpty()){
-        state.map.setBounds(meta.bounds);
-        return;
-      }
-      // fallback: sido bounds
-      const sf = findSidoFeatureByName(sidoGeo, s);
-      if (sf){
-        const b = featureBounds(sf);
-        if (!b.isEmpty()) state.map.setBounds(b);
-      }
-      return;
-    }
-
-    // district
-    if (s && d){
-      const f = findSigunguFeature(sigunguGeo, s, d);
-      if (f){
-        const b = featureBounds(f);
-        if (!b.isEmpty()) state.map.setBounds(b);
-      }
-    }
+    scheduleRender();
   }
 
   function refreshCrumbs(){
@@ -1236,7 +1162,7 @@
         state.selectedDistrictShort = "";
         refreshCrumbs();
         refreshRightPanel();
-        zoomToSelectedScope().finally(() => scheduleRender());
+        scheduleRender();
       }));
     }
 
@@ -1246,7 +1172,7 @@
         state.selectedDistrictShort = "";
         refreshCrumbs();
         refreshRightPanel();
-        zoomToSelectedScope().finally(() => scheduleRender());
+        scheduleRender();
       }));
     }
 
@@ -1291,7 +1217,6 @@
     const q = norm(els.q.value);
     if (!q){ scheduleRender(); return; }
 
-    // 업체명
     const vendors = new Set(state.records.map(r => r.vendor));
     if (vendors.has(q)){
       state.vendorFilter = q;
@@ -1301,7 +1226,6 @@
       return;
     }
 
-    // 시도
     const sidoTry = normalizeSidoName(q);
     const sidoExists = new Set(state.records.map(r => r.sido)).has(sidoTry);
     if (sidoExists){
@@ -1311,22 +1235,18 @@
       state.selectedDistrictShort = "";
       refreshCrumbs();
       refreshRightPanel();
-      await zoomToSelectedScope();
       scheduleRender();
       return;
     }
 
-    // city(시 그룹)
     if (state.selectedSido){
       const byCity = await ensureCityMeta(state.selectedSido);
       if (byCity && byCity.has(q)){
         selectCity(q, byCity.get(q));
-        await zoomToSelectedScope();
         return;
       }
     }
 
-    // district(시+구 or 구)
     const sigSet = new Set(state.records.map(r => sigunguKey(r.sigungu)));
     if (sigSet.has(sigunguKey(q))){
       const r = state.records.find(x => sameSigungu(x.sigungu, q));
@@ -1336,29 +1256,25 @@
       state.selectedDistrictShort = parseCityDistrict(state.selectedDistrict).district || state.selectedDistrict;
       refreshCrumbs();
       refreshRightPanel();
-      await zoomToSelectedScope();
       scheduleRender();
       return;
     }
 
-    // dong
     const dongSet = new Set(state.records.map(r => dongCanon(r.dong)));
     if (dongSet.has(dongCanon(q))){
       const r = state.records.find(x => dongCanon(x.dong) === dongCanon(q));
       if (r){
         state.selectedSido = r.sido;
         state.selectedCity = cityGroupFromRecordSigungu(r.sigungu);
-        state.selectedDistrict = r.sigungu; // 구 있는 케이스면 district로 세팅
+        state.selectedDistrict = r.sigungu;
         state.selectedDistrictShort = parseCityDistrict(r.sigungu).district || r.sigungu;
         refreshCrumbs();
         refreshRightPanel();
-        await zoomToSelectedScope();
         scheduleRender();
       }
       return;
     }
 
-    // fallback: 부분 포함
     const found = state.records.find(r => r.sido.includes(q) || r.sigungu.includes(q) || r.dong.includes(q));
     if (found){
       state.selectedSido = found.sido;
@@ -1367,7 +1283,6 @@
       state.selectedDistrictShort = parseCityDistrict(found.sigungu).district || found.sigungu;
       refreshCrumbs();
       refreshRightPanel();
-      await zoomToSelectedScope();
       scheduleRender();
     }
   }
@@ -1450,9 +1365,6 @@
   function initMap(){
     const center = new kakao.maps.LatLng(36.5, 127.9);
     state.map = new kakao.maps.Map(els.map, { center, level: 13 });
-
-    // ✅ 줌/드래그로 레이어 바꾸지 않음(보기만)
-    // (원하면 여기서 아무것도 안함)
   }
 
   // ===== 부팅 =====

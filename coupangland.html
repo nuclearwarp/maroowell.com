@@ -304,6 +304,7 @@
     selectedCity: "",
     selectedDistrict: "",
     selectedDistrictShort: "",
+    selectedDistrictFeature: null, // ✅ 선택한 “구” 폴리곤 feature 저장
 
     showAllDongs: true,
 
@@ -311,7 +312,7 @@
       sido: null,
       sigungu: null,
       dongBySido: new Map(),
-      cityMetaBySido: new Map(), // Map<sido, Map<city, meta>>
+      cityMetaBySido: new Map(),
     },
 
     map: null,
@@ -357,7 +358,6 @@
     return A.includes(B) || B.includes(A);
   }
 
-  // ✅ “시(그룹) / 구(디스트릭트)” 파서
   function parseCityDistrict(sigunguDisp){
     const s = norm(sigunguDisp);
     if (!s) return { city:"", district:"" };
@@ -470,14 +470,12 @@
 
   function uniq(arr){ return Array.from(new Set(arr)); }
 
-  // ===== point in polygon (좌표 기반 시도-시군구 매칭용) =====
-  // ring: [[lng,lat],...], pt: {lng,lat}
+  // ===== point-in-polygon (구 내부 동 필터용) =====
   function pointInRing(pt, ring){
     let inside = false;
     for (let i=0, j=ring.length-1; i<ring.length; j=i++){
       const xi = ring[i][0], yi = ring[i][1];
       const xj = ring[j][0], yj = ring[j][1];
-
       const intersect = ((yi > pt.lat) !== (yj > pt.lat)) &&
         (pt.lng < (xj - xi) * (pt.lat - yi) / ((yj - yi) || 1e-12) + xi);
       if (intersect) inside = !inside;
@@ -504,7 +502,8 @@
 
   // ===== 데이터 파싱 =====
   const GU_TO_SIDO = new Map([
-    ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],["일산서구","경기도"],["일산동구","경기도"],["덕양구","경기도"],
+    ["영등포구","서울특별시"],["강서구","서울특별시"],["분당구","경기도"],["수지구","경기도"],["기흥구","경기도"],
+    ["일산서구","경기도"],["일산동구","경기도"],["덕양구","경기도"],
   ]);
   const DISTRICT_TO_FULL_SIGUNGU = new Map([
     ["분당구","성남시 분당구"],["수지구","용인시 수지구"],["기흥구","용인시 기흥구"],
@@ -665,7 +664,8 @@
     els.dongByVendorsEmpty.style.display = dbv.length ? "none" : "block";
     for (const item of dbv){
       const li = document.createElement('li');
-      li.textContent = `${item.dong}: ${item.vendors.map(([v,c])=>`${v}(${c})`).join(", ")}`;
+      // ✅ 동별 “유니크 업체 수”를 먼저 보여주고, 뒤에 상세도 같이
+      li.textContent = `${item.dong} (${item.vendors.length}업체): ${item.vendors.map(([v,c])=>`${v}(${c})`).join(", ")}`;
       els.dongByVendors.appendChild(li);
     }
   }
@@ -713,7 +713,7 @@
     return null;
   }
 
-  // ✅ 시도 폴리곤 내부(centroid 기준)로 sigungu를 안정적으로 필터
+  // ✅ 시도 폴리곤 내부(centroid 기준)로 sigungu 안정 필터
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
@@ -731,8 +731,6 @@
 
       if (pointInFeature(pt, sidoFeature)) out.push(f);
     }
-
-    // 혹시 centroid 판정이 너무 빡세서 0이면(예외), 그냥 원본 전체 리턴
     return out.length ? out : feats;
   }
 
@@ -797,7 +795,7 @@
     }
   }
 
-  // ===== 집계(라벨 count) =====
+  // ===== 집계(라벨 count = 유니크 업체 수) =====
   function vendorCountForSido(sidoName){
     const vf = norm(state.vendorFilter);
     const recs = state.records.filter(r => (!vf || r.vendor===vf) && normLoose(r.sido)===normLoose(sidoName));
@@ -862,7 +860,7 @@
           city,
           hasDistricts: false,
           bounds: new kakao.maps.LatLngBounds(),
-          features: [], // {f, disp, parts}
+          features: [],
         });
       }
 
@@ -891,8 +889,6 @@
 
     const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
     const sidoFeature = findSidoFeatureByName(sidoGeo, s);
-
-    // ✅ 여기서 “속한 시군구”를 properties가 아니라 geometry로 필터링
     const featsInSido = filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
 
     const meta = buildCityMetaForSido(featsInSido, s);
@@ -932,12 +928,10 @@
       const d = norm(state.selectedDistrict);
 
       const styleSIDO = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.62, fillColor:'#2563eb', fillOpacity:0.04 };
-
-      // ✅ CITY 레벨이 너무 연하면 “없어진 것처럼” 보일 수 있어서 살짝 진하게
       const styleCITY = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.40, fillColor:'#2563eb', fillOpacity:0.045 };
-
       const styleDIST = { strokeWeight: 3, strokeColor:'#2563eb', strokeOpacity:0.65, fillColor:'#2563eb', fillOpacity:0.06 };
-      const styleDONG = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.72, fillColor:'#2563eb', fillOpacity:0.07 };
+      const styleDONG = { strokeWeight: 2, strokeColor:'#2563eb', strokeOpacity:0.78, fillColor:'#2563eb', fillOpacity:0.07 };
+      const styleDIST_HL = { strokeWeight: 5, strokeColor:'#1d4ed8', strokeOpacity:0.75, fillColor:'#1d4ed8', fillOpacity:0.00 };
 
       let cityMetaMap = null;
       if (s) cityMetaMap = await ensureCityMeta(s);
@@ -1015,8 +1009,19 @@
       // ===== dong =====
       const scopeSigOrCity = d ? d : c;
       const dongGeo = await tryLoadDongForSido(s);
-      if (!dongGeo) return;
+      if (!dongGeo){
+        // 동 경계 못 불러오면 최소한 화면을 비우지 않도록 district로 되돌림
+        state.selectedDistrict = "";
+        state.selectedDistrictShort = "";
+        state.selectedDistrictFeature = null;
+        refreshCrumbs(); refreshRightPanel();
+        scheduleRender();
+        return;
+      }
       if (mySeq !== state.renderSeq) return;
+
+      // ✅ “구 폴리곤 내부”로 동을 필터(문자열 매칭 의존 제거)
+      const districtFeature = state.selectedDistrictFeature;
 
       const featsAll = dongGeo.features || [];
       const feats = featsAll.filter(f => {
@@ -1024,17 +1029,31 @@
         const sidoOk = normLoose(normalizeSidoName(n.sido)) === normLoose(s);
         if (!sidoOk) return false;
 
+        // 구 선택이면: 구 폴리곤 내부 동만
+        if (d && districtFeature){
+          const c0 = featureCentroid(f);
+          const bc = !c0 ? boundsCenter(featureBounds(f)) : null;
+          const pt = c0 ? { lng:c0.lng, lat:c0.lat } : (bc ? { lng:bc.lng, lat:bc.lat } : null);
+          if (!pt) return false;
+          return pointInFeature(pt, districtFeature);
+        }
+
+        // 구 선택인데 feature 없으면(예외): 문자열 매칭 fallback
         if (d){
           return sameSigungu(norm(n.sigungu), d);
-        }else{
-          const cg = parseCityDistrict(norm(n.sigungu)).city;
-          return normLoose(cg) === normLoose(c);
         }
+
+        // 구 미선택이면 city 기준으로 필터
+        const cg = parseCityDistrict(norm(n.sigungu)).city;
+        return normLoose(cg) === normLoose(c);
       });
 
-      const dataCanonSet = new Set(
-        recordsInScope().map(r => dongCanon(r.dong)).filter(Boolean)
-      );
+      // 선택 구 강조선(동 위에 테두리만)
+      if (d && districtFeature){
+        drawFeaturePolygons([districtFeature], styleDIST_HL, () => {}, () => "");
+      }
+
+      const dataCanonSet = new Set(recordsInScope().map(r => dongCanon(r.dong)).filter(Boolean));
 
       const featsToDraw = state.showAllDongs
         ? feats
@@ -1049,6 +1068,7 @@
         return n.dong;
       });
 
+      // 라벨(데이터 있는 동만): 동명 + 유니크 업체 수
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
@@ -1057,7 +1077,8 @@
         if (!dataCanonSet.has(canon)) continue;
         if (labeled.has(canon)) continue;
 
-        const cc = featureCentroid(f) || boundsCenter(featureBounds(f));
+        const cc0 = featureCentroid(f);
+        const cc = cc0 ? { lat:cc0.lat, lng:cc0.lng } : boundsCenter(featureBounds(f));
         if (!cc) continue;
 
         const vcnt = vendorCountForCanonDong(s, scopeSigOrCity, canon);
@@ -1083,6 +1104,7 @@
     state.selectedCity = "";
     state.selectedDistrict = "";
     state.selectedDistrictShort = "";
+    state.selectedDistrictFeature = null;
     refreshCrumbs();
     refreshRightPanel();
 
@@ -1095,6 +1117,7 @@
     state.selectedCity = norm(cityName);
     state.selectedDistrict = "";
     state.selectedDistrictShort = "";
+    state.selectedDistrictFeature = null;
     refreshCrumbs();
     refreshRightPanel();
 
@@ -1107,6 +1130,7 @@
   function selectDistrict(districtFull, districtShort, feature){
     state.selectedDistrict = norm(districtFull);
     state.selectedDistrictShort = norm(districtShort);
+    state.selectedDistrictFeature = feature || null; // ✅ 저장
     refreshCrumbs();
     refreshRightPanel();
 
@@ -1120,6 +1144,7 @@
     state.selectedCity = "";
     state.selectedDistrict = "";
     state.selectedDistrictShort = "";
+    state.selectedDistrictFeature = null;
     refreshCrumbs();
     refreshRightPanel();
 
@@ -1132,10 +1157,13 @@
     if (state.selectedDistrict){
       state.selectedDistrict = "";
       state.selectedDistrictShort = "";
+      state.selectedDistrictFeature = null;
     }else if (state.selectedCity){
       state.selectedCity = "";
+      state.selectedDistrictFeature = null;
     }else if (state.selectedSido){
       state.selectedSido = "";
+      state.selectedDistrictFeature = null;
     }
     refreshCrumbs();
     refreshRightPanel();
@@ -1160,6 +1188,7 @@
         state.selectedCity = "";
         state.selectedDistrict = "";
         state.selectedDistrictShort = "";
+        state.selectedDistrictFeature = null;
         refreshCrumbs();
         refreshRightPanel();
         scheduleRender();
@@ -1170,6 +1199,7 @@
       els.crumbs.appendChild(make(state.selectedCity, true, () => {
         state.selectedDistrict = "";
         state.selectedDistrictShort = "";
+        state.selectedDistrictFeature = null;
         refreshCrumbs();
         refreshRightPanel();
         scheduleRender();
@@ -1233,6 +1263,7 @@
       state.selectedCity = "";
       state.selectedDistrict = "";
       state.selectedDistrictShort = "";
+      state.selectedDistrictFeature = null;
       refreshCrumbs();
       refreshRightPanel();
       scheduleRender();
@@ -1254,6 +1285,7 @@
       state.selectedCity = cityGroupFromRecordSigungu(r?.sigungu || "");
       state.selectedDistrict = r?.sigungu || q;
       state.selectedDistrictShort = parseCityDistrict(state.selectedDistrict).district || state.selectedDistrict;
+      state.selectedDistrictFeature = null;
       refreshCrumbs();
       refreshRightPanel();
       scheduleRender();
@@ -1268,6 +1300,7 @@
         state.selectedCity = cityGroupFromRecordSigungu(r.sigungu);
         state.selectedDistrict = r.sigungu;
         state.selectedDistrictShort = parseCityDistrict(r.sigungu).district || r.sigungu;
+        state.selectedDistrictFeature = null;
         refreshCrumbs();
         refreshRightPanel();
         scheduleRender();
@@ -1281,6 +1314,7 @@
       state.selectedCity = cityGroupFromRecordSigungu(found.sigungu);
       state.selectedDistrict = found.sigungu;
       state.selectedDistrictShort = parseCityDistrict(found.sigungu).district || found.sigungu;
+      state.selectedDistrictFeature = null;
       refreshCrumbs();
       refreshRightPanel();
       scheduleRender();
@@ -1292,7 +1326,7 @@
     const vf = state.vendorFilter ? state.vendorFilter : "전체";
     const uniqCount = recordsInScope().length;
     const vd = vendorDistList().map(([v,c]) => `- ${v}: ${c}`).join("\n");
-    const dbv = dongByVendorList().map(x => `- ${x.dong}: ${x.vendors.map(([v,c])=>`${v}(${c})`).join(", ")}`).join("\n");
+    const dbv = dongByVendorList().map(x => `- ${x.dong} (${x.vendors.length}업체): ${x.vendors.map(([v,c])=>`${v}(${c})`).join(", ")}`).join("\n");
     const text = `[CoupangLand]\n선택범위: ${scope}\n업체필터: ${vf}\n유니크(업체+지역): ${uniqCount}\n\n[업체 분포]\n${vd || "- 없음"}\n\n[동별 업체]\n${dbv || "- 없음"}`;
 
     navigator.clipboard.writeText(text).then(() => alert("복사 완료"))

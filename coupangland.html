@@ -297,8 +297,6 @@
     selectedDistrict: "",
     selectedDistrictShort: "",
     selectedDistrictFeature: null,
-
-    // ✅ 기본값: 전체 동 표시
     showAllDongs: true,
 
     cache: { sido:null, sigungu:null, dongBySido:new Map(), cityMetaBySido:new Map() },
@@ -465,6 +463,23 @@
   function getFeatureName(feature){
     const p = feature?.properties || {};
     return norm(p.name || p.NAME_1 || p.NAME_2 || p.NAME || p.CTP_KOR_NM || p.SIG_KOR_NM || p.adm_nm || "");
+  }
+
+  // ✅ (핵심) 시군구 feature가 어떤 시도 소속인지 "속성값"으로 먼저 판별
+  function getSigunguSidoFromFeature(f){
+    const p = f?.properties || {};
+    const cand = [
+      p.CTP_KOR_NM,
+      p.province,
+      p.NAME_1,
+      p.SIDO,
+      p.sido,
+      norm(p.adm_nm||"").split(/\s+/g)[0],
+      (norm(p.name||"").includes(" ") ? norm(p.name||"").split(/\s+/g)[0] : ""),
+      (norm(p.SIG_KOR_NM||"").includes(" ") ? norm(p.SIG_KOR_NM||"").split(/\s+/g)[0] : ""),
+    ].map(x => normalizeSidoName(norm(x))).filter(Boolean);
+
+    return cand[0] || "";
   }
 
   function dongGetNames(feature){
@@ -724,6 +739,7 @@
     return null;
   }
 
+  // (구버전) geometry 기반 포함 판별 — fallback용
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
@@ -743,6 +759,24 @@
     return out.length ? out : feats;
   }
 
+  // ✅ (핵심) 속성 기반 우선 필터 + geometry fallback
+  function filterSigunguForSido(sigunguGeo, sidoGeo, focusSido){
+    const fs = normalizeSidoName(focusSido || "");
+    const feats = sigunguGeo?.features || [];
+    if (!fs) return feats;
+
+    // 1) 속성(CTP_KOR_NM 등)으로 먼저 걸러서 "누락 0"에 가깝게
+    const byProp = feats.filter(f => {
+      const s = getSigunguSidoFromFeature(f);
+      return s && normLoose(s) === normLoose(fs);
+    });
+    if (byProp.length) return byProp;
+
+    // 2) 속성이 없으면 geometry fallback
+    const sidoFeature = findSidoFeatureByName(sidoGeo, fs);
+    return filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
+  }
+
   function makeLabelOverlay(lat, lng, name, count, onClick){
     const div = document.createElement('div');
     div.className = 'region-label';
@@ -752,7 +786,6 @@
     nameEl.textContent = name;
     div.appendChild(nameEl);
 
-    // ✅ count > 0일 때만 배지 표시 (0이면 동이름만)
     if (count > 0){
       const c = document.createElement('span');
       c.className = 'count';
@@ -891,8 +924,9 @@
     if (state.cache.cityMetaBySido.has(s)) return state.cache.cityMetaBySido.get(s);
 
     const [sidoGeo, sigunguGeo] = await Promise.all([loadSido(), loadSigungu()]);
-    const sidoFeature = findSidoFeatureByName(sidoGeo, s);
-    const featsInSido = filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
+
+    // ✅ 여기서부터가 수정 핵심: "속성 기반 우선"으로 시군구를 정확히 포함
+    const featsInSido = filterSigunguForSido(sigunguGeo, sidoGeo, s);
 
     const meta = buildCityMetaForSido(featsInSido, s);
     state.cache.cityMetaBySido.set(s, meta);
@@ -966,11 +1000,17 @@
 
       if (layer === "city"){
         const byCity = cityMetaMap || new Map();
+
         for (const meta of byCity.values()){
-          drawFeaturePolygons(meta.features.map(x=>x.f), styleCITY, () => selectCity(meta.city, meta), (f) => {
-            const raw = norm(getFeatureName(f));
-            return stripSidoPrefix(raw, s) || raw;
-          });
+          drawFeaturePolygons(
+            meta.features.map(x=>x.f),
+            styleCITY,
+            () => selectCity(meta.city, meta),
+            (f) => {
+              const raw = norm(getFeatureName(f));
+              return stripSidoPrefix(raw, s) || raw;
+            }
+          );
 
           const cc = meta.center;
           if (!cc) continue;
@@ -1056,7 +1096,6 @@
 
       const dataCanonSet = new Set(recordsInScope().map(r => dongCanon(r.dong)).filter(Boolean));
 
-      // ✅ 폴리곤: 전체 동 모드면 전부, 데이터 동 모드면 데이터 있는 동만
       const featsToDraw = state.showAllDongs
         ? feats
         : feats.filter(f => {
@@ -1070,8 +1109,6 @@
         return n.dong;
       });
 
-      // ✅ 라벨: (전체 동 모드) 모든 동 이름 표시, count는 데이터 있을 때만 배지로
-      //         (데이터 동 모드) 데이터 있는 동만 라벨
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);

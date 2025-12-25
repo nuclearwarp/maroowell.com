@@ -307,10 +307,7 @@
     selectedDistrict: "",
     selectedDistrictShort: "",
     selectedDistrictFeature: null,
-
-    // 기본: 전체 동 표시(요청 반영)
     showAllDongs: true,
-
     cache: { sido:null, sigungu:null, dongBySido:new Map(), cityMetaBySido:new Map() },
     map: null,
     polygons: [],
@@ -543,8 +540,122 @@
     return false;
   }
 
-  // ===== 핵심 버그fix: 해안/길쭉한 폴리곤은 centroid가 바다로 튀는 케이스가 많음
-  // => 샘플 포인트 여러 개로 포함 판정
+  // ===== (핵심) 라벨 포인트 보강: 해안/멀티폴리곤에서 "첫 폴리곤"이 섬/바다쪽인 경우 라벨이 화면 밖으로 튀는 문제 해결 =====
+  function ringsFromGeometry(geom){
+    const rings = [];
+    if (!geom) return rings;
+    if (geom.type === "Polygon"){
+      const ring = geom.coordinates?.[0];
+      if (Array.isArray(ring) && ring.length >= 3) rings.push(ring);
+    } else if (geom.type === "MultiPolygon"){
+      for (const poly of (geom.coordinates || [])){
+        const ring = poly?.[0];
+        if (Array.isArray(ring) && ring.length >= 3) rings.push(ring);
+      }
+    }
+    return rings;
+  }
+
+  function ringAreaAbs(ring){
+    // shoelace (lng=x, lat=y)
+    let a = 0;
+    for (let i=0, j=ring.length-1; i<ring.length; j=i++){
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      a += (xj * yi - xi * yj);
+    }
+    return Math.abs(a) / 2;
+  }
+
+  function ringCentroid(ring){
+    // polygon centroid (lng=x, lat=y)
+    let cx = 0, cy = 0, a = 0;
+    for (let i=0, j=ring.length-1; i<ring.length; j=i++){
+      const xi = ring[i][0], yi = ring[i][1];
+      const xj = ring[j][0], yj = ring[j][1];
+      const cross = (xi * yj - xj * yi);
+      a += cross;
+      cx += (xi + xj) * cross;
+      cy += (yi + yj) * cross;
+    }
+    if (Math.abs(a) < 1e-12){
+      // fallback: average
+      let sx=0, sy=0, n=0;
+      for (const [x,y] of ring){ sx+=x; sy+=y; n++; }
+      if (!n) return null;
+      return { lng: sx/n, lat: sy/n };
+    }
+    a = a / 2;
+    cx = cx / (6 * a);
+    cy = cy / (6 * a);
+    return { lng: cx, lat: cy };
+  }
+
+  function ringBoundsCenter(ring){
+    let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+    for (const [x,y] of ring){
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (!isFinite(minX) || !isFinite(minY)) return null;
+    return { lng: (minX+maxX)/2, lat: (minY+maxY)/2 };
+  }
+
+  function pickPointInsideRing(ring){
+    // 1) centroid(면적) -> 2) bbox center -> 3) 중간점/버텍스 스캔
+    const c1 = ringCentroid(ring);
+    if (c1 && pointInRing({lng:c1.lng, lat:c1.lat}, ring)) return c1;
+
+    const c2 = ringBoundsCenter(ring);
+    if (c2 && pointInRing({lng:c2.lng, lat:c2.lat}, ring)) return c2;
+
+    const mid = ring[Math.floor(ring.length/2)];
+    if (mid && mid.length >= 2){
+      const p = { lng: mid[0], lat: mid[1] };
+      if (pointInRing({lng:p.lng, lat:p.lat}, ring)) return p;
+    }
+
+    for (let k=0; k<Math.min(ring.length, 40); k++){
+      const v = ring[k];
+      if (!v) continue;
+      const p = { lng: v[0], lat: v[1] };
+      // 꼭짓점은 경계라서 안쪽 판정이 false 나올 수 있음 → 아주 약간 안쪽으로 이동(근사)
+      // 여기서는 간단히 bbox center 방향으로 0.00005만큼 당김
+      const bc = c2 || c1 || ringBoundsCenter(ring);
+      if (bc){
+        const dx = bc.lng - p.lng;
+        const dy = bc.lat - p.lat;
+        const q = { lng: p.lng + dx * 0.00005, lat: p.lat + dy * 0.00005 };
+        if (pointInRing({lng:q.lng, lat:q.lat}, ring)) return q;
+      }
+    }
+
+    // 마지막 fallback
+    return c1 || c2 || null;
+  }
+
+  function labelPointForFeature(feature){
+    const rings = ringsFromGeometry(feature?.geometry);
+    if (!rings.length) return null;
+
+    // 가장 큰 면적의 outer ring을 선택 (멀티폴리곤에서 섬/분절 때문에 라벨 튀는 문제 방지)
+    let bestRing = rings[0];
+    let bestA = ringAreaAbs(bestRing);
+
+    for (let i=1; i<rings.length; i++){
+      const a = ringAreaAbs(rings[i]);
+      if (a > bestA){
+        bestA = a;
+        bestRing = rings[i];
+      }
+    }
+
+    return pickPointInsideRing(bestRing);
+  }
+
+  // ===== 기존: 샘플 포인트 포함 판정 =====
   function featureSamplePoints(feature){
     const pts = [];
 
@@ -815,7 +926,6 @@
     return null;
   }
 
-  // ===== 핵심 수정: centroid 단일판정 제거(해안 누락 해결) =====
   function filterSigunguBySidoGeometry(sigunguGeo, sidoFeature){
     const feats = sigunguGeo?.features || [];
     if (!sidoFeature) return feats;
@@ -826,7 +936,6 @@
     }
     if (out.length) return out;
 
-    // 마지막 fallback(그래도 최소한 잡히게)
     const out2 = [];
     for (const f of feats){
       const bc = boundsCenter(featureBounds(f));
@@ -841,14 +950,12 @@
     const feats = sigunguGeo?.features || [];
     if (!fs) return feats;
 
-    // 1) 속성 기반
     const byProp = feats.filter(f => {
       const s = getSigunguSidoFromFeature(f);
       return s && sameSido(s, fs);
     });
     if (byProp.length) return byProp;
 
-    // 2) name/admnm 문자열 기반 (속성 비는 데이터셋 대응)
     const byName = feats.filter(f => {
       const raw = norm(getFeatureName(f));
       if (!raw) return false;
@@ -857,7 +964,6 @@
     });
     if (byName.length) return byName;
 
-    // 3) 지오메트리 포함 판정(샘플 포인트)
     const sidoFeature = findSidoFeatureByName(sidoGeo, fs);
     return filterSigunguBySidoGeometry(sigunguGeo, sidoFeature);
   }
@@ -1142,7 +1248,6 @@
 
       const dongGeo = await tryLoadDongForSido(s);
       if (!dongGeo){
-        // 동파일 없으면 한 단계 위로 후퇴
         state.selectedDistrict = "";
         state.selectedDistrictShort = "";
         state.selectedDistrictFeature = null;
@@ -1161,7 +1266,6 @@
         if (!sidoOk) return false;
 
         if (d && districtFeature){
-          // 핵심 수정: centroid 1개 말고 샘플 포인트로 포함 판정(해안 누락 방지)
           return featureInFeatureBySamples(f, districtFeature);
         }
 
@@ -1193,6 +1297,7 @@
       });
 
       // 라벨: showAllDongs면 모든 동 이름 표시(데이터 없는 동은 뱃지 0개로)
+      // (핵심 수정) 라벨 좌표는 featureCentroid/boundsCenter 대신 "largest ring 내부"를 우선 사용
       const labeled = new Set();
       for (const f of featsToDraw){
         const n = dongGetNames(f);
@@ -1203,8 +1308,10 @@
         const key = `${sg}|${dongName}`;
         if (labeled.has(key)) continue;
 
-        const cc0 = featureCentroid(f);
-        const cc = cc0 ? { lat:cc0.lat, lng:cc0.lng } : boundsCenter(featureBounds(f));
+        const lp = labelPointForFeature(f); // <<<< 여기
+        const cc = lp ? { lat: lp.lat, lng: lp.lng }
+                      : (featureCentroid(f) || boundsCenter(featureBounds(f)));
+
         if (!cc) continue;
 
         const canon = dongCanon(dongName);

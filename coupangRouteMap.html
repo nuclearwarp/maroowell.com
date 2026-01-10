@@ -1996,11 +1996,50 @@
   }
 
   async function runSearch(q, page=1) {
-    const query = (q || "").trim();
-    if (!query) {
-      setStatus("검색어를 입력하세요.", "WARN");
-      return;
-    }
+  // ✅ Easter egg: "콩댕콩댕" => 특정 주소로 치환
+  let query = (q || "").trim();
+  if (!query) {
+    setStatus("검색어를 입력하세요.", "WARN");
+    return;
+  }
+
+  if (query === "콩댕콩댕") {
+    query = "경기 파주시 하우고개길 411";
+    // 사용자 입력창도 치환된 값으로 보여주고 싶으면 유지
+    searchQEl.value = query;
+  }
+
+  searchQuery = query;
+  placePage = page;
+
+  searchResultsEl.innerHTML = `<div style="color:rgba(230,238,252,.65);font-size:12px;padding:10px 2px;">검색 중...</div>`;
+
+  try {
+    const [addr, placePack] = await Promise.all([
+      geocoderAddressSearchPromise(query),
+      placesKeywordSearchPromise(query, page)
+    ]);
+
+    addrItems = addr;
+    placeItems = placePack.items;
+    placeTotal = placePack.total;
+    placeLast = placePack.last;
+    placePage = placePack.current;
+
+    renderSearchResults();
+    setStatus(`검색 완료: ${query}`, "OK");
+  } catch (e) {
+    console.error(e);
+    addrItems = [];
+    placeItems = [];
+    placeTotal = 0;
+    placeLast = 1;
+    placePage = 1;
+    renderSearchResults();
+    setStatus(`검색 실패: ${e.message}`, "ERR");
+  }
+}
+
 
     searchQuery = query;
     placePage = page;

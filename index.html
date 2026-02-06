@@ -256,16 +256,9 @@
     }
   </style>
 
-  <!-- Daum 우편번호 -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-
-  <!-- proj4 (5179 -> 4326 변환용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
-
-  <!-- turf (병합용) -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-
-  <!-- Kakao 지도 SDK -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
 </head>
 
@@ -348,17 +341,18 @@
     (function(){
       "use strict";
 
-      // ====== 설정(전역 선언 금지) ======
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
+      // 병합 “붙어있는거”를 같은 덩어리로 만들기 위한 스냅(버퍼) 거리
       const MERGE_SNAP_METERS = 35;
+
+      // 너무 작은 찌꺼기 제거 (㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
 
       const $ = (sel) => document.querySelector(sel);
       const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
 
-      // ====== 상태 ======
       const state = {
         map: null,
 
@@ -401,7 +395,7 @@
         return "#" + [r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
       }
 
-      // ====== proj4 ======
+      // ===== proj4 =====
       proj4.defs(
         "EPSG:5179",
         "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
@@ -422,7 +416,7 @@
         return { lat, lon };
       }
 
-      // ====== 지도 ======
+      // ===== 지도 =====
       function createMap() {
         if (!(window.kakao && kakao.maps)) {
           alert("카카오 지도 SDK 로딩 실패");
@@ -453,7 +447,7 @@
         $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
       }
 
-      // ====== 로드뷰 ======
+      // ===== 로드뷰 =====
       function ensureRoadview() {
         if (state.roadview && state.roadviewClient) return;
         state.roadview = new kakao.maps.Roadview($("#roadview"));
@@ -520,7 +514,7 @@
         }
       }
 
-      // ====== UI ======
+      // ===== UI =====
       function renderZipChips() {
         const list = $("#zipList");
         list.innerHTML = "";
@@ -563,7 +557,7 @@
         for (const arr of state.labels.values())   arr.forEach(l => l.setMap(map));
       }
 
-      // ====== 라벨 ======
+      // ===== 라벨 =====
       function centroidOfLngLatRing(ringLngLat) {
         if (!ringLngLat || ringLngLat.length < 3) return null;
         const pts = ringLngLat.slice();
@@ -600,19 +594,14 @@
         });
       }
 
-      // ====== ZIP 응답 정규화 ======
+      // ===== ZIP 응답 정규화 =====
       function isPoint(v){ return Array.isArray(v) && v.length>=2 && isFinite(v[0]) && isFinite(v[1]); }
 
       function normalizeToMultiPolygon5179(polygon5179) {
         if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
 
-        // [[x,y],...]
         if (isPoint(polygon5179[0])) return [ [ polygon5179 ] ];
-
-        // [[[x,y]...], ...]
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [ polygon5179 ];
-
-        // [[[[x,y]...]]]
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
             Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
             isPoint(polygon5179[0][0][0])) return polygon5179;
@@ -652,14 +641,12 @@
 
       function drawZipMultiPolygon(zip, wgsMultiCoords) {
         const color = pickColor(zip);
-
         const polys = [];
         const overlays = [];
 
         for (const polyRings of wgsMultiCoords) {
           const ringsLatLng = polyRings.map(ring => {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-            // 닫힌 링이면 마지막 제거(카카오는 닫힘 강제 아님)
             if (latlngs.length > 1) {
               const f = latlngs[0], l = latlngs[latlngs.length - 1];
               if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
@@ -669,7 +656,6 @@
 
           if (!ringsLatLng.length) continue;
 
-          // ✅ 핵심: 단일 링이면 LatLng[]로 줘야 안정적
           const pathForKakao = (ringsLatLng.length === 1) ? ringsLatLng[0] : ringsLatLng;
 
           const poly = new kakao.maps.Polygon({
@@ -736,7 +722,7 @@
         if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
       }
 
-      // ====== Bounds ======
+      // ===== Bounds =====
       function fitBoundsAllOriginal() {
         if (!state.map) return;
         const b = new kakao.maps.LatLngBounds();
@@ -745,11 +731,9 @@
         for (const arr of state.polygons.values()) {
           for (const poly of arr) {
             const path = poly.getPath();
-            // path가 LatLng[] or MVCArray일 수 있음
             if (Array.isArray(path)) {
               path.forEach(ll => { b.extend(ll); has = true; });
             } else if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
-              // rings
               for (let i = 0; i < path.getLength(); i++) {
                 const ring = path.getAt(i);
                 if (ring && typeof ring.getLength === "function") {
@@ -779,7 +763,7 @@
         if (has) state.map.setBounds(b);
       }
 
-      // ====== 병합 ======
+      // ===== 병합 =====
       function setMergeUI(on){
         state.mergeMode = !!on;
         const btn = $("#mergeBtn");
@@ -800,20 +784,82 @@
         } catch { return []; }
       }
 
+      // ✅ 병합 안정화: 좌표 truncate + clean + rewind
+      function stabilizeFeature(f){
+        let out = f;
+        try { out = turf.truncate(out, { precision: 6, mutate: false }); } catch {}
+        try { out = turf.cleanCoords(out); } catch {}
+        try { out = turf.rewind(out, { reverse: false }); } catch {}
+        return out;
+      }
+
+      // ✅ 안전 buffer/union (throw 방지)
+      function safeBuffer(f, meters){
+        if (!meters || meters === 0) return f;
+        try {
+          return turf.buffer(f, meters, { units: "meters", steps: 16 });
+        } catch (e) {
+          console.warn("[merge] buffer fail -> use original", e);
+          return f;
+        }
+      }
+
+      function safeUnion(a, b){
+        try {
+          return turf.union(a, b);
+        } catch (e) {
+          console.warn("[merge] union fail", e);
+          return null;
+        }
+      }
+
+      // ✅ 핵심: 여기서 turf 에러가 나도 절대 Uncaught로 터지지 않게 처리
       function mergeFeaturesWithSnap(features, snapMeters) {
         if (!features.length) return null;
 
-        const bufOpt = { units: "meters", steps: 16 };
+        const leftovers = [];
         let merged = null;
 
-        for (const f of features) {
-          const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
-          merged = merged ? turf.union(merged, fb) : fb;
+        for (const raw of features) {
+          const f0 = stabilizeFeature(raw);
+          const fb = stabilizeFeature(safeBuffer(f0, snapMeters));
+
+          if (!merged) {
+            merged = fb;
+            continue;
+          }
+
+          // 1차 시도: 스냅 포함 union
+          let u = safeUnion(merged, fb);
+
+          if (!u) {
+            // 2차 시도: 스냅 없는 union
+            const m2 = stabilizeFeature(merged);
+            const f2 = stabilizeFeature(raw);
+            u = safeUnion(m2, f2);
+          }
+
+          if (!u) {
+            // 3차: 이 조각은 병합에서 제외(=따로 유지) → 전체 병합이 죽지 않게
+            leftovers.push(fb);
+            continue;
+          }
+
+          merged = stabilizeFeature(u);
         }
-        if (snapMeters > 0 && merged) {
-          try { merged = turf.buffer(merged, -snapMeters, bufOpt); } catch {}
+
+        // leftovers가 있으면 merged와 함께 MultiPolygon 형태로 “합쳐두기”
+        // (완전 dissolve는 못 해도 최소한 화면/저장은 안정적으로)
+        if (leftovers.length) {
+          try {
+            const fc = turf.featureCollection([merged, ...leftovers].filter(Boolean));
+            const combined = turf.combine(fc); // MultiPolygon로 묶어줌
+            if (combined?.features?.[0]) merged = combined.features[0];
+          } catch (e) {
+            console.warn("[merge] combine fail", e);
+          }
         }
-        try { merged = turf.cleanCoords(merged); } catch {}
+
         return merged;
       }
 
@@ -827,51 +873,61 @@
       }
 
       async function mergeOn(rebuildOnly=false){
-        await drawSelected();
-        const feats = getSelectedFeatures();
-        if (!feats.length) { if(!rebuildOnly) alert("병합할 폴리곤이 없습니다."); return; }
+        try {
+          await drawSelected();
+          const feats = getSelectedFeatures();
+          if (!feats.length) { if(!rebuildOnly) alert("병합할 폴리곤이 없습니다."); return; }
 
-        const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
-        if (!merged) { if(!rebuildOnly) alert("병합 실패"); return; }
+          const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
+          if (!merged) { if(!rebuildOnly) alert("병합 실패"); return; }
 
-        let polys = flattenToPolygonFeatures(merged);
-        polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
+          let polys = flattenToPolygonFeatures(merged);
+          polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
 
-        const rings = polys
-          .map(p => p.geometry?.coordinates?.[0])
-          .filter(r => Array.isArray(r) && r.length >= 4);
+          const rings = polys
+            .map(p => p.geometry?.coordinates?.[0])
+            .filter(r => Array.isArray(r) && r.length >= 4);
 
-        if (!rings.length) { if(!rebuildOnly) alert("병합 결과가 비었습니다."); return; }
+          if (!rings.length) { if(!rebuildOnly) alert("병합 결과가 비었습니다."); return; }
 
-        clearMerged();
-        state.mergedRingsWgs84 = rings;
+          clearMerged();
+          state.mergedRingsWgs84 = rings;
 
-        const mergedColor = darkenHex(pickColor("merged"), 0.18);
+          const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-        for (const ring of rings) {
-          const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-          if (latlngs.length > 1) {
-            const f = latlngs[0], l = latlngs[latlngs.length - 1];
-            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+          for (const ring of rings) {
+            const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+            if (latlngs.length > 1) {
+              const f = latlngs[0], l = latlngs[latlngs.length - 1];
+              if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+            }
+            if (latlngs.length < 3) continue;
+
+            const poly = new kakao.maps.Polygon({
+              map: state.map,
+              path: latlngs,
+              strokeWeight: 6,
+              strokeColor: mergedColor,
+              strokeOpacity: 1,
+              strokeStyle: "solid",
+              fillColor: mergedColor,
+              fillOpacity: 0.20
+            });
+            state.mergedPolygons.push(poly);
           }
-          if (latlngs.length < 3) continue;
 
-          const poly = new kakao.maps.Polygon({
-            map: state.map,
-            path: latlngs,
-            strokeWeight: 6,
-            strokeColor: mergedColor,
-            strokeOpacity: 1,
-            strokeStyle: "solid",
-            fillColor: mergedColor,
-            fillOpacity: 0.20
-          });
-          state.mergedPolygons.push(poly);
+          setOriginalVisible(false); // 라벨 포함 숨김
+          setMergeUI(true);
+          fitBoundsToRings(rings);
+
+        } catch (e) {
+          // ✅ 여기서 끝. Uncaught (in promise) 절대 안 뜸.
+          console.warn("[merge] mergeOn crashed:", e);
+          clearMerged();
+          setOriginalVisible(true);
+          setMergeUI(false);
+          if (!rebuildOnly) alert("병합 실패(지오메트리 오류). 해당 우편번호 중 일부 폴리곤이 병합 불가 형태입니다.");
         }
-
-        setOriginalVisible(false); // ✅ 라벨 포함 숨김
-        setMergeUI(true);
-        fitBoundsToRings(rings);
       }
 
       function mergeOff(){
@@ -886,14 +942,18 @@
         else await mergeOn(false);
       }
 
-      // ====== 저장 ======
+      // ===== 저장 =====
       function openSaveModal(){
         $("#saveCampInput").value = localStorage.getItem("mw_save_camp") || "";
         $("#saveCodeInput").value = localStorage.getItem("mw_save_code") || "";
         $("#saveModal").classList.add("open");
         $("#saveModal").setAttribute("aria-hidden","false");
+        setTimeout(() => { $("#saveCampInput").focus(); }, 0);
       }
+
       function closeSaveModal(){
+        // aria-hidden 경고 줄이기: 닫기 전에 포커스를 바깥으로 이동
+        $("#saveBtn")?.focus?.();
         $("#saveModal").classList.remove("open");
         $("#saveModal").setAttribute("aria-hidden","true");
       }
@@ -936,7 +996,7 @@
         alert("저장 완료");
       }
 
-      // ====== 초기화 ======
+      // ===== 초기화 =====
       function clearAll(){
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
         for (const arr of state.labels.values())   arr.forEach(l => l.setMap(null));
@@ -953,7 +1013,7 @@
         setRoadviewOn(false);
       }
 
-      // ====== 바인딩 ======
+      // ===== 바인딩 =====
       function bindUI(){
         $("#addBtn").onclick = async () => {
           parseZips($("#zipInput").value).forEach(z => state.selectedZips.add(z));
@@ -971,7 +1031,6 @@
         $("#mergeBtn").onclick = async () => { await toggleMerge(); };
 
         $("#saveBtn").onclick = openSaveModal;
-
         $("#clearBtn").onclick = clearAll;
 
         $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);

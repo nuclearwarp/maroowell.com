@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
   <!-- 썸네일 이미지 (필수) -->
-<meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-<meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-<meta property="og:image:width" content="1200" />
-<meta property="og:image:height" content="630" />
-<meta property="og:image:alt" content="Maroowell" />
-  
+  <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Maroowell" />
+
   <title>Maroowell 우편번호 검색기</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
 
@@ -116,8 +116,19 @@
       border-color:#7f1d1d;
       color:#fecaca
     }
-    button.danger:hover{
-      border-color:#ef4444
+    button.danger:hover{border-color:#ef4444}
+
+    button.primary{
+      background:#132a25;
+      border-color:#0f766e;
+      color:#ccfbf1;
+    }
+    button.primary:hover{border-color:#2dd4bf}
+
+    button.active{
+      background:#0b2440;
+      border-color:#60a5fa;
+      color:#dbeafe;
     }
 
     .zip-label{
@@ -159,18 +170,10 @@
     }
 
     @media (max-width: 900px){
-      #app{
-        grid-template-columns:1fr;
-      }
-      #panel{
-        order:2;
-      }
-      #mapWrap{
-        min-height:60vh;
-      }
-      #mapWrap.roadview-open{
-        flex-direction:column;
-      }
+      #app{grid-template-columns:1fr;}
+      #panel{order:2;}
+      #mapWrap{min-height:60vh;}
+      #mapWrap.roadview-open{flex-direction:column;}
     }
   </style>
 
@@ -179,6 +182,9 @@
 
   <!-- proj4 (5179 -> 4326 변환용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
+  <!-- Turf.js (WGS84 Geo 연산: union/dissolve) -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
   <!-- Kakao 지도 SDK -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
@@ -209,6 +215,7 @@
       <div class="row" style="margin-top:8px">
         <button id="addBtn">추가</button>
         <button id="searchBtn">지도표시</button>
+        <button id="mergeBtn" class="primary" title="붙어있는 폴리곤 경계를 지워서 병합 표시">폴리곤 병합</button>
         <button id="clearBtn" class="danger">초기화</button>
       </div>
 
@@ -216,6 +223,10 @@
 
       <p class="muted" style="margin-top:10px">
         • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
+      </p>
+
+      <p class="muted" style="margin-top:10px">
+        • 병합 모드에서는 내부 경계(우편번호 경계)를 제거한 “합집합”으로 표시합니다. (떨어진 덩어리는 덩어리별로 표시)
       </p>
     </aside>
 
@@ -231,18 +242,50 @@
   </div>
 
   <script>
+    // =========================
+    // 병합(Union/Dissolve) 옵션
+    // =========================
+    // label은 병합 모드에서도 보여줄지(내부 경계는 없어도 우편번호 식별을 위해)
+    const KEEP_LABELS_IN_MERGE_MODE = true;
+
+    // “붙어있는 것” 판정이 데이터 정밀도 때문에 아주 미세한 틈이 생기면 union이 분리될 수 있음.
+    // 그럴 때를 대비해, 미세 버퍼(미터)를 주고 union 후 되돌리는 방식으로 “스냅 병합”을 강화할 수 있음.
+    // 0이면 순수 union. (추천: 0~2m)
+    const MERGE_SNAP_METERS = 1; // 필요 없으면 0으로
+
+    // 병합 폴리곤 스타일(단일 스타일로 표시)
+    const MERGED_STYLE = {
+      strokeWeight: 5,
+      strokeColor: "#22d3ee",
+      strokeOpacity: 0.95,
+      strokeStyle: "solid",
+      fillColor: "#22d3ee",
+      fillOpacity: 0.12
+    };
+
     // ------- 전역 상태 ------- //
     const state = {
       map: null,
-      polygons: new Map(),    // zipcode -> [Polygon, ...]
+
+      polygons: new Map(),    // zipcode -> [kakao.maps.Polygon, ...]   (화면 표시용)
       labels: new Map(),      // zipcode -> [CustomOverlay, ...]
       selectedZips: new Set(),
+
+      // ✅ WGS84 원본(저장/병합/재로딩용)
+      geoByZip: new Map(),    // zipcode -> GeoJSON Geometry {type:'Polygon'|'MultiPolygon', coordinates:...}
+
+      // ✅ 병합 모드
+      mergeOn: false,
+      mergedOverlays: [],     // 병합 결과 kakao.maps.Polygon[]
+      mergedGeometry: null,   // 병합 결과 GeoJSON Geometry(WGS84)
+
       isSatellite: false,
-      roadviewOn: false,       // 로드뷰 모드(길 선택 포함) on/off
-      roadviewOpen: false,     // 실제 로드뷰 화면 open 여부
+      roadviewOn: false,
+      roadviewOpen: false,
       roadview: null,
       roadviewClient: null,
       roadviewClickHandler: null,
+
       colors: [
         "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
         "#22d3ee","#c084fc","#f472b6","#60a5fa",
@@ -259,9 +302,7 @@
 
     const pickColor = (zip) => {
       let h = 0;
-      for (let i = 0; i < zip.length; i++) {
-        h = (h * 31 + zip.charCodeAt(i)) >>> 0;
-      }
+      for (let i = 0; i < zip.length; i++) h = (h * 31 + zip.charCodeAt(i)) >>> 0;
       return state.colors[h % state.colors.length];
     };
 
@@ -277,7 +318,6 @@
     // 5179 → WGS84 변환 (안되면 fallback)
     function convertPoint(x, y) {
       let lon, lat;
-
       try {
         const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
         lon = out[0];
@@ -287,19 +327,120 @@
       }
 
       // 변환값이 말이 안되면 (한국 범위 밖이면) 원본을 WGS84 라고 보고 사용
-      if (
-        !isFinite(lat) ||
-        !isFinite(lon) ||
-        lat < 30 ||
-        lat > 45 ||
-        lon < 120 ||
-        lon > 135
-      ) {
+      if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
         lon = x;
         lat = y;
       }
-
       return { lat, lon };
+    }
+
+    // ==========================================
+    // WGS84 데이터 표준화 (DB 저장/로드 호환)
+    // - DB jsonb에 coords만 저장하는 경우가 많아서(depth 3/4) 감지
+    // ==========================================
+    function coordsDepth(a) {
+      let d = 0, cur = a;
+      while (Array.isArray(cur)) { d++; cur = cur[0]; }
+      return d;
+    }
+
+    // coords만 들어오면 GeoJSON Geometry로 정규화
+    // - Polygon coords:   [[[lng,lat],...], [hole...], ...] => depth=3
+    // - MultiPolygon:     [[[[lng,lat]...]], ...]          => depth=4
+    function coordsToGeometryWgs84(coords) {
+      const d = coordsDepth(coords);
+      if (d === 3) return { type: "Polygon", coordinates: coords };
+      if (d === 4) return { type: "MultiPolygon", coordinates: coords };
+      // 애매하면 Polygon로 시도
+      return { type: "Polygon", coordinates: coords };
+    }
+
+    // 5179 polygon5179 -> WGS84 Geometry로 변환
+    // polygon5179는 보통 MultiPolygon(depth=4) 형태로 오지만, depth=3도 방어
+    function polygon5179ToGeometryWgs84(polygon5179) {
+      if (!Array.isArray(polygon5179) || !polygon5179.length) return null;
+
+      const d = coordsDepth(polygon5179);
+
+      // depth=3이면 Polygon으로 감싸서 MultiPolygon 처리하기 쉽게 만든다
+      const multi = (d === 3) ? [polygon5179] : polygon5179;
+
+      const outMulti = [];
+      for (const polygon of multi) {
+        if (!Array.isArray(polygon)) continue;
+        const ringsOut = [];
+
+        for (const ring of polygon) {
+          if (!Array.isArray(ring)) continue;
+          const ringOut = [];
+
+          for (const pt of ring) {
+            if (!Array.isArray(pt) || pt.length < 2) continue;
+            const x = Number(pt[0]);
+            const y = Number(pt[1]);
+            if (!isFinite(x) || !isFinite(y)) continue;
+            const { lat, lon } = convertPoint(x, y);
+            if (!isFinite(lat) || !isFinite(lon)) continue;
+            ringOut.push([lon, lat]); // ✅ Turf/GeoJSON: [lng,lat]
+          }
+
+          if (ringOut.length >= 3) ringsOut.push(closeRingLngLat(ringOut));
+        }
+
+        if (ringsOut.length) outMulti.push(ringsOut);
+      }
+
+      if (!outMulti.length) return null;
+      // 폴리곤이 1개면 Polygon로 내려도 되지만, 저장/병합 편의를 위해 타입을 유지
+      if (d === 3 && outMulti.length === 1) return { type: "Polygon", coordinates: outMulti[0] };
+      return { type: "MultiPolygon", coordinates: outMulti };
+    }
+
+    function closeRingLngLat(ring) {
+      if (!ring.length) return ring;
+      const f = ring[0], l = ring[ring.length - 1];
+      if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
+      return ring;
+    }
+
+    // ==========================================
+    // WGS84 Geometry -> Kakao Polygon overlays 생성
+    // (Polygon=1개 overlay, MultiPolygon=폴리곤 개수만큼 overlay)
+    // ==========================================
+    function kakaoPolygonsFromGeometryWgs84(geom, style) {
+      if (!geom || !geom.type || !geom.coordinates) return [];
+      const polys = [];
+
+      const makeOne = (polygonCoords) => {
+        // polygonCoords: [outerRing, hole1, ...]
+        const path = polygonCoords.map(ring =>
+          ring.map(([lng, lat]) => new kakao.maps.LatLng(lat, lng))
+        );
+
+        if (!path.length || path[0].length < 3) return null;
+
+        return new kakao.maps.Polygon({
+          map: state.map,
+          path,
+          strokeWeight: style.strokeWeight,
+          strokeColor: style.strokeColor,
+          strokeOpacity: style.strokeOpacity,
+          strokeStyle: style.strokeStyle,
+          fillColor: style.fillColor,
+          fillOpacity: style.fillOpacity
+        });
+      };
+
+      if (geom.type === "Polygon") {
+        const p = makeOne(geom.coordinates);
+        if (p) polys.push(p);
+      } else if (geom.type === "MultiPolygon") {
+        for (const polygonCoords of geom.coordinates) {
+          const p = makeOne(polygonCoords);
+          if (p) polys.push(p);
+        }
+      }
+      return polys;
     }
 
     // ------- 지도 초기화 ------- //
@@ -345,7 +486,6 @@
 
     function setRoadviewOverlay(on) {
       if (!state.map) return;
-      // ROADVIEW 오버레이(파란 길) 표시/해제
       try {
         if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
         else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
@@ -358,26 +498,21 @@
       ensureRoadview();
       if (!state.roadviewClient || !state.roadview) return;
 
-      // 반경(m) 내 가장 가까운 로드뷰 pano 찾기 (반경 단계적 확장)
       const radii = [80, 200, 500, 1200];
       const tryFind = (i) => {
         const r = radii[i];
         state.roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
-          // panoId가 0일 수도 있어 falsy 체크 금지
           if (panoId === null || panoId === undefined) {
             if (i < radii.length - 1) return tryFind(i + 1);
             alert("이 위치 근처에는 로드뷰가 없습니다.");
             return;
           }
-          // pano가 잡히면 그때 로드뷰 화면을 열어준다 (카카오처럼 '길 선택 → 진입')
           state.roadviewOpen = true;
           const wrap = $("#mapWrap");
           if (wrap) wrap.classList.add("roadview-open");
-          // display:none → block 전환 후 레이아웃 갱신
           if (state.roadview && typeof state.roadview.relayout === "function") {
             setTimeout(() => state.roadview.relayout(), 0);
           }
-
           state.roadview.setPanoId(panoId, latlng);
         });
       };
@@ -393,24 +528,19 @@
 
       if (wrap) {
         wrap.classList.toggle("roadview-on", state.roadviewOn);
-        // off일 때는 로드뷰 화면도 강제로 닫기
         if (!state.roadviewOn) wrap.classList.remove("roadview-open");
-        // on일 때는 아직 '선택' 단계이므로 roadview-open은 setRoadviewAt에서만 켠다
       }
       if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
       if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
 
-      // 레이아웃 변경 후 relayout
       if (state.map) {
         const c = state.map.getCenter();
         state.map.relayout();
         state.map.setCenter(c);
       }
-      if (state.roadviewOn) {
-        // 카카오처럼: 먼저 '길 선택' 모드(ROADVIEW 오버레이)만 켜고, 선택 시에만 로드뷰를 연다
-        setRoadviewOverlay(true);
 
-        // 지도 클릭 시 로드뷰 이동
+      if (state.roadviewOn) {
+        setRoadviewOverlay(true);
         if (!state.roadviewClickHandler && state.map) {
           state.roadviewClickHandler = (mouseEvent) => {
             if (!state.roadviewOn) return;
@@ -420,14 +550,12 @@
         }
       } else {
         setRoadviewOverlay(false);
-        // 클릭 핸들러 제거
         if (state.roadviewClickHandler && state.map) {
           kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
         }
         state.roadviewClickHandler = null;
       }
 
-      // roadview-open 상태에서만 relayout
       if (state.roadviewOn && state.roadviewOpen) {
         ensureRoadview();
         if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
@@ -437,16 +565,15 @@
     // ------- UI 이벤트 ------- //
     function bindUI() {
       $("#addBtn").onclick = () => {
-        parseZips($("#zipInput").value).forEach((z) =>
-          state.selectedZips.add(z)
-        );
+        parseZips($("#zipInput").value).forEach((z) => state.selectedZips.add(z));
         $("#zipInput").value = "";
         renderZipChips();
       };
 
       $("#clearBtn").onclick = () => {
         state.selectedZips.clear();
-        clearPolygons();
+        clearPolygonsAll();
+        setMergeOn(false);     // ✅ 병합도 같이 해제/정리
         setRoadviewOn(false);
         renderZipChips();
       };
@@ -456,29 +583,16 @@
         fitBoundsAll();
       };
 
+      $("#mergeBtn").onclick = () => {
+        setMergeOn(!state.mergeOn);
+        fitBoundsAll();
+      };
+
       const mapTypeBtn = $("#toggleMapType");
-      if (mapTypeBtn) {
-        mapTypeBtn.onclick = () => setMapTypeSatellite(!state.isSatellite);
-      }
+      if (mapTypeBtn) mapTypeBtn.onclick = () => setMapTypeSatellite(!state.isSatellite);
 
       const roadviewBtn = $("#toggleRoadview");
-      if (roadviewBtn) {
-        roadviewBtn.onclick = () => setRoadviewOn(!state.roadviewOn);
-      }
-
-      // (옵션) 버튼이 있는 경우에만 바인딩
-      const fitBtn = $("#fitBtn");
-      if (fitBtn) fitBtn.onclick = fitBoundsAll;
-
-      const shareBtn = $("#shareBtn");
-      if (shareBtn) {
-        shareBtn.onclick = async () => {
-          const u = new URL(location.href);
-          u.searchParams.set("zips", [...state.selectedZips].join(","));
-          await navigator.clipboard.writeText(u.toString());
-          alert("공유 링크 복사됨");
-        };
-      }
+      if (roadviewBtn) roadviewBtn.onclick = () => setRoadviewOn(!state.roadviewOn);
 
       $("#openAddr").onclick = () => {
         new daum.Postcode({
@@ -491,13 +605,14 @@
         }).open();
       };
 
-      const preset = parseZips(
-        new URLSearchParams(location.search).get("zips")
-      );
+      const preset = parseZips(new URLSearchParams(location.search).get("zips"));
       preset.forEach((z) => state.selectedZips.add(z));
       renderZipChips();
       if (preset.length) {
-        drawSelected().then(fitBoundsAll);
+        drawSelected().then(() => {
+          if (state.mergeOn) refreshMerged();
+          fitBoundsAll();
+        });
       }
     }
 
@@ -514,42 +629,56 @@
           `<button title="삭제">✕</button>`;
         div.querySelector("button").onclick = () => {
           state.selectedZips.delete(z);
-          removePolygon(z);
+          removeZip(z);
           renderZipChips();
+          fitBoundsAll();
         };
         list.appendChild(div);
       });
     }
 
-    // ------- 폴리곤 관리 ------- //
-    function clearPolygons() {
-      for (const arr of state.polygons.values()) {
-        arr.forEach((p) => p.setMap(null));
-      }
+    // ------- 폴리곤/라벨/원본 WGS84 관리 ------- //
+    function clearPolygonsAll() {
+      // 원본 폴리곤 제거
+      for (const arr of state.polygons.values()) arr.forEach((p) => p.setMap(null));
       state.polygons.clear();
 
-      for (const arr of state.labels.values()) {
-        arr.forEach((l) => l.setMap(null));
-      }
+      // 라벨 제거
+      for (const arr of state.labels.values()) arr.forEach((l) => l.setMap(null));
       state.labels.clear();
+
+      // 원본 WGS84 제거
+      state.geoByZip.clear();
+
+      // 병합 제거
+      clearMergedOverlays();
+      state.mergedGeometry = null;
     }
 
-    function removePolygon(zip) {
-      if (!state.polygons.has(zip)) return;
-      state.polygons.get(zip).forEach((p) => p.setMap(null));
-      state.polygons.delete(zip);
+    function removeZip(zip) {
+      // 원본 폴리곤 제거
+      if (state.polygons.has(zip)) {
+        state.polygons.get(zip).forEach((p) => p.setMap(null));
+        state.polygons.delete(zip);
+      }
 
+      // 라벨 제거
       if (state.labels.has(zip)) {
         state.labels.get(zip).forEach((l) => l.setMap(null));
         state.labels.delete(zip);
       }
+
+      // 원본 WGS84 제거
+      state.geoByZip.delete(zip);
+
+      // 병합 모드면 재계산
+      if (state.mergeOn) refreshMerged();
     }
 
     // ------- 라벨(우편번호) 위치 계산 ------- //
     function centroidOfLatLngRing(latlngs) {
       if (!latlngs || latlngs.length < 3) return null;
 
-      // 평면 근사: x=lng, y=lat
       const pts = latlngs.map((ll) => [ll.getLng(), ll.getLat()]);
       const f = pts[0];
       const l = pts[pts.length - 1];
@@ -595,13 +724,37 @@
       });
     }
 
+    // poly.getPath()에서 "외곽 링"만 추출(홀 제외)해서 라벨 센터 계산을 안정화
+    function getOuterRingLatLngs(poly) {
+      const path = poly.getPath();
+
+      // MVCArray< MVCArray<LatLng> >
+      if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
+        const first = path.getAt(0);
+        if (first && typeof first.getLength === "function" && typeof first.getAt === "function") {
+          return first.getArray();
+        }
+        // MVCArray<LatLng>
+        return path.getArray();
+      }
+
+      // Array 또는 Array of Array
+      if (Array.isArray(path)) {
+        if (Array.isArray(path[0])) return path[0]; // [ [LatLng..], [LatLng..] ]
+        return path; // [LatLng..]
+      }
+
+      // fallback
+      return [];
+    }
+
     function addZipLabelsForPolygons(zip, polys, color) {
       const overlays = [];
       for (const poly of polys) {
-        const latlngs = collectLatLngsFromPath(poly.getPath());
-        if (latlngs.length < 3) continue;
+        const outer = getOuterRingLatLngs(poly);
+        if (!outer || outer.length < 3) continue;
 
-        const center = centroidOfLatLngRing(latlngs) || boundsCenterOfLatLngs(latlngs);
+        const center = centroidOfLatLngRing(outer) || boundsCenterOfLatLngs(outer);
         if (!center) continue;
 
         const ov = createZipLabelOverlay(zip, color, center);
@@ -611,65 +764,140 @@
       if (overlays.length) state.labels.set(zip, overlays);
     }
 
-    // zip API -> Polygon 생성
-    function polygonsFrom5179(polygon5179, color, zip) {
-      if (!Array.isArray(polygon5179) || !polygon5179.length) return [];
+    // ------- 병합(Union/Dissolve) ------- //
+    function setMergeOn(on) {
+      state.mergeOn = !!on;
+      const btn = $("#mergeBtn");
+      if (btn) {
+        btn.classList.toggle("active", state.mergeOn);
+        btn.textContent = state.mergeOn ? "병합 해제" : "폴리곤 병합";
+      }
 
-      const polys = [];
+      if (!state.mergeOn) {
+        // 병합 해제: 병합 오버레이 제거 + 원본 다시 표시
+        clearMergedOverlays();
+        showAllOriginalPolygons(true);
+        if (!KEEP_LABELS_IN_MERGE_MODE) showAllLabels(true);
+        return;
+      }
 
-      // MultiPolygon 형식 처리: [[[[x,y], ...]]]
-      // 각 polygon (외부 배열의 각 요소) 처리
-      polygon5179.forEach((polygon, polyIdx) => {
-        if (!Array.isArray(polygon)) return;
-        
-        // 각 polygon의 rings 처리
-        polygon.forEach((ring, ringIdx) => {
-          if (!Array.isArray(ring)) return;
-          
-          const path = [];
-          ring.forEach((pt, ptIdx) => {
-            if (!Array.isArray(pt) || pt.length < 2) return;
-            const x = Number(pt[0]);
-            const y = Number(pt[1]);
-            if (!isFinite(x) || !isFinite(y)) return;
-
-            const { lat, lon } = convertPoint(x, y);
-            if (!isFinite(lat) || !isFinite(lon)) return;
-
-            path.push(new kakao.maps.LatLng(lat, lon));
-
-            // 첫 3개 포인트만 로그
-            if (polyIdx === 0 && ringIdx === 0 && ptIdx < 3) {
-              console.log(`[ZIP ${zip}] sample`, { x, y, lat, lon });
-            }
-          });
-
-          console.log(`[ZIP ${zip}] polygon ${polyIdx} ring ${ringIdx} path length`, path.length);
-
-          if (path.length < 3) return;
-
-          const poly = new kakao.maps.Polygon({
-            map: state.map,
-            path,
-            strokeWeight: 3,
-            strokeColor: color,
-            strokeOpacity: 1,
-            strokeStyle: "solid",
-            fillColor: color,
-            fillOpacity: 0.25
-          });
-          polys.push(poly);
-        });
-      });
-
-      return polys;
+      // 병합 켜기: 원본 숨기고 병합 표시
+      refreshMerged();
     }
 
-    // Worker API 호출해서 그리기
+    function clearMergedOverlays() {
+      state.mergedOverlays.forEach(p => p.setMap(null));
+      state.mergedOverlays = [];
+      state.mergedGeometry = null;
+    }
+
+    function showAllOriginalPolygons(show) {
+      for (const arr of state.polygons.values()) {
+        arr.forEach(p => p.setMap(show ? state.map : null));
+      }
+    }
+
+    function showAllLabels(show) {
+      for (const arr of state.labels.values()) {
+        arr.forEach(l => l.setMap(show ? state.map : null));
+      }
+    }
+
+    function geometryToTurfFeatures(geom) {
+      if (!geom) return [];
+      const feats = [];
+
+      if (geom.type === "Polygon") {
+        feats.push(turf.polygon(geom.coordinates));
+      } else if (geom.type === "MultiPolygon") {
+        for (const polyCoords of geom.coordinates) {
+          feats.push(turf.polygon(polyCoords));
+        }
+      }
+      return feats;
+    }
+
+    function safeBuffer(feature, meters) {
+      try {
+        return turf.buffer(feature, meters, { units: "meters" });
+      } catch (e) {
+        // buffer 실패하면 원본 반환
+        return feature;
+      }
+    }
+
+    function safeUnion(a, b) {
+      try {
+        return turf.union(a, b);
+      } catch (e) {
+        // 깨진 폴리곤 방어 (buffer(0))
+        try {
+          const aa = safeBuffer(a, 0);
+          const bb = safeBuffer(b, 0);
+          return turf.union(aa, bb);
+        } catch (e2) {
+          return null;
+        }
+      }
+    }
+
+    function refreshMerged() {
+      clearMergedOverlays();
+
+      // 병합 대상: 현재 그려진(zip 데이터 로드된) 것들 기준
+      const zips = [...state.polygons.keys()];
+      const allFeatures = [];
+
+      for (const zip of zips) {
+        const geom = state.geoByZip.get(zip);
+        if (!geom) continue;
+        allFeatures.push(...geometryToTurfFeatures(geom));
+      }
+
+      if (!allFeatures.length) {
+        // 그릴 게 없으면 원본만 표시
+        showAllOriginalPolygons(true);
+        if (!KEEP_LABELS_IN_MERGE_MODE) showAllLabels(true);
+        return;
+      }
+
+      // ✅ 병합 모드에서는 원본 폴리곤 숨김 (라벨은 옵션)
+      showAllOriginalPolygons(false);
+      if (!KEEP_LABELS_IN_MERGE_MODE) showAllLabels(false);
+
+      // 단일이면 그대로
+      let merged = allFeatures[0];
+
+      // 스냅 병합(옵션): 미세 갭 보정
+      if (MERGE_SNAP_METERS > 0) merged = safeBuffer(merged, MERGE_SNAP_METERS);
+
+      for (let i = 1; i < allFeatures.length; i++) {
+        let f = allFeatures[i];
+        if (MERGE_SNAP_METERS > 0) f = safeBuffer(f, MERGE_SNAP_METERS);
+
+        const u = safeUnion(merged, f);
+        if (u) merged = u;
+      }
+
+      if (MERGE_SNAP_METERS > 0) {
+        // 원래 크기로 되돌리기(역버퍼)
+        merged = safeBuffer(merged, -MERGE_SNAP_METERS);
+      }
+
+      if (!merged || !merged.geometry) return;
+
+      state.mergedGeometry = merged.geometry;
+
+      // ✅ WGS84 병합 결과를 카카오 폴리곤으로 생성
+      state.mergedOverlays = kakaoPolygonsFromGeometryWgs84(state.mergedGeometry, MERGED_STYLE);
+      state.mergedOverlays.forEach(p => p.setMap(state.map));
+
+      console.log("[MERGED] geometry(WGS84)", state.mergedGeometry);
+    }
+
+    // ------- Worker API 호출해서 그리기 ------- //
     async function drawSelected() {
-      const targets = [...state.selectedZips].filter(
-        (z) => !state.polygons.has(z)
-      );
+      const targets = [...state.selectedZips].filter((z) => !state.polygons.has(z));
       if (!targets.length) return;
 
       const notFound = [];
@@ -681,20 +909,42 @@
           const data = await res.json();
           console.log("[ZIP] 로드 완료", zip, data);
 
-          if (
-            !Array.isArray(data.polygon5179) ||
-            !data.polygon5179.length
-          ) {
+          // 1) 가능하면 서버에서 WGS84를 받는 구조(향후 대비)
+          //    (필드명은 서버 스펙에 맞게 추가로 매핑 가능)
+          const wgsCandidate =
+            data.polygon_wgs84 ||
+            data.polygonWgs84 ||
+            data.polygon4326 ||
+            null;
+
+          let geomWgs84 = null;
+
+          if (wgsCandidate) {
+            geomWgs84 = coordsToGeometryWgs84(wgsCandidate);
+          } else if (Array.isArray(data.polygon5179) && data.polygon5179.length) {
+            geomWgs84 = polygon5179ToGeometryWgs84(data.polygon5179);
+          }
+
+          if (!geomWgs84) {
             notFound.push(zip);
             continue;
           }
 
+          // ✅ 저장/병합/재로딩을 위해 WGS84 원본 보관
+          state.geoByZip.set(zip, geomWgs84);
+
           const color = pickColor(zip);
-          const polys = polygonsFrom5179(
-            data.polygon5179,
-            color,
-            zip
-          );
+          const style = {
+            strokeWeight: 3,
+            strokeColor: color,
+            strokeOpacity: 1,
+            strokeStyle: "solid",
+            fillColor: color,
+            fillOpacity: 0.25
+          };
+
+          // ✅ WGS84 기준으로 화면에 폴리곤 생성
+          const polys = kakaoPolygonsFromGeometryWgs84(geomWgs84, style);
           if (!polys.length) {
             console.warn("[ZIP] 폴리곤 생성 실패", zip);
             notFound.push(zip);
@@ -703,16 +953,18 @@
 
           state.polygons.set(zip, polys);
           addZipLabelsForPolygons(zip, polys, color);
+
         } catch (e) {
           console.error("[ZIP] 로드 실패", zip, e);
           notFound.push(zip);
         }
       }
 
+      // 병합 모드 켜진 상태면 병합 결과 갱신
+      if (state.mergeOn) refreshMerged();
+
       if (notFound.length) {
-        alert(
-          `폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`
-        );
+        alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
       }
     }
 
@@ -723,28 +975,16 @@
       const walk = (p) => {
         if (!p) return;
 
-        // LatLng 한 점
-        if (
-          p instanceof kakao.maps.LatLng ||
-          (typeof p.getLat === "function" &&
-            typeof p.getLng === "function")
-        ) {
+        if (p instanceof kakao.maps.LatLng || (typeof p.getLat === "function" && typeof p.getLng === "function")) {
           out.push(p);
           return;
         }
 
-        // MVCArray 스타일
-        if (
-          typeof p.getLength === "function" &&
-          typeof p.getAt === "function"
-        ) {
-          for (let i = 0; i < p.getLength(); i++) {
-            walk(p.getAt(i));
-          }
+        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
+          for (let i = 0; i < p.getLength(); i++) walk(p.getAt(i));
           return;
         }
 
-        // 배열 또는 forEach 가진 객체
         if (Array.isArray(p) || typeof p.forEach === "function") {
           p.forEach(walk);
           return;
@@ -762,20 +1002,44 @@
       const b = new kakao.maps.LatLngBounds();
       let has = false;
 
+      // 병합 모드면 병합 오버레이 기준
+      if (state.mergeOn && state.mergedOverlays.length) {
+        for (const poly of state.mergedOverlays) {
+          const latlngs = collectLatLngsFromPath(poly.getPath());
+          latlngs.forEach((ll) => { b.extend(ll); has = true; });
+        }
+        if (has) state.map.setBounds(b);
+        return;
+      }
+
+      // 기본: 원본 폴리곤 기준
       for (const arr of state.polygons.values()) {
         for (const poly of arr) {
           const latlngs = collectLatLngsFromPath(poly.getPath());
-          latlngs.forEach((ll) => {
-            b.extend(ll);
-            has = true;
-          });
+          latlngs.forEach((ll) => { b.extend(ll); has = true; });
         }
       }
 
-      if (has) {
-        state.map.setBounds(b);
-      }
+      if (has) state.map.setBounds(b);
     }
+
+    // ==========================
+    // ✅ 저장/연동용 공개 함수
+    // ==========================
+    // DB에 저장할 때: coords만 필요하면 아래 return값 그대로 jsonb에 넣으면 됨
+    // - Polygon:   [[[lng,lat]...], ...]
+    // - MultiPoly: [[[[lng,lat]...]], ...]
+    window.getZipWgs84Coords = (zip) => {
+      const g = state.geoByZip.get(String(zip));
+      return g ? g.coordinates : null;
+    };
+
+    window.getMergedWgs84Coords = () => {
+      const g = state.mergedGeometry;
+      return g ? g.coordinates : null;
+    };
+
+    window.getMergedWgs84Geometry = () => state.mergedGeometry;
 
     // ------- DOM 로드 시 초기화 ------- //
     document.addEventListener("DOMContentLoaded", () => {

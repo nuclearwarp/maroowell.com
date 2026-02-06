@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
 
+  <!-- 썸네일 이미지 (필수) -->
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:width" content="1200" />
@@ -48,6 +49,7 @@
     .muted{color:var(--muted);font-size:12px}
     .spacer{flex:1}
 
+    /* 숨겨둘 링크(헤더에서 카카오맵 하이퍼링크처럼) */
     header a.saveLink{
       color:var(--muted);
       font-size:12px;
@@ -151,6 +153,7 @@
     }
     button.danger:hover{border-color:#ef4444}
 
+    /* 병합 ON 상태 UI */
     button.merge-on{
       background:#0f2a1f;
       border-color:#22c55e;
@@ -195,6 +198,7 @@
       cursor:pointer;
     }
 
+    /* 저장 모달 */
     .modal{
       position:fixed;
       inset:0;
@@ -256,9 +260,16 @@
     }
   </style>
 
+  <!-- Daum 우편번호 -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+  <!-- proj4 (5179 -> 4326 변환용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
+  <!-- turf (병합) -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <!-- Kakao 지도 SDK -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
 </head>
 
@@ -270,6 +281,7 @@
     <h1>Maroowell 우편번호 검색기</h1>
     <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
     <span class="spacer"></span>
+    <!-- 숨겨둘 링크(눌러도 모달 뜨게) -->
     <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
   </header>
 
@@ -312,6 +324,7 @@
     </div>
   </div>
 
+  <!-- 저장 모달 -->
   <div id="saveModal" class="modal" aria-hidden="true">
     <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
       <div class="modalTop">
@@ -321,14 +334,14 @@
       <div class="modalBody">
         <div class="pill">
           • 현재 선택된 우편번호 폴리곤들을 “병합 결과”로 저장합니다.<br/>
-          • 병합을 안 눌렀어도 저장 시 자동 병합 후 저장합니다.
+          • 저장 시 최종 링은 “원본 면적”으로 클립되어 <b>절대 커지지 않습니다.</b>
         </div>
 
         <label>캠프(camp)</label>
-        <input id="saveCampInput" placeholder="예: ICN, DAEGU ..." />
+        <input id="saveCampInput" placeholder="예: M익산1 ..." />
 
         <label style="margin-top:10px">라우트 코드(code)</label>
-        <input id="saveCodeInput" placeholder="예: 126C ..." />
+        <input id="saveCodeInput" placeholder="예: 익산0그룹 ..." />
 
         <div class="row">
           <button id="saveDoBtn">저장</button>
@@ -341,13 +354,17 @@
     (function(){
       "use strict";
 
+      // ====== 엔드포인트 ======
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
+
+      // ⚠️ 필요하면 여기만 바꿔 (너 Worker 도메인 기준)
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
-      // 병합 “붙어있는거”를 같은 덩어리로 만들기 위한 스냅(버퍼) 거리
+      // “붙어있는 덩어리”를 같이 병합하기 위한 스냅 거리(미터)
+      // → 계산용이며, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
       const MERGE_SNAP_METERS = 35;
 
-      // 너무 작은 찌꺼기 제거 (㎡)
+      // 너무 작은 찌꺼기 제거(㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
 
       const $ = (sel) => document.querySelector(sel);
@@ -358,7 +375,7 @@
 
         polygons: new Map(), // zip -> [kakao Polygon]
         labels:   new Map(), // zip -> [overlay]
-        geoByZip: new Map(), // zip -> turf Feature
+        geoByZip: new Map(), // zip -> turf Feature(MultiPolygon)
 
         selectedZips: new Set(),
 
@@ -532,6 +549,8 @@
             state.selectedZips.delete(z);
             removeZipData(z);
             renderZipChips();
+
+            // 병합 ON 상태면 즉시 재병합(표시 유지)
             if (state.mergeMode) await mergeOn(true);
           };
 
@@ -600,8 +619,13 @@
       function normalizeToMultiPolygon5179(polygon5179) {
         if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
 
+        // 1) [ [x,y], ... ]  (단일 ring)
         if (isPoint(polygon5179[0])) return [ [ polygon5179 ] ];
+
+        // 2) [ ring[], ring[] ] (Polygon: rings)
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [ polygon5179 ];
+
+        // 3) [ [ring[]], [ring[]] ] (MultiPolygon)
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
             Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
             isPoint(polygon5179[0][0][0])) return polygon5179;
@@ -731,9 +755,15 @@
         for (const arr of state.polygons.values()) {
           for (const poly of arr) {
             const path = poly.getPath();
+
+            // 단일 ring: Array<LatLng>
             if (Array.isArray(path)) {
               path.forEach(ll => { b.extend(ll); has = true; });
-            } else if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
+              continue;
+            }
+
+            // MVCArray / 다중 ring
+            if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
               for (let i = 0; i < path.getLength(); i++) {
                 const ring = path.getAt(i);
                 if (ring && typeof ring.getLength === "function") {
@@ -763,7 +793,7 @@
         if (has) state.map.setBounds(b);
       }
 
-      // ===== 병합 =====
+      // ===== 병합 (turf 안정화) =====
       function setMergeUI(on){
         state.mergeMode = !!on;
         const btn = $("#mergeBtn");
@@ -784,7 +814,6 @@
         } catch { return []; }
       }
 
-      // ✅ 병합 안정화: 좌표 truncate + clean + rewind
       function stabilizeFeature(f){
         let out = f;
         try { out = turf.truncate(out, { precision: 6, mutate: false }); } catch {}
@@ -793,7 +822,6 @@
         return out;
       }
 
-      // ✅ 안전 buffer/union (throw 방지)
       function safeBuffer(f, meters){
         if (!meters || meters === 0) return f;
         try {
@@ -813,7 +841,16 @@
         }
       }
 
-      // ✅ 핵심: 여기서 turf 에러가 나도 절대 Uncaught로 터지지 않게 처리
+      function safeIntersect(a, b){
+        try {
+          const out = turf.intersect(a, b);
+          return out || null;
+        } catch (e) {
+          console.warn("[merge] intersect fail", e);
+          return null;
+        }
+      }
+
       function mergeFeaturesWithSnap(features, snapMeters) {
         if (!features.length) return null;
 
@@ -829,18 +866,18 @@
             continue;
           }
 
-          // 1차 시도: 스냅 포함 union
+          // 1차: 스냅 포함 union
           let u = safeUnion(merged, fb);
 
           if (!u) {
-            // 2차 시도: 스냅 없는 union
+            // 2차: 스냅 없는 union
             const m2 = stabilizeFeature(merged);
             const f2 = stabilizeFeature(raw);
             u = safeUnion(m2, f2);
           }
 
           if (!u) {
-            // 3차: 이 조각은 병합에서 제외(=따로 유지) → 전체 병합이 죽지 않게
+            // 3차: 전체 죽지 않게 이 조각은 따로 유지
             leftovers.push(fb);
             continue;
           }
@@ -848,12 +885,11 @@
           merged = stabilizeFeature(u);
         }
 
-        // leftovers가 있으면 merged와 함께 MultiPolygon 형태로 “합쳐두기”
-        // (완전 dissolve는 못 해도 최소한 화면/저장은 안정적으로)
+        // leftovers가 있으면 MultiPolygon로 묶기
         if (leftovers.length) {
           try {
             const fc = turf.featureCollection([merged, ...leftovers].filter(Boolean));
-            const combined = turf.combine(fc); // MultiPolygon로 묶어줌
+            const combined = turf.combine(fc);
             if (combined?.features?.[0]) merged = combined.features[0];
           } catch (e) {
             console.warn("[merge] combine fail", e);
@@ -872,23 +908,45 @@
         return feats;
       }
 
+      // ✅ 저장/표시 공통: "최종 링" 계산 (원본 면적으로 클립해서 절대 커지지 않음)
+      async function computeMergedRings(){
+        await drawSelected();
+
+        const feats = getSelectedFeatures().map(stabilizeFeature).filter(Boolean);
+        if (!feats.length) return null;
+
+        const mergedSnap = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
+        if (!mergedSnap) return null;
+
+        // 원본 면적 마스크(확장 없음)
+        let origMask = null;
+        try {
+          const fc = turf.featureCollection(feats);
+          const comb = turf.combine(fc);
+          origMask = comb?.features?.[0] || null;
+        } catch (e) {
+          console.warn("[merge] orig mask fail", e);
+        }
+
+        // ✅ 핵심: 스냅으로 늘어난 부분을 원본 면적으로 잘라냄
+        const mergedClipped =
+          (origMask ? safeIntersect(mergedSnap, origMask) : null) || origMask || mergedSnap;
+
+        let polys = flattenToPolygonFeatures(mergedClipped);
+        polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
+
+        const rings = polys
+          .map(p => p.geometry?.coordinates?.[0])
+          .filter(r => Array.isArray(r) && r.length >= 4);
+
+        return rings.length ? rings : null;
+      }
+
+      // 병합 ON: 화면에 합쳐진 폴리곤만 표시 + 우편번호 라벨 숨김
       async function mergeOn(rebuildOnly=false){
         try {
-          await drawSelected();
-          const feats = getSelectedFeatures();
-          if (!feats.length) { if(!rebuildOnly) alert("병합할 폴리곤이 없습니다."); return; }
-
-          const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
-          if (!merged) { if(!rebuildOnly) alert("병합 실패"); return; }
-
-          let polys = flattenToPolygonFeatures(merged);
-          polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
-
-          const rings = polys
-            .map(p => p.geometry?.coordinates?.[0])
-            .filter(r => Array.isArray(r) && r.length >= 4);
-
-          if (!rings.length) { if(!rebuildOnly) alert("병합 결과가 비었습니다."); return; }
+          const rings = await computeMergedRings();
+          if (!rings) { if(!rebuildOnly) alert("병합 결과가 없습니다."); return; }
 
           clearMerged();
           state.mergedRingsWgs84 = rings;
@@ -919,14 +977,12 @@
           setOriginalVisible(false); // 라벨 포함 숨김
           setMergeUI(true);
           fitBoundsToRings(rings);
-
         } catch (e) {
-          // ✅ 여기서 끝. Uncaught (in promise) 절대 안 뜸.
           console.warn("[merge] mergeOn crashed:", e);
           clearMerged();
           setOriginalVisible(true);
           setMergeUI(false);
-          if (!rebuildOnly) alert("병합 실패(지오메트리 오류). 해당 우편번호 중 일부 폴리곤이 병합 불가 형태입니다.");
+          if (!rebuildOnly) alert("병합 실패(지오메트리 오류).");
         }
       }
 
@@ -952,27 +1008,31 @@
       }
 
       function closeSaveModal(){
-        // aria-hidden 경고 줄이기: 닫기 전에 포커스를 바깥으로 이동
+        // aria-hidden 경고 줄이기: 닫기 전에 포커스 이동
         $("#saveBtn")?.focus?.();
         $("#saveModal").classList.remove("open");
         $("#saveModal").setAttribute("aria-hidden","true");
       }
 
       async function saveMergedToDB(){
-        if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-          await mergeOn(false);
-        }
-        if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-          alert("병합 결과가 없습니다.");
-          return;
-        }
-
         const camp = ($("#saveCampInput").value || "").trim();
         const code = ($("#saveCodeInput").value || "").trim();
         if (!camp) return alert("camp를 입력하세요");
         if (!code) return alert("code(라우트 코드)를 입력하세요");
 
-        const payload = { camp, code, polygon_wgs84: state.mergedRingsWgs84 };
+        // ✅ 화면을 건드리지 않고 저장용 rings만 계산
+        let rings = state.mergedRingsWgs84;
+
+        if (!rings || !rings.length) {
+          rings = await computeMergedRings();
+        }
+
+        if (!rings || !rings.length) {
+          alert("저장할 병합 결과가 없습니다.");
+          return;
+        }
+
+        const payload = { camp, code, polygon_wgs84: rings };
 
         const res = await fetch(ROUTE_ENDPOINT, {
           method: "POST",
@@ -992,6 +1052,7 @@
 
         localStorage.setItem("mw_save_camp", camp);
         localStorage.setItem("mw_save_code", code);
+
         closeSaveModal();
         alert("저장 완료");
       }
@@ -1047,7 +1108,9 @@
           }).open();
         };
 
+        // 헤더의 숨김 링크도 저장 모달로
         $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
+
         $("#saveCloseBtn").onclick = closeSaveModal;
         $("#saveDoBtn").onclick = saveMergedToDB;
 

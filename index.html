@@ -4,6 +4,991 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+
+  <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Maroowell" />
+
+  <title>Maroowell 우편번호 검색기</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    :root {
+      --headerH: 52px;
+      --bg:#0f1115;
+      --card:#161a22;
+      --muted:#8b95a7;
+      --text:#e6e9ef;
+      --line:#232838;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font:14px/1.4 system-ui,AppleSDGothicNeo,"Segoe UI",Roboto
+    }
+    header{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      padding:12px 16px;
+      height:var(--headerH);
+      background:#161a22;
+      border-bottom:1px solid var(--line);
+      position:sticky;
+      top:0;
+      z-index:5
+    }
+    header h1{font-size:18px;font-weight:800;letter-spacing:0.2px;margin:0}
+    .muted{color:var(--muted);font-size:12px}
+    .spacer{flex:1}
+
+    header a.saveLink{
+      color:var(--muted);
+      font-size:12px;
+      text-decoration:none;
+      opacity:.12;
+      padding:6px 8px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.08);
+      user-select:none;
+    }
+    header a.saveLink:hover{opacity:.28;border-color:rgba(255,255,255,.18)}
+
+    #app{
+      display:grid;
+      grid-template-columns:360px 1fr;
+      min-height:calc(100dvh - var(--headerH));
+    }
+    #panel{
+      padding:14px;
+      border-right:1px solid var(--line);
+      background:#10141b
+    }
+    #mapWrap{
+      position:relative;
+      min-height:calc(100dvh - var(--headerH));
+      display:flex;
+    }
+    #map,#roadview{
+      flex:1;
+      width:100%;
+      height:100%;
+      min-width:0;
+      min-height:0;
+    }
+    #roadview{display:none}
+    #mapWrap.roadview-open #roadview{display:block}
+
+    .map-controls{
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:10;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+    .map-controls button{
+      background:rgba(15,17,21,0.82);
+      border-color:#2a3142;
+      backdrop-filter: blur(6px);
+    }
+    .map-controls .hint{
+      padding:6px 10px;
+      border-radius:10px;
+      border:1px solid #2a3142;
+      background:rgba(15,17,21,0.72);
+      color:#cbd5e1;
+      font-size:12px;
+    }
+
+    label{display:block;margin:10px 0 6px;color:#9aa6b2}
+    input,textarea,button{font:inherit}
+    textarea{
+      width:100%;
+      background:#0c0f14;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:10px;
+      border-radius:10px;
+      min-height:90px
+    }
+    input{
+      width:100%;
+      background:#0c0f14;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:10px;
+      border-radius:10px;
+    }
+    button{
+      background:#1b2230;
+      border:1px solid #2a3142;
+      color:var(--text);
+      padding:6px 10px;
+      border-radius:10px;
+      cursor:pointer
+    }
+    button:hover{border-color:#3a4561}
+    button.danger{
+      background:#2a1416;
+      border-color:#7f1d1d;
+      color:#fecaca
+    }
+    button.danger:hover{border-color:#ef4444}
+
+    /* ✅ 병합 ON일 때 버튼 스타일 */
+    button.merge-on{
+      background:#0f2a1f;
+      border-color:#22c55e;
+      color:#bbf7d0;
+    }
+    button.merge-on:hover{
+      border-color:#4ade80;
+    }
+
+    .zip-label{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:4px 10px;
+      border-radius:999px;
+      font-weight:800;
+      font-size:12px;
+      letter-spacing:0.2px;
+      color:#0b1220;
+      background:rgba(255,255,255,0.92);
+      border:2px solid rgba(15,23,42,0.28);
+      box-shadow:0 2px 10px rgba(0,0,0,0.22);
+      user-select:none;
+      pointer-events:none;
+      transform:translateY(-2px);
+      white-space:nowrap;
+    }
+
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
+    .chip{
+      border:1px solid #2a3142;
+      border-radius:999px;
+      padding:6px 10px;
+      background:#0c0f14;
+      display:inline-flex;
+      align-items:center;
+      gap:6px
+    }
+    .chip button{
+      border:none;
+      background:transparent;
+      color:#94a3b8;
+      cursor:pointer
+    }
+
+    .modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background:rgba(0,0,0,.55);
+      z-index:9999;
+      padding:16px;
+    }
+    .modal.open{display:flex}
+    .modalCard{
+      width:min(520px, 100%);
+      background:#0f1626;
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.55);
+      overflow:hidden;
+    }
+    .modalTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:12px 14px;
+      background:#111b2e;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    .modalTop b{font-size:14px}
+    .modalTop button{
+      background:transparent;
+      border:1px solid rgba(255,255,255,.12);
+      padding:4px 10px;
+      border-radius:10px;
+      color:#cbd5e1;
+    }
+    .modalBody{padding:14px}
+    .modalBody .row{justify-content:flex-end;margin-top:10px}
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 10px;
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:12px;
+      background:rgba(0,0,0,.22);
+      color:#cbd5e1;
+      font-size:12px;
+      margin-bottom:10px;
+      line-height:1.35;
+    }
+
+    @media (max-width: 900px){
+      #app{grid-template-columns:1fr;}
+      #panel{order:2;}
+      #mapWrap{min-height:60vh;}
+      #mapWrap.roadview-open{flex-direction:column;}
+    }
+  </style>
+
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
+</head>
+
+<body>
+  <header>
+    <a href="/coupangRouteMap.html" style="display:flex;align-items:center">
+      <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
+    </a>
+    <h1>Maroowell 우편번호 검색기</h1>
+    <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
+    <span class="spacer"></span>
+    <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
+  </header>
+
+  <div id="app">
+    <aside id="panel">
+      <div class="row" style="justify-content:space-between">
+        <div>
+          <div class="muted">우편번호 여러 개 동시 조회</div>
+          <div class="muted">쉼표/공백/줄바꿈 모두 가능</div>
+        </div>
+        <button id="openAddr">주소검색 추가</button>
+      </div>
+
+      <label style="margin-top:12px">우편번호 목록</label>
+      <textarea id="zipInput"
+        placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea>
+
+      <div class="row" style="margin-top:8px">
+        <button id="addBtn">추가</button>
+        <button id="searchBtn">지도표시</button>
+        <button id="mergeBtn">병합</button>
+        <button id="saveBtn">저장</button>
+        <button id="clearBtn" class="danger">초기화</button>
+      </div>
+
+      <div class="list" id="zipList"></div>
+
+      <p class="muted" style="margin-top:10px">
+        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
+      </p>
+    </aside>
+
+    <div id="mapWrap">
+      <div id="map"></div>
+      <div id="roadview"></div>
+      <div class="map-controls">
+        <button id="toggleMapType" title="일반/위성 전환">위성</button>
+        <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
+        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 파란 길(ROADVIEW) 클릭</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="saveModal" class="modal" aria-hidden="true">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
+      <div class="modalTop">
+        <b>폴리곤 저장</b>
+        <button id="saveCloseBtn">닫기</button>
+      </div>
+      <div class="modalBody">
+        <div class="pill">
+          • 현재 “병합 결과”를 DB(subsubroutes.polygon_wgs84)로 저장합니다.<br/>
+          • 병합 안 했으면 저장 시 자동 병합 후 저장합니다.
+        </div>
+
+        <label>캠프(camp)</label>
+        <input id="saveCampInput" placeholder="예: ICN, DAEGU ..." />
+
+        <label style="margin-top:10px">라우트 코드(code)</label>
+        <input id="saveCodeInput" placeholder="예: 126C ..." />
+
+        <div class="row">
+          <button id="saveDoBtn">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const ZIP_API = "https://zip.maroowell.com/?zipcode=";
+    const API_BASE = "https://route.maroowell.com";
+    const ROUTE_ENDPOINT = `${API_BASE}/route`;
+
+    const MERGE_SNAP_METERS = 15;
+    const MIN_COMPONENT_AREA_SQM = 150;
+
+    const $ = (sel) => document.querySelector(sel);
+    const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
+
+    const state = {
+      map: null,
+      polygons: new Map(),
+      labels: new Map(),
+      geoByZip: new Map(),
+      selectedZips: new Set(),
+      colors: [
+        "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
+        "#22d3ee","#c084fc","#f472b6","#60a5fa",
+        "#34d399","#f97316"
+      ],
+      mergedRingsWgs84: null,
+      mergedPolygons: [],
+      mergeMode: false,
+
+      isSatellite: false,
+      roadviewOn: false,
+      roadviewOpen: false,
+      roadview: null,
+      roadviewClient: null,
+      roadviewClickHandler: null
+    };
+
+    const pickColor = (seed) => {
+      let h = 0;
+      const s = String(seed);
+      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      return state.colors[h % state.colors.length];
+    };
+
+    proj4.defs(
+      "EPSG:5179",
+      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+        "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
+        "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+    );
+    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+    function convertPoint(x, y) {
+      let lon, lat;
+      try {
+        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
+        lon = out[0];
+        lat = out[1];
+      } catch (e) {}
+
+      if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
+        lon = x;
+        lat = y;
+      }
+      return { lat, lon };
+    }
+
+    function createMap() {
+      if (!(window.kakao && kakao.maps)) {
+        alert("카카오 지도 SDK 로딩 실패");
+        return;
+      }
+      state.map = new kakao.maps.Map($("#map"), {
+        center: new kakao.maps.LatLng(37.5665, 126.978),
+        level: 8
+      });
+
+      window.addEventListener("resize", () => {
+        const c = state.map.getCenter();
+        state.map.relayout();
+        state.map.setCenter(c);
+        if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
+          state.roadview.relayout();
+        }
+      });
+    }
+
+    function setMapTypeSatellite(on) {
+      state.isSatellite = !!on;
+      if (!state.map) return;
+      state.map.setMapTypeId(
+        state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
+      );
+      const btn = $("#toggleMapType");
+      if (btn) btn.textContent = state.isSatellite ? "일반" : "위성";
+    }
+
+    function ensureRoadview() {
+      if (state.roadview && state.roadviewClient) return;
+      const container = $("#roadview");
+      if (!container) return;
+      state.roadview = new kakao.maps.Roadview(container);
+      state.roadviewClient = new kakao.maps.RoadviewClient();
+    }
+
+    function setRoadviewOverlay(on) {
+      if (!state.map) return;
+      try {
+        if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+        else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+      } catch (e) {}
+    }
+
+    function setRoadviewAt(latlng) {
+      ensureRoadview();
+      if (!state.roadviewClient || !state.roadview) return;
+
+      const radii = [80, 200, 500, 1200];
+      const tryFind = (i) => {
+        const r = radii[i];
+        state.roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
+          if (panoId === null || panoId === undefined) {
+            if (i < radii.length - 1) return tryFind(i + 1);
+            alert("이 위치 근처에는 로드뷰가 없습니다.");
+            return;
+          }
+          state.roadviewOpen = true;
+          const wrap = $("#mapWrap");
+          if (wrap) wrap.classList.add("roadview-open");
+          if (state.roadview && typeof state.roadview.relayout === "function") {
+            setTimeout(() => state.roadview.relayout(), 0);
+          }
+          state.roadview.setPanoId(panoId, latlng);
+        });
+      };
+      tryFind(0);
+    }
+
+    function setRoadviewOn(on) {
+      state.roadviewOn = !!on;
+      if (!state.roadviewOn) state.roadviewOpen = false;
+
+      const wrap = $("#mapWrap");
+      const hint = $("#roadviewHint");
+      const btn = $("#toggleRoadview");
+
+      if (wrap) {
+        wrap.classList.toggle("roadview-on", state.roadviewOn);
+        if (!state.roadviewOn) wrap.classList.remove("roadview-open");
+      }
+      if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
+      if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
+
+      if (state.map) {
+        const c = state.map.getCenter();
+        state.map.relayout();
+        state.map.setCenter(c);
+      }
+
+      if (state.roadviewOn) {
+        setRoadviewOverlay(true);
+        if (!state.roadviewClickHandler && state.map) {
+          state.roadviewClickHandler = (mouseEvent) => {
+            if (!state.roadviewOn) return;
+            if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+          };
+          kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
+        }
+      } else {
+        setRoadviewOverlay(false);
+        if (state.roadviewClickHandler && state.map) {
+          kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
+        }
+        state.roadviewClickHandler = null;
+      }
+
+      if (state.roadviewOn && state.roadviewOpen) {
+        ensureRoadview();
+        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
+      }
+    }
+
+    function renderZipChips() {
+      const list = $("#zipList");
+      list.innerHTML = "";
+      [...state.selectedZips].sort().forEach((z) => {
+        const div = document.createElement("div");
+        div.className = "chip";
+        const color = pickColor(z);
+        div.innerHTML =
+          `<b>${z}</b>` +
+          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
+          `<button title="삭제">✕</button>`;
+        div.querySelector("button").onclick = async () => {
+          state.selectedZips.delete(z);
+          removePolygon(z);
+          renderZipChips();
+          if (state.mergeMode) {
+            await mergeOn(true);
+          }
+        };
+        list.appendChild(div);
+      });
+    }
+
+    function removePolygon(zip) {
+      if (state.polygons.has(zip)) {
+        state.polygons.get(zip).forEach((p) => p.setMap(null));
+        state.polygons.delete(zip);
+      }
+      if (state.labels.has(zip)) {
+        state.labels.get(zip).forEach((l) => l.setMap(null));
+        state.labels.delete(zip);
+      }
+      state.geoByZip.delete(zip);
+    }
+
+    function clearAll() {
+      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
+      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
+      state.polygons.clear();
+      state.labels.clear();
+      state.geoByZip.clear();
+      clearMerged();
+      state.selectedZips.clear();
+      setMergeUI(false);
+    }
+
+    function clearMerged() {
+      state.mergedPolygons.forEach(p => p.setMap(null));
+      state.mergedPolygons = [];
+      state.mergedRingsWgs84 = null;
+    }
+
+    function setOriginalVisible(on) {
+      const map = on ? state.map : null;
+      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(map));
+      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(map));
+    }
+
+    function setMergeUI(on) {
+      state.mergeMode = !!on;
+      const btn = $("#mergeBtn");
+      if (!btn) return;
+      btn.textContent = state.mergeMode ? "해제" : "병합";
+      btn.classList.toggle("merge-on", state.mergeMode);
+    }
+
+    function centroidOfLatLngRing(latlngs) {
+      if (!latlngs || latlngs.length < 3) return null;
+      const pts = latlngs.map((ll) => [ll.getLng(), ll.getLat()]);
+      const f = pts[0];
+      const l = pts[pts.length - 1];
+      if (f[0] !== l[0] || f[1] !== l[1]) pts.push(f);
+
+      let area2 = 0, cx6 = 0, cy6 = 0;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const x0 = pts[i][0], y0 = pts[i][1];
+        const x1 = pts[i + 1][0], y1 = pts[i + 1][1];
+        const f2 = x0 * y1 - x1 * y0;
+        area2 += f2;
+        cx6 += (x0 + x1) * f2;
+        cy6 += (y0 + y1) * f2;
+      }
+      if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
+      const cx = cx6 / (3 * area2);
+      const cy = cy6 / (3 * area2);
+      if (!isFinite(cx) || !isFinite(cy)) return null;
+      return new kakao.maps.LatLng(cy, cx);
+    }
+
+    function createZipLabelOverlay(zip, color, pos) {
+      const el = document.createElement("div");
+      el.className = "zip-label";
+      el.textContent = zip;
+      el.style.borderColor = color;
+
+      return new kakao.maps.CustomOverlay({
+        position: pos,
+        content: el,
+        yAnchor: 0.5,
+        zIndex: 9999
+      });
+    }
+
+    function normalize5179ToMultiPolygonCoords(polygon5179) {
+      if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
+      const isPoint = (v) => Array.isArray(v) && v.length >= 2 && isFinite(v[0]) && isFinite(v[1]);
+      if (isPoint(polygon5179[0])) return [[[polygon5179]]];
+      if (Array.isArray(polygon5179[0]) && isPoint(polygon5179[0][0])) return [[polygon5179]];
+      if (Array.isArray(polygon5179[0]) && Array.isArray(polygon5179[0][0]) && isPoint(polygon5179[0][0][0])) return polygon5179;
+      return null;
+    }
+
+    function closeRingLngLat(ring) {
+      if (!Array.isArray(ring) || ring.length < 3) return ring;
+      const f = ring[0];
+      const l = ring[ring.length - 1];
+      if (!l || !f) return ring;
+      if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
+      return ring;
+    }
+
+    function convert5179MultiCoordsToWgs84(multiCoords5179) {
+      const out = [];
+      for (const poly of multiCoords5179) {
+        const ringsOut = [];
+        for (const ring of poly) {
+          const ringOut = [];
+          for (const pt of ring) {
+            if (!Array.isArray(pt) || pt.length < 2) continue;
+            const x = Number(pt[0]);
+            const y = Number(pt[1]);
+            if (!isFinite(x) || !isFinite(y)) continue;
+            const { lat, lon } = convertPoint(x, y);
+            if (!isFinite(lat) || !isFinite(lon)) continue;
+            ringOut.push([lon, lat]);
+          }
+          if (ringOut.length >= 3) {
+            closeRingLngLat(ringOut);
+            if (ringOut.length >= 4) ringsOut.push(ringOut);
+          }
+        }
+        if (ringsOut.length) out.push(ringsOut);
+      }
+      return out.length ? out : null;
+    }
+
+    function drawWgs84MultiPolygon(zip, wgsMultiCoords, color) {
+      const polys = [];
+      const labelOverlays = [];
+
+      for (const poly of wgsMultiCoords) {
+        const path = poly.map(ring => {
+          const pts = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+          if (pts.length > 1) {
+            const f = pts[0], l = pts[pts.length - 1];
+            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) pts.pop();
+          }
+          return pts;
+        }).filter(r => r.length >= 3);
+
+        if (!path.length || path[0].length < 3) continue;
+
+        const p = new kakao.maps.Polygon({
+          map: state.map,
+          path,
+          strokeWeight: 3,
+          strokeColor: color,
+          strokeOpacity: 1,
+          strokeStyle: "solid",
+          fillColor: color,
+          fillOpacity: 0.25
+        });
+        polys.push(p);
+
+        const outer = path[0];
+        const center = centroidOfLatLngRing(outer);
+        if (center) {
+          const ov = createZipLabelOverlay(zip, color, center);
+          ov.setMap(state.map);
+          labelOverlays.push(ov);
+        }
+      }
+
+      if (polys.length) state.polygons.set(zip, polys);
+      if (labelOverlays.length) state.labels.set(zip, labelOverlays);
+    }
+
+    async function drawSelected() {
+      const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
+      if (!targets.length) return;
+
+      const notFound = [];
+
+      for (const zip of targets) {
+        try {
+          const url = `${ZIP_API}${encodeURIComponent(zip)}`;
+          const res = await fetch(url, { cache: "no-store" });
+          const data = await res.json();
+
+          if (!data || !Array.isArray(data.polygon5179) || !data.polygon5179.length) {
+            notFound.push(zip);
+            continue;
+          }
+
+          const norm = normalize5179ToMultiPolygonCoords(data.polygon5179);
+          if (!norm) { notFound.push(zip); continue; }
+
+          const wgsMulti = convert5179MultiCoordsToWgs84(norm);
+          if (!wgsMulti) { notFound.push(zip); continue; }
+
+          const feature = {
+            type: "Feature",
+            properties: { zip },
+            geometry: { type: "MultiPolygon", coordinates: wgsMulti }
+          };
+          state.geoByZip.set(zip, feature);
+
+          const color = pickColor(zip);
+          drawWgs84MultiPolygon(zip, wgsMulti, color);
+        } catch (e) {
+          notFound.push(zip);
+        }
+      }
+
+      if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
+    }
+
+    function flattenToPolygonFeatures(feature) {
+      try {
+        const fc = turf.flatten(feature);
+        return (fc && fc.features) ? fc.features.filter(f => f?.geometry?.type === "Polygon") : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function mergeFeaturesWithSnap(features, snapMeters) {
+      if (!features.length) return null;
+      const bufOpt = { units: "meters", steps: 16 };
+      let merged = null;
+
+      for (const f of features) {
+        const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
+        merged = merged ? turf.union(merged, fb) : fb;
+      }
+
+      if (snapMeters > 0 && merged) {
+        try { merged = turf.buffer(merged, -snapMeters, bufOpt); } catch {}
+      }
+      return merged;
+    }
+
+    function fitBoundsToRings(rings) {
+      if (!state.map || !rings || !rings.length) return;
+      const b = new kakao.maps.LatLngBounds();
+      let has = false;
+      for (const ring of rings) {
+        for (const pt of ring) {
+          if (!Array.isArray(pt) || pt.length < 2) continue;
+          b.extend(new kakao.maps.LatLng(pt[1], pt[0]));
+          has = true;
+        }
+      }
+      if (has) state.map.setBounds(b);
+    }
+
+    function fitBoundsAll() {
+      if (!state.map) return;
+      const b = new kakao.maps.LatLngBounds();
+      let has = false;
+
+      for (const arr of state.polygons.values()) {
+        for (const poly of arr) {
+          const path = poly.getPath();
+          const pts = [];
+          if (typeof path.getLength === "function" && typeof path.getAt === "function") {
+            for (let i=0;i<path.getLength();i++) pts.push(path.getAt(i));
+          } else if (Array.isArray(path)) {
+            pts.push(...path);
+          }
+          pts.forEach(ll => {
+            if (!ll) return;
+            b.extend(ll);
+            has = true;
+          });
+        }
+      }
+      if (has) state.map.setBounds(b);
+    }
+
+    async function mergeOn(rebuildOnly=false) {
+      await drawSelected();
+
+      const feats = [];
+      for (const zip of state.selectedZips) {
+        const f = state.geoByZip.get(zip);
+        if (f) feats.push(f);
+      }
+      if (!feats.length) {
+        if (!rebuildOnly) alert("병합할 폴리곤이 없습니다.");
+        return;
+      }
+
+      const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
+      if (!merged) {
+        if (!rebuildOnly) alert("병합 실패");
+        return;
+      }
+
+      let polys = flattenToPolygonFeatures(merged);
+      polys = polys.filter(p => {
+        try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }
+      });
+
+      const rings = polys
+        .map(p => p.geometry?.coordinates?.[0])
+        .filter(r => Array.isArray(r) && r.length >= 4);
+
+      if (!rings.length) {
+        if (!rebuildOnly) alert("병합 결과가 비었습니다.");
+        return;
+      }
+
+      clearMerged();
+      state.mergedRingsWgs84 = rings;
+
+      rings.forEach((ring, idx) => {
+        const color = pickColor("merged_" + idx);
+        const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+        if (latlngs.length > 1) {
+          const f = latlngs[0], l = latlngs[latlngs.length - 1];
+          if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+        }
+        if (latlngs.length < 3) return;
+
+        const poly = new kakao.maps.Polygon({
+          map: state.map,
+          path: latlngs,
+          strokeWeight: 6,
+          strokeColor: color,
+          strokeOpacity: 1,
+          strokeStyle: "solid",
+          fillColor: color,
+          fillOpacity: 0.20
+        });
+        state.mergedPolygons.push(poly);
+      });
+
+      setOriginalVisible(false);
+      setMergeUI(true);
+      fitBoundsToRings(state.mergedRingsWgs84);
+    }
+
+    function mergeOff() {
+      clearMerged();
+      setOriginalVisible(true);
+      setMergeUI(false);
+      fitBoundsAll();
+    }
+
+    async function toggleMerge() {
+      if (state.mergeMode) mergeOff();
+      else await mergeOn(false);
+    }
+
+    function openSaveModal() {
+      const modal = $("#saveModal");
+      const lastCamp = localStorage.getItem("mw_save_camp") || "";
+      const lastCode = localStorage.getItem("mw_save_code") || "";
+      $("#saveCampInput").value = lastCamp;
+      $("#saveCodeInput").value = lastCode;
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden","false");
+    }
+
+    function closeSaveModal() {
+      const modal = $("#saveModal");
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden","true");
+    }
+
+    async function saveMergedToDB() {
+      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
+        await mergeOn(false);
+      }
+      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
+        alert("병합 결과가 없습니다.");
+        return;
+      }
+
+      const camp = ($("#saveCampInput").value || "").trim();
+      const code = ($("#saveCodeInput").value || "").trim();
+      if (!camp) return alert("camp를 입력하세요");
+      if (!code) return alert("code(라우트 코드)를 입력하세요");
+
+      const payload = { camp, code, polygon_wgs84: state.mergedRingsWgs84 };
+
+      const res = await fetch(ROUTE_ENDPOINT, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      let j=null; try{ j = text ? JSON.parse(text) : null; }catch{}
+      if (!res.ok) {
+        const msg = j?.error || j?.message || text || `HTTP ${res.status}`;
+        alert("저장 실패: " + msg);
+        return;
+      }
+
+      localStorage.setItem("mw_save_camp", camp);
+      localStorage.setItem("mw_save_code", code);
+
+      closeSaveModal();
+      alert("저장 완료");
+    }
+
+    function bindUI() {
+      $("#addBtn").onclick = () => {
+        parseZips($("#zipInput").value).forEach((z) => state.selectedZips.add(z));
+        $("#zipInput").value = "";
+        renderZipChips();
+      };
+
+      $("#searchBtn").onclick = async () => {
+        if (state.mergeMode) mergeOff();
+        await drawSelected();
+        fitBoundsAll();
+      };
+
+      $("#mergeBtn").onclick = async () => {
+        await toggleMerge();
+      };
+
+      $("#saveBtn").onclick = openSaveModal;
+
+      $("#clearBtn").onclick = () => {
+        clearAll();
+        renderZipChips();
+        setRoadviewOn(false);
+      };
+
+      $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
+      $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
+
+      $("#openAddr").onclick = () => {
+        new daum.Postcode({
+          oncomplete: (d) => {
+            if (d.zonecode) {
+              state.selectedZips.add(d.zonecode);
+              renderZipChips();
+            }
+          }
+        }).open();
+      };
+
+      $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
+      $("#saveCloseBtn").onclick = closeSaveModal;
+      $("#saveDoBtn").onclick = saveMergedToDB;
+
+      const preset = parseZips(new URLSearchParams(location.search).get("zips"));
+      preset.forEach((z) => state.selectedZips.add(z));
+      renderZipChips();
+      if (preset.length) drawSelected().then(fitBoundsAll);
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      createMap();
+      bindUI();
+      setMergeUI(false);
+    });
+  </script>
+</body>
+</html>
 
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />

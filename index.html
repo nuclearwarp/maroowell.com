@@ -4,14 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-<!doctype html>
-<html lang="ko">
-<head><!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="referrer" content="origin" />
 
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
@@ -32,7 +24,7 @@
       --line:#232838;
     }
     *{box-sizing:border-box}
-    html,body{height:100%; overflow:hidden;} /* ✅ 레이아웃 깨짐 방지 */
+    html,body{height:100%; overflow:hidden;}
     body{
       margin:0;
       background:var(--bg);
@@ -56,7 +48,6 @@
     .muted{color:var(--muted);font-size:12px}
     .spacer{flex:1}
 
-    /* ✅ 숨김 저장 트리거(헤더 링크) */
     header a.saveLink{
       color:var(--muted);
       font-size:12px;
@@ -72,7 +63,7 @@
     #app{
       display:grid;
       grid-template-columns:360px 1fr;
-      height:calc(100dvh - var(--headerH)); /* ✅ 고정 높이 */
+      height:calc(100dvh - var(--headerH));
       min-height:0;
     }
 
@@ -80,7 +71,7 @@
       padding:14px;
       border-right:1px solid var(--line);
       background:#10141b;
-      overflow:auto; /* ✅ 패널만 스크롤 */
+      overflow:auto;
       min-height:0;
     }
 
@@ -160,7 +151,6 @@
     }
     button.danger:hover{border-color:#ef4444}
 
-    /* ✅ 병합 ON 버튼 스타일 */
     button.merge-on{
       background:#0f2a1f;
       border-color:#22c55e;
@@ -205,7 +195,6 @@
       cursor:pointer;
     }
 
-    /* ✅ 저장 모달 */
     .modal{
       position:fixed;
       inset:0;
@@ -288,8 +277,6 @@
     <h1>Maroowell 우편번호 검색기</h1>
     <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
     <span class="spacer"></span>
-
-    <!-- ✅ 숨김 저장 트리거 -->
     <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
   </header>
 
@@ -332,7 +319,6 @@
     </div>
   </div>
 
-  <!-- 저장 모달 -->
   <div id="saveModal" class="modal" aria-hidden="true">
     <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
       <div class="modalTop">
@@ -359,2820 +345,578 @@
   </div>
 
   <script>
-    // ==========================
-    // 설정
-    // ==========================
-    const ZIP_API = "https://zip.maroowell.com/?zipcode=";   // 우편번호 경계
-    const ROUTE_ENDPOINT = "https://route.maroowell.com/route"; // 저장 API
+    (function(){
+      "use strict";
 
-    // 병합 스냅(미세 틈/좌표오차 때문에 붙어야 하는 것 붙이기)
-    const MERGE_SNAP_METERS = 35;     // ✅ 좀 더 공격적으로(덩어리 쪼개짐 완화)
-    const MIN_COMPONENT_AREA_SQM = 800; // ✅ 병합 후 생기는 미세 찌꺼기 제거(너무 크면 진짜 섬도 날아감)
+      // ====== 설정(전역 선언 금지) ======
+      const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
+      const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
-    const $ = (sel) => document.querySelector(sel);
-    const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
+      const MERGE_SNAP_METERS = 35;
+      const MIN_COMPONENT_AREA_SQM = 800;
 
-    // ==========================
-    // 상태
-    // ==========================
-    const state = {
-      map: null,
+      const $ = (sel) => document.querySelector(sel);
+      const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
 
-      // 원본(우편번호별)
-      polygons: new Map(),  // zip -> [kakao.maps.Polygon ...]
-      labels:   new Map(),  // zip -> [kakao.maps.CustomOverlay ...]
-      geoByZip: new Map(),  // zip -> turf Feature<MultiPolygon>
+      // ====== 상태 ======
+      const state = {
+        map: null,
 
-      selectedZips: new Set(),
+        polygons: new Map(), // zip -> [kakao Polygon]
+        labels:   new Map(), // zip -> [overlay]
+        geoByZip: new Map(), // zip -> turf Feature
 
-      // 병합 결과
-      mergeMode: false,
-      mergedPolygons: [],
-      mergedRingsWgs84: null,  // [[ [lng,lat], ... ], ...]  (컴포넌트별 outer ring)
+        selectedZips: new Set(),
 
-      // 지도 옵션
-      isSatellite: false,
-      roadviewOn: false,
-      roadviewOpen: false,
-      roadview: null,
-      roadviewClient: null,
-      roadviewClickHandler: null,
+        mergeMode: false,
+        mergedPolygons: [],
+        mergedRingsWgs84: null,
 
-      colors: [
-        "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
-        "#22d3ee","#c084fc","#f472b6","#60a5fa",
-        "#34d399","#f97316"
-      ]
-    };
+        isSatellite: false,
+        roadviewOn: false,
+        roadviewOpen: false,
+        roadview: null,
+        roadviewClient: null,
+        roadviewClickHandler: null,
 
-    function pickColor(seed) {
-      let h = 0;
-      const s = String(seed);
-      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-      return state.colors[h % state.colors.length];
-    }
-
-    function darkenHex(hex, amt=0.18){
-      if (!hex || hex[0] !== "#" || hex.length !== 7) return hex;
-      const r = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(1,3),16) * (1-amt))));
-      const g = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(3,5),16) * (1-amt))));
-      const b = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(5,7),16) * (1-amt))));
-      return "#" + [r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
-    }
-
-    // ==========================
-    // proj4 세팅 (5179 -> 4326)
-    // ==========================
-    proj4.defs(
-      "EPSG:5179",
-      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
-        "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
-        "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-    );
-    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
-
-    function convertPoint(x, y) {
-      let lon, lat;
-      try {
-        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
-        lon = out[0]; lat = out[1];
-      } catch {}
-      // fallback
-      if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
-        lon = x; lat = y;
-      }
-      return { lat, lon };
-    }
-
-    // ==========================
-    // 지도 초기화
-    // ==========================
-    function createMap() {
-      if (!(window.kakao && kakao.maps)) {
-        alert("카카오 지도 SDK 로딩 실패");
-        return;
-      }
-      state.map = new kakao.maps.Map($("#map"), {
-        center: new kakao.maps.LatLng(37.5665, 126.978),
-        level: 8
-      });
-
-      window.addEventListener("resize", () => {
-        if (!state.map) return;
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
-        if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
-          state.roadview.relayout();
-        }
-      });
-    }
-
-    function setMapTypeSatellite(on) {
-      state.isSatellite = !!on;
-      if (!state.map) return;
-      state.map.setMapTypeId(
-        state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
-      );
-      $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
-    }
-
-    // ==========================
-    // 로드뷰
-    // ==========================
-    function ensureRoadview() {
-      if (state.roadview && state.roadviewClient) return;
-      state.roadview = new kakao.maps.Roadview($("#roadview"));
-      state.roadviewClient = new kakao.maps.RoadviewClient();
-    }
-
-    function setRoadviewOverlay(on) {
-      if (!state.map) return;
-      try {
-        if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-        else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-      } catch {}
-    }
-
-    function setRoadviewAt(latlng) {
-      ensureRoadview();
-      const radii = [80, 200, 500, 1200];
-      const tryFind = (i) => {
-        state.roadviewClient.getNearestPanoId(latlng, radii[i], (panoId) => {
-          if (panoId === null || panoId === undefined) {
-            if (i < radii.length - 1) return tryFind(i + 1);
-            alert("이 위치 근처에는 로드뷰가 없습니다.");
-            return;
-          }
-          state.roadviewOpen = true;
-          $("#mapWrap").classList.add("roadview-open");
-          setTimeout(() => state.roadview.relayout(), 0);
-          state.roadview.setPanoId(panoId, latlng);
-        });
+        colors: [
+          "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
+          "#22d3ee","#c084fc","#f472b6","#60a5fa",
+          "#34d399","#f97316"
+        ]
       };
-      tryFind(0);
-    }
 
-    function setRoadviewOn(on) {
-      state.roadviewOn = !!on;
-      if (!state.roadviewOn) state.roadviewOpen = false;
-
-      $("#roadviewHint").style.display = state.roadviewOn ? "inline-flex" : "none";
-      $("#toggleRoadview").textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
-
-      if (!state.roadviewOn) $("#mapWrap").classList.remove("roadview-open");
-
-      if (state.map) {
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
+      function pickColor(seed) {
+        let h = 0;
+        const s = String(seed);
+        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        return state.colors[h % state.colors.length];
       }
 
-      if (state.roadviewOn) {
-        setRoadviewOverlay(true);
-        if (!state.roadviewClickHandler && state.map) {
-          state.roadviewClickHandler = (mouseEvent) => {
-            if (!state.roadviewOn) return;
-            if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
-          };
-          kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
+      function darkenHex(hex, amt=0.18){
+        if (!hex || hex[0] !== "#" || hex.length !== 7) return hex;
+        const r = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(1,3),16) * (1-amt))));
+        const g = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(3,5),16) * (1-amt))));
+        const b = Math.max(0, Math.min(255, Math.round(parseInt(hex.slice(5,7),16) * (1-amt))));
+        return "#" + [r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
+      }
+
+      // ====== proj4 ======
+      proj4.defs(
+        "EPSG:5179",
+        "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
+          "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
+          "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+      );
+      proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+      function convertPoint(x, y) {
+        let lon, lat;
+        try {
+          const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
+          lon = out[0]; lat = out[1];
+        } catch {}
+        if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
+          lon = x; lat = y;
         }
-      } else {
-        setRoadviewOverlay(false);
-        if (state.roadviewClickHandler && state.map) {
-          kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
+        return { lat, lon };
+      }
+
+      // ====== 지도 ======
+      function createMap() {
+        if (!(window.kakao && kakao.maps)) {
+          alert("카카오 지도 SDK 로딩 실패");
+          return;
         }
-        state.roadviewClickHandler = null;
-      }
-    }
-
-    // ==========================
-    // UI
-    // ==========================
-    function renderZipChips() {
-      const list = $("#zipList");
-      list.innerHTML = "";
-
-      [...state.selectedZips].sort().forEach((z) => {
-        const div = document.createElement("div");
-        div.className = "chip";
-        const color = pickColor(z);
-        div.innerHTML =
-          `<b>${z}</b>` +
-          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
-          `<button title="삭제">✕</button>`;
-
-        div.querySelector("button").onclick = async () => {
-          state.selectedZips.delete(z);
-          removeZipData(z);
-          renderZipChips();
-          if (state.mergeMode) await mergeOn(true); // ✅ 병합 모드면 즉시 재병합
-        };
-
-        list.appendChild(div);
-      });
-    }
-
-    // ==========================
-    // 원본 데이터(폴리곤/라벨) 관리
-    // ==========================
-    function removeZipData(zip) {
-      if (state.polygons.has(zip)) {
-        state.polygons.get(zip).forEach(p => p.setMap(null));
-        state.polygons.delete(zip);
-      }
-      if (state.labels.has(zip)) {
-        state.labels.get(zip).forEach(l => l.setMap(null));
-        state.labels.delete(zip);
-      }
-      state.geoByZip.delete(zip);
-    }
-
-    function setOriginalVisible(on) {
-      const map = on ? state.map : null;
-      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(map));
-      for (const arr of state.labels.values())   arr.forEach(l => l.setMap(map));
-    }
-
-    // ==========================
-    // 병합 UI + 병합 결과 관리
-    // ==========================
-    function setMergeUI(on) {
-      state.mergeMode = !!on;
-      const btn = $("#mergeBtn");
-      btn.textContent = state.mergeMode ? "해제" : "병합";
-      btn.classList.toggle("merge-on", state.mergeMode);
-    }
-
-    function clearMerged() {
-      state.mergedPolygons.forEach(p => p.setMap(null));
-      state.mergedPolygons = [];
-      state.mergedRingsWgs84 = null;
-    }
-
-    // ==========================
-    // 라벨/중심 계산
-    // ==========================
-    function centroidOfLngLatRing(ringLngLat) {
-      // ringLngLat: [[lng,lat],...], closed or not
-      if (!ringLngLat || ringLngLat.length < 3) return null;
-      const pts = ringLngLat.slice();
-      const f = pts[0], l = pts[pts.length - 1];
-      if (f[0] !== l[0] || f[1] !== l[1]) pts.push([f[0], f[1]]);
-
-      let area2 = 0, cx6 = 0, cy6 = 0;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const x0 = pts[i][0], y0 = pts[i][1];
-        const x1 = pts[i+1][0], y1 = pts[i+1][1];
-        const f2 = x0*y1 - x1*y0;
-        area2 += f2;
-        cx6 += (x0 + x1) * f2;
-        cy6 += (y0 + y1) * f2;
-      }
-      if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
-      const cx = cx6 / (3 * area2);
-      const cy = cy6 / (3 * area2);
-      if (!isFinite(cx) || !isFinite(cy)) return null;
-      return new kakao.maps.LatLng(cy, cx);
-    }
-
-    function createZipLabelOverlay(zip, color, pos) {
-      const el = document.createElement("div");
-      el.className = "zip-label";
-      el.textContent = zip;
-      el.style.borderColor = color;
-
-      return new kakao.maps.CustomOverlay({
-        position: pos,
-        content: el,
-        yAnchor: 0.5,
-        zIndex: 9999
-      });
-    }
-
-    // ==========================
-    // ZIP API 응답 정규화 + WGS84 변환 + 그리기
-    // ==========================
-    function isPoint(v) {
-      return Array.isArray(v) && v.length >= 2 && isFinite(v[0]) && isFinite(v[1]);
-    }
-
-    // 지원 형태:
-    // 1) [[x,y]...] (단일 ring)
-    // 2) [[[x,y]...]] (Polygon: rings)
-    // 3) [[[[x,y]...]]] (MultiPolygon)
-    function normalizeToMultiPolygon5179(polygon5179) {
-      if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
-
-      // case 1: [[x,y],...]
-      if (isPoint(polygon5179[0])) {
-        return [ [ polygon5179 ] ]; // MultiPolygon[ Polygon[ ring ] ]
-      }
-
-      // case 2: [[[x,y],...], ...]
-      if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) {
-        return [ polygon5179 ]; // MultiPolygon[ Polygon[ rings ] ]
-      }
-
-      // case 3: [[[[x,y]...]]]
-      if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
-          Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
-          isPoint(polygon5179[0][0][0])) {
-        return polygon5179; // already MultiPolygon
-      }
-
-      return null;
-    }
-
-    function closeRingLngLat(ring) {
-      if (!ring || ring.length < 3) return ring;
-      const f = ring[0], l = ring[ring.length - 1];
-      if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
-      return ring;
-    }
-
-    function convert5179MultiToWgs84(multi5179) {
-      const out = [];
-      for (const poly of multi5179) {
-        const ringsOut = [];
-        for (const ring of poly) {
-          const ringOut = [];
-          for (const pt of ring) {
-            if (!isPoint(pt)) continue;
-            const x = Number(pt[0]), y = Number(pt[1]);
-            const { lat, lon } = convertPoint(x, y);
-            if (!isFinite(lat) || !isFinite(lon)) continue;
-            ringOut.push([lon, lat]); // WGS84 [lng,lat]
-          }
-          if (ringOut.length >= 3) {
-            closeRingLngLat(ringOut);
-            if (ringOut.length >= 4) ringsOut.push(ringOut);
-          }
-        }
-        if (ringsOut.length) out.push(ringsOut);
-      }
-      return out.length ? out : null;
-    }
-
-    function drawZipMultiPolygon(zip, wgsMultiCoords) {
-      const color = pickColor(zip);
-
-      const polys = [];
-      const overlays = [];
-
-      for (const polyRings of wgsMultiCoords) {
-        // Kakao Polygon path: [ [LatLng...], [LatLng...] ] (holes 포함 가능)
-        const ringsLatLng = polyRings.map(ring => {
-          const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-          // 마지막=첫점이면 제거(카카오 Polygon은 닫힌 링 강제 아님)
-          if (latlngs.length > 1) {
-            const f = latlngs[0], l = latlngs[latlngs.length - 1];
-            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
-          }
-          return latlngs;
-        }).filter(r => r.length >= 3);
-
-        if (!ringsLatLng.length) continue;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path: ringsLatLng,
-          strokeWeight: 3,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.25
+        state.map = new kakao.maps.Map($("#map"), {
+          center: new kakao.maps.LatLng(37.5665, 126.978),
+          level: 8
         });
 
-        polys.push(poly);
-
-        // 라벨은 outer ring 기준
-        const outerRing = polyRings[0];
-        const center = centroidOfLngLatRing(outerRing);
-        if (center) {
-          const ov = createZipLabelOverlay(zip, color, center);
-          ov.setMap(state.map);
-          overlays.push(ov);
-        }
-      }
-
-      if (polys.length) state.polygons.set(zip, polys);
-      if (overlays.length) state.labels.set(zip, overlays);
-    }
-
-    async function drawSelected() {
-      const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
-      if (!targets.length) return;
-
-      const notFound = [];
-
-      for (const zip of targets) {
-        try {
-          const res = await fetch(`${ZIP_API}${encodeURIComponent(zip)}`, { cache: "no-store" });
-          const data = await res.json();
-
-          if (!data || !Array.isArray(data.polygon5179) || data.polygon5179.length === 0) {
-            notFound.push(zip);
-            continue;
+        window.addEventListener("resize", () => {
+          if (!state.map) return;
+          const c = state.map.getCenter();
+          state.map.relayout();
+          state.map.setCenter(c);
+          if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
+            state.roadview.relayout();
           }
+        });
+      }
 
-          const norm = normalizeToMultiPolygon5179(data.polygon5179);
-          if (!norm) { notFound.push(zip); continue; }
+      function setMapTypeSatellite(on) {
+        state.isSatellite = !!on;
+        if (!state.map) return;
+        state.map.setMapTypeId(
+          state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
+        );
+        $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
+      }
 
-          const wgs = convert5179MultiToWgs84(norm);
-          if (!wgs) { notFound.push(zip); continue; }
+      // ====== 로드뷰 ======
+      function ensureRoadview() {
+        if (state.roadview && state.roadviewClient) return;
+        state.roadview = new kakao.maps.Roadview($("#roadview"));
+        state.roadviewClient = new kakao.maps.RoadviewClient();
+      }
 
-          // turf Feature 저장(병합용)
-          const feature = {
-            type: "Feature",
-            properties: { zip },
-            geometry: { type: "MultiPolygon", coordinates: wgs }
-          };
-          state.geoByZip.set(zip, feature);
+      function setRoadviewOverlay(on) {
+        if (!state.map) return;
+        try {
+          if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+          else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+        } catch {}
+      }
 
-          // 그리기
-          drawZipMultiPolygon(zip, wgs);
+      function setRoadviewAt(latlng) {
+        ensureRoadview();
+        const radii = [80, 200, 500, 1200];
+        const tryFind = (i) => {
+          state.roadviewClient.getNearestPanoId(latlng, radii[i], (panoId) => {
+            if (panoId === null || panoId === undefined) {
+              if (i < radii.length - 1) return tryFind(i + 1);
+              alert("이 위치 근처에는 로드뷰가 없습니다.");
+              return;
+            }
+            state.roadviewOpen = true;
+            $("#mapWrap").classList.add("roadview-open");
+            setTimeout(() => state.roadview.relayout(), 0);
+            state.roadview.setPanoId(panoId, latlng);
+          });
+        };
+        tryFind(0);
+      }
 
-        } catch (e) {
-          notFound.push(zip);
+      function setRoadviewOn(on) {
+        state.roadviewOn = !!on;
+        if (!state.roadviewOn) state.roadviewOpen = false;
+
+        $("#roadviewHint").style.display = state.roadviewOn ? "inline-flex" : "none";
+        $("#toggleRoadview").textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
+
+        if (!state.roadviewOn) $("#mapWrap").classList.remove("roadview-open");
+
+        if (state.map) {
+          const c = state.map.getCenter();
+          state.map.relayout();
+          state.map.setCenter(c);
+        }
+
+        if (state.roadviewOn) {
+          setRoadviewOverlay(true);
+          if (!state.roadviewClickHandler && state.map) {
+            state.roadviewClickHandler = (mouseEvent) => {
+              if (!state.roadviewOn) return;
+              if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+            };
+            kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
+          }
+        } else {
+          setRoadviewOverlay(false);
+          if (state.roadviewClickHandler && state.map) {
+            kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
+          }
+          state.roadviewClickHandler = null;
         }
       }
 
-      if (notFound.length) {
-        alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
+      // ====== UI ======
+      function renderZipChips() {
+        const list = $("#zipList");
+        list.innerHTML = "";
+
+        [...state.selectedZips].sort().forEach((z) => {
+          const div = document.createElement("div");
+          div.className = "chip";
+          const color = pickColor(z);
+          div.innerHTML =
+            `<b>${z}</b>` +
+            `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
+            `<button title="삭제">✕</button>`;
+
+          div.querySelector("button").onclick = async () => {
+            state.selectedZips.delete(z);
+            removeZipData(z);
+            renderZipChips();
+            if (state.mergeMode) await mergeOn(true);
+          };
+
+          list.appendChild(div);
+        });
       }
-    }
 
-    // ==========================
-    // Bounds
-    // ==========================
-    function fitBoundsAllOriginal() {
-      if (!state.map) return;
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
+      function removeZipData(zip) {
+        if (state.polygons.has(zip)) {
+          state.polygons.get(zip).forEach(p => p.setMap(null));
+          state.polygons.delete(zip);
+        }
+        if (state.labels.has(zip)) {
+          state.labels.get(zip).forEach(l => l.setMap(null));
+          state.labels.delete(zip);
+        }
+        state.geoByZip.delete(zip);
+      }
 
-      for (const arr of state.polygons.values()) {
-        for (const poly of arr) {
-          const path = poly.getPath();
-          // path는 rings를 가진 MVCArray일 수 있음
-          if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
-            for (let i = 0; i < path.getLength(); i++) {
-              const ring = path.getAt(i);
-              if (ring && typeof ring.getLength === "function") {
-                for (let j = 0; j < ring.getLength(); j++) {
-                  b.extend(ring.getAt(j));
-                  has = true;
+      function setOriginalVisible(on) {
+        const map = on ? state.map : null;
+        for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(map));
+        for (const arr of state.labels.values())   arr.forEach(l => l.setMap(map));
+      }
+
+      // ====== 라벨 ======
+      function centroidOfLngLatRing(ringLngLat) {
+        if (!ringLngLat || ringLngLat.length < 3) return null;
+        const pts = ringLngLat.slice();
+        const f = pts[0], l = pts[pts.length - 1];
+        if (f[0] !== l[0] || f[1] !== l[1]) pts.push([f[0], f[1]]);
+
+        let area2 = 0, cx6 = 0, cy6 = 0;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const x0 = pts[i][0], y0 = pts[i][1];
+          const x1 = pts[i+1][0], y1 = pts[i+1][1];
+          const f2 = x0*y1 - x1*y0;
+          area2 += f2;
+          cx6 += (x0 + x1) * f2;
+          cy6 += (y0 + y1) * f2;
+        }
+        if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
+        const cx = cx6 / (3 * area2);
+        const cy = cy6 / (3 * area2);
+        if (!isFinite(cx) || !isFinite(cy)) return null;
+        return new kakao.maps.LatLng(cy, cx);
+      }
+
+      function createZipLabelOverlay(zip, color, pos) {
+        const el = document.createElement("div");
+        el.className = "zip-label";
+        el.textContent = zip;
+        el.style.borderColor = color;
+
+        return new kakao.maps.CustomOverlay({
+          position: pos,
+          content: el,
+          yAnchor: 0.5,
+          zIndex: 9999
+        });
+      }
+
+      // ====== ZIP 응답 정규화 ======
+      function isPoint(v){ return Array.isArray(v) && v.length>=2 && isFinite(v[0]) && isFinite(v[1]); }
+
+      function normalizeToMultiPolygon5179(polygon5179) {
+        if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
+
+        // [[x,y],...]
+        if (isPoint(polygon5179[0])) return [ [ polygon5179 ] ];
+
+        // [[[x,y]...], ...]
+        if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [ polygon5179 ];
+
+        // [[[[x,y]...]]]
+        if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
+            Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
+            isPoint(polygon5179[0][0][0])) return polygon5179;
+
+        return null;
+      }
+
+      function closeRingLngLat(ring) {
+        if (!ring || ring.length < 3) return ring;
+        const f = ring[0], l = ring[ring.length - 1];
+        if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
+        return ring;
+      }
+
+      function convert5179MultiToWgs84(multi5179) {
+        const out = [];
+        for (const poly of multi5179) {
+          const ringsOut = [];
+          for (const ring of poly) {
+            const ringOut = [];
+            for (const pt of ring) {
+              if (!isPoint(pt)) continue;
+              const x = Number(pt[0]), y = Number(pt[1]);
+              const { lat, lon } = convertPoint(x, y);
+              if (!isFinite(lat) || !isFinite(lon)) continue;
+              ringOut.push([lon, lat]);
+            }
+            if (ringOut.length >= 3) {
+              closeRingLngLat(ringOut);
+              if (ringOut.length >= 4) ringsOut.push(ringOut);
+            }
+          }
+          if (ringsOut.length) out.push(ringsOut);
+        }
+        return out.length ? out : null;
+      }
+
+      function drawZipMultiPolygon(zip, wgsMultiCoords) {
+        const color = pickColor(zip);
+
+        const polys = [];
+        const overlays = [];
+
+        for (const polyRings of wgsMultiCoords) {
+          const ringsLatLng = polyRings.map(ring => {
+            const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+            // 닫힌 링이면 마지막 제거(카카오는 닫힘 강제 아님)
+            if (latlngs.length > 1) {
+              const f = latlngs[0], l = latlngs[latlngs.length - 1];
+              if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+            }
+            return latlngs;
+          }).filter(r => r.length >= 3);
+
+          if (!ringsLatLng.length) continue;
+
+          // ✅ 핵심: 단일 링이면 LatLng[]로 줘야 안정적
+          const pathForKakao = (ringsLatLng.length === 1) ? ringsLatLng[0] : ringsLatLng;
+
+          const poly = new kakao.maps.Polygon({
+            map: state.map,
+            path: pathForKakao,
+            strokeWeight: 3,
+            strokeColor: color,
+            strokeOpacity: 1,
+            strokeStyle: "solid",
+            fillColor: color,
+            fillOpacity: 0.25
+          });
+
+          polys.push(poly);
+
+          const outerRing = polyRings[0];
+          const center = centroidOfLngLatRing(outerRing);
+          if (center) {
+            const ov = createZipLabelOverlay(zip, color, center);
+            ov.setMap(state.map);
+            overlays.push(ov);
+          }
+        }
+
+        if (polys.length) state.polygons.set(zip, polys);
+        if (overlays.length) state.labels.set(zip, overlays);
+      }
+
+      async function drawSelected() {
+        const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
+        if (!targets.length) return;
+
+        const notFound = [];
+
+        for (const zip of targets) {
+          try {
+            const res = await fetch(`${ZIP_API_URL}${encodeURIComponent(zip)}`, { cache: "no-store" });
+            const data = await res.json();
+
+            if (!data || !Array.isArray(data.polygon5179) || data.polygon5179.length === 0) {
+              notFound.push(zip);
+              continue;
+            }
+
+            const norm = normalizeToMultiPolygon5179(data.polygon5179);
+            if (!norm) { notFound.push(zip); continue; }
+
+            const wgs = convert5179MultiToWgs84(norm);
+            if (!wgs) { notFound.push(zip); continue; }
+
+            const feature = {
+              type: "Feature",
+              properties: { zip },
+              geometry: { type: "MultiPolygon", coordinates: wgs }
+            };
+            state.geoByZip.set(zip, feature);
+
+            drawZipMultiPolygon(zip, wgs);
+          } catch {
+            notFound.push(zip);
+          }
+        }
+
+        if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
+      }
+
+      // ====== Bounds ======
+      function fitBoundsAllOriginal() {
+        if (!state.map) return;
+        const b = new kakao.maps.LatLngBounds();
+        let has = false;
+
+        for (const arr of state.polygons.values()) {
+          for (const poly of arr) {
+            const path = poly.getPath();
+            // path가 LatLng[] or MVCArray일 수 있음
+            if (Array.isArray(path)) {
+              path.forEach(ll => { b.extend(ll); has = true; });
+            } else if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
+              // rings
+              for (let i = 0; i < path.getLength(); i++) {
+                const ring = path.getAt(i);
+                if (ring && typeof ring.getLength === "function") {
+                  for (let j = 0; j < ring.getLength(); j++) {
+                    b.extend(ring.getAt(j));
+                    has = true;
+                  }
                 }
               }
             }
           }
         }
-      }
-      if (has) state.map.setBounds(b);
-    }
-
-    function fitBoundsToRings(rings) {
-      if (!state.map || !rings || !rings.length) return;
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
-      for (const ring of rings) {
-        for (const pt of ring) {
-          if (!Array.isArray(pt) || pt.length < 2) continue;
-          b.extend(new kakao.maps.LatLng(pt[1], pt[0]));
-          has = true;
-        }
-      }
-      if (has) state.map.setBounds(b);
-    }
-
-    // ==========================
-    // 병합 (turf)
-    // ==========================
-    function flattenToPolygonFeatures(feature) {
-      try {
-        const fc = turf.flatten(feature);
-        return (fc && fc.features) ? fc.features.filter(f => f?.geometry?.type === "Polygon") : [];
-      } catch {
-        return [];
-      }
-    }
-
-    function mergeFeaturesWithSnap(features, snapMeters) {
-      if (!features.length) return null;
-
-      const bufOpt = { units: "meters", steps: 16 };
-      let merged = null;
-
-      for (const f of features) {
-        const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
-        merged = merged ? turf.union(merged, fb) : fb;
+        if (has) state.map.setBounds(b);
       }
 
-      if (snapMeters > 0 && merged) {
-        try {
-          merged = turf.buffer(merged, -snapMeters, bufOpt);
-        } catch {}
-      }
-
-      try { merged = turf.cleanCoords(merged); } catch {}
-      return merged;
-    }
-
-    function getSelectedFeatures() {
-      const feats = [];
-      for (const z of state.selectedZips) {
-        const f = state.geoByZip.get(z);
-        if (f) feats.push(f);
-      }
-      return feats;
-    }
-
-    async function mergeOn(rebuildOnly=false) {
-      await drawSelected();
-
-      const feats = getSelectedFeatures();
-      if (!feats.length) {
-        if (!rebuildOnly) alert("병합할 폴리곤이 없습니다.");
-        return;
-      }
-
-      const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
-      if (!merged) {
-        if (!rebuildOnly) alert("병합 실패");
-        return;
-      }
-
-      let polys = flattenToPolygonFeatures(merged);
-
-      // 작은 찌꺼기 제거
-      polys = polys.filter(p => {
-        try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; }
-        catch { return true; }
-      });
-
-      // outer ring만 뽑아서 저장(컴포넌트별)
-      const rings = polys
-        .map(p => p.geometry?.coordinates?.[0])
-        .filter(r => Array.isArray(r) && r.length >= 4);
-
-      if (!rings.length) {
-        if (!rebuildOnly) alert("병합 결과가 비었습니다.");
-        return;
-      }
-
-      // 기존 병합 결과 제거
-      clearMerged();
-      state.mergedRingsWgs84 = rings;
-
-      // merged 색은 "살짝 다른" 톤(어둡게)
-      const base = pickColor("merged");
-      const mergedColor = darkenHex(base, 0.18);
-
-      // merged 폴리곤 표시 (라벨 없음)
-      for (const ring of rings) {
-        const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-        // 닫힌 링이면 마지막 제거
-        if (latlngs.length > 1) {
-          const f = latlngs[0], l = latlngs[latlngs.length - 1];
-          if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
-        }
-        if (latlngs.length < 3) continue;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path: latlngs,
-          strokeWeight: 6,
-          strokeColor: mergedColor,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: mergedColor,
-          fillOpacity: 0.20
-        });
-
-        state.mergedPolygons.push(poly);
-      }
-
-      // ✅ 원본은 삭제하지 말고 숨김만
-      setOriginalVisible(false);
-
-      // ✅ 버튼 토글
-      setMergeUI(true);
-
-      // ✅ 화면 맞춤
-      fitBoundsToRings(rings);
-    }
-
-    function mergeOff() {
-      clearMerged();
-      setOriginalVisible(true);
-      setMergeUI(false);
-      fitBoundsAllOriginal();
-    }
-
-    async function toggleMerge() {
-      if (state.mergeMode) mergeOff();
-      else await mergeOn(false);
-    }
-
-    // ==========================
-    // 저장 모달/저장 로직
-    // ==========================
-    function openSaveModal() {
-      $("#saveCampInput").value = localStorage.getItem("mw_save_camp") || "";
-      $("#saveCodeInput").value = localStorage.getItem("mw_save_code") || "";
-      $("#saveModal").classList.add("open");
-      $("#saveModal").setAttribute("aria-hidden","false");
-    }
-
-    function closeSaveModal() {
-      $("#saveModal").classList.remove("open");
-      $("#saveModal").setAttribute("aria-hidden","true");
-    }
-
-    async function saveMergedToDB() {
-      // 병합 결과 없으면 자동 병합
-      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-        await mergeOn(false);
-      }
-      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-        alert("병합 결과가 없습니다.");
-        return;
-      }
-
-      const camp = ($("#saveCampInput").value || "").trim();
-      const code = ($("#saveCodeInput").value || "").trim();
-      if (!camp) return alert("camp를 입력하세요");
-      if (!code) return alert("code(라우트 코드)를 입력하세요");
-
-      const payload = {
-        camp,
-        code,
-        polygon_wgs84: state.mergedRingsWgs84
-      };
-
-      const res = await fetch(ROUTE_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const text = await res.text();
-      let j = null;
-      try { j = text ? JSON.parse(text) : null; } catch {}
-
-      if (!res.ok) {
-        const msg = j?.error || j?.message || text || `HTTP ${res.status}`;
-        alert("저장 실패: " + msg);
-        return;
-      }
-
-      localStorage.setItem("mw_save_camp", camp);
-      localStorage.setItem("mw_save_code", code);
-
-      closeSaveModal();
-      alert("저장 완료");
-    }
-
-    // ==========================
-    // 초기화
-    // ==========================
-    function clearAll() {
-      // 원본 제거
-      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
-      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
-      state.polygons.clear();
-      state.labels.clear();
-      state.geoByZip.clear();
-
-      // 병합 제거
-      clearMerged();
-      setMergeUI(false);
-
-      state.selectedZips.clear();
-      renderZipChips();
-
-      setRoadviewOn(false);
-    }
-
-    // ==========================
-    // 이벤트 바인딩
-    // ==========================
-    function bindUI() {
-      $("#addBtn").onclick = async () => {
-        parseZips($("#zipInput").value).forEach(z => state.selectedZips.add(z));
-        $("#zipInput").value = "";
-        renderZipChips();
-
-        // 병합 모드면 선택이 늘어난 상태로 즉시 병합 재계산(원하면)
-        if (state.mergeMode) await mergeOn(true);
-      };
-
-      $("#searchBtn").onclick = async () => {
-        // 병합 모드에서도 "지도표시" 누르면: 최신 데이터 로드 후 병합 상태 유지(재병합)
-        await drawSelected();
-        if (state.mergeMode) {
-          await mergeOn(true);
-        } else {
-          fitBoundsAllOriginal();
-        }
-      };
-
-      $("#mergeBtn").onclick = async () => {
-        await toggleMerge();
-      };
-
-      $("#saveBtn").onclick = openSaveModal;
-
-      $("#clearBtn").onclick = clearAll;
-
-      $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
-      $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
-
-      $("#openAddr").onclick = () => {
-        new daum.Postcode({
-          oncomplete: (d) => {
-            if (d.zonecode) {
-              state.selectedZips.add(d.zonecode);
-              renderZipChips();
-            }
-          }
-        }).open();
-      };
-
-      // 숨김 링크도 저장 모달 트리거
-      $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
-
-      // 모달 버튼
-      $("#saveCloseBtn").onclick = closeSaveModal;
-      $("#saveDoBtn").onclick = saveMergedToDB;
-
-      // URL preset
-      const preset = parseZips(new URLSearchParams(location.search).get("zips"));
-      preset.forEach(z => state.selectedZips.add(z));
-      renderZipChips();
-      if (preset.length) {
-        drawSelected().then(() => {
-          if (state.mergeMode) mergeOn(true);
-          else fitBoundsAllOriginal();
-        });
-      }
-
-      setMergeUI(false);
-    }
-
-    // ==========================
-    // DOM Ready
-    // ==========================
-    document.addEventListener("DOMContentLoaded", () => {
-      createMap();
-      bindUI();
-    });
-  </script>
-</body>
-</html>
-
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="referrer" content="origin" />
-
-  <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-  <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Maroowell" />
-
-  <title>Maroowell 우편번호 검색기</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-
-  <style>
-    :root {
-      --headerH: 52px;
-      --bg:#0f1115;
-      --card:#161a22;
-      --muted:#8b95a7;
-      --text:#e6e9ef;
-      --line:#232838;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      background:var(--bg);
-      color:var(--text);
-      font:14px/1.4 system-ui,AppleSDGothicNeo,"Segoe UI",Roboto
-    }
-    header{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      padding:12px 16px;
-      height:var(--headerH);
-      background:#161a22;
-      border-bottom:1px solid var(--line);
-      position:sticky;
-      top:0;
-      z-index:5
-    }
-    header h1{font-size:18px;font-weight:800;letter-spacing:0.2px;margin:0}
-    .muted{color:var(--muted);font-size:12px}
-    .spacer{flex:1}
-
-    header a.saveLink{
-      color:var(--muted);
-      font-size:12px;
-      text-decoration:none;
-      opacity:.12;
-      padding:6px 8px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.08);
-      user-select:none;
-    }
-    header a.saveLink:hover{opacity:.28;border-color:rgba(255,255,255,.18)}
-
-    #app{
-      display:grid;
-      grid-template-columns:360px 1fr;
-      min-height:calc(100dvh - var(--headerH));
-    }
-    #panel{
-      padding:14px;
-      border-right:1px solid var(--line);
-      background:#10141b
-    }
-    #mapWrap{
-      position:relative;
-      min-height:calc(100dvh - var(--headerH));
-      display:flex;
-    }
-    #map,#roadview{
-      flex:1;
-      width:100%;
-      height:100%;
-      min-width:0;
-      min-height:0;
-    }
-    #roadview{display:none}
-    #mapWrap.roadview-open #roadview{display:block}
-
-    .map-controls{
-      position:absolute;
-      top:10px;
-      right:10px;
-      z-index:10;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .map-controls button{
-      background:rgba(15,17,21,0.82);
-      border-color:#2a3142;
-      backdrop-filter: blur(6px);
-    }
-    .map-controls .hint{
-      padding:6px 10px;
-      border-radius:10px;
-      border:1px solid #2a3142;
-      background:rgba(15,17,21,0.72);
-      color:#cbd5e1;
-      font-size:12px;
-    }
-
-    label{display:block;margin:10px 0 6px;color:#9aa6b2}
-    input,textarea,button{font:inherit}
-    textarea{
-      width:100%;
-      background:#0c0f14;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:10px;
-      border-radius:10px;
-      min-height:90px
-    }
-    input{
-      width:100%;
-      background:#0c0f14;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:10px;
-      border-radius:10px;
-    }
-    button{
-      background:#1b2230;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:6px 10px;
-      border-radius:10px;
-      cursor:pointer
-    }
-    button:hover{border-color:#3a4561}
-    button.danger{
-      background:#2a1416;
-      border-color:#7f1d1d;
-      color:#fecaca
-    }
-    button.danger:hover{border-color:#ef4444}
-
-    /* ✅ 병합 ON일 때 버튼 스타일 */
-    button.merge-on{
-      background:#0f2a1f;
-      border-color:#22c55e;
-      color:#bbf7d0;
-    }
-    button.merge-on:hover{
-      border-color:#4ade80;
-    }
-
-    .zip-label{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      padding:4px 10px;
-      border-radius:999px;
-      font-weight:800;
-      font-size:12px;
-      letter-spacing:0.2px;
-      color:#0b1220;
-      background:rgba(255,255,255,0.92);
-      border:2px solid rgba(15,23,42,0.28);
-      box-shadow:0 2px 10px rgba(0,0,0,0.22);
-      user-select:none;
-      pointer-events:none;
-      transform:translateY(-2px);
-      white-space:nowrap;
-    }
-
-    .row{display:flex;gap:8px;flex-wrap:wrap}
-    .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
-    .chip{
-      border:1px solid #2a3142;
-      border-radius:999px;
-      padding:6px 10px;
-      background:#0c0f14;
-      display:inline-flex;
-      align-items:center;
-      gap:6px
-    }
-    .chip button{
-      border:none;
-      background:transparent;
-      color:#94a3b8;
-      cursor:pointer
-    }
-
-    .modal{
-      position:fixed;
-      inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      background:rgba(0,0,0,.55);
-      z-index:9999;
-      padding:16px;
-    }
-    .modal.open{display:flex}
-    .modalCard{
-      width:min(520px, 100%);
-      background:#0f1626;
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:16px;
-      box-shadow:0 20px 60px rgba(0,0,0,.55);
-      overflow:hidden;
-    }
-    .modalTop{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding:12px 14px;
-      background:#111b2e;
-      border-bottom:1px solid rgba(255,255,255,.08);
-    }
-    .modalTop b{font-size:14px}
-    .modalTop button{
-      background:transparent;
-      border:1px solid rgba(255,255,255,.12);
-      padding:4px 10px;
-      border-radius:10px;
-      color:#cbd5e1;
-    }
-    .modalBody{padding:14px}
-    .modalBody .row{justify-content:flex-end;margin-top:10px}
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 10px;
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:12px;
-      background:rgba(0,0,0,.22);
-      color:#cbd5e1;
-      font-size:12px;
-      margin-bottom:10px;
-      line-height:1.35;
-    }
-
-    @media (max-width: 900px){
-      #app{grid-template-columns:1fr;}
-      #panel{order:2;}
-      #mapWrap{min-height:60vh;}
-      #mapWrap.roadview-open{flex-direction:column;}
-    }
-  </style>
-
-  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
-</head>
-
-<body>
-  <header>
-    <a href="/coupangRouteMap.html" style="display:flex;align-items:center">
-      <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
-    </a>
-    <h1>Maroowell 우편번호 검색기</h1>
-    <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
-    <span class="spacer"></span>
-    <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
-  </header>
-
-  <div id="app">
-    <aside id="panel">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <div class="muted">우편번호 여러 개 동시 조회</div>
-          <div class="muted">쉼표/공백/줄바꿈 모두 가능</div>
-        </div>
-        <button id="openAddr">주소검색 추가</button>
-      </div>
-
-      <label style="margin-top:12px">우편번호 목록</label>
-      <textarea id="zipInput"
-        placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea>
-
-      <div class="row" style="margin-top:8px">
-        <button id="addBtn">추가</button>
-        <button id="searchBtn">지도표시</button>
-        <button id="mergeBtn">병합</button>
-        <button id="saveBtn">저장</button>
-        <button id="clearBtn" class="danger">초기화</button>
-      </div>
-
-      <div class="list" id="zipList"></div>
-
-      <p class="muted" style="margin-top:10px">
-        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
-      </p>
-    </aside>
-
-    <div id="mapWrap">
-      <div id="map"></div>
-      <div id="roadview"></div>
-      <div class="map-controls">
-        <button id="toggleMapType" title="일반/위성 전환">위성</button>
-        <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
-        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 파란 길(ROADVIEW) 클릭</span>
-      </div>
-    </div>
-  </div>
-
-  <div id="saveModal" class="modal" aria-hidden="true">
-    <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
-      <div class="modalTop">
-        <b>폴리곤 저장</b>
-        <button id="saveCloseBtn">닫기</button>
-      </div>
-      <div class="modalBody">
-        <div class="pill">
-          • 현재 “병합 결과”를 DB(subsubroutes.polygon_wgs84)로 저장합니다.<br/>
-          • 병합 안 했으면 저장 시 자동 병합 후 저장합니다.
-        </div>
-
-        <label>캠프(camp)</label>
-        <input id="saveCampInput" placeholder="예: ICN, DAEGU ..." />
-
-        <label style="margin-top:10px">라우트 코드(code)</label>
-        <input id="saveCodeInput" placeholder="예: 126C ..." />
-
-        <div class="row">
-          <button id="saveDoBtn">저장</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const ZIP_API = "https://zip.maroowell.com/?zipcode=";
-    const API_BASE = "https://route.maroowell.com";
-    const ROUTE_ENDPOINT = `${API_BASE}/route`;
-
-    const MERGE_SNAP_METERS = 15;
-    const MIN_COMPONENT_AREA_SQM = 150;
-
-    const $ = (sel) => document.querySelector(sel);
-    const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
-
-    const state = {
-      map: null,
-      polygons: new Map(),
-      labels: new Map(),
-      geoByZip: new Map(),
-      selectedZips: new Set(),
-      colors: [
-        "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
-        "#22d3ee","#c084fc","#f472b6","#60a5fa",
-        "#34d399","#f97316"
-      ],
-      mergedRingsWgs84: null,
-      mergedPolygons: [],
-      mergeMode: false,
-
-      isSatellite: false,
-      roadviewOn: false,
-      roadviewOpen: false,
-      roadview: null,
-      roadviewClient: null,
-      roadviewClickHandler: null
-    };
-
-    const pickColor = (seed) => {
-      let h = 0;
-      const s = String(seed);
-      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-      return state.colors[h % state.colors.length];
-    };
-
-    proj4.defs(
-      "EPSG:5179",
-      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
-        "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
-        "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-    );
-    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
-
-    function convertPoint(x, y) {
-      let lon, lat;
-      try {
-        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
-        lon = out[0];
-        lat = out[1];
-      } catch (e) {}
-
-      if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
-        lon = x;
-        lat = y;
-      }
-      return { lat, lon };
-    }
-
-    function createMap() {
-      if (!(window.kakao && kakao.maps)) {
-        alert("카카오 지도 SDK 로딩 실패");
-        return;
-      }
-      state.map = new kakao.maps.Map($("#map"), {
-        center: new kakao.maps.LatLng(37.5665, 126.978),
-        level: 8
-      });
-
-      window.addEventListener("resize", () => {
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
-        if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
-          state.roadview.relayout();
-        }
-      });
-    }
-
-    function setMapTypeSatellite(on) {
-      state.isSatellite = !!on;
-      if (!state.map) return;
-      state.map.setMapTypeId(
-        state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
-      );
-      const btn = $("#toggleMapType");
-      if (btn) btn.textContent = state.isSatellite ? "일반" : "위성";
-    }
-
-    function ensureRoadview() {
-      if (state.roadview && state.roadviewClient) return;
-      const container = $("#roadview");
-      if (!container) return;
-      state.roadview = new kakao.maps.Roadview(container);
-      state.roadviewClient = new kakao.maps.RoadviewClient();
-    }
-
-    function setRoadviewOverlay(on) {
-      if (!state.map) return;
-      try {
-        if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-        else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-      } catch (e) {}
-    }
-
-    function setRoadviewAt(latlng) {
-      ensureRoadview();
-      if (!state.roadviewClient || !state.roadview) return;
-
-      const radii = [80, 200, 500, 1200];
-      const tryFind = (i) => {
-        const r = radii[i];
-        state.roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
-          if (panoId === null || panoId === undefined) {
-            if (i < radii.length - 1) return tryFind(i + 1);
-            alert("이 위치 근처에는 로드뷰가 없습니다.");
-            return;
-          }
-          state.roadviewOpen = true;
-          const wrap = $("#mapWrap");
-          if (wrap) wrap.classList.add("roadview-open");
-          if (state.roadview && typeof state.roadview.relayout === "function") {
-            setTimeout(() => state.roadview.relayout(), 0);
-          }
-          state.roadview.setPanoId(panoId, latlng);
-        });
-      };
-      tryFind(0);
-    }
-
-    function setRoadviewOn(on) {
-      state.roadviewOn = !!on;
-      if (!state.roadviewOn) state.roadviewOpen = false;
-
-      const wrap = $("#mapWrap");
-      const hint = $("#roadviewHint");
-      const btn = $("#toggleRoadview");
-
-      if (wrap) {
-        wrap.classList.toggle("roadview-on", state.roadviewOn);
-        if (!state.roadviewOn) wrap.classList.remove("roadview-open");
-      }
-      if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
-      if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
-
-      if (state.map) {
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
-      }
-
-      if (state.roadviewOn) {
-        setRoadviewOverlay(true);
-        if (!state.roadviewClickHandler && state.map) {
-          state.roadviewClickHandler = (mouseEvent) => {
-            if (!state.roadviewOn) return;
-            if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
-          };
-          kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
-        }
-      } else {
-        setRoadviewOverlay(false);
-        if (state.roadviewClickHandler && state.map) {
-          kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
-        }
-        state.roadviewClickHandler = null;
-      }
-
-      if (state.roadviewOn && state.roadviewOpen) {
-        ensureRoadview();
-        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
-      }
-    }
-
-    function renderZipChips() {
-      const list = $("#zipList");
-      list.innerHTML = "";
-      [...state.selectedZips].sort().forEach((z) => {
-        const div = document.createElement("div");
-        div.className = "chip";
-        const color = pickColor(z);
-        div.innerHTML =
-          `<b>${z}</b>` +
-          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
-          `<button title="삭제">✕</button>`;
-        div.querySelector("button").onclick = async () => {
-          state.selectedZips.delete(z);
-          removePolygon(z);
-          renderZipChips();
-          if (state.mergeMode) {
-            await mergeOn(true);
-          }
-        };
-        list.appendChild(div);
-      });
-    }
-
-    function removePolygon(zip) {
-      if (state.polygons.has(zip)) {
-        state.polygons.get(zip).forEach((p) => p.setMap(null));
-        state.polygons.delete(zip);
-      }
-      if (state.labels.has(zip)) {
-        state.labels.get(zip).forEach((l) => l.setMap(null));
-        state.labels.delete(zip);
-      }
-      state.geoByZip.delete(zip);
-    }
-
-    function clearAll() {
-      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
-      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
-      state.polygons.clear();
-      state.labels.clear();
-      state.geoByZip.clear();
-      clearMerged();
-      state.selectedZips.clear();
-      setMergeUI(false);
-    }
-
-    function clearMerged() {
-      state.mergedPolygons.forEach(p => p.setMap(null));
-      state.mergedPolygons = [];
-      state.mergedRingsWgs84 = null;
-    }
-
-    function setOriginalVisible(on) {
-      const map = on ? state.map : null;
-      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(map));
-      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(map));
-    }
-
-    function setMergeUI(on) {
-      state.mergeMode = !!on;
-      const btn = $("#mergeBtn");
-      if (!btn) return;
-      btn.textContent = state.mergeMode ? "해제" : "병합";
-      btn.classList.toggle("merge-on", state.mergeMode);
-    }
-
-    function centroidOfLatLngRing(latlngs) {
-      if (!latlngs || latlngs.length < 3) return null;
-      const pts = latlngs.map((ll) => [ll.getLng(), ll.getLat()]);
-      const f = pts[0];
-      const l = pts[pts.length - 1];
-      if (f[0] !== l[0] || f[1] !== l[1]) pts.push(f);
-
-      let area2 = 0, cx6 = 0, cy6 = 0;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const x0 = pts[i][0], y0 = pts[i][1];
-        const x1 = pts[i + 1][0], y1 = pts[i + 1][1];
-        const f2 = x0 * y1 - x1 * y0;
-        area2 += f2;
-        cx6 += (x0 + x1) * f2;
-        cy6 += (y0 + y1) * f2;
-      }
-      if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
-      const cx = cx6 / (3 * area2);
-      const cy = cy6 / (3 * area2);
-      if (!isFinite(cx) || !isFinite(cy)) return null;
-      return new kakao.maps.LatLng(cy, cx);
-    }
-
-    function createZipLabelOverlay(zip, color, pos) {
-      const el = document.createElement("div");
-      el.className = "zip-label";
-      el.textContent = zip;
-      el.style.borderColor = color;
-
-      return new kakao.maps.CustomOverlay({
-        position: pos,
-        content: el,
-        yAnchor: 0.5,
-        zIndex: 9999
-      });
-    }
-
-    function normalize5179ToMultiPolygonCoords(polygon5179) {
-      if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
-      const isPoint = (v) => Array.isArray(v) && v.length >= 2 && isFinite(v[0]) && isFinite(v[1]);
-      if (isPoint(polygon5179[0])) return [[[polygon5179]]];
-      if (Array.isArray(polygon5179[0]) && isPoint(polygon5179[0][0])) return [[polygon5179]];
-      if (Array.isArray(polygon5179[0]) && Array.isArray(polygon5179[0][0]) && isPoint(polygon5179[0][0][0])) return polygon5179;
-      return null;
-    }
-
-    function closeRingLngLat(ring) {
-      if (!Array.isArray(ring) || ring.length < 3) return ring;
-      const f = ring[0];
-      const l = ring[ring.length - 1];
-      if (!l || !f) return ring;
-      if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
-      return ring;
-    }
-
-    function convert5179MultiCoordsToWgs84(multiCoords5179) {
-      const out = [];
-      for (const poly of multiCoords5179) {
-        const ringsOut = [];
-        for (const ring of poly) {
-          const ringOut = [];
+      function fitBoundsToRings(rings) {
+        if (!state.map || !rings || !rings.length) return;
+        const b = new kakao.maps.LatLngBounds();
+        let has = false;
+        for (const ring of rings) {
           for (const pt of ring) {
             if (!Array.isArray(pt) || pt.length < 2) continue;
-            const x = Number(pt[0]);
-            const y = Number(pt[1]);
-            if (!isFinite(x) || !isFinite(y)) continue;
-            const { lat, lon } = convertPoint(x, y);
-            if (!isFinite(lat) || !isFinite(lon)) continue;
-            ringOut.push([lon, lat]);
-          }
-          if (ringOut.length >= 3) {
-            closeRingLngLat(ringOut);
-            if (ringOut.length >= 4) ringsOut.push(ringOut);
-          }
-        }
-        if (ringsOut.length) out.push(ringsOut);
-      }
-      return out.length ? out : null;
-    }
-
-    function drawWgs84MultiPolygon(zip, wgsMultiCoords, color) {
-      const polys = [];
-      const labelOverlays = [];
-
-      for (const poly of wgsMultiCoords) {
-        const path = poly.map(ring => {
-          const pts = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-          if (pts.length > 1) {
-            const f = pts[0], l = pts[pts.length - 1];
-            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) pts.pop();
-          }
-          return pts;
-        }).filter(r => r.length >= 3);
-
-        if (!path.length || path[0].length < 3) continue;
-
-        const p = new kakao.maps.Polygon({
-          map: state.map,
-          path,
-          strokeWeight: 3,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.25
-        });
-        polys.push(p);
-
-        const outer = path[0];
-        const center = centroidOfLatLngRing(outer);
-        if (center) {
-          const ov = createZipLabelOverlay(zip, color, center);
-          ov.setMap(state.map);
-          labelOverlays.push(ov);
-        }
-      }
-
-      if (polys.length) state.polygons.set(zip, polys);
-      if (labelOverlays.length) state.labels.set(zip, labelOverlays);
-    }
-
-    async function drawSelected() {
-      const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
-      if (!targets.length) return;
-
-      const notFound = [];
-
-      for (const zip of targets) {
-        try {
-          const url = `${ZIP_API}${encodeURIComponent(zip)}`;
-          const res = await fetch(url, { cache: "no-store" });
-          const data = await res.json();
-
-          if (!data || !Array.isArray(data.polygon5179) || !data.polygon5179.length) {
-            notFound.push(zip);
-            continue;
-          }
-
-          const norm = normalize5179ToMultiPolygonCoords(data.polygon5179);
-          if (!norm) { notFound.push(zip); continue; }
-
-          const wgsMulti = convert5179MultiCoordsToWgs84(norm);
-          if (!wgsMulti) { notFound.push(zip); continue; }
-
-          const feature = {
-            type: "Feature",
-            properties: { zip },
-            geometry: { type: "MultiPolygon", coordinates: wgsMulti }
-          };
-          state.geoByZip.set(zip, feature);
-
-          const color = pickColor(zip);
-          drawWgs84MultiPolygon(zip, wgsMulti, color);
-        } catch (e) {
-          notFound.push(zip);
-        }
-      }
-
-      if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
-    }
-
-    function flattenToPolygonFeatures(feature) {
-      try {
-        const fc = turf.flatten(feature);
-        return (fc && fc.features) ? fc.features.filter(f => f?.geometry?.type === "Polygon") : [];
-      } catch {
-        return [];
-      }
-    }
-
-    function mergeFeaturesWithSnap(features, snapMeters) {
-      if (!features.length) return null;
-      const bufOpt = { units: "meters", steps: 16 };
-      let merged = null;
-
-      for (const f of features) {
-        const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
-        merged = merged ? turf.union(merged, fb) : fb;
-      }
-
-      if (snapMeters > 0 && merged) {
-        try { merged = turf.buffer(merged, -snapMeters, bufOpt); } catch {}
-      }
-      return merged;
-    }
-
-    function fitBoundsToRings(rings) {
-      if (!state.map || !rings || !rings.length) return;
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
-      for (const ring of rings) {
-        for (const pt of ring) {
-          if (!Array.isArray(pt) || pt.length < 2) continue;
-          b.extend(new kakao.maps.LatLng(pt[1], pt[0]));
-          has = true;
-        }
-      }
-      if (has) state.map.setBounds(b);
-    }
-
-    function fitBoundsAll() {
-      if (!state.map) return;
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
-
-      for (const arr of state.polygons.values()) {
-        for (const poly of arr) {
-          const path = poly.getPath();
-          const pts = [];
-          if (typeof path.getLength === "function" && typeof path.getAt === "function") {
-            for (let i=0;i<path.getLength();i++) pts.push(path.getAt(i));
-          } else if (Array.isArray(path)) {
-            pts.push(...path);
-          }
-          pts.forEach(ll => {
-            if (!ll) return;
-            b.extend(ll);
+            b.extend(new kakao.maps.LatLng(pt[1], pt[0]));
             has = true;
+          }
+        }
+        if (has) state.map.setBounds(b);
+      }
+
+      // ====== 병합 ======
+      function setMergeUI(on){
+        state.mergeMode = !!on;
+        const btn = $("#mergeBtn");
+        btn.textContent = state.mergeMode ? "해제" : "병합";
+        btn.classList.toggle("merge-on", state.mergeMode);
+      }
+
+      function clearMerged(){
+        state.mergedPolygons.forEach(p => p.setMap(null));
+        state.mergedPolygons = [];
+        state.mergedRingsWgs84 = null;
+      }
+
+      function flattenToPolygonFeatures(feature) {
+        try {
+          const fc = turf.flatten(feature);
+          return (fc && fc.features) ? fc.features.filter(f => f?.geometry?.type === "Polygon") : [];
+        } catch { return []; }
+      }
+
+      function mergeFeaturesWithSnap(features, snapMeters) {
+        if (!features.length) return null;
+
+        const bufOpt = { units: "meters", steps: 16 };
+        let merged = null;
+
+        for (const f of features) {
+          const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
+          merged = merged ? turf.union(merged, fb) : fb;
+        }
+        if (snapMeters > 0 && merged) {
+          try { merged = turf.buffer(merged, -snapMeters, bufOpt); } catch {}
+        }
+        try { merged = turf.cleanCoords(merged); } catch {}
+        return merged;
+      }
+
+      function getSelectedFeatures(){
+        const feats = [];
+        for (const z of state.selectedZips) {
+          const f = state.geoByZip.get(z);
+          if (f) feats.push(f);
+        }
+        return feats;
+      }
+
+      async function mergeOn(rebuildOnly=false){
+        await drawSelected();
+        const feats = getSelectedFeatures();
+        if (!feats.length) { if(!rebuildOnly) alert("병합할 폴리곤이 없습니다."); return; }
+
+        const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
+        if (!merged) { if(!rebuildOnly) alert("병합 실패"); return; }
+
+        let polys = flattenToPolygonFeatures(merged);
+        polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
+
+        const rings = polys
+          .map(p => p.geometry?.coordinates?.[0])
+          .filter(r => Array.isArray(r) && r.length >= 4);
+
+        if (!rings.length) { if(!rebuildOnly) alert("병합 결과가 비었습니다."); return; }
+
+        clearMerged();
+        state.mergedRingsWgs84 = rings;
+
+        const mergedColor = darkenHex(pickColor("merged"), 0.18);
+
+        for (const ring of rings) {
+          const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+          if (latlngs.length > 1) {
+            const f = latlngs[0], l = latlngs[latlngs.length - 1];
+            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+          }
+          if (latlngs.length < 3) continue;
+
+          const poly = new kakao.maps.Polygon({
+            map: state.map,
+            path: latlngs,
+            strokeWeight: 6,
+            strokeColor: mergedColor,
+            strokeOpacity: 1,
+            strokeStyle: "solid",
+            fillColor: mergedColor,
+            fillOpacity: 0.20
           });
+          state.mergedPolygons.push(poly);
         }
-      }
-      if (has) state.map.setBounds(b);
-    }
 
-    async function mergeOn(rebuildOnly=false) {
-      await drawSelected();
-
-      const feats = [];
-      for (const zip of state.selectedZips) {
-        const f = state.geoByZip.get(zip);
-        if (f) feats.push(f);
-      }
-      if (!feats.length) {
-        if (!rebuildOnly) alert("병합할 폴리곤이 없습니다.");
-        return;
+        setOriginalVisible(false); // ✅ 라벨 포함 숨김
+        setMergeUI(true);
+        fitBoundsToRings(rings);
       }
 
-      const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
-      if (!merged) {
-        if (!rebuildOnly) alert("병합 실패");
-        return;
+      function mergeOff(){
+        clearMerged();
+        setOriginalVisible(true);
+        setMergeUI(false);
+        fitBoundsAllOriginal();
       }
 
-      let polys = flattenToPolygonFeatures(merged);
-      polys = polys.filter(p => {
-        try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }
-      });
-
-      const rings = polys
-        .map(p => p.geometry?.coordinates?.[0])
-        .filter(r => Array.isArray(r) && r.length >= 4);
-
-      if (!rings.length) {
-        if (!rebuildOnly) alert("병합 결과가 비었습니다.");
-        return;
-      }
-
-      clearMerged();
-      state.mergedRingsWgs84 = rings;
-
-      rings.forEach((ring, idx) => {
-        const color = pickColor("merged_" + idx);
-        const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-        if (latlngs.length > 1) {
-          const f = latlngs[0], l = latlngs[latlngs.length - 1];
-          if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
-        }
-        if (latlngs.length < 3) return;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path: latlngs,
-          strokeWeight: 6,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.20
-        });
-        state.mergedPolygons.push(poly);
-      });
-
-      setOriginalVisible(false);
-      setMergeUI(true);
-      fitBoundsToRings(state.mergedRingsWgs84);
-    }
-
-    function mergeOff() {
-      clearMerged();
-      setOriginalVisible(true);
-      setMergeUI(false);
-      fitBoundsAll();
-    }
-
-    async function toggleMerge() {
-      if (state.mergeMode) mergeOff();
-      else await mergeOn(false);
-    }
-
-    function openSaveModal() {
-      const modal = $("#saveModal");
-      const lastCamp = localStorage.getItem("mw_save_camp") || "";
-      const lastCode = localStorage.getItem("mw_save_code") || "";
-      $("#saveCampInput").value = lastCamp;
-      $("#saveCodeInput").value = lastCode;
-      modal.classList.add("open");
-      modal.setAttribute("aria-hidden","false");
-    }
-
-    function closeSaveModal() {
-      const modal = $("#saveModal");
-      modal.classList.remove("open");
-      modal.setAttribute("aria-hidden","true");
-    }
-
-    async function saveMergedToDB() {
-      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-        await mergeOn(false);
-      }
-      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-        alert("병합 결과가 없습니다.");
-        return;
-      }
-
-      const camp = ($("#saveCampInput").value || "").trim();
-      const code = ($("#saveCodeInput").value || "").trim();
-      if (!camp) return alert("camp를 입력하세요");
-      if (!code) return alert("code(라우트 코드)를 입력하세요");
-
-      const payload = { camp, code, polygon_wgs84: state.mergedRingsWgs84 };
-
-      const res = await fetch(ROUTE_ENDPOINT, {
-        method:"POST",
-        headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const text = await res.text();
-      let j=null; try{ j = text ? JSON.parse(text) : null; }catch{}
-      if (!res.ok) {
-        const msg = j?.error || j?.message || text || `HTTP ${res.status}`;
-        alert("저장 실패: " + msg);
-        return;
-      }
-
-      localStorage.setItem("mw_save_camp", camp);
-      localStorage.setItem("mw_save_code", code);
-
-      closeSaveModal();
-      alert("저장 완료");
-    }
-
-    function bindUI() {
-      $("#addBtn").onclick = () => {
-        parseZips($("#zipInput").value).forEach((z) => state.selectedZips.add(z));
-        $("#zipInput").value = "";
-        renderZipChips();
-      };
-
-      $("#searchBtn").onclick = async () => {
+      async function toggleMerge(){
         if (state.mergeMode) mergeOff();
-        await drawSelected();
-        fitBoundsAll();
-      };
-
-      $("#mergeBtn").onclick = async () => {
-        await toggleMerge();
-      };
-
-      $("#saveBtn").onclick = openSaveModal;
-
-      $("#clearBtn").onclick = () => {
-        clearAll();
-        renderZipChips();
-        setRoadviewOn(false);
-      };
-
-      $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
-      $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
-
-      $("#openAddr").onclick = () => {
-        new daum.Postcode({
-          oncomplete: (d) => {
-            if (d.zonecode) {
-              state.selectedZips.add(d.zonecode);
-              renderZipChips();
-            }
-          }
-        }).open();
-      };
-
-      $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
-      $("#saveCloseBtn").onclick = closeSaveModal;
-      $("#saveDoBtn").onclick = saveMergedToDB;
-
-      const preset = parseZips(new URLSearchParams(location.search).get("zips"));
-      preset.forEach((z) => state.selectedZips.add(z));
-      renderZipChips();
-      if (preset.length) drawSelected().then(fitBoundsAll);
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      createMap();
-      bindUI();
-      setMergeUI(false);
-    });
-  </script>
-</body>
-</html>
-
-  <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-  <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Maroowell" />
-
-  <title>Maroowell 우편번호 검색기</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-
-  <style>
-    :root {
-      --headerH: 52px;
-      --bg:#0f1115;
-      --card:#161a22;
-      --muted:#8b95a7;
-      --text:#e6e9ef;
-      --line:#232838;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      background:var(--bg);
-      color:var(--text);
-      font:14px/1.4 system-ui,AppleSDGothicNeo,"Segoe UI",Roboto
-    }
-    header{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      padding:12px 16px;
-      height:var(--headerH);
-      background:#161a22;
-      border-bottom:1px solid var(--line);
-      position:sticky;
-      top:0;
-      z-index:5
-    }
-    header h1{font-size:18px;font-weight:800;letter-spacing:0.2px;margin:0}
-    header .spacer{flex:1}
-    header .muted{color:var(--muted);font-size:12px}
-    /* ✅ 숨겨둔 "카카오맵 링크"처럼 보이는 저장 트리거 */
-    header a.saveLink{
-      color:var(--muted);
-      font-size:12px;
-      text-decoration:none;
-      opacity:.12;               /* 더 숨기고 싶으면 0.05~0.12 사이로 */
-      padding:6px 8px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,.08);
-      user-select:none;
-    }
-    header a.saveLink:hover{opacity:.28;border-color:rgba(255,255,255,.18)}
-
-    #app{
-      display:grid;
-      grid-template-columns:360px 1fr;
-      min-height:calc(100dvh - var(--headerH));
-    }
-    #panel{
-      padding:14px;
-      border-right:1px solid var(--line);
-      background:#10141b
-    }
-    #mapWrap{
-      position:relative;
-      min-height:calc(100dvh - var(--headerH));
-      display:flex;
-    }
-    #map,#roadview{
-      flex:1;
-      width:100%;
-      height:100%;
-      min-width:0;
-      min-height:0;
-    }
-    #roadview{display:none}
-    #mapWrap.roadview-open #roadview{display:block}
-
-    .map-controls{
-      position:absolute;
-      top:10px;
-      right:10px;
-      z-index:10;
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .map-controls button{
-      background:rgba(15,17,21,0.82);
-      border-color:#2a3142;
-      backdrop-filter: blur(6px);
-    }
-    .map-controls .hint{
-      padding:6px 10px;
-      border-radius:10px;
-      border:1px solid #2a3142;
-      background:rgba(15,17,21,0.72);
-      color:#cbd5e1;
-      font-size:12px;
-    }
-
-    label{display:block;margin:10px 0 6px;color:#9aa6b2}
-    input,textarea,button{font:inherit}
-    textarea{
-      width:100%;
-      background:#0c0f14;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:10px;
-      border-radius:10px;
-      min-height:90px
-    }
-    input{
-      width:100%;
-      background:#0c0f14;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:10px;
-      border-radius:10px;
-    }
-    button{
-      background:#1b2230;
-      border:1px solid #2a3142;
-      color:var(--text);
-      padding:6px 10px;
-      border-radius:10px;
-      cursor:pointer
-    }
-    button:hover{border-color:#3a4561}
-    button.danger{
-      background:#2a1416;
-      border-color:#7f1d1d;
-      color:#fecaca
-    }
-    button.danger:hover{border-color:#ef4444}
-
-    .zip-label{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      padding:4px 10px;
-      border-radius:999px;
-      font-weight:800;
-      font-size:12px;
-      letter-spacing:0.2px;
-      color:#0b1220;
-      background:rgba(255,255,255,0.92);
-      border:2px solid rgba(15,23,42,0.28);
-      box-shadow:0 2px 10px rgba(0,0,0,0.22);
-      user-select:none;
-      pointer-events:none;
-      transform:translateY(-2px);
-      white-space:nowrap;
-    }
-
-    #saveBtn{
-      border-color: rgba(255,255,255,.22);
-    }
-    #saveBtn:hover{
-      border-color: rgba(255,255,255,.35);
-    }
-
-    .row{display:flex;gap:8px;flex-wrap:wrap}
-    .muted{color:#8b95a7;font-size:12px}
-    .list{margin-top:10px;display:flex;flex-wrap:wrap;gap:6px}
-    .chip{
-      border:1px solid #2a3142;
-      border-radius:999px;
-      padding:6px 10px;
-      background:#0c0f14;
-      display:inline-flex;
-      align-items:center;
-      gap:6px
-    }
-    .chip button{
-      border:none;
-      background:transparent;
-      color:#94a3b8;
-      cursor:pointer
-    }
-
-    /* ✅ 저장 모달 */
-    .modal{
-      position:fixed;
-      inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      background:rgba(0,0,0,.55);
-      z-index:9999;
-      padding:16px;
-    }
-    .modal.open{display:flex}
-    .modalCard{
-      width:min(520px, 100%);
-      background:#0f1626;
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:16px;
-      box-shadow:0 20px 60px rgba(0,0,0,.55);
-      overflow:hidden;
-    }
-    .modalTop{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding:12px 14px;
-      background:#111b2e;
-      border-bottom:1px solid rgba(255,255,255,.08);
-    }
-    .modalTop b{font-size:14px}
-    .modalTop button{
-      background:transparent;
-      border:1px solid rgba(255,255,255,.12);
-      padding:4px 10px;
-      border-radius:10px;
-      color:#cbd5e1;
-    }
-    .modalBody{padding:14px}
-    .modalBody .row{justify-content:flex-end;margin-top:10px}
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      padding:8px 10px;
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:12px;
-      background:rgba(0,0,0,.22);
-      color:#cbd5e1;
-      font-size:12px;
-      margin-bottom:10px;
-      line-height:1.35;
-    }
-
-    @media (max-width: 900px){
-      #app{grid-template-columns:1fr;}
-      #panel{order:2;}
-      #mapWrap{min-height:60vh;}
-      #mapWrap.roadview-open{flex-direction:column;}
-    }
-  </style>
-
-  <!-- Daum 우편번호 -->
-  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-
-  <!-- proj4 (5179 -> 4326 변환용) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
-
-  <!-- turf (병합/union/buffer) -->
-  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-
-  <!-- Kakao 지도 SDK -->
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
-</head>
-
-<body>
-  <header>
-    <a href="/coupangRouteMap.html" style="display:flex;align-items:center">
-      <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
-    </a>
-    <h1>Maroowell 우편번호 검색기</h1>
-    <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
-    <span class="spacer"></span>
-    <!-- ✅ 저장 트리거(숨김용) -->
-    <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
-  </header>
-
-  <div id="app">
-    <aside id="panel">
-      <div class="row" style="justify-content:space-between">
-        <div>
-          <div class="muted">우편번호 여러 개 동시 조회</div>
-          <div class="muted">쉼표/공백/줄바꿈 모두 가능</div>
-        </div>
-        <button id="openAddr">주소검색 추가</button>
-      </div>
-
-      <label style="margin-top:12px">우편번호 목록</label>
-      <textarea id="zipInput"
-        placeholder="예: 07420, 07421 07422&#10;또는 붙여넣기"></textarea>
-
-      <div class="row" style="margin-top:8px">
-        <button id="addBtn">추가</button>
-        <button id="searchBtn">지도표시</button>
-        <button id="mergeBtn">병합</button>
-        <button id="saveBtn">저장</button>
-        <button id="clearBtn" class="danger">초기화</button>
-      </div>
-
-      <div class="list" id="zipList"></div>
-
-      <p class="muted" style="margin-top:10px">
-        • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.
-      </p>
-    </aside>
-
-    <div id="mapWrap">
-      <div id="map"></div>
-      <div id="roadview"></div>
-      <div class="map-controls">
-        <button id="toggleMapType" title="일반/위성 전환">위성</button>
-        <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
-        <span id="roadviewHint" class="hint" style="display:none">로드뷰: 파란 길(ROADVIEW) 클릭</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- ✅ 저장 모달 -->
-  <div id="saveModal" class="modal" aria-hidden="true">
-    <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
-      <div class="modalTop">
-        <b>폴리곤 저장</b>
-        <button id="saveCloseBtn">닫기</button>
-      </div>
-      <div class="modalBody">
-        <div class="pill">
-          • 현재 “병합 결과”를 DB(subsubroutes.polygon_wgs84)로 저장합니다.<br/>
-          • 저장 전 병합을 안 했으면 자동으로 병합 시도합니다.
-        </div>
-
-        <label>캠프(camp)</label>
-        <input id="saveCampInput" placeholder="예: DAEGU, ICN ..." />
-
-        <label style="margin-top:10px">라우트 코드(code)</label>
-        <input id="saveCodeInput" placeholder="예: 171xx-..." />
-
-        <div class="row">
-          <button id="saveDoBtn">저장</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // ====== 설정 ======
-    const ZIP_API = "https://zip.maroowell.com/?zipcode=";
-    const API_BASE = "https://route.maroowell.com";
-    const ROUTE_ENDPOINT = `${API_BASE}/route`;
-
-    // ✅ 병합 스냅(경계 미세 틈 때문에 분리되는거 방지)
-    const MERGE_SNAP_METERS = 15;       // 필요하면 10~30 사이로 조절
-    const MIN_COMPONENT_AREA_SQM = 150; // 버퍼/union 찌꺼기(쪼가리) 제거용
-
-    const $ = (sel) => document.querySelector(sel);
-
-    // ====== 전역 상태 ======
-    const state = {
-      map: null,
-
-      // zipcode -> kakao polygons
-      polygons: new Map(),
-
-      // zipcode -> kakao labels
-      labels: new Map(),
-
-      // zipcode -> GeoJSON Feature(MultiPolygon, WGS84)
-      geoByZip: new Map(),
-
-      // 병합 결과 (WGS84 rings: [ [ [lng,lat], ... ], ... ])
-      mergedRingsWgs84: null,
-      mergedPolygons: [],
-
-      selectedZips: new Set(),
-      isSatellite: false,
-      roadviewOn: false,
-      roadviewOpen: false,
-      roadview: null,
-      roadviewClient: null,
-      roadviewClickHandler: null,
-
-      colors: [
-        "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
-        "#22d3ee","#c084fc","#f472b6","#60a5fa",
-        "#34d399","#f97316"
-      ]
-    };
-
-    const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
-
-    const pickColor = (seed) => {
-      let h = 0;
-      const s = String(seed);
-      for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-      return state.colors[h % state.colors.length];
-    };
-
-    // ====== proj4 세팅 (5179 -> 4326) ======
-    proj4.defs(
-      "EPSG:5179",
-      "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
-        "+x_0=1000000 +y_0=2000000 +ellps=GRS80 " +
-        "+towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-    );
-    proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
-
-    function convertPoint(x, y) {
-      let lon, lat;
-      try {
-        const out = proj4("EPSG:5179", "EPSG:4326", [x, y]);
-        lon = out[0];
-        lat = out[1];
-      } catch (e) {
-        console.warn("proj4 변환 실패, 원본 좌표 사용 시도", x, y, e);
+        else await mergeOn(false);
       }
 
-      // 변환값이 말이 안되면 원본을 WGS84로 보고 사용
-      if (!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135) {
-        lon = x;
-        lat = y;
+      // ====== 저장 ======
+      function openSaveModal(){
+        $("#saveCampInput").value = localStorage.getItem("mw_save_camp") || "";
+        $("#saveCodeInput").value = localStorage.getItem("mw_save_code") || "";
+        $("#saveModal").classList.add("open");
+        $("#saveModal").setAttribute("aria-hidden","false");
       }
-      return { lat, lon };
-    }
-
-    // ====== 지도 초기화 ======
-    function createMap() {
-      if (!(window.kakao && kakao.maps)) {
-        alert("카카오 지도 SDK 로딩 실패");
-        return;
-      }
-      state.map = new kakao.maps.Map($("#map"), {
-        center: new kakao.maps.LatLng(37.5665, 126.978),
-        level: 8
-      });
-
-      window.addEventListener("resize", () => {
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
-        if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
-          state.roadview.relayout();
-        }
-      });
-    }
-
-    function setMapTypeSatellite(on) {
-      state.isSatellite = !!on;
-      if (!state.map) return;
-      state.map.setMapTypeId(
-        state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP
-      );
-      const btn = $("#toggleMapType");
-      if (btn) btn.textContent = state.isSatellite ? "일반" : "위성";
-    }
-
-    // ====== 로드뷰 ======
-    function ensureRoadview() {
-      if (state.roadview && state.roadviewClient) return;
-      const container = $("#roadview");
-      if (!container) return;
-      state.roadview = new kakao.maps.Roadview(container);
-      state.roadviewClient = new kakao.maps.RoadviewClient();
-    }
-
-    function setRoadviewOverlay(on) {
-      if (!state.map) return;
-      try {
-        if (on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-        else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
-      } catch (e) {
-        console.warn("ROADVIEW 오버레이 토글 실패", e);
-      }
-    }
-
-    function setRoadviewAt(latlng) {
-      ensureRoadview();
-      if (!state.roadviewClient || !state.roadview) return;
-
-      const radii = [80, 200, 500, 1200];
-      const tryFind = (i) => {
-        const r = radii[i];
-        state.roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
-          if (panoId === null || panoId === undefined) {
-            if (i < radii.length - 1) return tryFind(i + 1);
-            alert("이 위치 근처에는 로드뷰가 없습니다.");
-            return;
-          }
-          state.roadviewOpen = true;
-          const wrap = $("#mapWrap");
-          if (wrap) wrap.classList.add("roadview-open");
-          if (state.roadview && typeof state.roadview.relayout === "function") {
-            setTimeout(() => state.roadview.relayout(), 0);
-          }
-          state.roadview.setPanoId(panoId, latlng);
-        });
-      };
-      tryFind(0);
-    }
-
-    function setRoadviewOn(on) {
-      state.roadviewOn = !!on;
-      if (!state.roadviewOn) state.roadviewOpen = false;
-
-      const wrap = $("#mapWrap");
-      const hint = $("#roadviewHint");
-      const btn = $("#toggleRoadview");
-
-      if (wrap) {
-        wrap.classList.toggle("roadview-on", state.roadviewOn);
-        if (!state.roadviewOn) wrap.classList.remove("roadview-open");
-      }
-      if (hint) hint.style.display = state.roadviewOn ? "inline-flex" : "none";
-      if (btn) btn.textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
-
-      if (state.map) {
-        const c = state.map.getCenter();
-        state.map.relayout();
-        state.map.setCenter(c);
+      function closeSaveModal(){
+        $("#saveModal").classList.remove("open");
+        $("#saveModal").setAttribute("aria-hidden","true");
       }
 
-      if (state.roadviewOn) {
-        setRoadviewOverlay(true);
-        if (!state.roadviewClickHandler && state.map) {
-          state.roadviewClickHandler = (mouseEvent) => {
-            if (!state.roadviewOn) return;
-            if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
-          };
-          kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
-        }
-      } else {
-        setRoadviewOverlay(false);
-        if (state.roadviewClickHandler && state.map) {
-          kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
-        }
-        state.roadviewClickHandler = null;
-      }
-
-      if (state.roadviewOn && state.roadviewOpen) {
-        ensureRoadview();
-        if (state.roadview && typeof state.roadview.relayout === "function") state.roadview.relayout();
-      }
-    }
-
-    // ====== UI ======
-    function bindUI() {
-      $("#addBtn").onclick = () => {
-        parseZips($("#zipInput").value).forEach((z) => state.selectedZips.add(z));
-        $("#zipInput").value = "";
-        renderZipChips();
-      };
-
-      $("#clearBtn").onclick = () => {
-        state.selectedZips.clear();
-        clearPolygons();
-        clearMerged();
-        setRoadviewOn(false);
-        renderZipChips();
-      };
-
-      $("#searchBtn").onclick = async () => {
-        clearMerged();        // 기존 병합 표시 제거
-        await drawSelected();
-        fitBoundsAll();
-      };
-
-      $("#mergeBtn").onclick = async () => {
-        // ✅ 병합하면 라벨/원본 폴리곤 정리 + 병합 색 표시
-        await ensureMergedReadyAndDraw();
-      };
-
-      $("#saveBtn").onclick = openSaveModal;
-
-      const mapTypeBtn = $("#toggleMapType");
-      if (mapTypeBtn) mapTypeBtn.onclick = () => setMapTypeSatellite(!state.isSatellite);
-
-      const roadviewBtn = $("#toggleRoadview");
-      if (roadviewBtn) roadviewBtn.onclick = () => setRoadviewOn(!state.roadviewOn);
-
-      $("#openAddr").onclick = () => {
-        new daum.Postcode({
-          oncomplete: (d) => {
-            if (d.zonecode) {
-              state.selectedZips.add(d.zonecode);
-              renderZipChips();
-            }
-          }
-        }).open();
-      };
-
-      // ✅ 저장 모달(헤더의 Kakao Map 링크)
-      $("#saveLink").onclick = (e) => {
-        e.preventDefault();
-        openSaveModal();
-      };
-      $("#saveCloseBtn").onclick = closeSaveModal;
-      $("#saveDoBtn").onclick = saveMergedToDB;
-
-      // URL 프리셋
-      const preset = parseZips(new URLSearchParams(location.search).get("zips"));
-      preset.forEach((z) => state.selectedZips.add(z));
-      renderZipChips();
-      if (preset.length) {
-        drawSelected().then(fitBoundsAll);
-      }
-    }
-
-    function renderZipChips() {
-      const list = $("#zipList");
-      list.innerHTML = "";
-      [...state.selectedZips].sort().forEach((z) => {
-        const div = document.createElement("div");
-        div.className = "chip";
-        const color = pickColor(z);
-        div.innerHTML =
-          `<b>${z}</b>` +
-          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color}"></span>` +
-          `<button title="삭제">✕</button>`;
-        div.querySelector("button").onclick = () => {
-          state.selectedZips.delete(z);
-          removePolygon(z);
-          renderZipChips();
-        };
-        list.appendChild(div);
-      });
-    }
-
-    // ====== 폴리곤/라벨 정리 ======
-    function clearPolygons() {
-      for (const arr of state.polygons.values()) arr.forEach((p) => p.setMap(null));
-      state.polygons.clear();
-
-      for (const arr of state.labels.values()) arr.forEach((l) => l.setMap(null));
-      state.labels.clear();
-
-      state.geoByZip.clear();
-    }
-
-    function removePolygon(zip) {
-      if (state.polygons.has(zip)) {
-        state.polygons.get(zip).forEach((p) => p.setMap(null));
-        state.polygons.delete(zip);
-      }
-      if (state.labels.has(zip)) {
-        state.labels.get(zip).forEach((l) => l.setMap(null));
-        state.labels.delete(zip);
-      }
-      state.geoByZip.delete(zip);
-    }
-
-    function clearMerged() {
-      state.mergedPolygons.forEach(p => p.setMap(null));
-      state.mergedPolygons = [];
-      state.mergedRingsWgs84 = null;
-    }
-
-    // ====== 라벨 위치 ======
-    function centroidOfLatLngRing(latlngs) {
-      if (!latlngs || latlngs.length < 3) return null;
-      const pts = latlngs.map((ll) => [ll.getLng(), ll.getLat()]);
-      const f = pts[0];
-      const l = pts[pts.length - 1];
-      if (f[0] !== l[0] || f[1] !== l[1]) pts.push(f);
-
-      let area2 = 0, cx6 = 0, cy6 = 0;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const x0 = pts[i][0], y0 = pts[i][1];
-        const x1 = pts[i + 1][0], y1 = pts[i + 1][1];
-        const f2 = x0 * y1 - x1 * y0;
-        area2 += f2;
-        cx6 += (x0 + x1) * f2;
-        cy6 += (y0 + y1) * f2;
-      }
-      if (!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
-      const cx = cx6 / (3 * area2);
-      const cy = cy6 / (3 * area2);
-      if (!isFinite(cx) || !isFinite(cy)) return null;
-      return new kakao.maps.LatLng(cy, cx);
-    }
-
-    function createZipLabelOverlay(zip, color, pos) {
-      const el = document.createElement("div");
-      el.className = "zip-label";
-      el.textContent = zip;
-      el.style.borderColor = color;
-
-      return new kakao.maps.CustomOverlay({
-        position: pos,
-        content: el,
-        yAnchor: 0.5,
-        zIndex: 9999
-      });
-    }
-
-    // ✅ Polygon/MultiPolygon 구조 유지 (holes 링은 같은 폴리곤 안으로)
-    function normalize5179ToMultiPolygonCoords(polygon5179) {
-      if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
-
-      const isPoint = (v) =>
-        Array.isArray(v) && v.length >= 2 && isFinite(v[0]) && isFinite(v[1]);
-
-      // ring: [ [x,y], ... ]
-      if (isPoint(polygon5179[0])) return [[[polygon5179]]];
-
-      // polygon: [ ring, ring(hole), ... ]
-      if (Array.isArray(polygon5179[0]) && isPoint(polygon5179[0][0])) return [[polygon5179]];
-
-      // multipolygon: [ polygon, polygon, ... ] where polygon = [ ring, hole, ... ]
-      if (Array.isArray(polygon5179[0]) && Array.isArray(polygon5179[0][0]) && isPoint(polygon5179[0][0][0])) {
-        return polygon5179;
-      }
-      return null;
-    }
-
-    function closeRingLngLat(ring) {
-      if (!Array.isArray(ring) || ring.length < 3) return ring;
-      const f = ring[0];
-      const l = ring[ring.length - 1];
-      if (!l || !f) return ring;
-      if (f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
-      return ring;
-    }
-
-    function convert5179MultiCoordsToWgs84(multiCoords5179) {
-      const out = [];
-      for (const poly of multiCoords5179) {
-        const ringsOut = [];
-        for (const ring of poly) {
-          const ringOut = [];
-          for (const pt of ring) {
-            if (!Array.isArray(pt) || pt.length < 2) continue;
-            const x = Number(pt[0]);
-            const y = Number(pt[1]);
-            if (!isFinite(x) || !isFinite(y)) continue;
-            const { lat, lon } = convertPoint(x, y);
-            if (!isFinite(lat) || !isFinite(lon)) continue;
-            ringOut.push([lon, lat]); // ✅ [lng, lat]
-          }
-          if (ringOut.length >= 3) {
-            closeRingLngLat(ringOut);
-            // 링은 최소 4개(닫힘 포함)
-            if (ringOut.length >= 4) ringsOut.push(ringOut);
-          }
-        }
-        if (ringsOut.length) out.push(ringsOut);
-      }
-      return out.length ? out : null;
-    }
-
-    function drawWgs84MultiPolygon(zip, wgsMultiCoords, color) {
-      const polys = [];
-      const labelOverlays = [];
-
-      for (const poly of wgsMultiCoords) {
-        // kakao Polygon은 holes를 path=[outerRingLatLngs, holeRingLatLngs, ...] 형태로 받음
-        const path = poly.map(ring => {
-          // 마지막이 첫점과 같으면 kakao에선 없어도 닫힘 처리되므로 제거
-          const pts = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-          if (pts.length > 1) {
-            const f = pts[0], l = pts[pts.length - 1];
-            if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) pts.pop();
-          }
-          return pts;
-        }).filter(r => r.length >= 3);
-
-        if (!path.length || path[0].length < 3) continue;
-
-        const p = new kakao.maps.Polygon({
-          map: state.map,
-          path,
-          strokeWeight: 3,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.25
-        });
-        polys.push(p);
-
-        // 라벨은 outer ring 기준으로만 계산
-        const outer = path[0];
-        const center = centroidOfLatLngRing(outer);
-        if (center) {
-          const ov = createZipLabelOverlay(zip, color, center);
-          ov.setMap(state.map);
-          labelOverlays.push(ov);
-        }
-      }
-
-      if (polys.length) state.polygons.set(zip, polys);
-      if (labelOverlays.length) state.labels.set(zip, labelOverlays);
-    }
-
-    // ====== API 호출해서 그리기 ======
-    async function drawSelected() {
-      const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
-      if (!targets.length) return;
-
-      const notFound = [];
-
-      for (const zip of targets) {
-        try {
-          const url = `${ZIP_API}${encodeURIComponent(zip)}`;
-          const res = await fetch(url, { cache: "no-store" });
-          const data = await res.json();
-
-          if (!data || !Array.isArray(data.polygon5179) || !data.polygon5179.length) {
-            notFound.push(zip);
-            continue;
-          }
-
-          const norm = normalize5179ToMultiPolygonCoords(data.polygon5179);
-          if (!norm) {
-            notFound.push(zip);
-            continue;
-          }
-
-          const wgsMulti = convert5179MultiCoordsToWgs84(norm);
-          if (!wgsMulti) {
-            notFound.push(zip);
-            continue;
-          }
-
-          // ✅ 병합용 GeoJSON 저장(holes 포함 구조 유지)
-          const feature = {
-            type: "Feature",
-            properties: { zip },
-            geometry: { type: "MultiPolygon", coordinates: wgsMulti }
-          };
-          state.geoByZip.set(zip, feature);
-
-          // 지도 표시
-          const color = pickColor(zip);
-          drawWgs84MultiPolygon(zip, wgsMulti, color);
-        } catch (e) {
-          console.error("[ZIP] 로드 실패", zip, e);
-          notFound.push(zip);
-        }
-      }
-
-      if (notFound.length) {
-        alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
-      }
-    }
-
-    // ====== 병합 (✅ 4덩어리 -> 2덩어리 문제 해결) ======
-    function flattenToPolygonFeatures(feature) {
-      if (!feature) return [];
-      try {
-        const fc = turf.flatten(feature);
-        return (fc && fc.features) ? fc.features.filter(f => f?.geometry?.type === "Polygon") : [];
-      } catch (e) {
-        console.warn("flatten 실패", e);
-        return [];
-      }
-    }
-
-    function mergeFeaturesWithSnap(features, snapMeters) {
-      if (!features.length) return null;
-
-      const bufOpt = { units: "meters", steps: 16 };
-      let merged = null;
-
-      for (const f of features) {
-        const fb = snapMeters > 0 ? turf.buffer(f, snapMeters, bufOpt) : f;
-        merged = merged ? turf.union(merged, fb) : fb;
-      }
-
-      if (snapMeters > 0 && merged) {
-        try {
-          merged = turf.buffer(merged, -snapMeters, bufOpt);
-        } catch (e) {
-          console.warn("negative buffer 실패(무시)", e);
-        }
-      }
-      return merged;
-    }
-
-    async function ensureMergedReadyAndDraw() {
-      // 병합 결과가 이미 있으면, 다시 누르면 병합 표시만 지우고(원본은 다시 표시 안함: 요청대로 라벨 제거)
-      if (state.mergedRingsWgs84 && state.mergedPolygons.length) {
-        clearMerged();
-        return;
-      }
-
-      // 데이터 없으면 먼저 로딩
-      await drawSelected();
-
-      const feats = [];
-      const missing = [];
-      for (const zip of state.selectedZips) {
-        const f = state.geoByZip.get(zip);
-        if (f) feats.push(f);
-        else missing.push(zip);
-      }
-
-      if (!feats.length) {
-        alert("병합할 폴리곤이 없습니다. (우편번호 데이터를 먼저 불러오세요)");
-        return;
-      }
-
-      const merged = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
-      if (!merged) {
-        alert("병합 실패");
-        return;
-      }
-
-      // 병합 결과를 Polygon 단위로 분해
-      let polys = flattenToPolygonFeatures(merged);
-
-      // ✅ union/buffer 찌꺼기(초소형 조각) 제거
-      polys = polys.filter(p => {
-        try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }
-      });
-
-      // ✅ 외곽 링만 뽑아서 저장/표시 포맷으로 맞춤: [ [ [lng,lat], ... ], ... ]
-      const rings = polys
-        .map(p => p.geometry?.coordinates?.[0])
-        .filter(r => Array.isArray(r) && r.length >= 4);
-
-      if (!rings.length) {
-        alert("병합 결과 링이 비었습니다.");
-        return;
-      }
-
-      // ====== 요청사항 반영 ======
-      // 1) 병합 후: 우편번호 라벨 다 지우기
-      for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
-      state.labels.clear();
-
-      // 2) 병합 후: 원본 폴리곤 숨김 (내부 경계 안 보이게)
-      for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
-
-      // 3) 병합 결과 저장
-      state.mergedRingsWgs84 = rings;
-
-      // 4) 병합 결과를 “색”으로 표시 (덩어리별 다른 색)
-      state.mergedPolygons.forEach(p => p.setMap(null));
-      state.mergedPolygons = [];
-
-      rings.forEach((ring, idx) => {
-        const color = pickColor("merged_" + idx);
-        // kakao는 마지막 점이 첫 점과 같으면 빼도 됨
-        const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-        if (latlngs.length > 1) {
-          const f = latlngs[0], l = latlngs[latlngs.length - 1];
-          if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
-        }
-        if (latlngs.length < 3) return;
-
-        const poly = new kakao.maps.Polygon({
-          map: state.map,
-          path: latlngs,
-          strokeWeight: 5,
-          strokeColor: color,
-          strokeOpacity: 1,
-          strokeStyle: "solid",
-          fillColor: color,
-          fillOpacity: 0.22
-        });
-        state.mergedPolygons.push(poly);
-      });
-
-      fitBoundsMerged();
-    }
-
-    function fitBoundsMerged() {
-      if (!state.map) return;
-      if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) return;
-
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
-      for (const ring of state.mergedRingsWgs84) {
-        for (const pt of ring) {
-          if (!Array.isArray(pt) || pt.length < 2) continue;
-          const ll = new kakao.maps.LatLng(pt[1], pt[0]);
-          b.extend(ll);
-          has = true;
-        }
-      }
-      if (has) state.map.setBounds(b);
-    }
-
-    // ====== path에서 LatLng 추출 ======
-    function collectLatLngsFromPath(path) {
-      const out = [];
-      const walk = (p) => {
-        if (!p) return;
-
-        if (p instanceof kakao.maps.LatLng || (typeof p.getLat === "function" && typeof p.getLng === "function")) {
-          out.push(p);
-          return;
-        }
-        if (typeof p.getLength === "function" && typeof p.getAt === "function") {
-          for (let i = 0; i < p.getLength(); i++) walk(p.getAt(i));
-          return;
-        }
-        if (Array.isArray(p) || typeof p.forEach === "function") {
-          p.forEach(walk);
-          return;
-        }
-      };
-      walk(path);
-      return out;
-    }
-
-    // ====== bounds 맞추기 ======
-    function fitBoundsAll() {
-      if (!state.map) return;
-
-      const b = new kakao.maps.LatLngBounds();
-      let has = false;
-
-      for (const arr of state.polygons.values()) {
-        for (const poly of arr) {
-          const latlngs = collectLatLngsFromPath(poly.getPath());
-          latlngs.forEach((ll) => { b.extend(ll); has = true; });
-        }
-      }
-
-      if (has) state.map.setBounds(b);
-    }
-
-    // ====== 저장 모달 ======
-    function openSaveModal() {
-      const modal = $("#saveModal");
-      if (!modal) return;
-
-      // 마지막 입력값 불러오기
-      const lastCamp = localStorage.getItem("mw_save_camp") || "";
-      const lastCode = localStorage.getItem("mw_save_code") || "";
-      $("#saveCampInput").value = lastCamp;
-      $("#saveCodeInput").value = lastCode;
-
-      modal.classList.add("open");
-      modal.setAttribute("aria-hidden", "false");
-    }
-
-    function closeSaveModal() {
-      const modal = $("#saveModal");
-      if (!modal) return;
-      modal.classList.remove("open");
-      modal.setAttribute("aria-hidden", "true");
-    }
-
-    async function saveMergedToDB() {
-      try {
-        // 병합 안 했으면 자동 병합 시도
+      async function saveMergedToDB(){
         if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-          await ensureMergedReadyAndDraw();
+          await mergeOn(false);
         }
         if (!state.mergedRingsWgs84 || !state.mergedRingsWgs84.length) {
-          alert("병합 결과가 없습니다. (병합 실패)");
+          alert("병합 결과가 없습니다.");
           return;
         }
 
         const camp = ($("#saveCampInput").value || "").trim();
         const code = ($("#saveCodeInput").value || "").trim();
+        if (!camp) return alert("camp를 입력하세요");
+        if (!code) return alert("code(라우트 코드)를 입력하세요");
 
-        if (!camp) { alert("camp를 입력하세요"); return; }
-        if (!code) { alert("code(라우트 코드)를 입력하세요"); return; }
-
-        // 저장 포맷: coupangRouteMap과 동일하게 “rings 배열”로 저장
-        // polygon_wgs84 = [ ring1, ring2, ... ], ring = [ [lng,lat], ... ]
-        const polygon_wgs84 = state.mergedRingsWgs84;
-
-        const payload = { camp, code, polygon_wgs84 };
+        const payload = { camp, code, polygon_wgs84: state.mergedRingsWgs84 };
 
         const res = await fetch(ROUTE_ENDPOINT, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type":"application/json" },
           body: JSON.stringify(payload)
         });
 
@@ -3182,25 +926,87 @@
 
         if (!res.ok) {
           const msg = j?.error || j?.message || text || `HTTP ${res.status}`;
-          throw new Error(msg);
+          alert("저장 실패: " + msg);
+          return;
         }
 
         localStorage.setItem("mw_save_camp", camp);
         localStorage.setItem("mw_save_code", code);
-
         closeSaveModal();
         alert("저장 완료");
-      } catch (e) {
-        console.error(e);
-        alert("저장 실패: " + (e?.message || String(e)));
       }
-    }
 
-    // ====== DOMReady ======
-    document.addEventListener("DOMContentLoaded", () => {
-      createMap();
-      bindUI();
-    });
+      // ====== 초기화 ======
+      function clearAll(){
+        for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
+        for (const arr of state.labels.values())   arr.forEach(l => l.setMap(null));
+        state.polygons.clear();
+        state.labels.clear();
+        state.geoByZip.clear();
+
+        clearMerged();
+        setMergeUI(false);
+
+        state.selectedZips.clear();
+        renderZipChips();
+
+        setRoadviewOn(false);
+      }
+
+      // ====== 바인딩 ======
+      function bindUI(){
+        $("#addBtn").onclick = async () => {
+          parseZips($("#zipInput").value).forEach(z => state.selectedZips.add(z));
+          $("#zipInput").value = "";
+          renderZipChips();
+          if (state.mergeMode) await mergeOn(true);
+        };
+
+        $("#searchBtn").onclick = async () => {
+          await drawSelected();
+          if (state.mergeMode) await mergeOn(true);
+          else fitBoundsAllOriginal();
+        };
+
+        $("#mergeBtn").onclick = async () => { await toggleMerge(); };
+
+        $("#saveBtn").onclick = openSaveModal;
+
+        $("#clearBtn").onclick = clearAll;
+
+        $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
+        $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
+
+        $("#openAddr").onclick = () => {
+          new daum.Postcode({
+            oncomplete: (d) => {
+              if (d.zonecode) {
+                state.selectedZips.add(d.zonecode);
+                renderZipChips();
+              }
+            }
+          }).open();
+        };
+
+        $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
+        $("#saveCloseBtn").onclick = closeSaveModal;
+        $("#saveDoBtn").onclick = saveMergedToDB;
+
+        const preset = parseZips(new URLSearchParams(location.search).get("zips"));
+        preset.forEach(z => state.selectedZips.add(z));
+        renderZipChips();
+        if (preset.length) {
+          drawSelected().then(() => fitBoundsAllOriginal());
+        }
+
+        setMergeUI(false);
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        createMap();
+        bindUI();
+      });
+    })();
   </script>
 </body>
 </html>

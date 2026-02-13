@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
 
+  <!-- 썸네일 이미지 (필수) -->
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:width" content="1200" />
@@ -256,9 +257,16 @@
     }
   </style>
 
+  <!-- Daum 우편번호 -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+
+  <!-- proj4 (5179 -> 4326 변환용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+
+  <!-- turf (병합) -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+  <!-- Kakao 지도 SDK -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
 </head>
 
@@ -312,6 +320,7 @@
     </div>
   </div>
 
+  <!-- 저장 모달 -->
   <div id="saveModal" class="modal" aria-hidden="true">
     <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
       <div class="modalTop">
@@ -341,10 +350,15 @@
     (function(){
       "use strict";
 
+      // ====== 엔드포인트 ======
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
+      // “붙어있는 덩어리”를 같이 병합하기 위한 스냅 거리(미터)
+      // → 계산용이며, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
       const MERGE_SNAP_METERS = 35;
+
+      // 너무 작은 찌꺼기 제거(㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
 
       const $ = (sel) => document.querySelector(sel);
@@ -353,15 +367,16 @@
       const state = {
         map: null,
 
-        polygons: new Map(),
-        labels:   new Map(),
-        geoByZip: new Map(),
+        polygons: new Map(), // zip -> [kakao Polygon]
+        labels:   new Map(), // zip -> [overlay]
+        geoByZip: new Map(), // zip -> turf Feature(MultiPolygon)
 
         selectedZips: new Set(),
 
         mergeMode: false,
         mergedPolygons: [],
-        mergedRingsWgs84: null,   // ✅ 원복: [ring, ring, ...] (ring = [[lng,lat]...])
+        mergedRingsWgs84: null,         // ✅ 저장/호환용: rings[] (기존 포맷)
+        mergedOutlineRingsWgs84: null,  // ✅ 표시용: 외곽/홀 경계 ring들
 
         isSatellite: false,
         roadviewOn: false,
@@ -392,6 +407,7 @@
         return "#" + [r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
       }
 
+      // ===== proj4 =====
       proj4.defs(
         "EPSG:5179",
         "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 " +
@@ -412,6 +428,7 @@
         return { lat, lon };
       }
 
+      // ===== 지도 =====
       function createMap() {
         if (!(window.kakao && kakao.maps)) {
           alert("카카오 지도 SDK 로딩 실패");
@@ -442,6 +459,7 @@
         $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
       }
 
+      // ===== 로드뷰 =====
       function ensureRoadview() {
         if (state.roadview && state.roadviewClient) return;
         state.roadview = new kakao.maps.Roadview($("#roadview"));
@@ -508,6 +526,7 @@
         }
       }
 
+      // ===== UI =====
       function renderZipChips() {
         const list = $("#zipList");
         list.innerHTML = "";
@@ -550,6 +569,7 @@
         for (const arr of state.labels.values())   arr.forEach(l => l.setMap(map));
       }
 
+      // ===== 라벨 =====
       function centroidOfLngLatRing(ringLngLat) {
         if (!ringLngLat || ringLngLat.length < 3) return null;
         const pts = ringLngLat.slice();
@@ -586,15 +606,18 @@
         });
       }
 
+      // ===== ZIP 응답 정규화 =====
       function isPoint(v){ return Array.isArray(v) && v.length>=2 && isFinite(v[0]) && isFinite(v[1]); }
 
       function normalizeToMultiPolygon5179(polygon5179) {
         if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
+
         if (isPoint(polygon5179[0])) return [ [ polygon5179 ] ];
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [ polygon5179 ];
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
             Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
             isPoint(polygon5179[0][0][0])) return polygon5179;
+
         return null;
       }
 
@@ -711,6 +734,7 @@
         if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
       }
 
+      // ===== Bounds =====
       function fitBoundsAllOriginal() {
         if (!state.map) return;
         const b = new kakao.maps.LatLngBounds();
@@ -755,6 +779,7 @@
         if (has) state.map.setBounds(b);
       }
 
+      // ===== 병합 (turf 안정화) =====
       function setMergeUI(on){
         state.mergeMode = !!on;
         const btn = $("#mergeBtn");
@@ -766,6 +791,7 @@
         state.mergedPolygons.forEach(p => p.setMap(null));
         state.mergedPolygons = [];
         state.mergedRingsWgs84 = null;
+        state.mergedOutlineRingsWgs84 = null;
       }
 
       function flattenToPolygonFeatures(feature) {
@@ -865,7 +891,97 @@
         return feats;
       }
 
-      // ✅ 원복: 저장/표시 모두 "rings[] (외곽 링만)" 형식으로 계산
+      // ====== ✅ 핵심 수정: 기존 저장 형식(rings[]) 유지 + 가운데 "홀" 유지 ======
+      function closestVertexPair(ringA, ringB){
+        // ring: [[lng,lat],...]
+        let best = null;
+        let bestD = Infinity;
+
+        for (let i = 0; i < ringA.length; i++) {
+          const a = ringA[i];
+          if (!Array.isArray(a) || a.length < 2) continue;
+          const ax = +a[0], ay = +a[1];
+          if (!isFinite(ax) || !isFinite(ay)) continue;
+
+          for (let j = 0; j < ringB.length; j++) {
+            const b = ringB[j];
+            if (!Array.isArray(b) || b.length < 2) continue;
+            const bx = +b[0], by = +b[1];
+            if (!isFinite(bx) || !isFinite(by)) continue;
+
+            const dx = ax - bx, dy = ay - by;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < bestD) {
+              bestD = d2;
+              best = { a:[ax,ay], b:[bx,by] };
+            }
+          }
+        }
+        return best;
+      }
+
+      function splitPolygonWithHolesToRings(polyFeature){
+        // polyFeature: turf Polygon (may have holes)
+        const coords = polyFeature?.geometry?.coordinates;
+        if (!Array.isArray(coords) || !coords.length) return { payloadRings: [], outlineRings: [] };
+
+        const outer = coords[0];
+        const holes = coords.slice(1).filter(r => Array.isArray(r) && r.length >= 4);
+
+        const outlineRings = [];
+        if (Array.isArray(outer) && outer.length >= 4) outlineRings.push(outer);
+        holes.forEach(h => outlineRings.push(h));
+
+        // holes 없으면 payload는 outer 1개
+        if (!holes.length) return { payloadRings: [outer], outlineRings };
+
+        // turf.polygonize가 없으면(희박) fallback: outer만(구멍은 못 살림)
+        if (typeof turf.polygonize !== "function" ||
+            typeof turf.booleanPointInPolygon !== "function" ||
+            typeof turf.pointOnFeature !== "function") {
+          console.warn("[merge] turf.polygonize/booleanPointInPolygon/pointOnFeature missing; fallback outer only");
+          return { payloadRings: [outer], outlineRings };
+        }
+
+        // 라인워크: outer + holes + (hole->outer) 브릿지들
+        const lines = [];
+        try {
+          lines.push(turf.lineString(outer));
+          holes.forEach(h => lines.push(turf.lineString(h)));
+
+          holes.forEach(h => {
+            const pair = closestVertexPair(h, outer);
+            if (!pair) return;
+            lines.push(turf.lineString([pair.a, pair.b]));
+          });
+
+          const polyFC = turf.polygonize(turf.featureCollection(lines));
+          const out = [];
+
+          for (const p of (polyFC?.features || [])) {
+            try {
+              if (!p?.geometry) continue;
+              const a = turf.area(p);
+              if (isFinite(a) && a < MIN_COMPONENT_AREA_SQM) continue;
+
+              const pt = turf.pointOnFeature(p);
+              if (!turf.booleanPointInPolygon(pt, polyFeature)) continue;
+
+              const r = p.geometry?.coordinates?.[0];
+              if (Array.isArray(r) && r.length >= 4) out.push(r);
+            } catch {}
+          }
+
+          return { payloadRings: out.length ? out : [outer], outlineRings };
+        } catch (e) {
+          console.warn("[merge] splitPolygonWithHolesToRings failed -> fallback outer only", e);
+          return { payloadRings: [outer], outlineRings };
+        }
+      }
+
+      // ✅ 저장/표시 공통 계산:
+      // - payloadRings: 기존 저장 형식 rings[] (홀 없는 조각 폴리곤들)
+      // - outlineRings: 외곽/홀 경계 링들(표시용)
       async function computeMergedRings(){
         await drawSelected();
 
@@ -875,6 +991,7 @@
         const mergedSnap = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
         if (!mergedSnap) return null;
 
+        // 원본 면적 마스크(확장 없음)
         let origMask = null;
         try {
           const fc = turf.featureCollection(feats);
@@ -884,30 +1001,47 @@
           console.warn("[merge] orig mask fail", e);
         }
 
+        // 스냅으로 늘어난 부분을 원본 면적으로 클립
         const mergedClipped =
           (origMask ? safeIntersect(mergedSnap, origMask) : null) || origMask || mergedSnap;
 
         let polys = flattenToPolygonFeatures(mergedClipped);
         polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
 
-        const rings = polys
-          .map(p => p.geometry?.coordinates?.[0])
-          .filter(r => Array.isArray(r) && r.length >= 4);
+        const payloadRings = [];
+        const outlineRings = [];
 
-        return rings.length ? rings : null;
+        for (const p of polys) {
+          const stabilized = stabilizeFeature(p);
+          const { payloadRings: pr, outlineRings: or } = splitPolygonWithHolesToRings(stabilized);
+          pr.forEach(r => { if (Array.isArray(r) && r.length >= 4) payloadRings.push(r); });
+          or.forEach(r => { if (Array.isArray(r) && r.length >= 4) outlineRings.push(r); });
+        }
+
+        if (!payloadRings.length) return null;
+
+        return {
+          payloadRings,
+          outlineRings: outlineRings.length ? outlineRings : payloadRings
+        };
       }
 
+      // 병합 ON: 화면에 합쳐진 폴리곤만 표시 + 우편번호 라벨 숨김
       async function mergeOn(rebuildOnly=false){
         try {
-          const rings = await computeMergedRings();
-          if (!rings) { if(!rebuildOnly) alert("병합 결과가 없습니다."); return; }
+          const res = await computeMergedRings();
+          if (!res) { if(!rebuildOnly) alert("병합 결과가 없습니다."); return; }
+
+          const { payloadRings, outlineRings } = res;
 
           clearMerged();
-          state.mergedRingsWgs84 = rings;
+          state.mergedRingsWgs84 = payloadRings;               // ✅ 저장용(기존 포맷)
+          state.mergedOutlineRingsWgs84 = outlineRings;        // ✅ 표시용(외곽/홀 경계)
 
           const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-          for (const ring of rings) {
+          // 1) ✅ fill만(테두리 없음) -> 조각 경계 seam 안 보이게
+          for (const ring of payloadRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
               const f = latlngs[0], l = latlngs[latlngs.length - 1];
@@ -915,22 +1049,41 @@
             }
             if (latlngs.length < 3) continue;
 
-            const poly = new kakao.maps.Polygon({
+            const polyFill = new kakao.maps.Polygon({
+              map: state.map,
+              path: latlngs,
+              strokeWeight: 1,
+              strokeOpacity: 0,         // ✅ seam 제거
+              strokeColor: mergedColor,
+              fillColor: mergedColor,
+              fillOpacity: 0.20
+            });
+            state.mergedPolygons.push(polyFill);
+          }
+
+          // 2) ✅ 외곽/홀 경계는 Polyline으로 굵게 1번만 표시
+          for (const ring of outlineRings) {
+            const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+            if (latlngs.length > 1) {
+              const f = latlngs[0], l = latlngs[latlngs.length - 1];
+              if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+            }
+            if (latlngs.length < 2) continue;
+
+            const line = new kakao.maps.Polyline({
               map: state.map,
               path: latlngs,
               strokeWeight: 6,
               strokeColor: mergedColor,
               strokeOpacity: 1,
-              strokeStyle: "solid",
-              fillColor: mergedColor,
-              fillOpacity: 0.20
+              strokeStyle: "solid"
             });
-            state.mergedPolygons.push(poly);
+            state.mergedPolygons.push(line);
           }
 
           setOriginalVisible(false);
           setMergeUI(true);
-          fitBoundsToRings(rings);
+          fitBoundsToRings(outlineRings);
         } catch (e) {
           console.warn("[merge] mergeOn crashed:", e);
           clearMerged();
@@ -952,6 +1105,7 @@
         else await mergeOn(false);
       }
 
+      // ===== 저장 =====
       function openSaveModal(){
         $("#saveCampInput").value = localStorage.getItem("mw_save_camp") || "";
         $("#saveCodeInput").value = localStorage.getItem("mw_save_code") || "";
@@ -974,14 +1128,16 @@
 
         let rings = state.mergedRingsWgs84;
         if (!rings || !rings.length) {
-          rings = await computeMergedRings();
+          const res = await computeMergedRings();
+          rings = res?.payloadRings || null;
         }
+
         if (!rings || !rings.length) {
           alert("저장할 병합 결과가 없습니다.");
           return;
         }
 
-        // ✅ 원복: polygon_wgs84 = rings[]
+        // ✅ 기존 저장 형식 그대로: rings[]
         const payload = { camp, code, polygon_wgs84: rings };
 
         const res = await fetch(ROUTE_ENDPOINT, {
@@ -1007,6 +1163,7 @@
         alert("저장 완료");
       }
 
+      // ===== 초기화 =====
       function clearAll(){
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
         for (const arr of state.labels.values())   arr.forEach(l => l.setMap(null));
@@ -1023,6 +1180,7 @@
         setRoadviewOn(false);
       }
 
+      // ===== 바인딩 =====
       function bindUI(){
         $("#addBtn").onclick = async () => {
           parseZips($("#zipInput").value).forEach(z => state.selectedZips.add(z));

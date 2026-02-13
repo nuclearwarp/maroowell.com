@@ -381,7 +381,7 @@
 
         mergeMode: false,
         mergedPolygons: [],
-        mergedRingsWgs84: null,
+        mergedRingsWgs84: null, // ✅ (수정됨) 이제 [ [ring, hole...], [ring...] ] 형태도 저장 가능
 
         isSatellite: false,
         roadviewOn: false,
@@ -779,17 +779,26 @@
         if (has) state.map.setBounds(b);
       }
 
-      function fitBoundsToRings(rings) {
-        if (!state.map || !rings || !rings.length) return;
+      // ✅ (수정됨) merged 결과가 "ring[]" 또는 "polygonRings[][]" 이어도 bounds 제대로 잡기
+      function fitBoundsToRings(ringsOrPolys) {
+        if (!state.map || !ringsOrPolys) return;
         const b = new kakao.maps.LatLngBounds();
         let has = false;
-        for (const ring of rings) {
-          for (const pt of ring) {
-            if (!Array.isArray(pt) || pt.length < 2) continue;
-            b.extend(new kakao.maps.LatLng(pt[1], pt[0]));
+
+        const walk = (node) => {
+          if (!Array.isArray(node)) return;
+
+          // point: [lng, lat]
+          if (node.length >= 2 && typeof node[0] === "number" && typeof node[1] === "number") {
+            b.extend(new kakao.maps.LatLng(node[1], node[0]));
             has = true;
+            return;
           }
-        }
+
+          for (const child of node) walk(child);
+        };
+
+        walk(ringsOrPolys);
         if (has) state.map.setBounds(b);
       }
 
@@ -909,6 +918,8 @@
       }
 
       // ✅ 저장/표시 공통: "최종 링" 계산 (원본 면적으로 클립해서 절대 커지지 않음)
+      // ✅ (수정됨) 폴리곤의 "홀(내부 링)"도 그대로 유지해서
+      //            선택 안한 가운데 우편번호(엔클레이브)가 병합에 끼어들지 않게 함.
       async function computeMergedRings(){
         await drawSelected();
 
@@ -935,35 +946,45 @@
         let polys = flattenToPolygonFeatures(mergedClipped);
         polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
 
-        const rings = polys
-          .map(p => p.geometry?.coordinates?.[0])
-          .filter(r => Array.isArray(r) && r.length >= 4);
+        // ✅ 기존: coordinates[0]만 뽑아서 홀을 버림 -> 가운데 미선택 우편번호가 "채워져" 버그 발생
+        // ✅ 수정: coordinates 전체([outer, hole1, ...])를 유지
+        const polyRingsList = polys
+          .map(p => p.geometry?.coordinates)
+          .filter(coords => Array.isArray(coords) && coords.length)
+          .map(coords => coords.filter(r => Array.isArray(r) && r.length >= 4))
+          .filter(coords => coords.length && Array.isArray(coords[0]) && coords[0].length >= 4);
 
-        return rings.length ? rings : null;
+        return polyRingsList.length ? polyRingsList : null;
       }
 
       // 병합 ON: 화면에 합쳐진 폴리곤만 표시 + 우편번호 라벨 숨김
       async function mergeOn(rebuildOnly=false){
         try {
-          const rings = await computeMergedRings();
-          if (!rings) { if(!rebuildOnly) alert("병합 결과가 없습니다."); return; }
+          const polyRingsList = await computeMergedRings();
+          if (!polyRingsList) { if(!rebuildOnly) alert("병합 결과가 없습니다."); return; }
 
           clearMerged();
-          state.mergedRingsWgs84 = rings;
+          state.mergedRingsWgs84 = polyRingsList;
 
           const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-          for (const ring of rings) {
-            const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
-            if (latlngs.length > 1) {
-              const f = latlngs[0], l = latlngs[latlngs.length - 1];
-              if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
-            }
-            if (latlngs.length < 3) continue;
+          for (const polyRings of polyRingsList) {
+            const ringsLatLng = polyRings.map(ring => {
+              const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
+              if (latlngs.length > 1) {
+                const f = latlngs[0], l = latlngs[latlngs.length - 1];
+                if (f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop();
+              }
+              return latlngs;
+            }).filter(r => r.length >= 3);
+
+            if (!ringsLatLng.length) continue;
+
+            const pathForKakao = (ringsLatLng.length === 1) ? ringsLatLng[0] : ringsLatLng;
 
             const poly = new kakao.maps.Polygon({
               map: state.map,
-              path: latlngs,
+              path: pathForKakao,
               strokeWeight: 6,
               strokeColor: mergedColor,
               strokeOpacity: 1,
@@ -976,7 +997,7 @@
 
           setOriginalVisible(false); // 라벨 포함 숨김
           setMergeUI(true);
-          fitBoundsToRings(rings);
+          fitBoundsToRings(polyRingsList);
         } catch (e) {
           console.warn("[merge] mergeOn crashed:", e);
           clearMerged();

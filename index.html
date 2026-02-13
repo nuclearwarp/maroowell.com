@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
 
-  <!-- 썸네일 이미지 (필수) -->
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
   <meta property="og:image:width" content="1200" />
@@ -257,16 +256,9 @@
     }
   </style>
 
-  <!-- Daum 우편번호 -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
-
-  <!-- proj4 (5179 -> 4326 변환용) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
-
-  <!-- turf (병합) -->
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-
-  <!-- Kakao 지도 SDK -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
 </head>
 
@@ -320,7 +312,6 @@
     </div>
   </div>
 
-  <!-- 저장 모달 -->
   <div id="saveModal" class="modal" aria-hidden="true">
     <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
       <div class="modalTop">
@@ -330,7 +321,7 @@
       <div class="modalBody">
         <div class="pill">
           • 현재 선택된 우편번호 폴리곤들을 “병합 결과”로 저장합니다.<br/>
-          • 저장 시 최종 링은 “원본 면적”으로 클립되어 <b>절대 커지지 않습니다.</b>
+          • 스냅(미세 갭 보정)은 “브릿지 조각”만 선택적으로 허용해 <b>구멍/외곽 확장</b>은 막습니다.
         </div>
 
         <label>캠프(camp)</label>
@@ -350,15 +341,18 @@
     (function(){
       "use strict";
 
-      // ====== 엔드포인트 ======
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
-      // 스냅 거리(미터) - 계산만, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
+      // 스냅 거리(미터): “미세 갭” 붙이기 용도
       const MERGE_SNAP_METERS = 35;
 
       // 너무 작은 찌꺼기 제거(㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
+
+      // ✅ 스냅으로 생긴 “추가 면적” 중, 브릿지로 보이는 작은 조각만 허용
+      const MAX_ADDED_COMPONENT_AREA_SQM = 20000; // 2만㎡(=큰 구멍 메우기 방지)
+      const MAX_ADDED_COMPACTNESS = 0.30;         // 0~1, 클수록 덩어리. 브릿지는 보통 낮음.
 
       const $ = (sel) => document.querySelector(sel);
       const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
@@ -366,16 +360,16 @@
       const state = {
         map: null,
 
-        polygons: new Map(), // zip -> [kakao Polygon]
-        labels:   new Map(), // zip -> [overlay]
-        geoByZip: new Map(), // zip -> turf Feature(MultiPolygon)
+        polygons: new Map(),
+        labels:   new Map(),
+        geoByZip: new Map(),
 
         selectedZips: new Set(),
 
         mergeMode: false,
         mergedPolygons: [],
-        mergedRingsWgs84: null,         // ✅ 저장 포맷: rings[]
-        mergedOutlineRingsWgs84: null,  // ✅ 표시용: 외곽/홀 경계 링들
+        mergedRingsWgs84: null,         // 저장용 rings[]
+        mergedOutlineRingsWgs84: null,  // 표시용 경계 링들
 
         isSatellite: false,
         roadviewOn: false,
@@ -793,7 +787,7 @@
         state.mergedOutlineRingsWgs84 = null;
       }
 
-      // ===== 병합 (turf 안정화) =====
+      // ===== 병합 유틸 =====
       function flattenToPolygonFeatures(feature) {
         try {
           const fc = turf.flatten(feature);
@@ -811,31 +805,23 @@
 
       function safeBuffer(f, meters){
         if (!meters || meters === 0) return f;
-        try {
-          return turf.buffer(f, meters, { units: "meters", steps: 16 });
-        } catch (e) {
-          console.warn("[merge] buffer fail -> use original", e);
-          return f;
-        }
+        try { return turf.buffer(f, meters, { units: "meters", steps: 16 }); }
+        catch (e) { console.warn("[merge] buffer fail -> use original", e); return f; }
       }
 
       function safeUnion(a, b){
-        try {
-          return turf.union(a, b);
-        } catch (e) {
-          console.warn("[merge] union fail", e);
-          return null;
-        }
+        try { return turf.union(a, b); }
+        catch (e) { console.warn("[merge] union fail", e); return null; }
       }
 
       function safeIntersect(a, b){
-        try {
-          const out = turf.intersect(a, b);
-          return out || null;
-        } catch (e) {
-          console.warn("[merge] intersect fail", e);
-          return null;
-        }
+        try { return turf.intersect(a, b) || null; }
+        catch (e) { console.warn("[merge] intersect fail", e); return null; }
+      }
+
+      function safeDifference(a, b){
+        try { return turf.difference(a, b) || null; }
+        catch (e) { console.warn("[merge] diff fail", e); return null; }
       }
 
       function mergeFeaturesWithSnap(features, snapMeters) {
@@ -891,10 +877,8 @@
         return feats;
       }
 
-      // ====== ✅ 핵심: 홀(구멍) 유지하면서 rings[]를 "소수 개"로 ======
-
+      // ====== ✅ hole 표현(저장 포맷 유지) ======
       function closestVertexPair(ringA, ringB){
-        // ringA/B: [[lng,lat]...]
         let best = null;
         let bestD = Infinity;
 
@@ -926,16 +910,10 @@
       }
 
       function pointInPolyStrict(pt, poly){
-        try {
-          return turf.booleanPointInPolygon(pt, poly, { ignoreBoundary: true });
-        } catch {
-          return false;
-        }
+        try { return turf.booleanPointInPolygon(pt, poly, { ignoreBoundary: true }); }
+        catch { return false; }
       }
 
-      // polygonize 결과에서 "큰 outer(구멍 포함)" 같은 잘못된 면 제거:
-      // - 원본(polyFeature) 내부에 있어야 함
-      // - 그리고 hole 내부 점을 포함하면 탈락 (구멍을 덮는 면)
       function polygonizePiecesForDonut(polyFeature, outer, holes){
         if (typeof turf.polygonize !== "function") return null;
         if (!outer || outer.length < 4 || !holes?.length) return null;
@@ -945,10 +923,8 @@
           lines.push(turf.lineString(outer));
           holes.forEach(h => lines.push(turf.lineString(h)));
 
-          // hole 내부를 찍는 점(각 hole당 1개)
           const holePts = holes.map(h => turf.pointOnFeature(turf.polygon([h])));
 
-          // hole마다 outer와 가장 가까운 vertex-vertex로 bridge 1개
           holes.forEach(h => {
             const pair = closestVertexPair(h, outer);
             if (!pair) return;
@@ -963,20 +939,16 @@
           for (const cand of (polyFC?.features || [])) {
             if (!cand?.geometry || cand.geometry.type !== "Polygon") continue;
 
-            // 면 안에 찍히는 점
             const pOn = turf.pointOnFeature(cand);
 
-            // 1) 원본 donut 영역 안쪽이어야 함
             if (!pointInPolyStrict(pOn, polyFeature)) continue;
 
-            // 2) hole 내부 점을 포함하면(= hole을 덮는 면) 탈락
             let coversHole = false;
             for (const hp of holePts) {
               if (pointInPolyStrict(hp, cand)) { coversHole = true; break; }
             }
             if (coversHole) continue;
 
-            // 3) 너무 작은 찌꺼기 제거
             const a = turf.area(cand);
             if (isFinite(a) && a < MIN_COMPONENT_AREA_SQM) continue;
 
@@ -987,7 +959,6 @@
             }
           }
 
-          // 보통 2개 정도로 끝남 (깔끔)
           return out.length ? out : null;
         } catch (e) {
           console.warn("[merge] polygonizePiecesForDonut failed", e);
@@ -1006,17 +977,120 @@
         if (Array.isArray(outer) && outer.length >= 4) outlineRings.push(outer);
         holes.forEach(h => outlineRings.push(h));
 
-        // hole 없으면 그냥 outer 1개
         if (!holes.length) return { payloadRings: [outer], outlineRings };
 
-        // ✅ 핵심: polygonize+bridge로 hole 없는 "소수 조각"으로 분해
         const pieces = polygonizePiecesForDonut(polyFeature, outer, holes);
         if (pieces && pieces.length) return { payloadRings: pieces, outlineRings };
 
-        // 만약 polygonize가 죽는 환경이면(드묾) fallback은 outer로(최소한 포맷은 유지)
-        // (여기서 fallback을 tesselate로 가면 다시 조각지옥이라 일부러 안 감)
-        console.warn("[merge] polygonize not available or failed -> fallback outer (hole may fill)");
+        console.warn("[merge] polygonize not available/failed -> fallback outer (hole may fill)");
         return { payloadRings: [outer], outlineRings };
+      }
+
+      // ====== ✅ 핵심: “스냅 추가 면적”을 브릿지 조각만 선택 유지 ======
+      function perimeterMeters(poly){
+        try {
+          const line = turf.polygonToLine(poly);
+          const km = turf.length(line, { units: "kilometers" });
+          return (isFinite(km) ? km*1000 : NaN);
+        } catch {
+          return NaN;
+        }
+      }
+
+      function compactnessScore(poly){
+        const A = turf.area(poly);
+        const P = perimeterMeters(poly);
+        if (!isFinite(A) || !isFinite(P) || P <= 0) return 1;
+        return (4*Math.PI*A) / (P*P); // 0~1
+      }
+
+      function countIntersections(addedPoly, basePolys){
+        let cnt = 0;
+        for (const bp of basePolys) {
+          try {
+            if (turf.booleanIntersects(addedPoly, bp)) {
+              cnt++;
+              if (cnt >= 2) return cnt;
+            }
+          } catch {}
+        }
+        return cnt;
+      }
+
+      function shouldKeepAdded(addedPoly, basePolys){
+        let a = 0;
+        try { a = turf.area(addedPoly); } catch { a = 0; }
+
+        if (!isFinite(a) || a <= 0) return false;
+        if (a > MAX_ADDED_COMPONENT_AREA_SQM) return false;
+
+        // “한 폴리곤 밖으로 퍼지는 띠”는 대부분 1개만 접촉 -> 제거
+        const hit = countIntersections(addedPoly, basePolys);
+        if (hit < 2) return false;
+
+        const c = compactnessScore(addedPoly);
+        if (!isFinite(c)) return false;
+
+        // 덩어리(구멍 메우기)는 compactness가 높게 나옴
+        return (c <= MAX_ADDED_COMPACTNESS) || (a <= 1500);
+      }
+
+      function unionMany(polys){
+        const xs = (polys || []).filter(Boolean).map(stabilizeFeature);
+        if (!xs.length) return null;
+
+        let acc = xs[0];
+        for (let i = 1; i < xs.length; i++) {
+          const b = xs[i];
+          let u = safeUnion(acc, b);
+          if (!u) {
+            // 마지막 안전장치: buffer(0) 비슷한 효과를 위해 아주 미세 buffer 후 union
+            try {
+              const a1 = turf.buffer(acc, 0.01, { units:"meters", steps:8 });
+              const b1 = turf.buffer(b,   0.01, { units:"meters", steps:8 });
+              u = safeUnion(a1, b1);
+              if (u) {
+                const u2 = turf.buffer(u, -0.01, { units:"meters", steps:8 });
+                acc = stabilizeFeature(u2 || u);
+                continue;
+              }
+            } catch {}
+            return null;
+          }
+          acc = stabilizeFeature(u);
+        }
+        return acc;
+      }
+
+      function applySelectiveSnap(mergedSnap, origMask){
+        if (!mergedSnap) return null;
+        if (!origMask) return mergedSnap;
+
+        const basePolys = flattenToPolygonFeatures(origMask);
+        if (!basePolys.length) return mergedSnap;
+
+        const added = safeDifference(mergedSnap, origMask);
+        if (!added) return origMask;
+
+        const addedPolys = flattenToPolygonFeatures(added);
+        const kept = addedPolys.filter(p => shouldKeepAdded(p, basePolys));
+
+        if (!kept.length) return origMask;
+
+        // origMask + kept를 다시 union(가능하면 하나로)
+        const all = [...basePolys, ...kept].map(stabilizeFeature);
+        const u = unionMany(all);
+
+        if (u) return u;
+
+        // union이 죽으면 최소한 combine으로라도 묶어두기
+        try {
+          const fc = turf.featureCollection(all);
+          const comb = turf.combine(fc);
+          return comb?.features?.[0] || origMask;
+        } catch {
+          return origMask;
+        }
       }
 
       // ✅ 저장/표시 공통 계산
@@ -1029,7 +1103,7 @@
         const mergedSnap = mergeFeaturesWithSnap(feats, MERGE_SNAP_METERS);
         if (!mergedSnap) return null;
 
-        // 원본 면적 마스크(확장 없음)
+        // base: 원본(확장 없음) 마스크
         let origMask = null;
         try {
           const fc = turf.featureCollection(feats);
@@ -1039,11 +1113,10 @@
           console.warn("[merge] orig mask fail", e);
         }
 
-        // 스냅으로 늘어난 부분을 원본 면적으로 클립
-        const mergedClipped =
-          (origMask ? safeIntersect(mergedSnap, origMask) : null) || origMask || mergedSnap;
+        // ✅ 핵심: “브릿지만” 선택적으로 허용한 최종 merged
+        const mergedFinal = applySelectiveSnap(mergedSnap, origMask) || origMask || mergedSnap;
 
-        let polys = flattenToPolygonFeatures(mergedClipped);
+        let polys = flattenToPolygonFeatures(mergedFinal);
         polys = polys.filter(p => { try { return turf.area(p) >= MIN_COMPONENT_AREA_SQM; } catch { return true; }});
 
         const payloadRings = [];
@@ -1051,8 +1124,8 @@
 
         for (const p of polys) {
           const stabilized = stabilizeFeature(p);
-
           const { payloadRings: pr, outlineRings: or } = splitPolygonToPayloadRings(stabilized);
+
           pr.forEach(r => { if (Array.isArray(r) && r.length >= 4) payloadRings.push(r); });
           or.forEach(r => { if (Array.isArray(r) && r.length >= 4) outlineRings.push(r); });
         }
@@ -1065,6 +1138,7 @@
         };
       }
 
+      // ===== 병합 표시 =====
       async function mergeOn(rebuildOnly=false){
         try {
           const res = await computeMergedRings();
@@ -1073,12 +1147,12 @@
           const { payloadRings, outlineRings } = res;
 
           clearMerged();
-          state.mergedRingsWgs84 = payloadRings;        // ✅ 저장용(기존 포맷)
-          state.mergedOutlineRingsWgs84 = outlineRings; // ✅ 표시용
+          state.mergedRingsWgs84 = payloadRings;
+          state.mergedOutlineRingsWgs84 = outlineRings;
 
           const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-          // 1) fill (stroke 숨김) -> 조각 seam 안 보이게
+          // fill: seam 안 보이게 stroke 숨김
           for (const ring of payloadRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
@@ -1099,7 +1173,7 @@
             state.mergedPolygons.push(polyFill);
           }
 
-          // 2) 외곽/홀 경계 Polyline
+          // outline
           for (const ring of outlineRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
@@ -1176,7 +1250,7 @@
           return;
         }
 
-        // ✅ 기존 저장 형식 그대로: rings[]
+        // ✅ 기존 저장 형식 그대로
         const payload = { camp, code, polygon_wgs84: rings };
 
         const res = await fetch(ROUTE_ENDPOINT, {

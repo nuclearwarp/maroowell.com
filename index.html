@@ -49,7 +49,6 @@
     .muted{color:var(--muted);font-size:12px}
     .spacer{flex:1}
 
-    /* 숨겨둘 링크(헤더에서 카카오맵 하이퍼링크처럼) */
     header a.saveLink{
       color:var(--muted);
       font-size:12px;
@@ -153,7 +152,6 @@
     }
     button.danger:hover{border-color:#ef4444}
 
-    /* 병합 ON 상태 UI */
     button.merge-on{
       background:#0f2a1f;
       border-color:#22c55e;
@@ -198,7 +196,6 @@
       cursor:pointer;
     }
 
-    /* 저장 모달 */
     .modal{
       position:fixed;
       inset:0;
@@ -281,7 +278,6 @@
     <h1>Maroowell 우편번호 검색기</h1>
     <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
     <span class="spacer"></span>
-    <!-- 숨겨둘 링크(눌러도 모달 뜨게) -->
     <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
   </header>
 
@@ -356,15 +352,12 @@
 
       // ====== 엔드포인트 ======
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
-
-      // ⚠️ 필요하면 여기만 바꿔 (너 Worker 도메인 기준)
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
 
-      // “붙어있는 덩어리”를 같이 병합하기 위한 스냅 거리(미터)
-      // → 계산용이며, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
+      // 스냅 거리(미터) - 계산만, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
       const MERGE_SNAP_METERS = 35;
 
-      // 너무 작은 찌꺼기 제거(㎡)
+      // (컴포넌트 제거용) 너무 작은 찌꺼기 제거(㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
 
       const $ = (sel) => document.querySelector(sel);
@@ -550,8 +543,6 @@
             state.selectedZips.delete(z);
             removeZipData(z);
             renderZipChips();
-
-            // 병합 ON 상태면 즉시 재병합(표시 유지)
             if (state.mergeMode) await mergeOn(true);
           };
 
@@ -620,13 +611,8 @@
       function normalizeToMultiPolygon5179(polygon5179) {
         if (!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
 
-        // 1) [ [x,y], ... ]  (단일 ring)
         if (isPoint(polygon5179[0])) return [ [ polygon5179 ] ];
-
-        // 2) [ ring[], ring[] ] (Polygon: rings)
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [ polygon5179 ];
-
-        // 3) [ [ring[]], [ring[]] ] (MultiPolygon)
         if (Array.isArray(polygon5179[0]) && polygon5179[0].length &&
             Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length &&
             isPoint(polygon5179[0][0][0])) return polygon5179;
@@ -757,13 +743,11 @@
           for (const poly of arr) {
             const path = poly.getPath();
 
-            // 단일 ring: Array<LatLng>
             if (Array.isArray(path)) {
               path.forEach(ll => { b.extend(ll); has = true; });
               continue;
             }
 
-            // MVCArray / 다중 ring
             if (path && typeof path.getLength === "function" && typeof path.getAt === "function") {
               for (let i = 0; i < path.getLength(); i++) {
                 const ring = path.getAt(i);
@@ -869,18 +853,15 @@
             continue;
           }
 
-          // 1차: 스냅 포함 union
           let u = safeUnion(merged, fb);
 
           if (!u) {
-            // 2차: 스냅 없는 union
             const m2 = stabilizeFeature(merged);
             const f2 = stabilizeFeature(raw);
             u = safeUnion(m2, f2);
           }
 
           if (!u) {
-            // 3차: 전체 죽지 않게 이 조각은 따로 유지
             leftovers.push(fb);
             continue;
           }
@@ -888,7 +869,6 @@
           merged = stabilizeFeature(u);
         }
 
-        // leftovers가 있으면 MultiPolygon로 묶기
         if (leftovers.length) {
           try {
             const fc = turf.featureCollection([merged, ...leftovers].filter(Boolean));
@@ -911,35 +891,7 @@
         return feats;
       }
 
-      // ====== ✅ 핵심(구멍 유지 + 저장 포맷 유지) ======
-      function closestVertexPair(ringA, ringB){
-        let best = null;
-        let bestD = Infinity;
-
-        for (let i = 0; i < ringA.length; i++) {
-          const a = ringA[i];
-          if (!Array.isArray(a) || a.length < 2) continue;
-          const ax = +a[0], ay = +a[1];
-          if (!isFinite(ax) || !isFinite(ay)) continue;
-
-          for (let j = 0; j < ringB.length; j++) {
-            const b = ringB[j];
-            if (!Array.isArray(b) || b.length < 2) continue;
-            const bx = +b[0], by = +b[1];
-            if (!isFinite(bx) || !isFinite(by)) continue;
-
-            const dx = ax - bx, dy = ay - by;
-            const d2 = dx*dx + dy*dy;
-            if (d2 < bestD) {
-              bestD = d2;
-              best = { a:[ax,ay], b:[bx,by] };
-            }
-          }
-        }
-        return best;
-      }
-
-      // ✅ FIX 포함 버전: 홀(구멍) 영역이 payloadRings로 들어가서 칠해지는 버그 제거
+      // ====== ✅ 핵심: 홀 유지 + 저장 포맷 유지(rings[]) ======
       function splitPolygonWithHolesToRings(polyFeature){
         const coords = polyFeature?.geometry?.coordinates;
         if (!Array.isArray(coords) || !coords.length) return { payloadRings: [], outlineRings: [] };
@@ -947,64 +899,35 @@
         const outer = coords[0];
         const holes = coords.slice(1).filter(r => Array.isArray(r) && r.length >= 4);
 
+        // 표시용(외곽+홀 경계)
         const outlineRings = [];
         if (Array.isArray(outer) && outer.length >= 4) outlineRings.push(outer);
         holes.forEach(h => outlineRings.push(h));
 
-        // holes 없으면 payload는 outer 1개
+        // 홀 없으면 그대로 1개 링
         if (!holes.length) return { payloadRings: [outer], outlineRings };
 
-        if (typeof turf.polygonize !== "function" ||
-            typeof turf.booleanPointInPolygon !== "function" ||
-            typeof turf.pointOnFeature !== "function") {
-          console.warn("[merge] turf functions missing; fallback outer only");
-          return { payloadRings: [outer], outlineRings };
-        }
-
-        const lines = [];
-        try {
-          lines.push(turf.lineString(outer));
-          holes.forEach(h => lines.push(turf.lineString(h)));
-
-          holes.forEach(h => {
-            const pair = closestVertexPair(h, outer);
-            if (!pair) return;
-            lines.push(turf.lineString([pair.a, pair.b]));
-          });
-
-          const polyFC = turf.polygonize(turf.featureCollection(lines));
-          const out = [];
-
-          for (const p of (polyFC?.features || [])) {
-            try {
-              if (!p?.geometry) continue;
-
-              // ✅ 핵심 1) 도넛(원본 polyFeature)로 클립 => 홀 내부 덮는 면적은 무조건 잘려나감
-              const clipped = safeIntersect(p, polyFeature);
-              if (!clipped || !clipped.geometry) continue;
-
-              // ✅ 핵심 2) boundary(경계) 위는 제외 => 홀 조각이 섞여 들어오는 케이스 차단
-              const pt = turf.pointOnFeature(clipped);
-              if (!turf.booleanPointInPolygon(pt, polyFeature, { ignoreBoundary: true })) continue;
-
-              // 찌꺼기 제거
-              const a = turf.area(clipped);
-              if (isFinite(a) && a < MIN_COMPONENT_AREA_SQM) continue;
-
-              // MultiPolygon 가능 => flatten 후 외곽링만 저장
-              const flats = flattenToPolygonFeatures(clipped);
-              for (const fp of flats) {
-                const r = fp?.geometry?.coordinates?.[0];
-                if (Array.isArray(r) && r.length >= 4) out.push(r);
-              }
-            } catch {}
+        // ✅ 1순위: tesselate(삼각분할) = 홀 영역은 애초에 면이 생성되지 않음
+        if (typeof turf.tesselate === "function") {
+          try {
+            const triFC = turf.tesselate(polyFeature);
+            const out = [];
+            for (const f of (triFC?.features || [])) {
+              const r = f?.geometry?.coordinates?.[0];
+              if (Array.isArray(r) && r.length >= 4) out.push(r);
+            }
+            if (out.length) return { payloadRings: out, outlineRings };
+            console.warn("[merge] tesselate produced empty -> fallback outer (hole lost)");
+            return { payloadRings: [outer], outlineRings };
+          } catch (e) {
+            console.warn("[merge] tesselate failed -> fallback outer (hole lost)", e);
+            return { payloadRings: [outer], outlineRings };
           }
-
-          return { payloadRings: out.length ? out : [outer], outlineRings };
-        } catch (e) {
-          console.warn("[merge] splitPolygonWithHolesToRings failed -> fallback outer only", e);
-          return { payloadRings: [outer], outlineRings };
         }
+
+        // turf.tesselate가 없으면(희박) 최후 fallback: outer(구멍 못 살림)
+        console.warn("[merge] turf.tesselate missing -> fallback outer (hole lost)");
+        return { payloadRings: [outer], outlineRings };
       }
 
       // ✅ 저장/표시 공통 계산:
@@ -1029,7 +952,7 @@
           console.warn("[merge] orig mask fail", e);
         }
 
-        // ✅ 핵심: 스냅으로 늘어난 부분을 원본 면적으로 잘라냄
+        // 스냅으로 늘어난 부분을 원본 면적으로 클립
         const mergedClipped =
           (origMask ? safeIntersect(mergedSnap, origMask) : null) || origMask || mergedSnap;
 
@@ -1054,7 +977,6 @@
         };
       }
 
-      // 병합 ON: 화면에 합쳐진 폴리곤만 표시 + 우편번호 라벨 숨김
       async function mergeOn(rebuildOnly=false){
         try {
           const res = await computeMergedRings();
@@ -1063,12 +985,12 @@
           const { payloadRings, outlineRings } = res;
 
           clearMerged();
-          state.mergedRingsWgs84 = payloadRings;               // ✅ 저장용(기존 포맷)
-          state.mergedOutlineRingsWgs84 = outlineRings;        // ✅ 표시용(외곽/홀 경계)
+          state.mergedRingsWgs84 = payloadRings;        // ✅ 저장용(기존 포맷)
+          state.mergedOutlineRingsWgs84 = outlineRings; // ✅ 표시용(외곽/홀 경계)
 
           const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-          // 1) ✅ fill만(테두리 없음) -> 조각 경계 seam 안 보이게
+          // 1) fill만(테두리 없음) -> 조각 seam 안 보이게
           for (const ring of payloadRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
@@ -1081,7 +1003,7 @@
               map: state.map,
               path: latlngs,
               strokeWeight: 1,
-              strokeOpacity: 0,         // ✅ seam 제거
+              strokeOpacity: 0,
               strokeColor: mergedColor,
               fillColor: mergedColor,
               fillOpacity: 0.20
@@ -1089,7 +1011,7 @@
             state.mergedPolygons.push(polyFill);
           }
 
-          // 2) ✅ 외곽/홀 경계는 Polyline으로 굵게 1번만 표시
+          // 2) 외곽/홀 경계는 Polyline으로 굵게
           for (const ring of outlineRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
@@ -1109,7 +1031,7 @@
             state.mergedPolygons.push(line);
           }
 
-          setOriginalVisible(false); // 라벨 포함 숨김
+          setOriginalVisible(false);
           setMergeUI(true);
           fitBoundsToRings(outlineRings);
         } catch (e) {
@@ -1143,7 +1065,6 @@
       }
 
       function closeSaveModal(){
-        // aria-hidden 경고 줄이기: 닫기 전에 포커스 이동
         $("#saveBtn")?.focus?.();
         $("#saveModal").classList.remove("open");
         $("#saveModal").setAttribute("aria-hidden","true");
@@ -1155,7 +1076,6 @@
         if (!camp) return alert("camp를 입력하세요");
         if (!code) return alert("code(라우트 코드)를 입력하세요");
 
-        // ✅ 화면을 건드리지 않고 저장용 rings만 계산
         let rings = state.mergedRingsWgs84;
 
         if (!rings || !rings.length) {
@@ -1245,7 +1165,6 @@
           }).open();
         };
 
-        // 헤더의 숨김 링크도 저장 모달로
         $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
 
         $("#saveCloseBtn").onclick = closeSaveModal;

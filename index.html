@@ -357,7 +357,7 @@
       // 스냅 거리(미터) - 계산만, 저장/표시는 origMask로 클립해서 절대 커지지 않게 함
       const MERGE_SNAP_METERS = 35;
 
-      // (컴포넌트 제거용) 너무 작은 찌꺼기 제거(㎡)
+      // 너무 작은 찌꺼기 제거(㎡)
       const MIN_COMPONENT_AREA_SQM = 800;
 
       const $ = (sel) => document.querySelector(sel);
@@ -374,8 +374,8 @@
 
         mergeMode: false,
         mergedPolygons: [],
-        mergedRingsWgs84: null,         // ✅ 저장 호환: rings[] (기존 포맷)
-        mergedOutlineRingsWgs84: null,  // ✅ 표시용: 외곽/홀 경계 ring들
+        mergedRingsWgs84: null,         // ✅ 저장 포맷: rings[]
+        mergedOutlineRingsWgs84: null,  // ✅ 표시용: 외곽/홀 경계 링들
 
         isSatellite: false,
         roadviewOn: false,
@@ -891,48 +891,135 @@
         return feats;
       }
 
-      // ====== ✅ 핵심: 홀 유지 + 저장 포맷 유지(rings[]) ======
-      function splitPolygonWithHolesToRings(polyFeature){
+      // ====== ✅ 핵심: 홀(구멍) 유지하면서 rings[]를 "소수 개"로 ======
+
+      function closestVertexPair(ringA, ringB){
+        // ringA/B: [[lng,lat]...]
+        let best = null;
+        let bestD = Infinity;
+
+        const aLen = ringA?.length || 0;
+        const bLen = ringB?.length || 0;
+        if (aLen < 2 || bLen < 2) return null;
+
+        for (let i = 0; i < aLen; i++) {
+          const a = ringA[i];
+          if (!Array.isArray(a) || a.length < 2) continue;
+          const ax = +a[0], ay = +a[1];
+          if (!isFinite(ax) || !isFinite(ay)) continue;
+
+          for (let j = 0; j < bLen; j++) {
+            const b = ringB[j];
+            if (!Array.isArray(b) || b.length < 2) continue;
+            const bx = +b[0], by = +b[1];
+            if (!isFinite(bx) || !isFinite(by)) continue;
+
+            const dx = ax - bx, dy = ay - by;
+            const d2 = dx*dx + dy*dy;
+            if (d2 < bestD) {
+              bestD = d2;
+              best = { a:[ax,ay], b:[bx,by] };
+            }
+          }
+        }
+        return best;
+      }
+
+      function pointInPolyStrict(pt, poly){
+        try {
+          return turf.booleanPointInPolygon(pt, poly, { ignoreBoundary: true });
+        } catch {
+          return false;
+        }
+      }
+
+      // polygonize 결과에서 "큰 outer(구멍 포함)" 같은 잘못된 면 제거:
+      // - 원본(polyFeature) 내부에 있어야 함
+      // - 그리고 hole 내부 점을 포함하면 탈락 (구멍을 덮는 면)
+      function polygonizePiecesForDonut(polyFeature, outer, holes){
+        if (typeof turf.polygonize !== "function") return null;
+        if (!outer || outer.length < 4 || !holes?.length) return null;
+
+        try {
+          const lines = [];
+          lines.push(turf.lineString(outer));
+          holes.forEach(h => lines.push(turf.lineString(h)));
+
+          // hole 내부를 찍는 점(각 hole당 1개)
+          const holePts = holes.map(h => turf.pointOnFeature(turf.polygon([h])));
+
+          // hole마다 outer와 가장 가까운 vertex-vertex로 bridge 1개
+          holes.forEach(h => {
+            const pair = closestVertexPair(h, outer);
+            if (!pair) return;
+            lines.push(turf.lineString([pair.a, pair.b]));
+          });
+
+          const fc = turf.featureCollection(lines);
+          const polyFC = turf.polygonize(fc);
+
+          const out = [];
+
+          for (const cand of (polyFC?.features || [])) {
+            if (!cand?.geometry || cand.geometry.type !== "Polygon") continue;
+
+            // 면 안에 찍히는 점
+            const pOn = turf.pointOnFeature(cand);
+
+            // 1) 원본 donut 영역 안쪽이어야 함
+            if (!pointInPolyStrict(pOn, polyFeature)) continue;
+
+            // 2) hole 내부 점을 포함하면(= hole을 덮는 면) 탈락
+            let coversHole = false;
+            for (const hp of holePts) {
+              if (pointInPolyStrict(hp, cand)) { coversHole = true; break; }
+            }
+            if (coversHole) continue;
+
+            // 3) 너무 작은 찌꺼기 제거
+            const a = turf.area(cand);
+            if (isFinite(a) && a < MIN_COMPONENT_AREA_SQM) continue;
+
+            const r = cand.geometry.coordinates?.[0];
+            if (Array.isArray(r) && r.length >= 4) {
+              closeRingLngLat(r);
+              out.push(r);
+            }
+          }
+
+          // 보통 2개 정도로 끝남 (깔끔)
+          return out.length ? out : null;
+        } catch (e) {
+          console.warn("[merge] polygonizePiecesForDonut failed", e);
+          return null;
+        }
+      }
+
+      function splitPolygonToPayloadRings(polyFeature){
         const coords = polyFeature?.geometry?.coordinates;
         if (!Array.isArray(coords) || !coords.length) return { payloadRings: [], outlineRings: [] };
 
         const outer = coords[0];
         const holes = coords.slice(1).filter(r => Array.isArray(r) && r.length >= 4);
 
-        // 표시용(외곽+홀 경계)
         const outlineRings = [];
         if (Array.isArray(outer) && outer.length >= 4) outlineRings.push(outer);
         holes.forEach(h => outlineRings.push(h));
 
-        // 홀 없으면 그대로 1개 링
+        // hole 없으면 그냥 outer 1개
         if (!holes.length) return { payloadRings: [outer], outlineRings };
 
-        // ✅ 1순위: tesselate(삼각분할) = 홀 영역은 애초에 면이 생성되지 않음
-        if (typeof turf.tesselate === "function") {
-          try {
-            const triFC = turf.tesselate(polyFeature);
-            const out = [];
-            for (const f of (triFC?.features || [])) {
-              const r = f?.geometry?.coordinates?.[0];
-              if (Array.isArray(r) && r.length >= 4) out.push(r);
-            }
-            if (out.length) return { payloadRings: out, outlineRings };
-            console.warn("[merge] tesselate produced empty -> fallback outer (hole lost)");
-            return { payloadRings: [outer], outlineRings };
-          } catch (e) {
-            console.warn("[merge] tesselate failed -> fallback outer (hole lost)", e);
-            return { payloadRings: [outer], outlineRings };
-          }
-        }
+        // ✅ 핵심: polygonize+bridge로 hole 없는 "소수 조각"으로 분해
+        const pieces = polygonizePiecesForDonut(polyFeature, outer, holes);
+        if (pieces && pieces.length) return { payloadRings: pieces, outlineRings };
 
-        // turf.tesselate가 없으면(희박) 최후 fallback: outer(구멍 못 살림)
-        console.warn("[merge] turf.tesselate missing -> fallback outer (hole lost)");
+        // 만약 polygonize가 죽는 환경이면(드묾) fallback은 outer로(최소한 포맷은 유지)
+        // (여기서 fallback을 tesselate로 가면 다시 조각지옥이라 일부러 안 감)
+        console.warn("[merge] polygonize not available or failed -> fallback outer (hole may fill)");
         return { payloadRings: [outer], outlineRings };
       }
 
-      // ✅ 저장/표시 공통 계산:
-      // - payloadRings: 기존 저장 형식 rings[] (홀 없는 조각 폴리곤들)
-      // - outlineRings: 외곽/홀 경계 링들(표시용)
+      // ✅ 저장/표시 공통 계산
       async function computeMergedRings(){
         await drawSelected();
 
@@ -964,7 +1051,8 @@
 
         for (const p of polys) {
           const stabilized = stabilizeFeature(p);
-          const { payloadRings: pr, outlineRings: or } = splitPolygonWithHolesToRings(stabilized);
+
+          const { payloadRings: pr, outlineRings: or } = splitPolygonToPayloadRings(stabilized);
           pr.forEach(r => { if (Array.isArray(r) && r.length >= 4) payloadRings.push(r); });
           or.forEach(r => { if (Array.isArray(r) && r.length >= 4) outlineRings.push(r); });
         }
@@ -986,11 +1074,11 @@
 
           clearMerged();
           state.mergedRingsWgs84 = payloadRings;        // ✅ 저장용(기존 포맷)
-          state.mergedOutlineRingsWgs84 = outlineRings; // ✅ 표시용(외곽/홀 경계)
+          state.mergedOutlineRingsWgs84 = outlineRings; // ✅ 표시용
 
           const mergedColor = darkenHex(pickColor("merged"), 0.18);
 
-          // 1) fill만(테두리 없음) -> 조각 seam 안 보이게
+          // 1) fill (stroke 숨김) -> 조각 seam 안 보이게
           for (const ring of payloadRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {
@@ -1011,7 +1099,7 @@
             state.mergedPolygons.push(polyFill);
           }
 
-          // 2) 외곽/홀 경계는 Polyline으로 굵게
+          // 2) 외곽/홀 경계 Polyline
           for (const ring of outlineRings) {
             const latlngs = ring.map(([lng,lat]) => new kakao.maps.LatLng(lat, lng));
             if (latlngs.length > 1) {

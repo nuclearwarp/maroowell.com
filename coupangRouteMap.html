@@ -2,7 +2,3587 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" /><!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>마루웰 라우트 편집기</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1a2d;
+      --panel2:#0c1627;
+      --txt:#e6eefc;
+      --muted:#93a4c7;
+      --line:rgba(255,255,255,.08);
+      --btn:#162744;
+      --btn2:#1a2f55;
+      --danger:#6b1b1b;
+      --ok:#1a5a3a;
+      --warn:#6a4b13;
+      --overlay:rgba(0,0,0,.55);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%; margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif; background:#0a0f1a;}
+    .wrap{display:flex; height:100%;}
+    .left{
+      width:360px; min-width:340px; max-width:420px;
+      background:linear-gradient(180deg,var(--bg),#070b13);
+      color:var(--txt);
+      border-right:1px solid var(--line);
+      padding:14px 14px 10px 14px;
+      overflow:auto;
+    }
+    .title{font-size:18px; font-weight:800; letter-spacing:.2px; margin:2px 0 10px; display:flex; align-items:center; gap:6px;}
+    .subtitle{font-size:12px; color:var(--muted); margin:-6px 0 14px;}
+    .group{background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:12px; padding:10px; margin:10px 0;}
+    .label{font-size:12px; color:var(--muted); margin:6px 0 6px;}
+    .label.sectionTitle{ text-align:center; font-weight:900; letter-spacing:.2px; }
+    input[type="text"]{
+      width:100%;
+      padding:10px 10px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      outline:none;
+    }
+    input[type="text"]:focus{border-color:rgba(255,255,255,.25)}
+    .row{display:flex; gap:8px; align-items:center;}
+    .row > *{flex:1}
+    .btn{
+      padding:10px 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:var(--btn);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:700;
+      font-size:13px;
+      white-space:nowrap;
+    }
+    .btn:hover{background:var(--btn2)}
+    .btn.danger{background:rgba(107,27,27,.35); border-color:rgba(255,60,60,.22)}
+    .btn.danger:hover{background:rgba(107,27,27,.55)}
+    .btn.ok{background:rgba(26,90,58,.35); border-color:rgba(0,255,140,.18)}
+    .btn.ok:hover{background:rgba(26,90,58,.55)}
+    .btn.warn{background:rgba(106,75,19,.35); border-color:rgba(255,180,0,.18)}
+    .btn.warn:hover{background:rgba(106,75,19,.55)}
+    /* ✅ 벤더(주간/야간) 표시 */
+    .kv{
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.18);
+      padding:6px 10px; /* ⬅ 칸 크기 소폭 축소 */
+    }
+    .kvRow{
+      display:grid;
+      grid-template-columns: 92px 1fr;
+      align-items:center;
+      column-gap:10px;
+      padding:0;
+      min-height:32px; /* ⬅ 높이 소폭 축소 */
+    }
+    .kvRow + .kvRow{border-top:1px solid var(--line);}
+    .kvLabel{
+      display:flex;
+      align-items:center;
+      height:32px;
+      font-size:12px;
+      color:rgba(230,238,252,.72);
+      white-space:nowrap;
+      transform:translateY(2px); /* ⬅ 글자 상단 쏠림 보정(패딩으로 칸 늘리지 않음) */
+    }
+    .kvValue{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      height:32px;
+      font-size:13px;
+      font-weight:900;
+      color:rgba(255,255,255,.92);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      transform:translateY(2px); /* ⬅ 글자 상단 쏠림 보정 */
+    }
+    .kvValue.empty{
+      color:rgba(230,238,252,.45);
+      font-weight:800;
+    }
+
+    /* ✅ 벤더 선택/1W·2W 선택 모달 */
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.35);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:2000;
+      backdrop-filter: blur(2px);
+    }
+    .modalCard{
+      width:min(720px, calc(100% - 40px));
+      max-height:min(720px, calc(100% - 40px));
+      background:linear-gradient(180deg, rgba(15,26,45,.96), rgba(8,14,26,.96));
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:18px;
+      box-shadow:0 22px 80px rgba(0,0,0,.55);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .modalTop{
+      padding:14px 14px 10px 14px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .modalTitle{
+      font-weight:900;
+      color:#eaf2ff;
+      letter-spacing:.2px;
+      white-space:nowrap;
+    }
+    .modalTop .miniBtn{
+      height:36px;
+      padding:0 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.25);
+      color:#fff;
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      white-space:nowrap;
+    }
+    .modalTop .miniBtn:hover{background:rgba(0,0,0,.35)}
+    .modalBody{
+      flex:1;
+      overflow:auto;
+      padding:12px 14px;
+    }
+    .modalMeta{
+      padding:10px 14px;
+      color:rgba(230,238,252,.70);
+      font-size:12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+    }
+    .waveGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+      padding:14px;
+    }
+    .waveBtn{
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.20);
+      color:#fff;
+      cursor:pointer;
+      padding:14px 12px;
+      text-align:left;
+      font-weight:900;
+    }
+    .waveBtn:hover{background:rgba(0,0,0,.30)}
+    .waveBtn .sub{
+      display:block;
+      margin-top:6px;
+      color:rgba(230,238,252,.70);
+      font-size:12px;
+      font-weight:800;
+    }
+    .logWrap{
+      border-radius:12px;
+      border:1px solid var(--line);
+      overflow:hidden;
+      background:rgba(0,0,0,.25);
+      margin-top:10px;
+    }
+    .logHeader{
+      padding:8px 10px;
+      border-bottom:1px solid var(--line);
+      display:flex; align-items:center; justify-content:space-between;
+      font-size:12px; color:var(--muted);
+    }
+    .log{
+      height:170px;
+      overflow:auto;
+      padding:8px 10px;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:12px;
+      white-space:pre-wrap;
+      color:#d9e5ff;
+    }
+    .pill{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+      font-size:12px;
+      color:var(--muted);
+    }
+    .map{flex:1; position:relative;}
+
+    /* ✅ mapWrap/roadview (index.html 스타일 이식) */
+    #mapWrap{
+      position:absolute;
+      inset:0;
+      display:flex;
+      min-width:0;
+      min-height:0;
+    }
+    #map,#roadview{
+      flex:1;
+      width:100%;
+      height:100%;
+      min-width:0;
+      min-height:0;
+    }
+    #roadview{display:none;}
+    #mapWrap.roadview-open #roadview{display:block;}
+
+    .map-controls{
+      position:absolute;
+      top:10px;
+      right:10px;
+      z-index:25;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      pointer-events:auto;
+    }
+    .map-controls button{
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(255,255,255,.14);
+      color:#fff;
+      padding:8px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:800;
+      font-size:12px;
+      backdrop-filter: blur(6px);
+    }
+    .map-controls button:hover{
+      background:rgba(0,0,0,.68);
+      border-color:rgba(255,255,255,.22);
+    }
+    .map-controls .hint{
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.55);
+      color:#cbd5e1;
+      font-size:12px;
+      display:none;
+    }
+
+    .floatingHint{
+      position:absolute;
+      top:10px; left:10px;
+      background:rgba(0,0,0,.55);
+      color:#fff;
+      border:1px solid rgba(255,255,255,.14);
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:12px;
+      max-width:520px;
+      display:none;
+      z-index:20;
+      pointer-events:none;
+    }
+    .sep{height:1px; background:var(--line); margin:10px 0;}
+    .small{font-size:11px; color:var(--muted);}
+
+    /* ✅ 카카오지도 스타일 검색 모달 */
+    .searchModal{
+      position:absolute;
+      inset:0;
+      background:rgba(0,0,0,.20);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:999;
+      backdrop-filter: blur(2px);
+    }
+    .searchCard{
+      width:min(860px, calc(100% - 40px));
+      height:min(680px, calc(100% - 40px));
+      background:linear-gradient(180deg, rgba(15,26,45,.96), rgba(8,14,26,.96));
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:18px;
+      box-shadow:0 22px 80px rgba(0,0,0,.55);
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+    }
+    .searchTop{
+      padding:14px 14px 10px 14px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .searchTopTitle{
+      font-weight:900;
+      color:#eaf2ff;
+      letter-spacing:.2px;
+      margin-right:4px;
+      white-space:nowrap;
+    }
+    .searchInput{
+      flex:1;
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .searchInput input{
+      flex:1;
+      height:40px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.25);
+      color:#eaf2ff;
+      padding:0 12px;
+      outline:none;
+    }
+    .searchInput input:focus{border-color:rgba(255,255,255,.25)}
+    .searchTop .miniBtn{
+      height:40px;
+      padding:0 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.25);
+      color:#fff;
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      white-space:nowrap;
+    }
+    .searchTop .miniBtn:hover{background:rgba(0,0,0,.35)}
+    .searchMeta{
+      padding:10px 14px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      color:rgba(230,238,252,.80);
+      font-size:12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    .searchBody{
+      flex:1;
+      overflow:auto;
+      padding:12px 14px;
+    }
+    .sectionTitle{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin:10px 0 8px;
+      color:#eaf2ff;
+      font-weight:900;
+      letter-spacing:.2px;
+    }
+    .sectionTitle .count{
+      font-size:12px;
+      color:rgba(230,238,252,.65);
+      font-weight:800;
+    }
+    .resultCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(0,0,0,.16);
+      border-radius:14px;
+      padding:12px 12px;
+      margin-bottom:10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      cursor:pointer;
+    }
+    .resultCard:hover{
+      border-color:rgba(255,255,255,.18);
+      background:rgba(0,0,0,.22);
+    }
+    .resultTitle{
+      font-weight:900;
+      color:#fff;
+      margin-bottom:6px;
+      line-height:1.2;
+      word-break:keep-all;
+    }
+    .resultSub{
+      color:rgba(230,238,252,.70);
+      font-size:12px;
+      line-height:1.45;
+      white-space:pre-line;
+    }
+    .createBox{
+      padding:12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(255,255,255,0.04);
+    }
+    .createHead{
+      font-weight:800;
+      font-size:14px;
+      letter-spacing:.2px;
+    }
+
+
+    .createDesc{
+      margin-top:6px;
+      color:rgba(230,238,252,.62);
+      font-size:12px;
+      line-height:1.4;
+    }
+    .createForm{
+      margin-top:12px;
+      display:grid;
+      grid-template-columns:1fr;
+      gap:10px;
+    }
+    @media (min-width: 860px){
+      .createForm{ grid-template-columns: 1fr 1fr; }
+    }
+    .createField{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width:0;
+    }
+    .createLabel{
+      font-size:12px;
+      color:rgba(230,238,252,.70);
+      font-weight:800;
+    }
+    .createInput{
+      width:100%;
+      height:40px;
+      padding:0 12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.18);
+      color:#fff;
+      outline:none;
+      box-sizing:border-box;
+    }
+    .createInput:focus{
+      border-color: rgba(92,162,255,.55);
+      box-shadow: 0 0 0 3px rgba(92,162,255,.15);
+    }
+    .createActions{
+      margin-top:12px;
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:10px;
+    }
+    .createBtn{
+      height:40px;
+      padding:0 16px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.16);
+      background:linear-gradient(180deg, rgba(58,130,255,.45), rgba(58,130,255,.22));
+      color:#fff;
+      font-weight:900;
+      cursor:pointer;
+    }
+    .createBtn:hover{ filter:brightness(1.06); }
+    .createBtn:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+      filter:none;
+    }
+    .tagPill{
+      flex:0 0 auto;
+      margin-left:10px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      color:rgba(230,238,252,.85);
+      font-weight:900;
+      font-size:12px;
+      background:rgba(255,255,255,.04);
+      align-self:center;
+      white-space:nowrap;
+    }
+    .searchBottom{
+      padding:10px 14px 14px;
+      border-top:1px solid rgba(255,255,255,.10);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      color:rgba(230,238,252,.70);
+      font-size:12px;
+    }
+    .pager{
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .pager .miniBtn{
+      height:30px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.18);
+      color:#fff;
+      cursor:pointer;
+      font-weight:900;
+      font-size:12px;
+    }
+    .pager .miniBtn:hover{background:rgba(0,0,0,.30)}
+    .kbdHint{
+      color:rgba(230,238,252,.55);
+      font-size:12px;
+      white-space:nowrap;
+    }
+  
+  /* --- vendor search UX additions --- */
+  .btnSearch{padding:10px 14px; min-width:86px;}
+  .pillRow{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:6px 10px; border-radius:999px;
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.04);
+    color:var(--muted);
+    font-size:12px;
+    gap:10px;
+  }
+  .pillX{
+    width:22px; height:22px; border-radius:999px;
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.06);
+    color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .pillX:hover{background:rgba(255,255,255,.12);}
+  .resultActions{display:flex; gap:8px; align-items:center;}
+  .miniX{
+    min-width:34px; height:32px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05);
+    color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .miniX:hover{background:rgba(255,255,255,.10);}
+  .kvRow{min-height:32px;}
+  .kvLabel, .kvValue{line-height:1.15;}
+
+  /* vendor modal empty state */
+  .emptyMsg{
+    padding:10px 6px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.06);
+    color:#fff;
+    font-weight:900;
+    font-size:13px;
+  }
+</style>
+
+  <!-- Kakao Maps -->
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
+</head>
+
+<body>
+<div class="wrap">
+  <div class="left">
+    <div class="title">
+      <a href="/index.html" style="display:flex;align-items:center">
+        <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
+      </a>
+      <span>마루웰 라우트 편집기</span>
+    </div>
+
+    <div class="group">
+      <div class="label">캠프 이름 (예: 평양1)</div>
+      <input id="campInput" type="text" value="" />
+
+      <div class="label">라우트 코드 (예: 101A,101B) — 비우면 camp 전체 표시</div>
+      <input id="codeInput" type="text" value="" />
+
+      <div class="sep"></div>
+
+      <div class="label sectionTitle">벤더 정보(서브라우트 단위)</div>
+
+      <div class="kv">
+        <div class="kvRow">
+          <div class="kvLabel">주간 (2W)</div>
+          <div class="kvValue" id="vendorWeekValue">-</div>
+        </div>
+        <div class="kvRow">
+          <div class="kvLabel">야간 (1W)</div>
+          <div class="kvValue" id="vendorNightValue">-</div>
+        </div>
+      </div>
+
+      <div style="height:10px"></div>
+      <div class="row" style="gap:10px;">
+            <input id="vendorSearchInput" type="text" placeholder="벤더명/사업자번호 일부 입력 후 Enter" style="flex:1;" />
+            <button id="vendorSearchBtn" class="btn btnSearch" type="button">검색</button>
+          </div>
+
+      <div style="height:10px"></div>
+      <div class="row">
+        <button id="vendorSaveBtn" class="btn ok">벤더 저장</button>
+        <button id="vendorClearBtn" class="btn danger">벤더 비우기</button>
+      </div>
+
+      <div style="height:8px"></div>
+      <div id="vendorPickedWrap" class="pillRow" style="display:none;margin-top:8px;">
+            <div id="vendorPickedText"></div>
+            <button id="vendorPickedClearBtn" class="pillX" type="button" title="선택 해제">✕</button>
+          </div>
+
+      <div class="sep"></div>
+
+      <div class="label sectionTitle">입차지 정보(서브라우트 단위)</div>
+      <input id="deliveryNameInput" type="text" placeholder="입차지 (예: 본캠프 or 식사동MB)" />
+      <div style="height:8px"></div>
+      <input id="deliveryAddrInput" type="text" placeholder="입차지 주소 (상세히)" />
+
+      <div style="height:10px"></div>
+      <div class="row">
+        <button id="deliverySaveBtn" class="btn ok">입차지 저장</button>
+        <button id="deliveryClearBtn" class="btn danger">입차지 비우기</button>
+      </div>
+</div>
+
+    <div class="group" id="addressListGroup" style="display:none">
+      <div class="label">배송지 목록 (입차지→배송지 네비)</div>
+      <div id="addressList" style="max-height:300px; overflow-y:auto; margin-top:8px;"></div>
+</div>
+
+    <div class="group">
+      <div class="row">
+        <button id="loadBtn" class="btn">불러오기</button>
+        <button id="drawNewBtn" class="btn warn">새로 그리기</button>
+        <button id="drawAddBtn" class="btn warn">구역 추가</button>
+      </div>
+      <div style="height:8px"></div>
+      <div class="row">
+        <button id="saveBtn" class="btn ok">저장</button>
+        <button id="deletePolyBtn" class="btn danger">폴리곤 삭제</button>
+        <button id="vendorLabelToggleBtn" class="btn">벤더 라벨 OFF</button>
+      </div>
+      <div style="height:8px"></div>
+      <div class="row">
+        <button id="addrBtn" class="btn">주소검색</button>
+        <button id="labelToggleBtn" class="btn">라우트 라벨 ON</button>
+        <button id="resetBtn" class="btn">지도 초기화</button>
+      </div>
+      <div style="height:8px"></div>
+      <div class="row">
+        <button id="shareBtn" class="btn ok" style="width:100%;">🔗 공유 링크 생성</button>
+      </div>
+</div>
+
+    <div class="logWrap">
+      <div class="logHeader">
+        <span class="pill" id="statusPill">READY</span>
+        <span class="small" id="selectedInfo">선택: 없음</span>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+</div>
+
+  <div class="map">
+    <div id="mapWrap">
+      <div id="map"></div>
+      <div id="roadview"></div>
+    </div>
+
+    <div class="map-controls">
+      <button id="toggleMapType" title="일반/위성 전환">위성</button>
+      <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
+      <span id="roadviewHint" class="hint">로드뷰: 파란 길 클릭</span>
+    </div>
+
+    <div class="floatingHint" id="hint"></div>
+
+    <!-- ✅ 카카오지도 스타일 검색 모달 -->
+    <div class="searchModal" id="searchModal" aria-hidden="true">
+      <div class="searchCard" role="dialog" aria-modal="true" aria-label="카카오지도 검색">
+        <div class="searchTop">
+          <div class="searchTopTitle">카카오지도 검색</div>
+          <div class="searchInput">
+            <input id="searchQ" type="text" placeholder="장소, 주소, 키워드 검색" autocomplete="off" />
+            <button id="searchRunBtn" class="miniBtn">검색</button>
+            <button id="searchCloseBtn" class="miniBtn" style="background:rgba(255,80,80,.18);border-color:rgba(255,80,80,.26)">닫기</button>
+          </div>
+        </div>
+        <div class="searchMeta">
+          <div class="kbdHint">Enter: 검색 · ESC: 닫기/마커삭제</div>
+          <div id="searchMetaCount">주소 0개 · 장소 0개</div>
+        </div>
+        <div class="searchBody" id="searchResults"></div>
+        <div class="searchBottom">
+          <div class="kbdHint">주소 검색 결과 + 장소(키워드) 결과를 동시에 표시합니다</div>
+          <div class="pager">
+            <button id="placePrevBtn" class="miniBtn">이전</button>
+            <span id="placePageInfo">장소 페이지 1 / 1</span>
+            <button id="placeNextBtn" class="miniBtn">다음</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+
+<!-- ✅ 벤더 검색 결과 선택 모달 -->
+<div class="modal" id="vendorModal" aria-hidden="true">
+  <div class="modalCard" role="dialog" aria-modal="true" aria-label="벤더 선택">
+    <div class="modalTop">
+      <div class="modalTitle">벤더 선택</div>
+      <button id="vendorModalCloseBtn" class="miniBtn" style="background:rgba(255,80,80,.18);border-color:rgba(255,80,80,.26)">닫기</button>
+    </div>
+    <div class="modalMeta">
+      <div class="kbdHint">클릭: 선택 · ESC: 닫기</div>
+      <div id="vendorMetaCount">0개</div>
+    </div>
+    <div class="modalBody" id="vendorResults"></div>
+  </div>
+</div>
+
+<!-- ✅ 1W/2W 선택 모달 -->
+<div class="modal" id="waveModal" aria-hidden="true">
+  <div class="modalCard" role="dialog" aria-modal="true" aria-label="1W/2W 선택" style="width:min(520px, calc(100% - 40px)); max-height:none;">
+    <div class="modalTop">
+      <div class="modalTitle" id="waveModalTitle">저장 구분 선택</div>
+      <button id="waveModalCloseBtn" class="miniBtn" style="background:rgba(255,80,80,.18);border-color:rgba(255,80,80,.26)">닫기</button>
+    </div>
+    <div class="modalMeta">
+      <div class="kbdHint">주간/야간 중 하나를 선택하세요</div>
+      <div class="pill" id="waveModalVendorPill" style="display:none"></div>
+    </div>
+    <div class="waveGrid">
+      <button id="wave2WBtn" class="waveBtn">주간 (2W)<span class="sub">2W로 저장</span></button>
+      <button id="wave1WBtn" class="waveBtn">야간 (1W)<span class="sub">1W로 저장</span></button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ====== 환경 설정 ======
+  const API_BASE = "https://route.maroowell.com"; // 필요시 변경
+  const ROUTE_ENDPOINT = `${API_BASE}/route`;
+  const OSM_ENDPOINT = `${API_BASE}/osm`;
+  const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
+  const VENDORS_ENDPOINT = `${API_BASE}/vendors`; // ✅ 벤더 검색(이름 부분 일치)
+
+  // ====== DOM ======
+  const $ = (id) => document.getElementById(id);
+
+  const campInput = $("campInput");
+  const codeInput = $("codeInput");
+
+  // ✅ 벤더(주간/야간)
+  const vendorWeekValue = $("vendorWeekValue");
+  const vendorNightValue = $("vendorNightValue");
+  const vendorSearchInput = $("vendorSearchInput");
+  const vendorSearchBtn = $("vendorSearchBtn");
+  const vendorPickedWrap = $("vendorPickedWrap");
+  const vendorPickedText = $("vendorPickedText");
+  const vendorPickedClearBtn = $("vendorPickedClearBtn");
+
+  // ✅ 벤더 선택 모달
+  const vendorModalEl = $("vendorModal");
+  const vendorModalCloseBtn = $("vendorModalCloseBtn");
+  const vendorMetaCountEl = $("vendorMetaCount");
+  const vendorResultsEl = $("vendorResults");
+
+  // ✅ 1W/2W 선택 모달
+  const waveModalEl = $("waveModal");
+  const waveModalCloseBtn = $("waveModalCloseBtn");
+  const waveModalTitleEl = $("waveModalTitle");
+  const waveModalVendorPillEl = $("waveModalVendorPill");
+  const wave1WBtn = $("wave1WBtn");
+  const wave2WBtn = $("wave2WBtn");
+
+  // ✅ 입차지
+  const deliveryNameInput = $("deliveryNameInput");
+  const deliveryAddrInput = $("deliveryAddrInput");
+
+  const loadBtn = $("loadBtn");
+  const drawNewBtn = $("drawNewBtn");
+  const drawAddBtn = $("drawAddBtn");
+  const addrBtn = $("addrBtn");
+  const saveBtn = $("saveBtn");
+  const deletePolyBtn = $("deletePolyBtn");
+  const vendorLabelToggleBtn = $("vendorLabelToggleBtn");
+  const labelToggleBtn = $("labelToggleBtn");
+  const resetBtn = $("resetBtn");
+  const vendorSaveBtn = $("vendorSaveBtn");
+  const vendorClearBtn = $("vendorClearBtn");
+  const deliverySaveBtn = $("deliverySaveBtn");
+  const deliveryClearBtn = $("deliveryClearBtn");
+  const shareBtn = $("shareBtn");
+
+  const logEl = $("log");
+  const statusPill = $("statusPill");
+  const selectedInfo = $("selectedInfo");
+  const hintEl = $("hint");
+
+  // 지도 컨트롤
+  const toggleMapTypeBtn = $("toggleMapType");
+  const toggleRoadviewBtn = $("toggleRoadview");
+  const roadviewHintEl = $("roadviewHint");
+  const mapWrapEl = $("mapWrap");
+
+  // 검색 모달
+  const searchModalEl = $("searchModal");
+  const searchQEl = $("searchQ");
+  const searchRunBtn = $("searchRunBtn");
+  const searchCloseBtn = $("searchCloseBtn");
+  const searchResultsEl = $("searchResults");
+  const searchMetaCountEl = $("searchMetaCount");
+  const placePrevBtn = $("placePrevBtn");
+  const placeNextBtn = $("placeNextBtn");
+  const placePageInfoEl = $("placePageInfo");
+
+  // ====== 로그 ======
+  const ts = () => {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    const ss = String(d.getSeconds()).padStart(2,"0");
+    return `[${hh}:${mm}:${ss}]`;
+  };
+  function setStatus(t, kind="READY") {
+    statusPill.textContent = kind;
+    statusPill.style.borderColor =
+      kind === "ERR" ? "rgba(255,60,60,.35)" :
+      kind === "WARN" ? "rgba(255,180,0,.30)" :
+      kind === "OK" ? "rgba(0,255,140,.22)" :
+      "rgba(255,255,255,.10)";
+    statusPill.style.background =
+      kind === "ERR" ? "rgba(255,60,60,.12)" :
+      kind === "WARN" ? "rgba(255,180,0,.10)" :
+      kind === "OK" ? "rgba(0,255,140,.08)" :
+      "rgba(255,255,255,.04)";
+    if (t) log(`${kind} ${t}`);
+  }
+  function log(msg) {
+    logEl.textContent += `${ts()} ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function hint(msg, show=true) {
+    hintEl.textContent = msg;
+    hintEl.style.display = show ? "block" : "none";
+  }
+
+  // ====== 상태 ======
+  let map, geocoder, places;
+
+  /** @type {Array<any>} */
+  let routeRows = []; // API에서 받은 row들
+  let addressRows = []; // 배송지 목록
+
+  /**
+   * rowId -> { row, polygons: kakao.maps.Polygon[], labels: kakao.maps.CustomOverlay[] }
+   */
+  const overlayById = new Map();
+
+  // 선택/편집 상태
+  let selectedRouteId = null;   // 클릭으로 선택된 라우트(id)
+  let editingRouteId = null;    // Enter로 편집 중인 라우트(id)
+  let editHandles = [];         // kakao.maps.Marker[]
+  let editPolygons = [];        // kakao.maps.Polygon[]
+  let labelOn = true;
+  let vendorLabelOn = false;
+
+  // ✅ 라벨 위치 수동조정(편집모드) 임시 비활성화: 떨어진 폴리곤 조각별 라벨 표기 우선
+  const LABEL_ANCHOR_EDIT_ENABLED = false;
+
+  // ✅ 벤더 검색/필터 상태
+  let vendorCandidate = null;              // { name, business_number, vendor_code }
+  let vendorFilterBusinessNumber = null;   // 불러오기(검색)용
+
+
+  // ✅ (추가) 폴리곤 개별 삭제 X 오버레이
+  let deleteOverlays = []; // kakao.maps.CustomOverlay[]
+
+  // 커스텀 드래그 상태
+  let draggingVertex = null; // { marker, polygon, index }
+
+  // 그리기 상태
+  let drawMode = null; // "new" | "add" | null
+  let drawPoints = []; // kakao.maps.LatLng[]
+  let drawMarkers = []; // kakao.maps.Marker[]
+  let drawLine = null; // kakao.maps.Polyline
+
+  // OSM 오버레이
+  let osmOverlays = [];
+
+  // ✅ 검색 선택 마커 (ESC로 삭제)
+  let searchSelectedMarker = null;
+  let searchSelectedOverlay = null;
+
+  // ✅ 위성/로드뷰
+  let isSatellite = false;
+  let roadviewOn = false;    // 길 선택 모드 on/off
+  let roadviewOpen = false;  // 실제 roadview 화면 open 여부
+  let roadview = null;
+  let roadviewClient = null;
+  let roadviewClickHandler = null;
+
+  // ✅ 검색 모달 상태
+  let searchModalOpen = false;
+  let searchQuery = "";
+  let placePage = 1;
+  let placeLast = 1;
+  let placeTotal = 0;
+  let placeItems = [];
+  let addrItems = [];
+
+  // ====== 컬러(인접 라우트 색 차이 + 눈부심 완화) ======
+  // - 라우트 목록(full_code 정렬) 기준으로 "골든 앵글" 분산 색상을 부여합니다.
+  // - 채도/명도는 낮춰서(눈부심 완화) 라벨/선만 또렷하게 보이게 합니다.
+  const GOLDEN_ANGLE = 137.50776405003785;
+
+  function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+  function hslToHex(h, s, l) {
+    // h:0-360, s/l:0-100
+    h = ((h % 360) + 360) % 360;
+    s = clamp01(s / 100);
+    l = clamp01(l / 100);
+
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const hh = h / 60;
+    const x = c * (1 - Math.abs((hh % 2) - 1));
+    let r=0,g=0,b=0;
+
+    if (0 <= hh && hh < 1) { r=c; g=x; b=0; }
+    else if (1 <= hh && hh < 2) { r=x; g=c; b=0; }
+    else if (2 <= hh && hh < 3) { r=0; g=c; b=x; }
+    else if (3 <= hh && hh < 4) { r=0; g=x; b=c; }
+    else if (4 <= hh && hh < 5) { r=x; g=0; b=c; }
+    else { r=c; g=0; b=x; }
+
+    const m = l - c/2;
+    const to255 = (v)=> Math.round((v+m)*255);
+    const rr = to255(r), gg = to255(g), bb = to255(b);
+
+    const hex = (n)=> n.toString(16).padStart(2,"0");
+    return `#${hex(rr)}${hex(gg)}${hex(bb)}`;
+  }
+
+  // fallback(단독 호출) - 색상 강제 저장하지 않고 "표시용"으로만 씁니다.
+  function colorFor(code) {
+    const str = String(code||"");
+    let h = 2166136261; // FNV-1a
+    for (let i=0;i<str.length;i++){
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const hue = (h >>> 0) % 360;
+    const sat = 28;
+    const light = 60;
+    return hslToHex(hue, sat, light);
+  }
+
+
+  // ✅ 인접 라우트 색상 겹침 최소화: 정렬 순서 기반 골든 앵글 분산(저채도/중명도)
+  function buildDisplayColors(rows) {
+    const arr = Array.isArray(rows) ? rows.slice() : [];
+    const keyOf = (r) => String(r?.full_code || r?.code || r?.route_code || "");
+    arr.sort((a,b)=> keyOf(a).localeCompare(keyOf(b), "en", { numeric:true, sensitivity:"base" }));
+
+    // camp 기반 seed (같은 camp는 같은 시작색)
+    const camp = String(arr[0]?.camp || "");
+    let seed = 2166136261; // FNV-1a
+    for (let i=0;i<camp.length;i++){
+      seed ^= camp.charCodeAt(i);
+      seed = Math.imul(seed, 16777619);
+    }
+    const startHue = (seed >>> 0) % 360;
+    const golden = 137.50776405003785; // degrees
+
+    const map = new Map();
+    for (let i=0;i<arr.length;i++){
+      const r = arr[i];
+      const idKey = (typeof r?.id === "number" || typeof r?.id === "string") ? r.id : keyOf(r);
+      const hue = (startHue + i * golden) % 360;
+      const sat = 42 + ((i * 11) % 18);      // 42~59 (적당한 채도)
+      const light = 48 + ((i * 7) % 10);      // 48~57 (중저명도)
+      map.set(idKey, hslToHex(hue, sat, light));
+    }
+    return map;
+  }
+
+  // ====== API ======
+  async function apiGet(url) {
+    const res = await fetch(url, { method:"GET" });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!res.ok) {
+      const msg = json?.error || text || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return json;
+  }
+  async function apiJson(method, url, body) {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type":"application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
+    if (!res.ok) {
+      const msg = json?.error || text || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    return json;
+  }
+
+  // ====== 유틸: polygon_wgs84 파싱 ======
+  function parsePolygonWgs84(v, debugId = "") {
+    if (!v) return null;
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string") {
+      try {
+        const p = JSON.parse(v);
+        if (Array.isArray(p)) return p;
+      } catch (e) {
+        if (debugId) log(`⚠ 폴리곤 파싱 실패: ${debugId}`);
+      }
+    }
+    return null;
+  }
+
+  // ====== 지도 오버레이 정리 ======
+  function clearAllOverlays() {
+    stopEditing();
+    stopDraw(true);
+    clearOsm();
+
+    for (const {polygons, labels} of overlayById.values()) {
+      polygons.forEach(p => p.setMap(null));
+      labels.forEach(l => l.setMap(null));
+    }
+    overlayById.clear();
+    routeRows = [];
+    selectedRouteId = null;
+    editingRouteId = null;
+    selectedInfo.textContent = "선택: 없음";
+
+    clearVendorDisplay();
+    deliveryNameInput.value = "";
+    deliveryAddrInput.value = "";
+  }
+
+  function clearOsm() {
+    osmOverlays.forEach(o => o.setMap(null));
+    osmOverlays = [];
+  }
+
+  // ====== 라벨 ======
+  function centroidOfLatLngs(latlngs) {
+    let latSum=0, lngSum=0;
+    for (const ll of latlngs) { latSum += ll.getLat(); lngSum += ll.getLng(); }
+    return new kakao.maps.LatLng(latSum/latlngs.length, lngSum/latlngs.length);
+  }
+  function normalizeCenterWgs84(v) {
+    if (!v) return null;
+    let obj = v;
+    if (typeof obj === "string") {
+      try { obj = JSON.parse(obj); } catch { return null; }
+    }
+    let lat = null, lng = null;
+
+    if (Array.isArray(obj) && obj.length >= 2) {
+      const a = Number(obj[0]);
+      const b = Number(obj[1]);
+      // [lng,lat] or [lat,lng] heuristic
+      if (Math.abs(a) > Math.abs(b)) { lng = a; lat = b; }
+      else { lat = a; lng = b; }
+    } else if (obj && typeof obj === "object") {
+      lat = Number(obj.lat ?? obj.latitude ?? obj.y);
+      lng = Number(obj.lng ?? obj.lon ?? obj.longitude ?? obj.x);
+    }
+
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return new kakao.maps.LatLng(lat, lng);
+  }
+
+  function vendorNameOnly(name, bn) {
+    const n = (name ?? "").toString().trim();
+    if (n) return n;
+    const b = (bn ?? "").toString().trim();
+    if (b) return b;
+    return "-";
+  }
+
+  function getVendorWeekNightFromRow(row) {
+    // ✅ 주간=2W, 야간=1W (요구사항 반영)
+    const name1 =
+      row.vendor_name_1w ??
+      row.vendor_1w_name ??
+      row.vendor_week_name ??
+      row.vendor_name_week ??
+      null;
+    const bn1 =
+      row.vendor_business_number_1w ??
+      row.vendor_business_number_week ??
+      null;
+
+    const name2 =
+      row.vendor_name_2w ??
+      row.vendor_2w_name ??
+      row.vendor_night_name ??
+      row.vendor_name_night ??
+      null;
+    const bn2 =
+      row.vendor_business_number_2w ??
+      row.vendor_business_number_night ??
+      null;
+
+    return {
+      week: vendorNameOnly(name2, bn2),
+      night: vendorNameOnly(name1, bn1)
+    };
+  }
+
+  function createLabelOverlay(code, row, position, color, opts = {}) {
+    const showCode = (opts.showCode !== undefined) ? opts.showCode : labelOn;
+    const showVendor = (opts.showVendor !== undefined) ? opts.showVendor : vendorLabelOn;
+
+    const root = document.createElement("div");
+    root.style.padding = showVendor ? "6px 10px" : "4px 8px";
+    root.style.borderRadius = "14px";
+    root.style.background = "rgba(0,0,0,0.55)";
+    root.style.color = "#fff";
+    root.style.border = "1px solid rgba(255,255,255,0.18)";
+    root.style.boxShadow = "0 4px 14px rgba(0,0,0,0.28)";
+    root.style.backdropFilter = "blur(2px)";
+    root.style.maxWidth = "240px";
+    root.style.pointerEvents = "none";
+    root.style.display = "flex";
+    root.style.flexDirection = "column";
+    root.style.gap = (showVendor && showCode) ? "3px" : (showVendor ? "2px" : "0");
+
+    // ✅ 라우트 라벨 OFF + 벤더 라벨 ON : 라우트코드 숨김(벤더 정보만 표시)
+    if (!showCode && showVendor) {
+      root.style.borderLeft = `4px solid ${color}`;
+    }
+
+    if (showCode) {
+      const top = document.createElement("div");
+      top.style.display = "inline-flex";
+      top.style.alignItems = "center";
+      top.style.gap = "6px";
+
+      const dot = document.createElement("span");
+      dot.style.width = "8px";
+      dot.style.height = "8px";
+      dot.style.borderRadius = "999px";
+      dot.style.background = color;
+      dot.style.boxShadow = "0 0 0 2px rgba(255,255,255,0.12)";
+      dot.style.flex = "0 0 auto";
+
+      const t = document.createElement("span");
+      t.textContent = String(code || "");
+      t.style.fontWeight = "900";
+      t.style.fontSize = "12px";
+      t.style.letterSpacing = "0.2px";
+      t.style.lineHeight = "1.1";
+
+      top.appendChild(dot);
+      top.appendChild(t);
+      root.appendChild(top);
+    }
+
+    if (showVendor) {
+      const { week, night } = getVendorWeekNightFromRow(row || {});
+      const box = document.createElement("div");
+      box.style.display = "flex";
+      box.style.flexDirection = "column";
+      box.style.gap = "1px";
+      box.style.fontSize = "11px";
+      box.style.lineHeight = "1.2";
+      box.style.color = "rgba(255,255,255,0.88)";
+
+      const l1 = document.createElement("div");
+      l1.textContent = `주간: ${week}`;
+      const l2 = document.createElement("div");
+      l2.textContent = `야간: ${night}`;
+
+      [l1, l2].forEach(el => {
+        el.style.whiteSpace = "nowrap";
+        el.style.overflow = "hidden";
+        el.style.textOverflow = "ellipsis";
+      });
+
+      box.appendChild(l1);
+      box.appendChild(l2);
+      root.appendChild(box);
+    }
+
+    return new kakao.maps.CustomOverlay({ position, content: root, yAnchor: 1.0, zIndex: 10 });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  // ====== 폴리곤 생성 ======
+  function makePolygon(latlngs, strokeColor, fillColor, zIndex=1) {
+    return new kakao.maps.Polygon({
+      path: latlngs, // 반드시 LatLng[]
+      strokeWeight: 1,
+      strokeColor,
+      strokeOpacity: 1.0,
+      strokeStyle: "solid",
+      fillColor,
+      fillOpacity: 0.24,
+      zIndex
+    });
+  }
+
+  // ====== (추가) 폴리곤 개별 삭제 X 오버레이 유틸 ======
+  function clearDeleteOverlays() {
+    deleteOverlays.forEach(o => o.setMap(null));
+    deleteOverlays = [];
+  }
+
+  function getPolygonPathAsArray(polygon) {
+    const rawPath = polygon.getPath();
+    const out = [];
+    if (!rawPath) return out;
+
+    if (Array.isArray(rawPath)) {
+      out.push(...rawPath);
+      return out;
+    }
+    if (typeof rawPath.getLength === "function" && typeof rawPath.getAt === "function") {
+      for (let i = 0; i < rawPath.getLength(); i++) out.push(rawPath.getAt(i));
+      return out;
+    }
+    return out;
+  }
+
+  function createDeleteOverlayForPolygon(polygon) {
+    const path = getPolygonPathAsArray(polygon);
+    if (!path || path.length < 3) return null;
+
+    const pos = centroidOfLatLngs(path);
+
+    const btn = document.createElement("div");
+    btn.textContent = "×";
+    btn.title = "이 구역만 삭제";
+    btn.style.width = "22px";
+    btn.style.height = "22px";
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.justifyContent = "center";
+    btn.style.borderRadius = "999px";
+    btn.style.cursor = "pointer";
+    btn.style.userSelect = "none";
+    btn.style.background = "rgba(0,0,0,.72)";
+    btn.style.color = "#fff";
+    btn.style.border = "1px solid rgba(255,255,255,.22)";
+    btn.style.boxShadow = "0 3px 12px rgba(0,0,0,.45)";
+    btn.style.fontWeight = "900";
+    btn.style.fontSize = "14px";
+    btn.style.lineHeight = "1";
+
+    btn.onmouseenter = () => {
+      btn.style.background = "rgba(255,60,60,.75)";
+      btn.style.borderColor = "rgba(255,60,60,.55)";
+    };
+    btn.onmouseleave = () => {
+      btn.style.background = "rgba(0,0,0,.72)";
+      btn.style.borderColor = "rgba(255,255,255,.22)";
+    };
+
+    btn.onclick = (e) => {
+      if (e && typeof e.stopPropagation === "function") e.stopPropagation();
+      deleteSinglePolygonOnly(polygon);
+    };
+
+    return new kakao.maps.CustomOverlay({
+      position: pos,
+      content: btn,
+      xAnchor: 0.5,
+      yAnchor: 0.5,
+      zIndex: 30
+    });
+  }
+
+  function rebuildDeleteOverlays() {
+    clearDeleteOverlays();
+    if (!selectedRouteId) return;
+    if (!editPolygons || editPolygons.length === 0) return;
+
+    for (const p of editPolygons) {
+      const overlay = createDeleteOverlayForPolygon(p);
+      if (!overlay) continue;
+      overlay.setMap(map);
+      deleteOverlays.push(overlay);
+    }
+  }
+
+  function deleteSinglePolygonOnly(targetPolygon) {
+    if (!selectedRouteId || !overlayById.has(selectedRouteId)) return;
+
+    const pack = overlayById.get(selectedRouteId);
+    if (!pack || !pack.polygons) return;
+
+    targetPolygon.setMap(null);
+
+    pack.polygons = pack.polygons.filter(p => p !== targetPolygon);
+    editPolygons = editPolygons.filter(p => p !== targetPolygon);
+
+    if (pack.polygons.length === 0) {
+      updateSelectedLabels();
+      stopEditing();
+      setStatus("해당 라우트의 구역이 모두 제거되었습니다. 저장하면 반영됩니다.", "WARN");
+      return;
+    }
+
+    updateSelectedLabels();
+    rebuildHandles();
+    setStatus("구역 1개 제거(로컬). 저장 버튼을 눌러 반영하세요.", "OK");
+  }
+
+  // ====== ✅ 검색 선택 마커 유틸 (ESC로 삭제) ======
+  function clearSearchSelectedMarker() {
+    if (searchSelectedMarker) {
+      searchSelectedMarker.setMap(null);
+      searchSelectedMarker = null;
+    }
+    if (searchSelectedOverlay) {
+      if (typeof searchSelectedOverlay.setMap === "function") searchSelectedOverlay.setMap(null);
+      if (typeof searchSelectedOverlay.close === "function") searchSelectedOverlay.close();
+      searchSelectedOverlay = null;
+    }
+  }
+
+  function setSearchSelectedMarker(latlng) {
+    clearSearchSelectedMarker();
+    searchSelectedMarker = new kakao.maps.Marker({
+      position: latlng,
+      zIndex: 999
+    });
+    searchSelectedMarker.setMap(map);
+  }
+
+  // ====== 데이터 표시 ======
+  function renderRoutes(rows) {
+    clearAllOverlays();
+    routeRows = rows || [];
+
+    const displayColorMap = buildDisplayColors(routeRows);
+
+    if (!routeRows.length) {
+      setStatus("표시할 데이터가 없습니다.", "WARN");
+      return;
+    }
+
+    let bounds = new kakao.maps.LatLngBounds();
+    let any = false;
+
+    for (const row of routeRows) {
+      const id = row.id;
+      const code = row.full_code || row.code || row.route_code || "";
+      const camp = row.camp || row.camp_name || "";
+      const colorMap = displayColorMap;
+      const idKey = (typeof id === "number" || typeof id === "string") ? id : code;
+      const color = (colorMap && colorMap.get(idKey)) || colorFor(code);
+      row.color = color;
+      const debugId = `${camp}/${code}(id=${id})`;
+
+      const poly = parsePolygonWgs84(row.polygon_wgs84, debugId);
+
+      const polygons = [];
+      const labels = [];
+
+      if (poly && Array.isArray(poly) && poly.length > 0) {
+        let rings = [];
+
+        const first = poly[0];
+        if (first && typeof first === 'object' && 'lat' in first && 'lng' in first) {
+          rings = [poly];
+        } else if (Array.isArray(first)) {
+          const firstOfFirst = first[0];
+          if (firstOfFirst && typeof firstOfFirst === 'object' && 'lat' in firstOfFirst && 'lng' in firstOfFirst) {
+            rings = poly;
+          } else if (Array.isArray(firstOfFirst) && firstOfFirst.length >= 2) {
+            rings = poly;
+          } else if (typeof firstOfFirst === 'number') {
+            rings = [poly];
+          }
+        }
+
+        for (let i=0; i<rings.length; i++) {
+          const ring = rings[i];
+          if (!Array.isArray(ring) || ring.length < 3) continue;
+
+          const latlngs = ring.map(pt => {
+            if (pt && typeof pt === 'object' && 'lat' in pt && 'lng' in pt) {
+              return new kakao.maps.LatLng(pt.lat, pt.lng);
+            } else if (Array.isArray(pt) && pt.length >= 2) {
+              return new kakao.maps.LatLng(pt[1], pt[0]);
+            }
+            return null;
+          }).filter(ll => ll !== null);
+
+          if (latlngs.length < 3) continue;
+          const p = makePolygon(latlngs, color, color, 1);
+          p.setMap(map);
+
+          kakao.maps.event.addListener(p, "click", () => {
+            if (drawMode || roadviewOn || searchModalOpen) return;
+            selectRoute(id);
+          });
+
+          polygons.push(p);
+          any = true;
+          latlngs.forEach(ll => bounds.extend(ll));
+
+
+        }
+      }
+
+      // ✅ 라우트/벤더 라벨 - 폴리곤 조각별 표기
+      if ((labelOn || vendorLabelOn) && polygons.length > 0) {
+        const opts = { showCode: labelOn, showVendor: vendorLabelOn };
+
+        // ✅ 폴리곤이 여러 조각(떨어진 구역)인 경우: 조각별로 라벨 각각 표기
+        if (polygons.length === 1) {
+          const pos =
+            normalizeCenterWgs84(row.center_wgs84) ||
+            centroidOfLatLngs(getPolygonPathAsArray(polygons[0]));
+          const label = createLabelOverlay(code, row, pos, color, opts);
+          label.setMap(map);
+          labels.push(label);
+        } else {
+          for (const p of polygons) {
+            const pos = centroidOfLatLngs(getPolygonPathAsArray(p));
+            const label = createLabelOverlay(code, row, pos, color, opts);
+            label.setMap(map);
+            labels.push(label);
+          }
+        }
+      }
+
+      overlayById.set(id, { row, polygons, labels });
+    }
+
+    if (any) {
+      map.setBounds(bounds);
+      setStatus(`${routeRows.length}개 라우트 로드 완료`, "OK");
+    } else {
+      setStatus(`폴리곤 데이터 없음. 새로 그리기로 생성하세요.`, "WARN");
+    }
+  }
+
+  // ====== 편집(버텍스 핸들) ======
+  let VERTEX_IMG = null;
+  let MID_IMG = null;
+
+  function makeHandleImage(fill="#ffffff", stroke="#111827") {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+        <circle cx="6" cy="6" r="5" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
+      </svg>`;
+    const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(12,12), { offset: new kakao.maps.Point(6,6) });
+  }
+
+  function makeLabelAnchorImage() {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+        <circle cx="7" cy="7" r="6" fill="rgba(59,130,246,0.95)" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="7" cy="7" r="2" fill="#111827" opacity="0.9"/>
+      </svg>`;
+    const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(14,14), { offset: new kakao.maps.Point(7,7) });
+  }
+
+  let labelAnchorMarker = null;
+  let labelAnchorLatLng = null;
+  let labelAnchorDirty = false;
+
+  function stopLabelAnchorEdit() {
+    if (labelAnchorMarker) {
+      labelAnchorMarker.setMap(null);
+      labelAnchorMarker = null;
+    }
+    labelAnchorLatLng = null;
+    labelAnchorDirty = false;
+  }
+
+  function startLabelAnchorEdit(routeId) {
+    stopLabelAnchorEdit();
+    const pack = overlayById.get(routeId);
+    if (!pack || !pack.polygons || pack.polygons.length === 0) return;
+
+    const row = pack.row || {};
+    const pos =
+      normalizeCenterWgs84(row.center_wgs84) ||
+      centroidOfLatLngs(pack.polygons[0].getPath());
+
+    labelAnchorLatLng = pos;
+    labelAnchorDirty = false;
+
+    labelAnchorMarker = new kakao.maps.Marker({
+      position: pos,
+      image: makeLabelAnchorImage(),
+      draggable: true,
+      zIndex: 9999
+    });
+    labelAnchorMarker.setMap(map);
+
+    const applyPos = (p) => {
+      labelAnchorLatLng = p;
+      labelAnchorDirty = true;
+
+      // 즉시 라벨 위치 반영 (보이는 경우)
+      if (pack.labels && pack.labels.length > 0) {
+        pack.labels.forEach(l => l.setPosition(p));
+      }
+    };
+
+    kakao.maps.event.addListener(labelAnchorMarker, "dragend", () => {
+      applyPos(labelAnchorMarker.getPosition());
+    });
+
+    // 우클릭: 자동 중심(centroid)으로 되돌리기
+    kakao.maps.event.addListener(labelAnchorMarker, "rightclick", () => {
+      const c = centroidOfLatLngs(pack.polygons[0].getPath());
+      labelAnchorMarker.setPosition(c);
+      applyPos(c);
+    });
+  }
+
+  function vendorText(name, bn) {
+    const n = (name ?? "").toString().trim();
+    if (n) return n;
+    const b = (bn ?? "").toString().trim();
+    if (b) return "지정됨";
+    return "-";
+  }
+
+  function setVendorDisplayFromRow(row) {
+    const name1 =
+      row.vendor_name_1w ??
+      row.vendor_1w_name ??
+      row.vendor_week_name ??
+      row.vendor_name_week ??
+      null;
+    const bn1 =
+      row.vendor_business_number_1w ??
+      row.vendor_business_number_week ??
+      null;
+
+    const name2 =
+      row.vendor_name_2w ??
+      row.vendor_2w_name ??
+      row.vendor_night_name ??
+      row.vendor_name_night ??
+      null;
+    const bn2 =
+      row.vendor_business_number_2w ??
+      row.vendor_business_number_night ??
+      null;
+
+    if (vendorWeekValue) vendorWeekValue.textContent = vendorText(name2, bn2);
+    if (vendorNightValue) vendorNightValue.textContent = vendorText(name1, bn1);
+  }
+
+  function clearVendorDisplay() {
+    if (vendorWeekValue) vendorWeekValue.textContent = "-";
+    if (vendorNightValue) vendorNightValue.textContent = "-";
+  }
+
+  function applyBasePolygonStyle() {
+    for (const {row, polygons} of overlayById.values()) {
+      const base = row.color || colorFor(row.full_code || "");
+      polygons.forEach(p => {
+        p.setOptions({
+          strokeColor: base,
+          fillColor: base,
+          strokeWeight: 1,
+          fillOpacity: 0.24,
+          zIndex: 1
+        });
+      });
+    }
+  }
+
+  function applySelectionStyle(routeId) {
+    if (!routeId) return;
+    const pack = overlayById.get(routeId);
+    if (!pack) return;
+    const { row, polygons } = pack;
+    const base = row.color || colorFor(row.full_code || "");
+    polygons.forEach(p => {
+      p.setOptions({ strokeColor: base, fillColor: base, strokeWeight: 3, fillOpacity: 0.24, zIndex: 5 });
+    });
+  }
+
+  function stopEditing() {
+    editHandles.forEach(m => m.setMap(null));
+    editHandles = [];
+    editPolygons = [];
+    draggingVertex = null;
+    if (map) map.setDraggable(true);
+
+    clearDeleteOverlays();
+
+    // ✅ 편집모드 라벨 앵커 마커 정리
+    stopLabelAnchorEdit();
+
+    editingRouteId = null;
+
+    applyBasePolygonStyle();
+
+    // ✅ 선택된 라우트는 "진해진 상태" 유지
+    if (selectedRouteId && overlayById.has(selectedRouteId)) {
+      applySelectionStyle(selectedRouteId);
+    }
+  }
+
+  function selectRoute(routeId, { silent = false } = {}) {
+    if (!overlayById.has(routeId)) return;
+
+    if (roadviewOn) {
+      setStatus("로드뷰 모드에서는 라우트 선택만 가능합니다. (Enter 편집 불가)", "WARN");
+    }
+
+    stopDraw(true);
+
+    selectedRouteId = routeId;
+    stopEditing(); // 편집 모드 종료 + 선택 하이라이트 적용
+
+    const pack = overlayById.get(routeId);
+    const { row } = pack;
+
+    const code = row.full_code || row.code || row.route_code || "";
+    const camp = row.camp || row.camp_name || "";
+    selectedInfo.textContent = `선택: ${camp} / ${code} (id=${routeId})`;
+
+    // 좌측 입력값 동기화
+    campInput.value = camp;
+    codeInput.value = code;
+
+    setVendorDisplayFromRow(row);
+
+    deliveryNameInput.value = row.delivery_location_name || "";
+    deliveryAddrInput.value = row.delivery_location_address || "";
+
+    loadAddresses().catch(err => log(`배송지 로드 실패: ${err.message}`));
+
+    if (!silent) setStatus(`선택됨: ${code} (Enter로 수정 모드)`, "OK");
+  }
+
+  function startEditing(routeId) {
+    if (!overlayById.has(routeId)) return;
+
+    if (roadviewOn) {
+      setStatus("로드뷰 모드에서는 수정 모드로 진입할 수 없습니다. 로드뷰를 종료하세요.", "WARN");
+      return;
+    }
+    if (searchModalOpen) closeSearchModal();
+
+    stopDraw(true);
+
+    selectedRouteId = routeId;
+    stopEditing(); // 기존 편집 정리 + 선택 하이라이트
+
+    editingRouteId = routeId;
+
+    const pack = overlayById.get(routeId);
+    const { row, polygons } = pack;
+
+    const code = row.full_code || row.code || row.route_code || "";
+    const camp = row.camp || row.camp_name || "";
+    selectedInfo.textContent = `선택: ${camp} / ${code} (id=${routeId})`;
+
+    // 좌측 입력값 동기화
+    campInput.value = camp;
+    codeInput.value = code;
+
+    setVendorDisplayFromRow(row);
+
+    deliveryNameInput.value = row.delivery_location_name || "";
+    deliveryAddrInput.value = row.delivery_location_address || "";
+
+    if (!polygons || polygons.length === 0) {
+      setStatus(`선택 대상 ${code}는 polygon이 없습니다. "새로 그리기"로 생성하세요.`, "WARN");
+      return;
+    }
+
+    // 편집용 폴리곤 목록
+    editPolygons = polygons.slice();
+
+    rebuildHandles();
+
+    // ✅ 요청사항: 편집모드 라벨 위치 수정 기능은 잠깐 주석처리(비활성) — 자동 라벨(조각별) 표기 우선
+    if (LABEL_ANCHOR_EDIT_ENABLED) startLabelAnchorEdit(routeId);
+    else stopLabelAnchorEdit();
+
+    setStatus(`편집 모드: ${code} (Enter=저장 · ESC=종료)`, "OK");
+  }
+
+  function rebuildHandles() {
+    editHandles.forEach(m => m.setMap(null));
+    editHandles = [];
+
+    for (const polygon of editPolygons) {
+      const rawPath = polygon.getPath();
+      if (!rawPath) {
+        log(`⚠ rebuildHandles: polygon.getPath()가 null`);
+        continue;
+      }
+
+      const path = [];
+      const len = Array.isArray(rawPath) ? rawPath.length : (rawPath.getLength ? rawPath.getLength() : 0);
+      for (let i = 0; i < len; i++) {
+        path.push(Array.isArray(rawPath) ? rawPath[i] : rawPath.getAt(i));
+      }
+
+      if (path.length < 3) continue;
+
+      for (let i=0;i<path.length;i++) {
+        ((index, polygon) => {
+          const vMarker = new kakao.maps.Marker({
+            position: path[index],
+            image: VERTEX_IMG,
+            clickable: true,
+            zIndex: 20
+          });
+
+          vMarker.setMap(map);
+
+          kakao.maps.event.addListener(vMarker, "mousedown", (e) => {
+            if (roadviewOn || searchModalOpen) return;
+            draggingVertex = { marker: vMarker, polygon, index };
+            map.setDraggable(false);
+
+            if (e && e.domEvent) {
+              e.domEvent.preventDefault();
+              e.domEvent.stopPropagation();
+            }
+          });
+
+          kakao.maps.event.addListener(vMarker, "rightclick", () => {
+            const pth = polygon.getPath();
+            const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+            if (len <= 3) {
+              setStatus("점 삭제 불가: 최소 3개 꼭짓점 유지 필요", "WARN");
+              return;
+            }
+            const pathArray = [];
+            for (let j = 0; j < len; j++) {
+              if (j !== index) {
+                pathArray.push(Array.isArray(pth) ? pth[j] : pth.getAt(j));
+              }
+            }
+            polygon.setPath(pathArray);
+            updateSelectedLabels();
+            rebuildHandles();
+          });
+
+          editHandles.push(vMarker);
+        })(i, polygon);
+      }
+
+      for (let i=0;i<path.length;i++) {
+        ((index, polygon) => {
+          const a = path[index];
+          const b = path[(index+1)%path.length];
+
+          const mid = new kakao.maps.LatLng(
+            (a.getLat()+b.getLat())/2,
+            (a.getLng()+b.getLng())/2
+          );
+
+          const midMarker = new kakao.maps.Marker({
+            position: mid,
+            clickable: true,
+            image: MID_IMG,
+            zIndex: 19
+          });
+          midMarker.setMap(map);
+
+          kakao.maps.event.addListener(midMarker, "click", () => {
+            const pth = polygon.getPath();
+            const len = Array.isArray(pth) ? pth.length : (pth.getLength ? pth.getLength() : 0);
+            const pathArray = [];
+            for (let j = 0; j < len; j++) {
+              pathArray.push(Array.isArray(pth) ? pth[j] : pth.getAt(j));
+              if (j === index) {
+                pathArray.push(mid);
+              }
+            }
+            polygon.setPath(pathArray);
+            updateSelectedLabels();
+            rebuildHandles();
+          });
+
+          editHandles.push(midMarker);
+        })(i, polygon);
+      }
+    }
+
+    rebuildDeleteOverlays();
+  }
+
+  function updateSelectedLabels() {
+    // 기존: 선택 라우트 라벨 재생성. 현재는 전체 라벨을 가볍게 리프레시.
+    if (!(labelOn || vendorLabelOn)) return;
+    refreshLabelsOnly();
+  }
+      
+
+  // ====== 그리기 모드 ======
+  function stopDraw(silent=false) {
+    drawMode = null;
+    drawPoints = [];
+    drawMarkers.forEach(m => m.setMap(null));
+    drawMarkers = [];
+    if (drawLine) { drawLine.setMap(null); drawLine = null; }
+    hint("", false);
+}
+
+  function beginDraw(mode) {
+    const camp = campInput.value.trim();
+    const code = codeInput.value.trim();
+    if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+    if (!code) { setStatus("code가 비었습니다. (새로 그리기/구역 추가는 code 필수)", "ERR"); return; }
+
+    if (roadviewOn) {
+      setStatus("로드뷰 모드에서는 그리기를 시작할 수 없습니다. 로드뷰를 종료하세요.", "WARN");
+      return;
+    }
+    if (searchModalOpen) closeSearchModal();
+
+    stopEditing();
+    stopDraw(true);
+
+    drawMode = mode;
+    drawPoints = [];
+    drawMarkers = [];
+
+    if (drawLine) drawLine.setMap(null);
+    drawLine = new kakao.maps.Polyline({
+      path: [],
+      strokeWeight: 1,
+      strokeColor: "#00C2FF",
+      strokeOpacity: 0.9,
+      strokeStyle: "shortdash"
+    });
+    drawLine.setMap(map);
+
+    hint("그리기 모드: 지도 클릭으로 점 추가 · Enter키로 완료 · 우클릭으로 마지막 점 취소 · ESC로 취소", true);
+    setStatus(mode === "new" ? "새로 그리기 시작" : "구역 추가 시작", "OK");
+  }
+
+  function addDrawPoint(latlng) {
+    drawPoints.push(latlng);
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <circle cx="5" cy="5" r="4" fill="#00C2FF" stroke="#0b1220" stroke-width="1.5"/>
+    </svg>`;
+    const markerImageSrc = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    const markerImage = new kakao.maps.MarkerImage(markerImageSrc, new kakao.maps.Size(10, 10), {
+      offset: new kakao.maps.Point(5, 5)
+    });
+
+    const m = new kakao.maps.Marker({
+      position: latlng,
+      image: markerImage,
+      zIndex: 30
+    });
+    m.setMap(map);
+    drawMarkers.push(m);
+
+    drawLine.setPath(drawPoints);
+  }
+
+  function popDrawPoint() {
+    if (drawPoints.length === 0) return;
+    drawPoints.pop();
+    const m = drawMarkers.pop();
+    if (m) m.setMap(null);
+    drawLine.setPath(drawPoints);
+  }
+
+  function finishDraw() {
+    if (drawPoints.length < 3) {
+      setStatus("폴리곤 생성 실패: 점이 3개 이상 필요", "WARN");
+      return;
+    }
+
+    const camp = campInput.value.trim();
+    const code = codeInput.value.trim();
+    const color = colorFor(code);
+
+    let rowId = selectedRouteId;
+    let row = null;
+
+    if (rowId && overlayById.has(rowId)) {
+      row = overlayById.get(rowId).row;
+    }
+
+    if (drawMode === "new") {
+      if (rowId && overlayById.has(rowId)) {
+        const pack = overlayById.get(rowId);
+        pack.polygons.forEach(p => p.setMap(null));
+        pack.labels.forEach(l => l.setMap(null));
+        pack.polygons = [];
+        pack.labels = [];
+      } else {
+        for (const [id, pack] of overlayById.entries()) {
+          const r = pack.row;
+          if ((r.camp||"") === camp && (r.full_code||"") === code) {
+            rowId = id;
+            pack.polygons.forEach(p => p.setMap(null));
+            pack.labels.forEach(l => l.setMap(null));
+            pack.polygons = [];
+            pack.labels = [];
+            break;
+          }
+        }
+      }
+    }
+
+    const poly = makePolygon(drawPoints.slice(), color, color, 5);
+    poly.setMap(map);
+    kakao.maps.event.addListener(poly, "click", () => {
+      if (!rowId) return;
+      if (drawMode || roadviewOn || searchModalOpen) return;
+      selectRoute(rowId);
+    });
+
+    if (!rowId) {
+      rowId = `tmp_${camp}_${code}`;
+      overlayById.set(rowId, {
+        row: {
+          id: rowId,
+          camp,
+          full_code: code,
+          color,
+          polygon_wgs84: null,
+          vendor_business_number_1w: null,
+          vendor_business_number_2w: null,
+          vendor_name_1w: null,
+          vendor_name_2w: null,
+          delivery_location_name: deliveryNameInput.value.trim(),
+          delivery_location_address: deliveryAddrInput.value.trim()
+        },
+        polygons: [],
+        labels: []
+      });
+    }
+
+    const pack = overlayById.get(rowId);
+    pack.row.camp = camp;
+    pack.row.full_code = code;
+    pack.row.color = color;
+
+    pack.polygons.push(poly);
+
+    if (labelOn || vendorLabelOn) {
+      const c = centroidOfLatLngs(drawPoints);
+      const label = createLabelOverlay(code, pack.row, c, color, { showCode: labelOn, showVendor: vendorLabelOn });
+      label.setMap(map);
+      pack.labels.push(label);
+    }
+
+    stopDraw(true);
+    selectedRouteId = rowId;
+    selectedInfo.textContent = `선택: ${camp} / ${code} (id=${rowId})`;
+    editPolygons = pack.polygons.slice();
+    rebuildHandles();
+    hint("", false);
+
+    setStatus(`폴리곤 생성 완료: ${drawMode === "new" ? "교체" : "추가"} 1개`, "OK");
+  }
+
+  // ====== 저장 데이터 만들기 ======
+  function getCurrentEditedPolygonWgs84ById(id) {
+    const pack = overlayById.get(id);
+    if (!pack) return null;
+    const polys = pack.polygons;
+    if (!polys || polys.length === 0) return null;
+
+    const out = [];
+    for (const p of polys) {
+      const pathRaw = p.getPath();
+      const path = [];
+      if (pathRaw && typeof pathRaw.getLength === "function") {
+        for (let i=0;i<pathRaw.getLength();i++) path.push(pathRaw.getAt(i));
+      } else if (Array.isArray(pathRaw)) {
+        path.push(...pathRaw);
+      }
+      if (!path || path.length < 3) continue;
+
+      const ring = [];
+      for (let i=0;i<path.length;i++) {
+        const ll = path[i];
+        ring.push([ ll.getLng(), ll.getLat() ]);
+      }
+      out.push(ring);
+    }
+    return out.length ? out : null;
+  }
+
+  // ====== 배송지 목록 불러오기 ======
+  async function loadAddresses() {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) return;
+
+      const url = new URL(ADDRESS_ENDPOINT);
+      url.searchParams.set("camp", camp);
+      if (code) url.searchParams.set("code", code);
+
+      const data = await apiGet(url.toString());
+      addressRows = data?.rows || [];
+
+      renderAddressList();
+      log(`배송지 ${addressRows.length}개 로드 완료`);
+    } catch (e) {
+      console.error('배송지 로드 실패:', e);
+      addressRows = [];
+      renderAddressList();
+    }
+  }
+
+  // ====== 배송지 목록 렌더링 ======
+  function renderAddressList() {
+    const container = document.getElementById("addressList");
+    const group = document.getElementById("addressListGroup");
+
+    if (!addressRows || addressRows.length === 0) {
+      group.style.display = "none";
+      container.innerHTML = "";
+      return;
+    }
+
+    group.style.display = "block";
+    container.innerHTML = "";
+
+    addressRows.forEach((addr, idx) => {
+      const item = document.createElement("div");
+      item.style.cssText = `
+        padding: 8px;
+        margin-bottom: 6px;
+        background: rgba(0,0,0,0.15);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 12px;
+      `;
+
+      const addressText = addr.address || addr.full_address || "주소 없음";
+      const dong = addr.dong ? `<span style="color:var(--muted)">(${addr.dong})</span>` : "";
+
+      item.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; color:var(--txt); margin-bottom:2px;">
+              ${idx + 1}. ${addressText} ${dong}
+            </div>
+            <div style="color:var(--muted); font-size:11px;">
+              ${addr.zipcode ? `우편번호: ${addr.zipcode}` : ""}
+            </div>
+          </div>
+          <button class="btn" style="padding:6px 12px; font-size:11px; white-space:nowrap;">
+            네비
+          </button>
+        </div>
+      `;
+
+      const naviBtn = item.querySelector("button");
+      naviBtn.onclick = () => openNaviToAddress(addr);
+
+      container.appendChild(item);
+    });
+  }
+
+  // ====== 배송지로 네비 실행 ======
+  async function openNaviToAddress(addr) {
+    const deliveryAddr = deliveryAddrInput.value.trim();
+
+    if (!deliveryAddr) {
+      setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
+      return;
+    }
+
+    if (!addr.center_wgs84) {
+      setStatus("배송지 좌표(center_wgs84)가 없습니다.", "ERR");
+      return;
+    }
+
+    setStatus(`경로 계산 중: 입차지 → ${addr.address || "배송지"}`, "OK");
+
+    geocoder.addressSearch(deliveryAddr, (result, status) => {
+      if (status !== kakao.maps.services.Status.OK || !result?.length) {
+        setStatus("입차지 주소를 찾을 수 없습니다.", "ERR");
+        return;
+      }
+
+      const startLat = Number(result[0].y);
+      const startLng = Number(result[0].x);
+
+      let endLat, endLng;
+
+      if (typeof addr.center_wgs84 === 'object') {
+        endLat = addr.center_wgs84.lat || addr.center_wgs84.latitude;
+        endLng = addr.center_wgs84.lng || addr.center_wgs84.lon || addr.center_wgs84.longitude;
+      } else if (Array.isArray(addr.center_wgs84) && addr.center_wgs84.length >= 2) {
+        const [first, second] = addr.center_wgs84;
+        if (Math.abs(first) > Math.abs(second)) {
+          endLng = first;
+          endLat = second;
+        } else {
+          endLat = first;
+          endLng = second;
+        }
+      }
+
+      if (!endLat || !endLng || !isFinite(endLat) || !isFinite(endLng)) {
+        setStatus("배송지 좌표 형식이 올바르지 않습니다.", "ERR");
+        log(`center_wgs84: ${JSON.stringify(addr.center_wgs84)}`);
+        return;
+      }
+
+      const deliveryName = deliveryNameInput.value.trim() || "입차지";
+      const addressName = addr.address || "배송지";
+
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      let naviUrl;
+      if (isMobile) {
+        naviUrl = `kakaomap://route?sp=${startLat},${startLng}&ep=${endLat},${endLng}&by=CAR`;
+      } else {
+        naviUrl = `https://map.kakao.com/link/from/${encodeURIComponent(deliveryName)},${startLat},${startLng}/to/${encodeURIComponent(addressName)},${endLat},${endLng}`;
+      }
+
+      window.open(naviUrl, "_blank");
+      setStatus(`네비 실행: ${deliveryName} → ${addressName}`, "OK");
+      log(`경로: (${startLat.toFixed(4)}, ${startLng.toFixed(4)}) → (${endLat.toFixed(4)}, ${endLng.toFixed(4)})`);
+    });
+  }
+
+  // ====== 불러오기 ======
+  async function loadRoutes() {
+    try {
+      stopEditing();
+      stopDraw(true);
+      hint("", false);
+      clearOsm();
+
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+
+      const codes = code ? code.split(/[,\s]+/).map(c => c.trim()).filter(c => c) : [];
+
+      let allRows = [];
+
+      if (codes.length === 0) {
+        const url = new URL(ROUTE_ENDPOINT);
+        url.searchParams.set("camp", camp);
+        url.searchParams.set("mode", "prefix");
+const data = await apiGet(url.toString());
+        if (!data || !data.rows) {
+          setStatus("서버 응답 오류", "ERR");
+          return;
+        }
+        allRows = data.rows;
+      } else if (codes.length === 1) {
+        const url = new URL(ROUTE_ENDPOINT);
+        url.searchParams.set("camp", camp);
+        url.searchParams.set("mode", "prefix");
+        url.searchParams.set("code", codes[0]);
+const data = await apiGet(url.toString());
+        if (!data || !data.rows) {
+          setStatus("서버 응답 오류", "ERR");
+          return;
+        }
+        allRows = data.rows;
+      } else {
+        setStatus(`${codes.length}개 라우트 조회 중...`, "OK");
+
+        for (const singleCode of codes) {
+          try {
+            const url = new URL(ROUTE_ENDPOINT);
+            url.searchParams.set("camp", camp);
+            url.searchParams.set("mode", "prefix");
+            url.searchParams.set("code", singleCode);
+const data = await apiGet(url.toString());
+
+            if (data && data.rows && data.rows.length > 0) {
+              allRows.push(...data.rows);
+              log(`${singleCode}: ${data.rows.length}개 발견`);
+            } else {
+              log(`${singleCode}: 데이터 없음`);
+            }
+          } catch (err) {
+            log(`${singleCode}: 조회 실패 - ${err.message}`);
+          }
+        }
+      }
+
+      if (allRows.length === 0) {
+        setStatus("조회된 라우트가 없습니다.", "WARN");
+        clearAllOverlays();
+        return;
+      }
+
+
+      // ✅ 표시용 컬러 재부여 (DB에 저장하지 않음)
+      // full_code 정렬 기준으로 인접 라우트 색이 비슷해지지 않도록 분산합니다.
+      try {
+        const codesSorted = Array.from(
+          new Set(
+            (allRows || [])
+              .map(r => (r.full_code || r.code || "").toString().trim())
+              .filter(Boolean)
+          )
+        ).sort((a,b)=> a.localeCompare(b, "en", {numeric:true, sensitivity:"base"}));
+
+        const colorMap = new Map();
+        for (let i=0; i<codesSorted.length; i++) {
+          const hue = (i * GOLDEN_ANGLE) % 360;
+          const sat = 42 + (i % 7) * 2;    // 42-54 (적당한 채도)
+          const light = 48 + (i % 5) * 2;  // 48-56 (중저명도)
+          colorMap.set(codesSorted[i], hslToHex(hue, sat, light));
+        }
+
+        for (const r of allRows) {
+          const c = (r.full_code || r.code || "").toString().trim();
+          r.color = colorMap.get(c) || colorFor(c);
+        }
+      } catch (e) {
+        // color 실패해도 로딩은 진행
+      }
+
+      renderRoutes(allRows);
+      await loadAddresses();
+    } catch (e) {
+      console.error(e);
+      const errMsg = e.message || String(e);
+      setStatus(`불러오기 실패: ${errMsg}`, "ERR");
+    }
+  }
+
+  // ====== 저장(POST) ======
+  async function saveCurrent() {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+      if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+
+      let id = selectedRouteId;
+      if (!id || !overlayById.has(id)) {
+        for (const [rid, pack] of overlayById.entries()) {
+          if ((pack.row.camp||"") === camp && (pack.row.full_code||"") === code) {
+            id = rid;
+            break;
+          }
+        }
+      }
+
+      const polygonSourceId = id;
+      let actualId = id;
+
+      if (actualId && typeof actualId === "string" && actualId.startsWith("tmp_")) {
+        const actualRow = routeRows.find(r =>
+          (r.camp||"") === camp && (r.full_code||"") === code
+        );
+        if (actualRow && typeof actualRow.id === "number") {
+          actualId = actualRow.id;
+          log(`임시 ID를 실제 ID로 변환: ${polygonSourceId} → ${actualId}`);
+        } else {
+          actualId = undefined;
+          log(`실제 row가 없음. 새로 생성합니다.`);
+        }
+      }
+
+      const polygon_wgs84 = polygonSourceId ? getCurrentEditedPolygonWgs84ById(polygonSourceId) : null;
+
+      if (!actualId) {
+        const existingRow = routeRows.find(r => {
+          const rCamp = r.camp || r.camp_name || "";
+          const rCode = r.full_code || r.code || r.route_code || "";
+          return rCamp === camp && rCode === code;
+        });
+        if (existingRow && typeof existingRow.id === "number") {
+          actualId = existingRow.id;
+        }
+      }
+
+      const payload = {
+        camp,
+        code,
+        polygon_wgs84,
+        delivery_location_name: deliveryNameInput.value.trim() || null,
+        delivery_location_address: deliveryAddrInput.value.trim() || null
+      };
+
+      if (typeof actualId === "number") payload.id = actualId;
+
+      await apiJson("POST", ROUTE_ENDPOINT, payload);
+      setStatus(`저장 완료`, "OK");
+
+      await loadRoutes();
+    } catch (e) {
+      console.error(e);
+      setStatus(`저장 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  // ====== 폴리곤 삭제 (polygon_wgs84=null) ======
+  async function deletePolygon() {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+      if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+
+      let id = selectedRouteId;
+      const payload = (typeof id === "number") ? { id } : { camp, code };
+
+      setStatus("DELETE /route 요청 (polygon_wgs84=null)", "OK");
+      await apiJson("DELETE", ROUTE_ENDPOINT, payload);
+      setStatus("폴리곤 삭제 완료", "OK");
+
+      await loadRoutes();
+    } catch (e) {
+      console.error(e);
+      setStatus(`폴리곤 삭제 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  // ====== ✅ 벤더 검색/선택/저장(1W/2W) ======
+  let vendorModalOpen = false;
+  let waveModalOpen = false;
+  let waveModalAction = null; // "save" | "clear"
+
+  function normalizeVendor(v) {
+    if (!v || typeof v !== "object") return null;
+    const name = (v.name ?? v.vendor_name ?? "").toString().trim();
+    const business_number = (v.business_number ?? v.vendor_business_number ?? v.businessNumber ?? "").toString().trim();
+    const vendor_code = (v.vendor_code ?? v.vendorCode ?? "").toString().trim();
+    if (!name) return null;
+    return { name, business_number, vendor_code };
+  }
+
+  function setVendorCandidate(v) {
+    vendorCandidate = v || null;
+
+    if (!vendorPickedWrap || !vendorPickedText) return;
+
+    if (!vendorCandidate) {
+      vendorPickedWrap.style.display = "none";
+      vendorPickedText.textContent = "";
+      return;
+    }
+
+    const bn = vendorCandidate.business_number ? ` (${vendorCandidate.business_number})` : "";
+    vendorPickedText.textContent = `벤더 선택됨: ${vendorCandidate.name || "-"}${bn}`;
+    vendorPickedWrap.style.display = "flex";
+  }
+
+  if (vendorPickedClearBtn) {
+    vendorPickedClearBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      setVendorCandidate(null);
+    });
+  }
+
+  function openVendorModal(list, q="") {
+    if (!vendorModalEl || !vendorResultsEl) return;
+
+    vendorModalOpen = true;
+    vendorModalEl.style.display = "flex";
+    vendorModalEl.setAttribute("aria-hidden", "false");
+
+    const safeList = Array.isArray(list) ? list : [];
+    if (vendorMetaCountEl) vendorMetaCountEl.textContent = `${safeList.length}개`;
+
+    // 결과 영역
+    vendorResultsEl.innerHTML = "";
+
+    // 현재 선택된 벤더(후보) 표시 + 해제(X)
+    if (vendorCandidate && (vendorCandidate.name || vendorCandidate.business_number)) {
+      const sel = document.createElement("div");
+      sel.className = "pillRow";
+      sel.style.marginBottom = "10px";
+
+      const bn = vendorCandidate.business_number ? ` (${vendorCandidate.business_number})` : "";
+      const t = document.createElement("div");
+      t.textContent = `선택됨: ${vendorCandidate.name || "-"}${bn}`;
+
+      const x = document.createElement("button");
+      x.className = "pillX";
+      x.type = "button";
+      x.title = "선택 해제";
+      x.textContent = "✕";
+      x.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setVendorCandidate(null);
+        openVendorModal(safeList, q);
+      });
+
+      sel.appendChild(t);
+      sel.appendChild(x);
+      vendorResultsEl.appendChild(sel);
+    }
+
+    if (safeList.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "emptyMsg";
+      empty.textContent = `검색 결과 없음 : "${q || ""}"`;
+      vendorResultsEl.appendChild(empty);
+    } else {
+      for (const v of safeList) {
+        const card = document.createElement("div");
+        card.className = "resultCard";
+
+        const left = document.createElement("div");
+        left.className = "resultLeft";
+
+        const title = document.createElement("div");
+        title.className = "resultTitle";
+        title.textContent = v?.name || "-";
+
+        const meta = document.createElement("div");
+        meta.className = "resultSub";
+        // ✅ vendor_code는 표시하지 않음
+        meta.textContent = `사업자번호: ${v?.business_number || "-"}`;
+
+        left.appendChild(title);
+        left.appendChild(meta);
+
+        const actions = document.createElement("div");
+        actions.className = "resultActions";
+
+        const isSel =
+          !!vendorCandidate &&
+          String(v?.business_number || "") === String(vendorCandidate?.business_number || "") &&
+          String(v?.name || "") === String(vendorCandidate?.name || "");
+
+        const selectBtn = document.createElement("button");
+        selectBtn.className = "miniBtn";
+        selectBtn.textContent = isSel ? "선택됨" : "선택";
+        if (isSel) selectBtn.disabled = true;
+        selectBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setVendorCandidate(v);
+          closeVendorModal();
+        });
+
+        const clearBtn = document.createElement("button");
+        clearBtn.className = "miniX";
+        clearBtn.type = "button";
+        clearBtn.title = "선택 해제";
+        clearBtn.textContent = "✕";
+        clearBtn.style.display = isSel ? "inline-flex" : "none";
+        clearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setVendorCandidate(null);
+          openVendorModal(safeList, q);
+        });
+
+        actions.appendChild(selectBtn);
+        actions.appendChild(clearBtn);
+
+        card.appendChild(left);
+        card.appendChild(actions);
+        vendorResultsEl.appendChild(card);
+      }
+    }
+
+    // 신규 등록 섹션 (검색 결과 유무와 무관하게 항상 노출)
+    {
+      const divider = document.createElement("div");
+      divider.style.marginTop = "14px";
+      divider.style.paddingTop = "12px";
+      divider.style.borderTop = "1px solid rgba(255,255,255,.10)";
+      vendorResultsEl.appendChild(divider);
+
+      const box = document.createElement("div");
+      box.className = "createBox";
+
+      const head = document.createElement("div");
+      head.className = "createHead";
+      head.textContent = "신규 벤더 등록";
+
+      const desc = document.createElement("div");
+      desc.className = "createDesc";
+      desc.textContent = "검색 결과가 없어도 여기서 바로 등록할 수 있어요. (name + business_number)";
+
+      const form = document.createElement("div");
+      form.className = "createForm";
+
+      const mkField = (labelText, placeholder) => {
+        const wrap = document.createElement("div");
+        wrap.className = "createField";
+
+        const lab = document.createElement("div");
+        lab.className = "createLabel";
+        lab.textContent = labelText;
+
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "createInput";
+        inp.placeholder = placeholder;
+
+        wrap.appendChild(lab);
+        wrap.appendChild(inp);
+        return { wrap, inp };
+      };
+
+      const fName = mkField("벤더명", "예: 차니물류");
+      const fBn = mkField("사업자번호", "예: 123-45-67890 (하이픈 포함 그대로)");
+
+      // 검색어가 있으면 벤더명에 자동 채움
+      fName.inp.value = (q || "").trim();
+
+      form.appendChild(fName.wrap);
+      form.appendChild(fBn.wrap);
+
+      const actions = document.createElement("div");
+      actions.className = "createActions";
+
+      const createBtn = document.createElement("button");
+      createBtn.className = "createBtn";
+      createBtn.textContent = "등록";
+
+      actions.appendChild(createBtn);
+
+      box.appendChild(head);
+      box.appendChild(desc);
+      box.appendChild(form);
+      box.appendChild(actions);
+
+      const doCreate = async () => {
+        const name = (fName.inp.value || "").trim();
+        const bn = (fBn.inp.value || "").trim();
+
+        if (!name) { toastWarn("벤더명을 입력하세요."); fName.inp.focus(); return; }
+        if (!bn) { toastWarn("사업자번호를 입력하세요."); fBn.inp.focus(); return; }
+
+        createBtn.disabled = true;
+        createBtn.textContent = "등록중...";
+
+        try {
+          const created = await apiCreateVendor({ name, business_number: bn });
+
+          if (created?.business_number) {
+            // 현재 wave 상태(주간/야간)를 유지한 채로 즉시 선택 적용
+            onVendorPicked(created, /*silent*/true);
+            closeVendorModal();
+            toastOk("벤더 등록 완료");
+          } else {
+            throw new Error("생성 응답이 올바르지 않습니다.");
+          }
+        } catch (e) {
+          toastErr("등록 실패: " + (e?.message || String(e)));
+        } finally {
+          createBtn.disabled = false;
+          createBtn.textContent = "등록";
+        }
+      };
+
+      createBtn.addEventListener("click", doCreate);
+      fBn.inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") doCreate(); });
+      fName.inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") fBn.inp.focus(); });
+
+      vendorResultsEl.appendChild(box);
+    }
+
+    if (safeList.length === 0) {
+      setStatus(`검색 결과 없음: "${q}" (신규 등록 가능)`, "WARN");
+    }
+  }
+
+
+function closeVendorModal() {
+    vendorModalOpen = false;
+    if (!vendorModalEl) return;
+    vendorModalEl.style.display = "none";
+    vendorModalEl.setAttribute("aria-hidden", "true");
+  }
+
+  async function fetchVendorsByName(q) {
+    const url = new URL(VENDORS_ENDPOINT);
+    url.searchParams.set("q", q);
+
+    const data = await apiGet(url.toString());
+    const rows = Array.isArray(data) ? data : (data?.rows || data?.vendors || []);
+    return (rows || []).map(normalizeVendor).filter(Boolean);
+  }
+
+  async function runVendorSearch(q) {
+  const query = (q || "").trim();
+  if (!query) { setStatus("검색어를 입력하세요.", "WARN"); return; }
+
+  setStatus(`벤더 검색중: "${query}" ...`, "OK");
+
+  let list = [];
+  try {
+    list = await fetchVendorsByName(query);
+  } catch (e) {
+    setStatus(`벤더 검색 실패: ${e?.message || String(e)}`, "ERR");
+    // 검색 실패여도 신규 등록은 가능하게 모달 오픈
+    openVendorModal([], query);
+    return;
+  }
+
+  // 1개여도 모달 오픈(선택/해제 UX 통일)
+  if (list.length === 1) {
+    setVendorCandidate(list[0]);
+    openVendorModal(list, query);
+    setStatus(`벤더 후보 1개: "${query}"`, "OK");
+    return;
+  }
+
+  // 0개/다수: 모달 오픈 (0개여도 신규 등록 가능)
+  openVendorModal(list, query);
+
+  if (list.length === 0) setStatus(`검색 결과 없음: "${query}" (신규 등록 가능)`, "WARN");
+  else setStatus(`벤더 후보 ${list.length}개: "${query}"`, "OK");
+}
+
+function openWaveModal(action) {
+    if (!waveModalEl) return;
+
+    waveModalAction = action;
+    waveModalOpen = true;
+    waveModalEl.style.display = "flex";
+    waveModalEl.setAttribute("aria-hidden", "false");
+
+    if (waveModalTitleEl) {
+      waveModalTitleEl.textContent =
+        action === "clear" ? "어느 구분을 비울까요?" : "어느 구분으로 저장할까요?";
+    }
+
+    if (waveModalVendorPillEl) {
+      if (action === "save" && vendorCandidate?.name) {
+        waveModalVendorPillEl.style.display = "inline-block";
+        waveModalVendorPillEl.textContent = `저장 대상: ${vendorCandidate.name}`;
+      } else {
+        waveModalVendorPillEl.style.display = "none";
+        waveModalVendorPillEl.textContent = "";
+      }
+    }
+  }
+
+  function closeWaveModal() {
+    waveModalOpen = false;
+    if (!waveModalEl) return;
+    waveModalEl.style.display = "none";
+    waveModalEl.setAttribute("aria-hidden", "true");
+    waveModalAction = null;
+  }
+
+  function resolveActualId(camp, code) {
+    let id = selectedRouteId;
+
+    // 임시 ID 처리
+    if (id && typeof id === "string" && id.startsWith("tmp_")) {
+      const actualRow = routeRows.find(r =>
+        (r.camp||"") === camp && (r.full_code||"") === code
+      );
+      if (actualRow && typeof actualRow.id === "number") id = actualRow.id;
+      else id = undefined;
+    }
+
+    // 선택이 없을 때도 camp/code로 매칭
+    if (!(typeof id === "number")) {
+      const actualRow = routeRows.find(r =>
+        (r.camp||"") === camp && (r.full_code||"") === code
+      );
+      if (actualRow && typeof actualRow.id === "number") id = actualRow.id;
+    }
+
+    return (typeof id === "number") ? id : undefined;
+  }
+
+  async function saveVendorWave(wave, clear=false) {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+      if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+
+      const actualId = resolveActualId(camp, code);
+
+      const bn = clear ? null : (vendorCandidate?.business_number || null);
+      if (!clear && !bn) {
+        setStatus("저장할 벤더를 먼저 선택하세요. (벤더 검색 Enter)", "ERR");
+        return;
+      }
+
+      const payload = { camp, code };
+      if (wave === "1W") payload.vendor_business_number_1w = bn;
+      else payload.vendor_business_number_2w = bn;
+
+      if (typeof actualId === "number") payload.id = actualId;
+
+      const msg = clear ? `벤더 비우기(${wave}) 저장` : `벤더 저장(${wave})`;
+      setStatus(msg, "OK");
+
+      await apiJson("POST", ROUTE_ENDPOINT, payload);
+
+      setStatus(clear ? `벤더 비우기(${wave}) 완료` : `벤더 저장(${wave}) 완료`, "OK");
+      await loadRoutes();
+    } catch (e) {
+      console.error(e);
+      setStatus(`벤더 저장 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  // ====== 폴리곤 중심점 계산 ======
+  function getRouteCenter() {
+    if (!selectedRouteId || !overlayById.has(selectedRouteId)) return null;
+
+    const pack = overlayById.get(selectedRouteId);
+    const polygons = pack.polygons;
+
+    if (!polygons || polygons.length === 0) return null;
+
+    const allPoints = [];
+    for (const poly of polygons) {
+      const path = poly.getPath();
+      if (!path) continue;
+
+      const len = Array.isArray(path) ? path.length : (path.getLength ? path.getLength() : 0);
+      for (let i = 0; i < len; i++) {
+        const pt = Array.isArray(path) ? path[i] : path.getAt(i);
+        if (pt) allPoints.push(pt);
+      }
+    }
+
+    if (allPoints.length === 0) return null;
+    return centroidOfLatLngs(allPoints);
+  }
+  // ====== 입차지 저장/비우기 ======
+  async function saveDeliveryOnly(clear=false) {
+    try {
+      const camp = campInput.value.trim();
+      const code = codeInput.value.trim();
+      if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+      if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+
+      let id = selectedRouteId;
+
+      if (id && typeof id === "string" && id.startsWith("tmp_")) {
+        const actualRow = routeRows.find(r =>
+          (r.camp||"") === camp && (r.full_code||"") === code
+        );
+        if (actualRow && typeof actualRow.id === "number") id = actualRow.id;
+        else id = undefined;
+      }
+
+      const payload = {
+        camp,
+        code,
+        delivery_location_name: clear ? null : (deliveryNameInput.value.trim() || null),
+        delivery_location_address: clear ? null : (deliveryAddrInput.value.trim() || null),
+      };
+
+      if (typeof id === "number") payload.id = id;
+
+      setStatus(clear ? "입차지 비우기 저장" : "입차지 저장", "OK");
+      await apiJson("POST", ROUTE_ENDPOINT, payload);
+      setStatus(clear ? "입차지 비우기 완료" : "입차지 저장 완료", "OK");
+      await loadRoutes();
+    } catch (e) {
+      console.error(e);
+      setStatus(`입차지 저장 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  // ====== ✅ 주소검색 (카카오지도 스타일 모달) ======
+  function openSearchModal(prefill="") {
+    searchModalOpen = true;
+    searchModalEl.style.display = "flex";
+    searchModalEl.setAttribute("aria-hidden", "false");
+    if (prefill) searchQEl.value = prefill;
+    setTimeout(() => searchQEl.focus(), 0);
+  }
+
+  function closeSearchModal() {
+    searchModalOpen = false;
+    searchModalEl.style.display = "none";
+    searchModalEl.setAttribute("aria-hidden", "true");
+  }
+
+  function renderSearchSection(title, countText, items, kind) {
+    const wrap = document.createElement("div");
+
+    const head = document.createElement("div");
+    head.className = "sectionTitle";
+    head.innerHTML = `<div>${escapeHtml(title)}</div><div class="count">${escapeHtml(String(countText))}</div>`;
+    wrap.appendChild(head);
+
+    if (!items || items.length === 0) {
+      const empty = document.createElement("div");
+      empty.style.cssText = "color:rgba(230,238,252,.55);font-size:12px;margin:6px 0 14px;";
+      empty.textContent = "결과 없음";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    for (const it of items) {
+      const card = document.createElement("div");
+      card.className = "resultCard";
+
+      const left = document.createElement("div");
+      left.style.flex = "1";
+      left.style.minWidth = "0";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "resultTitle";
+
+      const subEl = document.createElement("div");
+      subEl.className = "resultSub";
+
+      if (kind === "addr") {
+        titleEl.textContent = it.address_name || it.address || "주소";
+        const road = it.road_address_name ? `도로명: ${it.road_address_name}\n` : "";
+        const jibun = it.address_name ? `지번: ${it.address_name}` : "";
+        subEl.textContent = `${road}${jibun}`.trim();
+
+        card.onclick = () => {
+          const lat = Number(it.y);
+          const lng = Number(it.x);
+          const pos = new kakao.maps.LatLng(lat, lng);
+          setSearchSelectedMarker(pos);
+          map.setCenter(pos);
+          map.setLevel(4);
+          closeSearchModal();
+          setStatus(`주소 선택: ${titleEl.textContent}`, "OK");
+        };
+      } else {
+        titleEl.textContent = it.place_name || it.name || "장소";
+        const addr = it.road_address_name || it.address_name || "";
+        const phone = it.phone ? `\n전화: ${it.phone}` : "";
+        subEl.textContent = `${addr}${phone}`.trim();
+
+        card.onclick = () => {
+          const lat = Number(it.y);
+          const lng = Number(it.x);
+          const pos = new kakao.maps.LatLng(lat, lng);
+          setSearchSelectedMarker(pos);
+          map.setCenter(pos);
+          map.setLevel(4);
+          closeSearchModal();
+          setStatus(`장소 선택: ${titleEl.textContent}`, "OK");
+        };
+      }
+
+      left.appendChild(titleEl);
+      left.appendChild(subEl);
+
+      const tag = document.createElement("div");
+      tag.className = "tagPill";
+      tag.textContent = (kind === "addr") ? "주소" : "장소";
+
+      card.appendChild(left);
+      card.appendChild(tag);
+
+      wrap.appendChild(card);
+    }
+
+    return wrap;
+  }
+
+  function updateSearchMeta() {
+    // ✅ 요청대로 "주소 먼저" 표기
+    const addrCountText = `주소 ${addrItems.length}개`;
+    const placeCountText = `장소 ${placeTotal || placeItems.length}개`;
+    searchMetaCountEl.textContent = `${addrCountText} · ${placeCountText}`;
+
+    placePageInfoEl.textContent = `장소 페이지 ${placePage} / ${placeLast}`;
+    placePrevBtn.disabled = (placePage <= 1);
+    placeNextBtn.disabled = (placePage >= placeLast);
+
+    placePrevBtn.style.opacity = placePrevBtn.disabled ? "0.5" : "1";
+    placeNextBtn.style.opacity = placeNextBtn.disabled ? "0.5" : "1";
+    placePrevBtn.style.cursor = placePrevBtn.disabled ? "not-allowed" : "pointer";
+    placeNextBtn.style.cursor = placeNextBtn.disabled ? "not-allowed" : "pointer";
+  }
+
+  function renderSearchResults() {
+    searchResultsEl.innerHTML = "";
+
+    // ✅ 요청대로: 주소 섹션을 위로, 장소(키워드) 섹션을 아래로
+    searchResultsEl.appendChild(
+      renderSearchSection("주소", addrItems.length, addrItems, "addr")
+    );
+    searchResultsEl.appendChild(
+      renderSearchSection("장소(키워드)", (placeTotal ? `${placeTotal}개` : `${placePage}/${placeLast}p`), placeItems, "place")
+    );
+
+    updateSearchMeta();
+  }
+
+  function placesKeywordSearchPromise(q, page) {
+    return new Promise((resolve) => {
+      // ✅ 전국 검색: location/bounds/radius 옵션 넣지 않음
+      const options = { page, size: 15 };
+      places.keywordSearch(q, (data, status, pagination) => {
+        if (status !== kakao.maps.services.Status.OK) {
+          return resolve({ items: [], total: 0, last: 1, current: page });
+        }
+        const total = Number(pagination?.totalCount || data?.length || 0);
+        const last = Number(pagination?.last || 1);
+        const current = Number(pagination?.current || page);
+        resolve({ items: data || [], total, last, current });
+      }, options);
+    });
+  }
+
+  function geocoderAddressSearchPromise(q) {
+    return new Promise((resolve) => {
+      geocoder.addressSearch(q, (result, status) => {
+        if (status !== kakao.maps.services.Status.OK) return resolve([]);
+        resolve(result || []);
+      });
+    });
+  }
+
+  // ✅✅✅ 여기만 “콩댕콩댕” 이스터에그 포함해서 오류 없이 수정됨
+  async function runSearch(q, page=1) {
+    let query = (q || "").trim();
+    if (!query) {
+      setStatus("검색어를 입력하세요.", "WARN");
+      return;
+    }
+
+    // ✅ Easter egg
+    if (query === "콩댕콩댕") {
+      query = "경기 파주시 하우고개길 411";
+      // 입력창에도 치환된 값 표시 (원하면 이 줄 삭제 가능)
+      searchQEl.value = query;
+    }
+
+    searchQuery = query;
+    placePage = page;
+
+    searchResultsEl.innerHTML = `<div style="color:rgba(230,238,252,.65);font-size:12px;padding:10px 2px;">검색 중...</div>`;
+
+    try {
+      const [addr, placePack] = await Promise.all([
+        geocoderAddressSearchPromise(query),
+        placesKeywordSearchPromise(query, page)
+      ]);
+
+      addrItems = addr;
+      placeItems = placePack.items;
+      placeTotal = placePack.total;
+      placeLast = placePack.last;
+      placePage = placePack.current;
+
+      renderSearchResults();
+      setStatus(`검색 완료: ${query}`, "OK");
+    } catch (e) {
+      console.error(e);
+      addrItems = [];
+      placeItems = [];
+      placeTotal = 0;
+      placeLast = 1;
+      placePage = 1;
+      renderSearchResults();
+      setStatus(`검색 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  function searchAddress() {
+    openSearchModal("");
+  }
+
+  // ====== OSM 정렬(Overpass) ======
+  async function alignWithOsm() {
+    try {
+      clearOsm();
+
+      const b = map.getBounds();
+      const sw = b.getSouthWest();
+      const ne = b.getNorthEast();
+
+      const bbox = `${sw.getLng()},${sw.getLat()},${ne.getLng()},${ne.getLat()}`;
+      const url = new URL(OSM_ENDPOINT);
+      url.searchParams.set("bbox", bbox);
+
+      setStatus(`GET /osm 요청: ${url.toString()}`, "OK");
+      const data = await apiGet(url.toString());
+
+      const roads = data?.roads || [];
+      const buildings = data?.buildings || [];
+
+      for (const r of roads) {
+        if (!r.coords || r.coords.length < 2) continue;
+        const path = r.coords.map(([lng,lat]) => new kakao.maps.LatLng(lat,lng));
+        const pl = new kakao.maps.Polyline({
+          path,
+          strokeWeight: 1,
+          strokeColor: "#ffffff",
+          strokeOpacity: 0.35,
+          strokeStyle: "solid",
+          zIndex: 0
+        });
+        pl.setMap(map);
+        osmOverlays.push(pl);
+      }
+
+      for (const g of buildings) {
+        if (!g.coords || g.coords.length < 3) continue;
+        const path = g.coords.map(([lng,lat]) => new kakao.maps.LatLng(lat,lng));
+        const pg = new kakao.maps.Polygon({
+          path,
+          strokeWeight: 1,
+          strokeColor: "#ffffff",
+          strokeOpacity: 0.18,
+          strokeStyle: "solid",
+          fillColor: "#ffffff",
+          fillOpacity: 0.05,
+          zIndex: 0
+        });
+        pg.setMap(map);
+        osmOverlays.push(pg);
+      }
+
+      setStatus(`OSM 표시 완료: roads ${roads.length}, buildings ${buildings.length}`, "OK");
+    } catch (e) {
+      console.error(e);
+      setStatus(`OSM 정렬 실패: ${e.message}`, "ERR");
+    }
+  }
+
+  // ====== 라벨 토글 ======
+  function refreshLabelsOnly() {
+    for (const [id, pack] of overlayById.entries()) {
+      pack.labels.forEach(l => l.setMap(null));
+      pack.labels = [];
+
+      if (!(labelOn || vendorLabelOn)) continue;
+      if (!pack.polygons || pack.polygons.length === 0) continue;
+
+      const row = pack.row || {};
+      const code = row.full_code || row.code || row.route_code || "";
+      const color = row.color || colorFor(code);
+
+      const opts = { showCode: labelOn, showVendor: vendorLabelOn };
+
+      if (pack.polygons.length === 1) {
+        const pos =
+          normalizeCenterWgs84(row.center_wgs84) ||
+          centroidOfLatLngs(getPolygonPathAsArray(pack.polygons[0]));
+        const label = createLabelOverlay(code, row, pos, color, opts);
+        label.setMap(map);
+        pack.labels.push(label);
+      } else {
+        for (const p of pack.polygons) {
+          const pos = centroidOfLatLngs(getPolygonPathAsArray(p));
+          const label = createLabelOverlay(code, row, pos, color, opts);
+          label.setMap(map);
+          pack.labels.push(label);
+        }
+      }
+    }
+  }
+
+  function toggleLabels() {
+    labelOn = !labelOn;
+    labelToggleBtn.textContent = labelOn ? "라우트 라벨 ON" : "라우트 라벨 OFF";
+    refreshLabelsOnly();
+  }
+
+  function toggleVendorLabels() {
+    vendorLabelOn = !vendorLabelOn;
+    vendorLabelToggleBtn.textContent = vendorLabelOn ? "벤더 라벨 ON" : "벤더 라벨 OFF";
+    refreshLabelsOnly();
+  }
+        
+
+  // ====== 초기화 ======
+  function resetMap() {
+    clearAllOverlays();
+    clearOsm();
+    stopDraw(true);
+    hint("", false);
+    setStatus("지도 초기화 완료.", "OK");
+  }
+
+  // ====== (추가) KST yyyymmddHHMM ======
+  function kstYYYYMMDDHHMM() {
+    const now = new Date();
+    const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const yyyy = String(kst.getUTCFullYear());
+    const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(kst.getUTCDate()).padStart(2, "0");
+    const HH = String(kst.getUTCHours()).padStart(2, "0");
+    const MM = String(kst.getUTCMinutes()).padStart(2, "0");
+    return `${yyyy}${mm}${dd}${HH}${MM}`;
+  }
+
+  // ====== 공유 링크 생성 ======
+  function generateShareLink() {
+    const camp = campInput.value.trim();
+    const code = codeInput.value.trim();
+
+    if (!camp) {
+      setStatus("캠프 정보를 입력해주세요.", "WARN");
+      return;
+    }
+
+    const shareUrl = new URL("/share.html", location.origin);
+    shareUrl.searchParams.set("camp", camp);
+    if (code) shareUrl.searchParams.set("code", code);
+
+    shareUrl.searchParams.set("v", kstYYYYMMDDHHMM());
+
+    const url = shareUrl.toString();
+
+    navigator.clipboard.writeText(url).then(() => {
+      setStatus("공유 링크가 클립보드에 복사되었습니다!", "OK");
+
+      const confirmed = confirm(
+        `공유 링크가 복사되었습니다!\n\n${url}\n\n새 탭에서 미리보기를 여시겠습니까?`
+      );
+
+      if (confirmed) window.open(url, "_blank");
+    }).catch(err => {
+      prompt("공유 링크 (Ctrl+C로 복사):", url);
+      setStatus("공유 링크를 생성했습니다.", "OK");
+    });
+
+    log(`공유 링크 생성: ${url}`);
+  }
+
+  // ====== ✅ 위성/로드뷰 ======
+  function setMapTypeSatellite(on) {
+    isSatellite = !!on;
+    if (!map) return;
+    map.setMapTypeId(isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+    if (toggleMapTypeBtn) toggleMapTypeBtn.textContent = isSatellite ? "일반" : "위성";
+  }
+
+  function ensureRoadview() {
+    if (roadview && roadviewClient) return;
+    const container = $("roadview");
+    if (!container) return;
+    roadview = new kakao.maps.Roadview(container);
+    roadviewClient = new kakao.maps.RoadviewClient();
+  }
+
+  function setRoadviewOverlay(on) {
+    if (!map) return;
+    try {
+      if (on) map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+      else map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+    } catch (e) {
+      console.warn("ROADVIEW 오버레이 토글 실패", e);
+    }
+  }
+
+  function setRoadviewAt(latlng) {
+    ensureRoadview();
+    if (!roadviewClient || !roadview) return;
+
+    const radii = [80, 200, 500, 1200];
+    const tryFind = (i) => {
+      const r = radii[i];
+      roadviewClient.getNearestPanoId(latlng, r, (panoId) => {
+        if (panoId === null || panoId === undefined) {
+          if (i < radii.length - 1) return tryFind(i + 1);
+          alert("이 위치 근처에는 로드뷰가 없습니다.");
+          return;
+        }
+        roadviewOpen = true;
+        if (mapWrapEl) mapWrapEl.classList.add("roadview-open");
+
+        if (roadview && typeof roadview.relayout === "function") {
+          setTimeout(() => roadview.relayout(), 0);
+        }
+
+        roadview.setPanoId(panoId, latlng);
+      });
+    };
+    tryFind(0);
+  }
+
+  function setRoadviewOn(on) {
+    roadviewOn = !!on;
+    if (!roadviewOn) roadviewOpen = false;
+
+    if (toggleRoadviewBtn) toggleRoadviewBtn.textContent = roadviewOn ? "로드뷰 종료" : "로드뷰";
+    if (roadviewHintEl) roadviewHintEl.style.display = roadviewOn ? "inline-flex" : "none";
+
+    if (mapWrapEl) {
+      if (!roadviewOn) mapWrapEl.classList.remove("roadview-open");
+    }
+
+    if (map) {
+      const c = map.getCenter();
+      map.relayout();
+      map.setCenter(c);
+    }
+    if (!roadviewOn) {
+      setRoadviewOverlay(false);
+      if (roadviewClickHandler && map) {
+        kakao.maps.event.removeListener(map, "click", roadviewClickHandler);
+      }
+      roadviewClickHandler = null;
+      return;
+    }
+
+    if (drawMode) stopDraw(true);
+    if (searchModalOpen) closeSearchModal();
+
+    setRoadviewOverlay(true);
+
+    if (!roadviewClickHandler && map) {
+      roadviewClickHandler = (mouseEvent) => {
+        if (!roadviewOn) return;
+        if (drawMode) return;
+        if (searchModalOpen) return;
+        if (mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+      };
+      kakao.maps.event.addListener(map, "click", roadviewClickHandler);
+    }
+  }
+
+  // ====== 지도 이벤트(그리기 모드 + 커스텀 드래그) ======
+  function attachMapEvents() {
+    kakao.maps.event.addListener(map, "click", (mouseEvent) => {
+      if (drawMode) {
+        const latlng = mouseEvent.latLng;
+        addDrawPoint(latlng);
+      }
+    });
+
+    kakao.maps.event.addListener(map, "rightclick", () => {
+      if (!drawMode) return;
+      popDrawPoint();
+    });
+
+    const handleMouseMove = (e) => {
+      if (!draggingVertex) return;
+
+      const mapDiv = map.getNode ? map.getNode() : document.getElementById("map");
+      const rect = mapDiv.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const proj = map.getProjection();
+      const point = new kakao.maps.Point(x, y);
+      const newPos = proj.coordsFromContainerPoint(point);
+
+      const { marker, polygon, index } = draggingVertex;
+
+      marker.setPosition(newPos);
+
+      const currentPath = polygon.getPath();
+      const pathArray = [];
+      if (currentPath && typeof currentPath.getLength === 'function') {
+        for (let j = 0; j < currentPath.getLength(); j++) {
+          pathArray.push(j === index ? newPos : currentPath.getAt(j));
+        }
+      } else if (Array.isArray(currentPath)) {
+        for (let j = 0; j < currentPath.length; j++) {
+          pathArray.push(j === index ? newPos : currentPath[j]);
+        }
+      }
+      polygon.setPath(pathArray);
+
+      updateSelectedLabels();
+    };
+
+    const handleMouseUp = () => {
+      if (!draggingVertex) return;
+      draggingVertex = null;
+      map.setDraggable(true);
+      rebuildHandles();
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    // ✅ 키보드: Enter/ESC 동작 (모달 → 그리기 → 편집/선택 우선순위)
+    window.addEventListener("keydown", (e) => {
+      // 0) 모달 우선 처리
+      if (e.key === "Escape") {
+        if (waveModalOpen) {
+          closeWaveModal();
+          setStatus("1W/2W 선택 닫기", "OK");
+          return;
+        }
+        if (vendorModalOpen) {
+          closeVendorModal();
+          setStatus("벤더 선택 닫기", "OK");
+          return;
+        }
+        if (searchModalOpen) {
+          closeSearchModal();
+          clearSearchSelectedMarker();
+          setStatus("검색 닫기/마커 삭제", "OK");
+          return;
+        }
+        if (searchSelectedMarker || searchSelectedOverlay) {
+          clearSearchSelectedMarker();
+          setStatus("검색 마커 삭제", "OK");
+          return;
+        }
+      }
+
+      // 1) 그리기 모드
+      if (drawMode) {
+        if (e.key === "Escape") {
+          stopDraw();
+          setStatus("그리기 취소", "WARN");
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          finishDraw();
+        }
+        return;
+      }
+
+      // 2) 입력 중이면 글로벌 Enter는 무시 (각 input에서 처리)
+      const active = document.activeElement;
+      const tag = (active?.tagName || "").toLowerCase();
+      const isTyping = tag === "input" || tag === "textarea" || active?.isContentEditable;
+      if (isTyping) return;
+
+      // 3) Enter: 편집 저장 / 선택→편집 진입
+      if (e.key === "Enter") {
+        if (editingRouteId) {
+          e.preventDefault();
+          e.stopPropagation();
+          saveCurrent();
+          return;
+        }
+        if (selectedRouteId) {
+          e.preventDefault();
+          e.stopPropagation();
+          startEditing(selectedRouteId);
+          return;
+        }
+      }
+
+      // 4) Escape: 편집 종료(선택 유지) / 선택 해제
+      if (e.key === "Escape") {
+        if (editingRouteId) {
+          stopEditing();
+          setStatus("편집 모드 종료 (선택 유지)", "OK");
+          return;
+        }
+        if (selectedRouteId) {
+          selectedRouteId = null;
+          stopEditing();
+          selectedInfo.textContent = "선택: 없음";
+          clearVendorDisplay();
+          deliveryNameInput.value = "";
+          deliveryAddrInput.value = "";
+          setStatus("선택 해제", "OK");
+          return;
+        }
+      }
+    });
+  }
+
+  // ====== 초기 구동 ======
+  function init() {
+    kakao.maps.load(() => {
+      const center = new kakao.maps.LatLng(37.4936, 126.9019);
+      map = new kakao.maps.Map($("map"), { center, level: 6 });
+      geocoder = new kakao.maps.services.Geocoder();
+      places = new kakao.maps.services.Places();
+
+      VERTEX_IMG = makeHandleImage("#ffffff", "#0b1220");
+      MID_IMG = makeHandleImage("#93a4c7", "#0b1220");
+
+      attachMapEvents();
+
+      window.addEventListener("resize", () => {
+        if (!map) return;
+        const c = map.getCenter();
+        map.relayout();
+        map.setCenter(c);
+        if (roadviewOn && roadview && typeof roadview.relayout === "function") roadview.relayout();
+      });
+
+      loadBtn.addEventListener("click", loadRoutes);
+      drawNewBtn.addEventListener("click", () => beginDraw("new"));
+      drawAddBtn.addEventListener("click", () => beginDraw("add"));
+      addrBtn.addEventListener("click", searchAddress);
+      saveBtn.addEventListener("click", saveCurrent);
+      deletePolyBtn.addEventListener("click", deletePolygon);
+      
+      labelToggleBtn.addEventListener("click", toggleLabels);
+      vendorLabelToggleBtn.addEventListener("click", toggleVendorLabels);
+      resetBtn.addEventListener("click", resetMap);
+
+      // ✅ Enter로 "불러오기" (캠프/라우트코드)
+      campInput.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (editingRouteId) saveCurrent();
+        else loadRoutes();
+      });
+      codeInput.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (editingRouteId) saveCurrent();
+        else loadRoutes();
+      });
+
+      // ✅ Enter로 벤더 검색 + 캠프+벤더 자동 불러오기
+      if (vendorSearchInput) vendorSearchInput.addEventListener("keydown", (e) => {
+        if (e.isComposing) return;
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        e.stopPropagation();
+        runVendorSearch(vendorSearchInput.value);
+      });
+
+      if (vendorSearchBtn) {
+        vendorSearchBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          runVendorSearch(vendorSearchInput.value);
+        });
+      }
+
+      // ✅ 벤더 저장/비우기: 1W/2W 선택 모달
+      vendorSaveBtn.addEventListener("click", () => {
+        const camp = campInput.value.trim();
+        const code = codeInput.value.trim();
+        if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+        if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+        if (!vendorCandidate?.business_number) {
+          setStatus("벤더를 먼저 검색/선택하세요. (벤더 검색 Enter)", "ERR");
+          return;
+        }
+        openWaveModal("save");
+      });
+      vendorClearBtn.addEventListener("click", () => {
+        const camp = campInput.value.trim();
+        const code = codeInput.value.trim();
+        if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
+        if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+        openWaveModal("clear");
+      });
+
+      // ✅ 모달 닫기/이벤트
+      if (vendorModalCloseBtn) vendorModalCloseBtn.addEventListener("click", closeVendorModal);
+      if (vendorModalEl) vendorModalEl.addEventListener("click", (e) => { if (e.target === vendorModalEl) closeVendorModal(); });
+
+      if (waveModalCloseBtn) waveModalCloseBtn.addEventListener("click", closeWaveModal);
+      if (waveModalEl) waveModalEl.addEventListener("click", (e) => { if (e.target === waveModalEl) closeWaveModal(); });
+
+      if (wave1WBtn) wave1WBtn.addEventListener("click", () => {
+        const action = waveModalAction;
+        closeWaveModal();
+        saveVendorWave("1W", action === "clear");
+      });
+      if (wave2WBtn) wave2WBtn.addEventListener("click", () => {
+        const action = waveModalAction;
+        closeWaveModal();
+        saveVendorWave("2W", action === "clear");
+      });
+
+      // ✅ 입차지 저장/비우기
+      deliverySaveBtn.addEventListener("click", () => saveDeliveryOnly(false));
+      deliveryClearBtn.addEventListener("click", () => saveDeliveryOnly(true));
+
+      shareBtn.addEventListener("click", generateShareLink);
+
+      if (toggleMapTypeBtn) toggleMapTypeBtn.addEventListener("click", () => setMapTypeSatellite(!isSatellite));
+      if (toggleRoadviewBtn) toggleRoadviewBtn.addEventListener("click", () => setRoadviewOn(!roadviewOn));
+
+      // ✅ 검색 모달 이벤트
+      searchRunBtn.addEventListener("click", () => runSearch(searchQEl.value, 1));
+      searchCloseBtn.addEventListener("click", () => closeSearchModal());
+      searchQEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") runSearch(searchQEl.value, 1);
+        if (e.key === "Escape") {
+          closeSearchModal();
+          clearSearchSelectedMarker();
+        }
+      });
+      searchModalEl.addEventListener("click", (e) => {
+        if (e.target === searchModalEl) closeSearchModal();
+      });
+
+      placePrevBtn.addEventListener("click", () => {
+        if (placePage <= 1) return;
+        runSearch(searchQuery, placePage - 1);
+      });
+      placeNextBtn.addEventListener("click", () => {
+        if (placePage >= placeLast) return;
+        runSearch(searchQuery, placePage + 1);
+      });
+
+      setStatus("지도 로드 완료", "OK");
+
+      loadRoutes().catch((err) => {
+        log("자동 로드 실패. 백엔드 API 확인이 필요합니다.");
+        setStatus("자동 로드 실패 (백엔드 API 오류). 새로 그리기는 가능합니다.", "WARN");
+      });
+    });
+  }
+
+  window.addEventListener("error", (ev) => {
+    const msg = ev?.message || "Script error.";
+    log(`ERR window.error: ${msg}`);
+  });
+
+  init();
+})();
+</script>
+</body>
+</html>
+
   <meta name="referrer" content="origin" />
   <title>마루웰 라우트 편집기</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />

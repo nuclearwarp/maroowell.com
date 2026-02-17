@@ -391,7 +391,7 @@
       padding:12px 12px;
       margin-bottom:10px;
       display:flex;
-      align-items:flex-start;
+      align-items:center;
       justify-content:space-between;
       gap:10px;
       cursor:pointer;
@@ -470,7 +470,42 @@
       font-size:12px;
       white-space:nowrap;
     }
-  </style>
+  
+  /* --- vendor search UX additions --- */
+  .btnSearch{padding:10px 14px; min-width:86px;}
+  .pillRow{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:6px 10px; border-radius:999px;
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.04);
+    color:var(--muted);
+    font-size:12px;
+    gap:10px;
+  }
+  .pillX{
+    width:22px; height:22px; border-radius:999px;
+    border:1px solid var(--line);
+    background:rgba(255,255,255,.06);
+    color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .pillX:hover{background:rgba(255,255,255,.12);}
+  .resultActions{display:flex; gap:8px; align-items:center;}
+  .miniX{
+    min-width:34px; height:32px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05);
+    color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center;
+    cursor:pointer;
+  }
+  .miniX:hover{background:rgba(255,255,255,.10);}
+  .kvRow{min-height:28px;}
+  .kvLabel, .kvValue{line-height:18px;}
+
+</style>
 
   <!-- Kakao Maps -->
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
@@ -509,7 +544,10 @@
       </div>
 
       <div style="height:10px"></div>
-      <input id="vendorSearchInput" type="text" placeholder="벤더 검색 (이름 일부 입력 후 Enter)" />
+      <div class="row" style="gap:10px;">
+            <input id="vendorSearchInput" type="text" placeholder="벤더명/사업자번호 일부 입력 후 Enter" style="flex:1;" />
+            <button id="vendorSearchBtn" class="btn btnSearch" type="button">검색</button>
+          </div>
 
       <div style="height:10px"></div>
       <div class="row">
@@ -518,7 +556,10 @@
       </div>
 
       <div style="height:8px"></div>
-      <span class="pill" id="vendorPickedPill" style="display:none"></span>
+      <div id="vendorPickedWrap" class="pillRow" style="display:none;margin-top:8px;">
+            <div id="vendorPickedText"></div>
+            <button id="vendorPickedClearBtn" class="pillX" type="button" title="선택 해제">✕</button>
+          </div>
 
       <div class="sep"></div>
 
@@ -670,7 +711,10 @@
   const vendorWeekValue = $("vendorWeekValue");
   const vendorNightValue = $("vendorNightValue");
   const vendorSearchInput = $("vendorSearchInput");
-  const vendorPickedPill = $("vendorPickedPill");
+  const vendorSearchBtn = $("vendorSearchBtn");
+  const vendorPickedWrap = $("vendorPickedWrap");
+  const vendorPickedText = $("vendorPickedText");
+  const vendorPickedClearBtn = $("vendorPickedClearBtn");
 
   // ✅ 벤더 선택 모달
   const vendorModalEl = $("vendorModal");
@@ -2241,14 +2285,25 @@ const data = await apiGet(url.toString());
 
   function setVendorCandidate(v) {
     vendorCandidate = v || null;
-if (!vendorPickedPill) return;
+
+    if (!vendorPickedWrap || !vendorPickedText) return;
+
     if (!vendorCandidate) {
-      vendorPickedPill.style.display = "none";
-      vendorPickedPill.textContent = "";
+      vendorPickedWrap.style.display = "none";
+      vendorPickedText.textContent = "";
       return;
     }
-    vendorPickedPill.style.display = "inline-block";
-    vendorPickedPill.textContent = `벤더 선택됨: ${vendorCandidate.name}`;
+
+    const bn = vendorCandidate.business_number ? ` (${vendorCandidate.business_number})` : "";
+    vendorPickedText.textContent = `벤더 선택됨: ${vendorCandidate.name || "-"}${bn}`;
+    vendorPickedWrap.style.display = "flex";
+  }
+
+  if (vendorPickedClearBtn) {
+    vendorPickedClearBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      setVendorCandidate(null);
+    });
   }
 
   function openVendorModal(list, q="") {
@@ -2263,6 +2318,33 @@ if (!vendorPickedPill) return;
 
     // 결과 영역
     vendorResultsEl.innerHTML = "";
+
+    // 현재 선택된 벤더(후보) 표시 + 해제(X)
+    if (vendorCandidate && (vendorCandidate.name || vendorCandidate.business_number)) {
+      const sel = document.createElement("div");
+      sel.className = "pillRow";
+      sel.style.marginBottom = "10px";
+
+      const bn = vendorCandidate.business_number ? ` (${vendorCandidate.business_number})` : "";
+      const t = document.createElement("div");
+      t.textContent = `선택됨: ${vendorCandidate.name || "-"}${bn}`;
+
+      const x = document.createElement("button");
+      x.className = "pillX";
+      x.type = "button";
+      x.title = "선택 해제";
+      x.textContent = "✕";
+      x.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setVendorCandidate(null);
+        openVendorModal(safeList, q);
+      });
+
+      sel.appendChild(t);
+      sel.appendChild(x);
+      vendorResultsEl.appendChild(sel);
+    }
 
     if (safeList.length === 0) {
       const empty = document.createElement("div");
@@ -2290,16 +2372,43 @@ if (!vendorPickedPill) return;
         left.appendChild(title);
         left.appendChild(meta);
 
-        const right = document.createElement("button");
-        right.className = "miniBtn";
-        right.textContent = "선택";
-        right.addEventListener("click", () => {
+        const actions = document.createElement("div");
+        actions.className = "resultActions";
+
+        const isSel =
+          !!vendorCandidate &&
+          String(v?.business_number || "") === String(vendorCandidate?.business_number || "") &&
+          String(v?.name || "") === String(vendorCandidate?.name || "");
+
+        const selectBtn = document.createElement("button");
+        selectBtn.className = "miniBtn";
+        selectBtn.textContent = isSel ? "선택됨" : "선택";
+        if (isSel) selectBtn.disabled = true;
+        selectBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           setVendorCandidate(v);
           closeVendorModal();
         });
 
+        const clearBtn = document.createElement("button");
+        clearBtn.className = "miniX";
+        clearBtn.type = "button";
+        clearBtn.title = "선택 해제";
+        clearBtn.textContent = "✕";
+        clearBtn.style.display = isSel ? "inline-flex" : "none";
+        clearBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setVendorCandidate(null);
+          openVendorModal(safeList, q);
+        });
+
+        actions.appendChild(selectBtn);
+        actions.appendChild(clearBtn);
+
         card.appendChild(left);
-        card.appendChild(right);
+        card.appendChild(actions);
         vendorResultsEl.appendChild(card);
       }
     }
@@ -2383,6 +2492,7 @@ if (!vendorPickedPill) return;
 
     btn.addEventListener("click", doCreate);
     bnInput.addEventListener("keydown", (ev) => {
+      if (ev.isComposing) return;
       if (ev.key === "Enter") { ev.preventDefault(); doCreate(); }
     });
 
@@ -2396,11 +2506,11 @@ if (!vendorPickedPill) return;
 
     vendorResultsEl.appendChild(box);
 
-    // ESC로 닫기 안내
     if (safeList.length === 0) {
       setStatus(`검색 결과 없음: "${q}" (신규 등록 가능)`, "WARN");
     }
-}
+  }
+
 
 function closeVendorModal() {
     vendorModalOpen = false;
@@ -2434,10 +2544,11 @@ function closeVendorModal() {
     return;
   }
 
-  // 1개면 바로 선택(기존 UX 유지)
+  // 1개여도 모달 오픈(선택/해제 UX 통일)
   if (list.length === 1) {
     setVendorCandidate(list[0]);
-    setStatus(`벤더 선택됨: ${list[0].name}`, "OK");
+    openVendorModal(list, query);
+    setStatus(`벤더 후보 1개: "${query}"`, "OK");
     return;
   }
 
@@ -3229,11 +3340,19 @@ function openWaveModal(action) {
 
       // ✅ Enter로 벤더 검색 + 캠프+벤더 자동 불러오기
       if (vendorSearchInput) vendorSearchInput.addEventListener("keydown", (e) => {
+        if (e.isComposing) return;
         if (e.key !== "Enter") return;
         e.preventDefault();
         e.stopPropagation();
-        runVendorSearch();
+        runVendorSearch(vendorSearchInput.value);
       });
+
+      if (vendorSearchBtn) {
+        vendorSearchBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          runVendorSearch(vendorSearchInput.value);
+        });
+      }
 
       // ✅ 벤더 저장/비우기: 1W/2W 선택 모달
       vendorSaveBtn.addEventListener("click", () => {

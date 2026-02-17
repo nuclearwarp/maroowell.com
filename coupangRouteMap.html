@@ -37,6 +37,7 @@
     .subtitle{font-size:12px; color:var(--muted); margin:-6px 0 14px;}
     .group{background:rgba(255,255,255,.03); border:1px solid var(--line); border-radius:12px; padding:10px; margin:10px 0;}
     .label{font-size:12px; color:var(--muted); margin:6px 0 6px;}
+    .label.sectionTitle{ text-align:center; font-weight:900; letter-spacing:.2px; }
     input[type="text"]{
       width:100%;
       padding:10px 10px;
@@ -482,7 +483,7 @@
 
       <div class="sep"></div>
 
-      <div class="label">벤더 정보(서브라우트 단위)</div>
+      <div class="label sectionTitle">벤더 정보(서브라우트 단위)</div>
 
       <div class="kv">
         <div class="kvRow">
@@ -509,7 +510,7 @@
 
       <div class="sep"></div>
 
-      <div class="label">입차지 정보(서브라우트 단위)</div>
+      <div class="label sectionTitle">입차지 정보(서브라우트 단위)</div>
       <input id="deliveryNameInput" type="text" placeholder="입차지 (예: 본캠프 or 식사동MB)" />
       <div style="height:8px"></div>
       <input id="deliveryAddrInput" type="text" placeholder="입차지 주소 (상세히)" />
@@ -536,7 +537,7 @@
       <div class="row">
         <button id="saveBtn" class="btn ok">저장</button>
         <button id="deletePolyBtn" class="btn danger">폴리곤 삭제</button>
-        <button id="alignBtn" class="btn">지도 정렬</button>
+        <button id="vendorLabelToggleBtn" class="btn">벤더 라벨 ON</button>
       </div>
       <div style="height:8px"></div>
       <div class="row">
@@ -683,7 +684,7 @@
   const addrBtn = $("addrBtn");
   const saveBtn = $("saveBtn");
   const deletePolyBtn = $("deletePolyBtn");
-  const alignBtn = $("alignBtn");
+  const vendorLabelToggleBtn = $("vendorLabelToggleBtn");
   const labelToggleBtn = $("labelToggleBtn");
   const resetBtn = $("resetBtn");
   const vendorSaveBtn = $("vendorSaveBtn");
@@ -763,6 +764,7 @@
   let editHandles = [];         // kakao.maps.Marker[]
   let editPolygons = [];        // kakao.maps.Polygon[]
   let labelOn = true;
+  let vendorLabelOn = true;
 
   // ✅ 벤더 검색/필터 상태
   let vendorCandidate = null;              // { name, business_number, vendor_code }
@@ -874,8 +876,8 @@
       const r = arr[i];
       const idKey = (typeof r?.id === "number" || typeof r?.id === "string") ? r.id : keyOf(r);
       const hue = (startHue + i * golden) % 360;
-      const sat = 24 + ((i * 7) % 10);      // 24~33 (저채도)
-      const light = 56 + ((i * 11) % 11) - 4; // 52~62 (중명도)
+      const sat = 42 + ((i * 11) % 18);      // 42~59 (적당한 채도)
+      const light = 48 + ((i * 7) % 10);      // 48~57 (중저명도)
       map.set(idKey, hslToHex(hue, sat, light));
     }
     return map;
@@ -956,43 +958,135 @@
     for (const ll of latlngs) { latSum += ll.getLat(); lngSum += ll.getLng(); }
     return new kakao.maps.LatLng(latSum/latlngs.length, lngSum/latlngs.length);
   }
-  function createLabelOverlay(text, position, color) {
-    const el = document.createElement("div");
-    el.style.padding = "4px 8px";
-    el.style.borderRadius = "999px";
-    el.style.background = "rgba(0,0,0,.55)";
-    el.style.color = "#fff";
-    el.style.fontSize = "12px";
-    el.style.border = "1px solid rgba(255,255,255,.18)";
-    el.style.whiteSpace = "nowrap";
-    el.style.boxShadow = "0 2px 10px rgba(0,0,0,.35)";
-    el.style.transform = "translateY(-2px)";
+  function normalizeCenterWgs84(v) {
+    if (!v) return null;
+    let obj = v;
+    if (typeof obj === "string") {
+      try { obj = JSON.parse(obj); } catch { return null; }
+    }
+    let lat = null, lng = null;
 
-    // ✅ 점(●) 세로 정렬 이슈 해결: flex로 중앙 정렬
-    el.style.display = "inline-flex";
-    el.style.alignItems = "center";
-    el.style.gap = "6px";
+    if (Array.isArray(obj) && obj.length >= 2) {
+      const a = Number(obj[0]);
+      const b = Number(obj[1]);
+      // [lng,lat] or [lat,lng] heuristic
+      if (Math.abs(a) > Math.abs(b)) { lng = a; lat = b; }
+      else { lat = a; lng = b; }
+    } else if (obj && typeof obj === "object") {
+      lat = Number(obj.lat ?? obj.latitude ?? obj.y);
+      lng = Number(obj.lng ?? obj.lon ?? obj.longitude ?? obj.x);
+    }
+
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return new kakao.maps.LatLng(lat, lng);
+  }
+
+  function vendorNameOnly(name, bn) {
+    const n = (name ?? "").toString().trim();
+    if (n) return n;
+    const b = (bn ?? "").toString().trim();
+    if (b) return b;
+    return "-";
+  }
+
+  function getVendorWeekNightFromRow(row) {
+    // ✅ 주간=2W, 야간=1W (요구사항 반영)
+    const name1 =
+      row.vendor_name_1w ??
+      row.vendor_1w_name ??
+      row.vendor_week_name ??
+      row.vendor_name_week ??
+      null;
+    const bn1 =
+      row.vendor_business_number_1w ??
+      row.vendor_business_number_week ??
+      null;
+
+    const name2 =
+      row.vendor_name_2w ??
+      row.vendor_2w_name ??
+      row.vendor_night_name ??
+      row.vendor_name_night ??
+      null;
+    const bn2 =
+      row.vendor_business_number_2w ??
+      row.vendor_business_number_night ??
+      null;
+
+    return {
+      week: vendorNameOnly(name2, bn2),
+      night: vendorNameOnly(name1, bn1)
+    };
+  }
+
+  function createLabelOverlay(code, row, position, color) {
+    const root = document.createElement("div");
+    root.style.padding = vendorLabelOn ? "6px 10px" : "4px 8px";
+    root.style.borderRadius = "14px";
+    root.style.background = "rgba(0,0,0,0.55)";
+    root.style.color = "#fff";
+    root.style.border = "1px solid rgba(255,255,255,0.18)";
+    root.style.boxShadow = "0 4px 14px rgba(0,0,0,0.28)";
+    root.style.backdropFilter = "blur(2px)";
+    root.style.maxWidth = "240px";
+    root.style.pointerEvents = "none";
+    root.style.display = "flex";
+    root.style.flexDirection = "column";
+    root.style.gap = vendorLabelOn ? "3px" : "0";
+
+    const top = document.createElement("div");
+    top.style.display = "inline-flex";
+    top.style.alignItems = "center";
+    top.style.gap = "6px";
 
     const dot = document.createElement("span");
     dot.style.width = "8px";
     dot.style.height = "8px";
-    dot.style.borderRadius = "50%";
+    dot.style.borderRadius = "999px";
     dot.style.background = color;
+    dot.style.boxShadow = "0 0 0 2px rgba(255,255,255,0.12)";
     dot.style.flex = "0 0 auto";
 
     const t = document.createElement("span");
-    t.textContent = text;
+    t.textContent = String(code || "");
+    t.style.fontWeight = "900";
+    t.style.fontSize = "12px";
+    t.style.letterSpacing = "0.2px";
+    t.style.lineHeight = "1.1";
 
-    el.appendChild(dot);
-    el.appendChild(t);
+    top.appendChild(dot);
+    top.appendChild(t);
+    root.appendChild(top);
 
-    return new kakao.maps.CustomOverlay({
-      position,
-      content: el,
-      yAnchor: 1.0,
-      zIndex: 10
-    });
+    if (vendorLabelOn) {
+      const { week, night } = getVendorWeekNightFromRow(row || {});
+      const box = document.createElement("div");
+      box.style.display = "flex";
+      box.style.flexDirection = "column";
+      box.style.gap = "1px";
+      box.style.fontSize = "11px";
+      box.style.lineHeight = "1.2";
+      box.style.color = "rgba(255,255,255,0.88)";
+
+      const l1 = document.createElement("div");
+      l1.textContent = `주간: ${week}`;
+      const l2 = document.createElement("div");
+      l2.textContent = `야간: ${night}`;
+
+      [l1, l2].forEach(el => {
+        el.style.whiteSpace = "nowrap";
+        el.style.overflow = "hidden";
+        el.style.textOverflow = "ellipsis";
+      });
+
+      box.appendChild(l1);
+      box.appendChild(l2);
+      root.appendChild(box);
+    }
+
+    return new kakao.maps.CustomOverlay({ position, content: root, yAnchor: 1.0, zIndex: 10 });
   }
+
   function escapeHtml(s) {
     return String(s)
       .replaceAll("&","&amp;")
@@ -1011,7 +1105,7 @@
       strokeOpacity: 1.0,
       strokeStyle: "solid",
       fillColor,
-      fillOpacity: 0.12,
+      fillOpacity: 0.20,
       zIndex
     });
   }
@@ -1217,13 +1311,18 @@
           any = true;
           latlngs.forEach(ll => bounds.extend(ll));
 
-          if (labelOn) {
-            const c = centroidOfLatLngs(latlngs);
-            const label = createLabelOverlay(code, c, color);
-            label.setMap(map);
-            labels.push(label);
-          }
+
         }
+      }
+
+      // ✅ 라우트 라벨(코드 + 벤더) - 1개만 표시
+      if (labelOn && polygons.length > 0) {
+        const pos =
+          normalizeCenterWgs84(row.center_wgs84) ||
+          centroidOfLatLngs(polygons[0].getPath());
+        const label = createLabelOverlay(code, row, pos, color);
+        label.setMap(map);
+        labels.push(label);
       }
 
       overlayById.set(id, { row, polygons, labels });
@@ -1248,6 +1347,72 @@
       </svg>`;
     const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(12,12), { offset: new kakao.maps.Point(6,6) });
+  }
+
+  function makeLabelAnchorImage() {
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+        <circle cx="7" cy="7" r="6" fill="rgba(59,130,246,0.95)" stroke="#ffffff" stroke-width="2"/>
+        <circle cx="7" cy="7" r="2" fill="#111827" opacity="0.9"/>
+      </svg>`;
+    const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(14,14), { offset: new kakao.maps.Point(7,7) });
+  }
+
+  let labelAnchorMarker = null;
+  let labelAnchorLatLng = null;
+  let labelAnchorDirty = false;
+
+  function stopLabelAnchorEdit() {
+    if (labelAnchorMarker) {
+      labelAnchorMarker.setMap(null);
+      labelAnchorMarker = null;
+    }
+    labelAnchorLatLng = null;
+    labelAnchorDirty = false;
+  }
+
+  function startLabelAnchorEdit(routeId) {
+    stopLabelAnchorEdit();
+    const pack = overlayById.get(routeId);
+    if (!pack || !pack.polygons || pack.polygons.length === 0) return;
+
+    const row = pack.row || {};
+    const pos =
+      normalizeCenterWgs84(row.center_wgs84) ||
+      centroidOfLatLngs(pack.polygons[0].getPath());
+
+    labelAnchorLatLng = pos;
+    labelAnchorDirty = false;
+
+    labelAnchorMarker = new kakao.maps.Marker({
+      position: pos,
+      image: makeLabelAnchorImage(),
+      draggable: true,
+      zIndex: 9999
+    });
+    labelAnchorMarker.setMap(map);
+
+    const applyPos = (p) => {
+      labelAnchorLatLng = p;
+      labelAnchorDirty = true;
+
+      // 즉시 라벨 위치 반영 (보이는 경우)
+      if (pack.labels && pack.labels.length > 0) {
+        pack.labels.forEach(l => l.setPosition(p));
+      }
+    };
+
+    kakao.maps.event.addListener(labelAnchorMarker, "dragend", () => {
+      applyPos(labelAnchorMarker.getPosition());
+    });
+
+    // 우클릭: 자동 중심(centroid)으로 되돌리기
+    kakao.maps.event.addListener(labelAnchorMarker, "rightclick", () => {
+      const c = centroidOfLatLngs(pack.polygons[0].getPath());
+      labelAnchorMarker.setPosition(c);
+      applyPos(c);
+    });
   }
 
   function vendorText(name, bn) {
@@ -1298,7 +1463,7 @@
           strokeColor: base,
           fillColor: base,
           strokeWeight: 1,
-          fillOpacity: 0.12,
+          fillOpacity: 0.20,
           zIndex: 1
         });
       });
@@ -1312,7 +1477,7 @@
     const { row, polygons } = pack;
     const base = row.color || colorFor(row.full_code || "");
     polygons.forEach(p => {
-      p.setOptions({ strokeColor: base, fillColor: base, strokeWeight: 5, fillOpacity: 0.18, zIndex: 5 });
+      p.setOptions({ strokeColor: base, fillColor: base, strokeWeight: 3, fillOpacity: 0.24, zIndex: 5 });
     });
   }
 
@@ -1409,6 +1574,7 @@
     editPolygons = polygons.slice();
 
     rebuildHandles();
+    startLabelAnchorEdit(routeId);
     setStatus(`편집 모드: ${code} (Enter=저장 · ESC=종료)`, "OK");
   }
 
@@ -1517,36 +1683,11 @@
   }
 
   function updateSelectedLabels() {
-    if (!selectedRouteId) return;
-    const pack = overlayById.get(selectedRouteId);
-    if (!pack) return;
-    const { row, polygons, labels } = pack;
+    // 기존: 선택 라우트 라벨 재생성. 현재는 전체 라벨을 가볍게 리프레시.
     if (!labelOn) return;
-
-    labels.forEach(l => l.setMap(null));
-    pack.labels = [];
-
-    const code = row.full_code || "";
-    const color = row.color || colorFor(code);
-
-    for (const p of polygons) {
-      const rawPath = p.getPath();
-      const path = [];
-      if (rawPath && typeof rawPath.getLength === 'function') {
-        for (let i = 0; i < rawPath.getLength(); i++) {
-          path.push(rawPath.getAt(i));
-        }
-      } else if (Array.isArray(rawPath)) {
-        path.push(...rawPath);
-      }
-
-      if (path.length < 3) continue;
-      const c = centroidOfLatLngs(path);
-      const label = createLabelOverlay(code, c, color);
-      label.setMap(map);
-      pack.labels.push(label);
-    }
+    refreshLabelsOnly();
   }
+      
 
   // ====== 그리기 모드 ======
   function stopDraw(silent=false) {
@@ -1698,7 +1839,7 @@
 
     if (labelOn) {
       const c = centroidOfLatLngs(drawPoints);
-      const label = createLabelOverlay(code, c, color);
+      const label = createLabelOverlay(code, pack.row, c, color);
       label.setMap(map);
       pack.labels.push(label);
     }
@@ -1961,8 +2102,8 @@ const data = await apiGet(url.toString());
         const colorMap = new Map();
         for (let i=0; i<codesSorted.length; i++) {
           const hue = (i * GOLDEN_ANGLE) % 360;
-          const sat = 26 + (i % 5) * 2;    // 26-34 (낮은 채도)
-          const light = 58 + (i % 4) * 2;  // 58-64 (부드러운 명도)
+          const sat = 42 + (i % 7) * 2;    // 42-54 (적당한 채도)
+          const light = 48 + (i % 5) * 2;  // 48-56 (중저명도)
           colorMap.set(codesSorted[i], hslToHex(hue, sat, light));
         }
 
@@ -2612,37 +2753,40 @@ left.appendChild(titleEl);
   }
 
   // ====== 라벨 토글 ======
-  function toggleLabels() {
-    labelOn = !labelOn;
-    labelToggleBtn.textContent = labelOn ? "라우트 라벨 ON" : "라우트 라벨 OFF";
-
+  function refreshLabelsOnly() {
     for (const [id, pack] of overlayById.entries()) {
       pack.labels.forEach(l => l.setMap(null));
       pack.labels = [];
 
       if (!labelOn) continue;
+      if (!pack.polygons || pack.polygons.length === 0) continue;
 
-      const row = pack.row;
-      const code = row.full_code || "";
+      const row = pack.row || {};
+      const code = row.full_code || row.code || row.route_code || "";
       const color = row.color || colorFor(code);
 
-      for (const p of pack.polygons) {
-        const pathRaw = p.getPath();
-        const path = [];
-        if (pathRaw && typeof pathRaw.getLength === "function") {
-          for (let i=0;i<pathRaw.getLength();i++) path.push(pathRaw.getAt(i));
-        } else if (Array.isArray(pathRaw)) {
-          path.push(...pathRaw);
-        }
-        if (!path || path.length < 3) continue;
+      const pos =
+        normalizeCenterWgs84(row.center_wgs84) ||
+        centroidOfLatLngs(pack.polygons[0].getPath());
 
-        const c = centroidOfLatLngs(path);
-        const label = createLabelOverlay(code, c, color);
-        label.setMap(map);
-        pack.labels.push(label);
-      }
+      const label = createLabelOverlay(code, row, pos, color);
+      label.setMap(map);
+      pack.labels.push(label);
     }
   }
+
+  function toggleLabels() {
+    labelOn = !labelOn;
+    labelToggleBtn.textContent = labelOn ? "라우트 라벨 ON" : "라우트 라벨 OFF";
+    refreshLabelsOnly();
+  }
+
+  function toggleVendorLabels() {
+    vendorLabelOn = !vendorLabelOn;
+    vendorLabelToggleBtn.textContent = vendorLabelOn ? "벤더 라벨 ON" : "벤더 라벨 OFF";
+    if (labelOn) refreshLabelsOnly();
+  }
+        
 
   // ====== 초기화 ======
   function resetMap() {
@@ -2958,8 +3102,9 @@ left.appendChild(titleEl);
       addrBtn.addEventListener("click", searchAddress);
       saveBtn.addEventListener("click", saveCurrent);
       deletePolyBtn.addEventListener("click", deletePolygon);
-      alignBtn.addEventListener("click", alignWithOsm);
+      
       labelToggleBtn.addEventListener("click", toggleLabels);
+      vendorLabelToggleBtn.addEventListener("click", toggleVendorLabels);
       resetBtn.addEventListener("click", resetMap);
 
       // ✅ Enter로 "불러오기" (캠프/라우트코드)

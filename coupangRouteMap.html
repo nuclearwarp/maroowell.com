@@ -847,9 +847,38 @@
       h = Math.imul(h, 16777619);
     }
     const hue = (h >>> 0) % 360;
-    const sat = 40;
-    const light = 56;
+    const sat = 28;
+    const light = 60;
     return hslToHex(hue, sat, light);
+  }
+
+
+  // ✅ 인접 라우트 색상 겹침 최소화: 정렬 순서 기반 골든 앵글 분산(저채도/중명도)
+  function buildDisplayColors(rows) {
+    const arr = Array.isArray(rows) ? rows.slice() : [];
+    const keyOf = (r) => String(r?.full_code || r?.code || r?.route_code || "");
+    arr.sort((a,b)=> keyOf(a).localeCompare(keyOf(b), "en", { numeric:true, sensitivity:"base" }));
+
+    // camp 기반 seed (같은 camp는 같은 시작색)
+    const camp = String(arr[0]?.camp || "");
+    let seed = 2166136261; // FNV-1a
+    for (let i=0;i<camp.length;i++){
+      seed ^= camp.charCodeAt(i);
+      seed = Math.imul(seed, 16777619);
+    }
+    const startHue = (seed >>> 0) % 360;
+    const golden = 137.50776405003785; // degrees
+
+    const map = new Map();
+    for (let i=0;i<arr.length;i++){
+      const r = arr[i];
+      const idKey = (typeof r?.id === "number" || typeof r?.id === "string") ? r.id : keyOf(r);
+      const hue = (startHue + i * golden) % 360;
+      const sat = 24 + ((i * 7) % 10);      // 24~33 (저채도)
+      const light = 56 + ((i * 11) % 11) - 4; // 52~62 (중명도)
+      map.set(idKey, hslToHex(hue, sat, light));
+    }
+    return map;
   }
 
   // ====== API ======
@@ -977,7 +1006,7 @@
   function makePolygon(latlngs, strokeColor, fillColor, zIndex=1) {
     return new kakao.maps.Polygon({
       path: latlngs, // 반드시 LatLng[]
-      strokeWeight: 2,
+      strokeWeight: 1,
       strokeColor,
       strokeOpacity: 1.0,
       strokeStyle: "solid",
@@ -1120,6 +1149,8 @@
     clearAllOverlays();
     routeRows = rows || [];
 
+    const displayColorMap = buildDisplayColors(routeRows);
+
     if (!routeRows.length) {
       setStatus("표시할 데이터가 없습니다.", "WARN");
       return;
@@ -1132,7 +1163,10 @@
       const id = row.id;
       const code = row.full_code || row.code || row.route_code || "";
       const camp = row.camp || row.camp_name || "";
-      const color = row.color || colorFor(code);
+      const colorMap = displayColorMap;
+      const idKey = (typeof id === "number" || typeof id === "string") ? id : code;
+      const color = (colorMap && colorMap.get(idKey)) || colorFor(code);
+      row.color = color;
       const debugId = `${camp}/${code}(id=${id})`;
 
       const poly = parsePolygonWgs84(row.polygon_wgs84, debugId);
@@ -1263,7 +1297,7 @@
         p.setOptions({
           strokeColor: base,
           fillColor: base,
-          strokeWeight: 2,
+          strokeWeight: 1,
           fillOpacity: 0.12,
           zIndex: 1
         });
@@ -1278,7 +1312,7 @@
     const { row, polygons } = pack;
     const base = row.color || colorFor(row.full_code || "");
     polygons.forEach(p => {
-      p.setOptions({ strokeColor: base, fillColor: base, strokeWeight: 6, fillOpacity: 0.18, zIndex: 5 });
+      p.setOptions({ strokeColor: base, fillColor: base, strokeWeight: 5, fillOpacity: 0.18, zIndex: 5 });
     });
   }
 
@@ -2282,10 +2316,6 @@ left.appendChild(titleEl);
     if (allPoints.length === 0) return null;
     return centroidOfLatLngs(allPoints);
   }
-
-  // ====== 카카오내비 연동 ======
-  async 
-
   // ====== 입차지 저장/비우기 ======
   async function saveDeliveryOnly(clear=false) {
     try {
@@ -2547,7 +2577,7 @@ left.appendChild(titleEl);
         const path = r.coords.map(([lng,lat]) => new kakao.maps.LatLng(lat,lng));
         const pl = new kakao.maps.Polyline({
           path,
-          strokeWeight: 2,
+          strokeWeight: 1,
           strokeColor: "#ffffff",
           strokeOpacity: 0.35,
           strokeStyle: "solid",

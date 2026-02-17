@@ -67,7 +67,7 @@
     .btn.ok:hover{background:rgba(26,90,58,.55)}
     .btn.warn{background:rgba(106,75,19,.35); border-color:rgba(255,180,0,.18)}
     .btn.warn:hover{background:rgba(106,75,19,.55)}
-    .help{font-size:12px; color:var(--muted); line-height:1.5; margin-top:8px;}
+    .help{font-size:12px; color:var(--muted); line-height:1.5; margin-top:8px; display:none;}
     .logWrap{
       border-radius:12px;
       border:1px solid var(--line);
@@ -389,7 +389,6 @@
 
       <div style="height:10px"></div>
       <div class="row">
-        <button id="deliveryNaviBtn" class="btn warn">카카오내비</button>
         <button id="deliverySaveBtn" class="btn ok">입차지 저장</button>
         <button id="deliveryClearBtn" class="btn danger">입차지 비우기</button>
       </div>
@@ -596,7 +595,8 @@
   const overlayById = new Map();
 
   // 편집(버텍스 핸들) 상태
-  let selectedRouteId = null;
+  let selectedRouteId = null;   // 클릭으로 선택된 라우트
+  let editingRouteId = null;    // Enter로 진입한 "수정모드" 라우트
   let editHandles = []; // kakao.maps.Marker[]
   let editPolygons = []; // kakao.maps.Polygon[]
   let labelOn = true;
@@ -738,7 +738,12 @@
     el.style.whiteSpace = "nowrap";
     el.style.boxShadow = "0 2px 10px rgba(0,0,0,.35)";
     el.style.transform = "translateY(-2px)";
-    el.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;"></span>${escapeHtml(text)}`;
+    // ✅ 라우트 라벨 점/텍스트 수직 정렬 보정
+    el.style.display = "inline-flex";
+    el.style.alignItems = "center";
+    el.style.gap = "6px";
+    el.style.lineHeight = "1";
+    el.innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;flex:0 0 auto;"></span><span>${escapeHtml(text)}</span>`;
 
     return new kakao.maps.CustomOverlay({
       position,
@@ -958,7 +963,10 @@
           p.setMap(map);
 
           kakao.maps.event.addListener(p, "click", () => {
-            if (!drawMode && !roadviewOn && !searchModalOpen) startEditing(id);
+            if (!drawMode && !roadviewOn && !searchModalOpen) {
+              if (editingRouteId === id) return;
+              selectRoute(id);
+            }
           });
 
           polygons.push(p);
@@ -1002,6 +1010,7 @@
     editHandles.forEach(m => m.setMap(null));
     editHandles = [];
     editPolygons = [];
+    editingRouteId = null;
     draggingVertex = null;
     map.setDraggable(true);
 
@@ -1020,6 +1029,46 @@
       });
     }
   }
+
+function selectRoute(routeId) {
+  if (!overlayById.has(routeId)) return;
+
+  // draw/search 중이면 우선 정리
+  stopDraw(true);
+  if (searchModalOpen) closeSearchModal();
+
+  // 기존 편집 핸들 제거 (폴리곤은 유지)
+  stopEditing();
+
+  selectedRouteId = routeId;
+  const pack = overlayById.get(routeId);
+  const { row, polygons } = pack;
+
+  const code = row.full_code || "";
+  const camp = row.camp || "";
+  selectedInfo.textContent = `선택: ${camp} / ${code} (id=${routeId})`;
+
+  campInput.value = camp;
+  codeInput.value = code;
+
+  // 부가 데이터
+  loadAddresses().catch(err => log(`배송지 로드 실패: ${err.message}`));
+
+  vendorNameInput.value = row.vendor_name || "";
+  vendorBizInput.value = row.vendor_business_number || "";
+
+  deliveryNameInput.value = row.delivery_location_name || "";
+  deliveryAddrInput.value = row.delivery_location_address || "";
+
+  // 선택된 라우트는 "진하게"만 표시 (수정모드는 Enter로)
+  if (polygons && polygons.length > 0) {
+    polygons.forEach(p => {
+      p.setOptions({ strokeWeight: 8, fillOpacity: 0.25, zIndex: 5 });
+    });
+  }
+
+  setStatus(`선택됨: ${code} (Enter로 수정모드 진입)`, "OK");
+}
 
   function startEditing(routeId) {
     if (!overlayById.has(routeId)) return;
@@ -1055,6 +1104,7 @@
     });
 
     editPolygons = polygons.slice();
+    editingRouteId = routeId;
 
     rebuildHandles();
     setStatus(`편집 모드: ${code} (꼭짓점 드래그로 수정)`, "OK");
@@ -1311,7 +1361,10 @@
     const poly = makePolygon(drawPoints.slice(), color, color, 5);
     poly.setMap(map);
     kakao.maps.event.addListener(poly, "click", () => {
-      if (rowId && !drawMode && !roadviewOn && !searchModalOpen) startEditing(rowId);
+      if (rowId && !drawMode && !roadviewOn && !searchModalOpen) {
+        if (editingRouteId === rowId) return;
+        selectRoute(rowId);
+      }
     });
 
     if (!rowId) {
@@ -1351,6 +1404,7 @@
     selectedRouteId = rowId;
     selectedInfo.textContent = `선택: ${camp} / ${code} (id=${rowId})`;
     editPolygons = pack.polygons.slice();
+    editingRouteId = rowId;
     rebuildHandles();
     hint("", false);
 
@@ -2362,7 +2416,32 @@
         } else if (e.key === "Enter") {
           finishDraw();
         }
-      } else if (e.key === "Escape") {
+} else if (e.key === "Enter") {
+  // ✅ Enter: 선택 라우트 -> 수정모드 진입, 수정모드 -> 저장
+  if (searchModalOpen) return;
+
+  const ae = document.activeElement;
+  const tag = (ae && ae.tagName) ? ae.tagName.toLowerCase() : "";
+  const isTyping =
+    tag === "input" ||
+    tag === "textarea" ||
+    tag === "select" ||
+    (ae && ae.isContentEditable);
+
+  // 입력창 Enter는 각 입력창 핸들러에서 처리
+  if (isTyping) return;
+
+  if (editingRouteId) {
+    e.preventDefault();
+    saveCurrent();
+    return;
+  }
+  if (selectedRouteId) {
+    e.preventDefault();
+    startEditing(selectedRouteId);
+    return;
+  }
+} else if (e.key === "Escape") {
         if (selectedRouteId) {
           stopEditing();
           selectedRouteId = null;
@@ -2394,7 +2473,22 @@
         if (roadviewOn && roadview && typeof roadview.relayout === "function") roadview.relayout();
       });
 
-      loadBtn.addEventListener("click", loadRoutes);
+loadBtn.addEventListener("click", loadRoutes);
+
+// ✅ Enter로 불러오기 (캠프만 / 캠프+라우트코드 입력 후)
+campInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    loadRoutes();
+  }
+});
+codeInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    loadRoutes();
+  }
+});
+
       drawNewBtn.addEventListener("click", () => beginDraw("new"));
       drawAddBtn.addEventListener("click", () => beginDraw("add"));
       addrBtn.addEventListener("click", searchAddress);
@@ -2407,7 +2501,7 @@
       vendorSaveBtn.addEventListener("click", () => saveVendorOnly(false));
       vendorClearBtn.addEventListener("click", () => saveVendorOnly(true));
 
-      deliveryNaviBtn.addEventListener("click", openKakaoNavi);
+      if (deliveryNaviBtn) deliveryNaviBtn.addEventListener("click", openKakaoNavi);
       deliverySaveBtn.addEventListener("click", () => saveDeliveryOnly(false));
       deliveryClearBtn.addEventListener("click", () => saveDeliveryOnly(true));
 

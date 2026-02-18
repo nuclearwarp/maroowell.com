@@ -9,6 +9,7 @@
 const ROUTE_TABLE = "subsubroutes";
 const ADDRESS_TABLE = "addresses";
 const CAMPS_TABLE = "camps";
+const VENDORS_TABLE = "vendors";
 
 export default {
   async fetch(request, env) {
@@ -39,6 +40,12 @@ export default {
       if (path === "/camps") {
         if (request.method === "GET") return cors(await handleCampsGet(url, env));
         if (request.method === "POST") return cors(await handleCampsPost(request, env));
+        return cors(json({ error: "Method Not Allowed" }, 405));
+      }
+
+      if (path === "/vendors") {
+        if (request.method === "GET") return cors(await handleVendorsGet(url, env));
+        if (request.method === "POST") return cors(await handleVendorCreate(request, env));
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
@@ -181,6 +188,71 @@ function generateColor(code) {
   return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
 }
 
+function quoteInValue(v) {
+  const s = String(v ?? "");
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+async function fetchVendorNameMap(env, businessNumbers) {
+  const bns = Array.from(
+    new Set(
+      (businessNumbers || [])
+        .map((v) => safeTrim(v))
+        .filter(Boolean)
+    )
+  );
+
+  if (bns.length === 0) return new Map();
+
+  const params = new URLSearchParams();
+  params.set("select", "business_number,name");
+  params.set("business_number", `in.(${bns.slice(0, 200).map(quoteInValue).join(",")})`);
+
+  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
+  const out = new Map();
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows) {
+    const bn = safeTrim(row?.business_number);
+    if (!bn) continue;
+    out.set(bn, safeTrim(row?.name) || null);
+  }
+  return out;
+}
+
+async function enrichRowsWithVendorNames(rows, env) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+
+  const bns = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const bn1 = safeTrim(row.vendor_business_number_1w ?? row.vendor_business_number);
+    const bn2 = safeTrim(row.vendor_business_number_2w);
+    if (bn1) bns.push(bn1);
+    if (bn2) bns.push(bn2);
+  }
+  const nameMap = await fetchVendorNameMap(env, bns);
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+
+    const bn1 = safeTrim(row.vendor_business_number_1w ?? row.vendor_business_number);
+    const bn2 = safeTrim(row.vendor_business_number_2w);
+    const n1 = bn1 ? nameMap.get(bn1) : null;
+    const n2 = bn2 ? nameMap.get(bn2) : null;
+
+    if (n1) {
+      row.vendor_name_1w = n1;
+      row.vendor_1w_name = n1;
+    }
+    if (n2) {
+      row.vendor_name_2w = n2;
+      row.vendor_2w_name = n2;
+    }
+  }
+
+  return rows;
+}
+
 // ---------- camps 매핑 ----------
 async function loadCampIndex(env, campName = "") {
   const params = new URLSearchParams();
@@ -266,6 +338,7 @@ async function handleRouteGet(url, env) {
   const out = Array.isArray(rows) ? rows : [];
 
   out.forEach(applyRouteDerivedFields);
+  await enrichRowsWithVendorNames(out, env);
   await hydrateRouteRowsWithCamps(out, env);
 
   return json({ rows: out }, 200, { "Cache-Control": "no-store" });
@@ -367,6 +440,7 @@ async function handleRoutePost(request, env) {
   }
 
   applyRouteDerivedFields(row);
+  await enrichRowsWithVendorNames([row], env);
   await hydrateRouteRowsWithCamps([row], env);
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
@@ -399,7 +473,124 @@ async function handleRouteDelete(request, env) {
 
   const row = Array.isArray(updated) ? updated[0] : updated;
   applyRouteDerivedFields(row);
+  await enrichRowsWithVendorNames([row], env);
   await hydrateRouteRowsWithCamps([row], env);
+
+  return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /vendors ----------
+function scoreVendorSearch(row, qLower) {
+  const name = safeTrim(row?.name).toLowerCase();
+  const bn = safeTrim(row?.business_number).toLowerCase();
+  if (!qLower) return 0;
+  if (name === qLower) return 120;
+  if (bn === qLower) return 115;
+  if (name.startsWith(qLower)) return 100;
+  if (bn.startsWith(qLower)) return 95;
+  if (name.includes(qLower)) return 80;
+  if (bn.includes(qLower)) return 75;
+  return 0;
+}
+
+function vendorDedupeKey(row) {
+  if (row?.id != null) return `id:${row.id}`;
+  return `key:${safeTrim(row?.business_number)}|${safeTrim(row?.name)}`;
+}
+
+async function handleVendorsGet(url, env) {
+  const q = safeTrim(url.searchParams.get("q"));
+  const limitRaw = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
+
+  if (!q) {
+    const params = new URLSearchParams();
+    params.set("select", "*");
+    params.set("order", "created_at.desc,id.desc");
+    params.set("limit", String(limit));
+    const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
+    return json({ rows: Array.isArray(rows) ? rows : [] }, 200, { "Cache-Control": "no-store" });
+  }
+
+  const wildcard = `*${q}*`;
+  const base = new URLSearchParams();
+  base.set("select", "*");
+  base.set("order", "created_at.desc,id.desc");
+  base.set("limit", String(Math.min(limit * 2, 200)));
+
+  const queries = [
+    ["name", `eq.${q}`],
+    ["business_number", `eq.${q}`],
+    ["name", `ilike.${wildcard}`],
+    ["business_number", `ilike.${wildcard}`],
+  ];
+
+  const merged = new Map();
+  for (const [field, value] of queries) {
+    try {
+      const p = new URLSearchParams(base.toString());
+      p.set(field, value);
+      const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${p.toString()}`, { method: "GET" });
+      for (const row of (Array.isArray(rows) ? rows : [])) {
+        const key = vendorDedupeKey(row);
+        if (!merged.has(key)) merged.set(key, row);
+      }
+    } catch (e) {
+      console.warn("vendors 검색 쿼리 실패:", e?.message || String(e));
+    }
+  }
+
+  const qLower = q.toLowerCase();
+  const out = Array.from(merged.values())
+    .sort((a, b) => scoreVendorSearch(b, qLower) - scoreVendorSearch(a, qLower))
+    .slice(0, limit);
+
+  return json({ rows: out }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleVendorCreate(request, env) {
+  const body = await readJson(request);
+  const name = safeTrim(body.name ?? body.vendor_name);
+  const businessNumber = safeTrim(body.business_number ?? body.vendor_business_number);
+  const vendorCode = safeTrim(body.vendor_code);
+
+  if (!name) return json({ error: "name is required" }, 400);
+  if (!businessNumber) return json({ error: "business_number is required" }, 400);
+
+  const existingQuery = new URLSearchParams();
+  existingQuery.set("select", "*");
+  existingQuery.set("business_number", `eq.${businessNumber}`);
+  existingQuery.set("limit", "1");
+  const existing = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${existingQuery.toString()}`, { method: "GET" });
+
+  const patch = { name, business_number: businessNumber };
+  if (vendorCode || Object.prototype.hasOwnProperty.call(body, "vendor_code")) {
+    patch.vendor_code = vendorCode || null;
+  }
+
+  let row = null;
+  if (Array.isArray(existing) && existing.length > 0 && typeof existing[0]?.id === "number") {
+    const params = new URLSearchParams();
+    params.set("id", `eq.${existing[0].id}`);
+    params.set("select", "*");
+
+    const updated = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    });
+    row = Array.isArray(updated) ? updated[0] : updated;
+  } else {
+    const params = new URLSearchParams();
+    params.set("select", "*");
+
+    const inserted = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    });
+    row = Array.isArray(inserted) ? inserted[0] : inserted;
+  }
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
 }

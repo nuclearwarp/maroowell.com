@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Naver News Search</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 24px; }
+    .row { display:flex; gap:8px; margin-bottom:12px; }
+    input { flex:1; padding:10px 12px; font-size:16px; }
+    button { padding:10px 12px; font-size:16px; cursor:pointer; }
+    .item { padding:12px 0; border-bottom:1px solid #eee; }
+    .title { font-weight:700; text-decoration:none; color:#111; }
+    .meta { color:#666; font-size:13px; margin-top:6px; }
+    .desc { color:#333; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <h1>네이버 뉴스 검색</h1>
+
+  <div class="row">
+    <input id="q" placeholder="키워드 입력 (예: 쿠팡)" />
+    <button id="btn">검색</button>
+  </div>
+
+  <div class="row">
+    <label>정렬:
+      <select id="sort">
+        <option value="date">최신순</option>
+        <option value="sim">정확도순</option>
+      </select>
+    </label>
+    <label>개수:
+      <select id="display">
+        <option>10</option><option>20</option><option>30</option><option>50</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="status"></div>
+  <div id="list"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    async function search() {
+      const query = $("q").value.trim();
+      if (!query) return;
+
+      $("status").textContent = "검색 중...";
+      $("list").innerHTML = "";
+
+      const sort = $("sort").value;
+      const display = $("display").value;
+
+      const url = `/newsSearch?query=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}&display=${encodeURIComponent(display)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        $("status").textContent = "에러: " + await res.text();
+        return;
+      }
+      const data = await res.json();
+
+      $("status").textContent = `총 ${data.total ?? "?"}건 / 현재 ${data.items.length}건`;
+
+      for (const it of data.items) {
+        const div = document.createElement("div");
+        div.className = "item";
+
+        const a = document.createElement("a");
+        a.className = "title";
+        a.href = it.link;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = it.title;
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = it.pubDate ? `발행: ${it.pubDate}` : "";
+
+        const desc = document.createElement("div");
+        desc.className = "desc";
+        desc.textContent = it.description || "";
+
+        div.appendChild(a);
+        div.appendChild(meta);
+        div.appendChild(desc);
+
+        $("list").appendChild(div);
+      }
+    }
+
+    $("btn").addEventListener("click", search);
+    $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+  </script>
+</body>
+</html>

@@ -17,16 +17,29 @@
 
     #status { margin: 10px 0 12px; font-weight: 600; }
 
-    .item { padding: 10px 0; }
-    .title {
-      display:block;
+    /* ✅ 카드/간격: 기사마다 아래로 띄우기 */
+    .item {
+      padding: 12px 0 18px;
+      border-bottom: 1px solid #eee;
+    }
+
+    /* ✅ 링크는 텍스트만 클릭되게 inline */
+    a.title {
+      display: inline;            /* 핵심 */
       font-size: 18px;
       font-weight: 800;
       color:#111;
       text-decoration:none;
       line-height: 1.35;
     }
-    .title:hover { text-decoration: underline; }
+    a.title:hover { text-decoration: underline; }
+
+    /* ✅ 발행일은 제목 아래 작게 */
+    .date {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #666;
+    }
   </style>
 </head>
 <body>
@@ -70,16 +83,25 @@
   <script>
     const $ = (id) => document.getElementById(id);
 
-    async function search() {
-      const qEl = $("q");
-      const statusEl = $("status");
-      const listEl = $("list");
+    // Naver pubDate: "Tue, 17 Feb 2026 07:46:00 +0900" 형태가 많아서 보기 좋게 변환
+    function formatPubDate(pubDate) {
+      if (!pubDate) return "";
+      const d = new Date(pubDate);
+      if (isNaN(d.getTime())) return pubDate; // 파싱 실패하면 원문
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+    }
 
-      const query = (qEl?.value || "").trim();
+    async function search() {
+      const query = ($("q").value || "").trim();
       if (!query) return;
 
-      statusEl.textContent = "검색 중...";
-      listEl.innerHTML = "";
+      $("status").textContent = "검색 중...";
+      $("list").innerHTML = "";
 
       const sort = $("sort").value;      // sim | date
       const display = $("display").value;
@@ -90,23 +112,25 @@
       try {
         res = await fetch(api);
       } catch (e) {
-        statusEl.textContent = "에러: API 호출 실패 (네트워크/Worker 확인)";
+        $("status").textContent = "에러: API 호출 실패 (네트워크/Worker 확인)";
         return;
       }
 
       if (!res.ok) {
-        statusEl.textContent = "에러: " + await res.text();
+        $("status").textContent = "에러: " + await res.text();
         return;
       }
 
       const data = await res.json();
       const items = data.items || [];
-      statusEl.textContent = `총 ${data.total ?? "?"}건 / 현재 ${items.length}건`;
+
+      $("status").textContent = `총 ${data.total ?? "?"}건 / 현재 ${items.length}건`;
 
       for (const it of items) {
-        const div = document.createElement("div");
-        div.className = "item";
+        const item = document.createElement("div");
+        item.className = "item";
 
+        // ✅ 제목 링크(텍스트만 클릭되도록 inline)
         const a = document.createElement("a");
         a.className = "title";
         a.href = it.link;
@@ -114,8 +138,15 @@
         a.rel = "noopener noreferrer";
         a.textContent = it.title;
 
-        div.appendChild(a);
-        listEl.appendChild(div);
+        // ✅ 발행일
+        const date = document.createElement("div");
+        date.className = "date";
+        date.textContent = it.pubDate ? `발행: ${formatPubDate(it.pubDate)}` : "";
+
+        item.appendChild(a);
+        if (date.textContent) item.appendChild(date);
+
+        $("list").appendChild(item);
       }
     }
 
@@ -126,16 +157,15 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      // 이벤트 바인딩
       $("btn").addEventListener("click", search);
       $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
       $("preset").addEventListener("change", () => {
         const v = $("preset").value;
         if (v) setKeywordAndSearch(v);
       });
 
-      // ✅ 첫 진입 자동 검색: 쿠팡CLS
-      // (원하면 /naverSearch.html?k=쿠팡 처럼 k로 override 가능)
+      // ✅ 첫 진입 자동 검색: 쿠팡CLS (필요시 k= 로 override)
       const params = new URLSearchParams(location.search);
       const k = (params.get("k") || "").trim();
       setKeywordAndSearch(k || "쿠팡CLS");

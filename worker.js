@@ -188,19 +188,39 @@ function generateColor(code) {
   return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
 }
 
+function digitsOnly(v) {
+  return safeTrim(v).replace(/\D/g, "");
+}
+
+function normalizeBusinessNumber(v) {
+  const d = digitsOnly(v);
+  if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 5)}-${d.slice(5)}`;
+  return safeTrim(v);
+}
+
+function buildVendorCodeFromBusinessNumber(v) {
+  const d = digitsOnly(v);
+  if (!d) return null;
+  return `bn_${d}`;
+}
+
 function quoteInValue(v) {
   const s = String(v ?? "");
   return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 async function fetchVendorNameMap(env, businessNumbers) {
-  const bns = Array.from(
-    new Set(
-      (businessNumbers || [])
-        .map((v) => safeTrim(v))
-        .filter(Boolean)
-    )
-  );
+  const bnSet = new Set();
+  for (const v of businessNumbers || []) {
+    const raw = safeTrim(v);
+    if (!raw) continue;
+    bnSet.add(raw);
+    const norm = normalizeBusinessNumber(raw);
+    if (norm) bnSet.add(norm);
+    const d = digitsOnly(raw);
+    if (d) bnSet.add(d);
+  }
+  const bns = Array.from(bnSet);
 
   if (bns.length === 0) return new Map();
 
@@ -214,7 +234,12 @@ async function fetchVendorNameMap(env, businessNumbers) {
   for (const row of rows) {
     const bn = safeTrim(row?.business_number);
     if (!bn) continue;
-    out.set(bn, safeTrim(row?.name) || null);
+    const name = safeTrim(row?.name) || null;
+    out.set(bn, name);
+    const norm = normalizeBusinessNumber(bn);
+    if (norm) out.set(norm, name);
+    const d = digitsOnly(bn);
+    if (d) out.set(d, name);
   }
   return out;
 }
@@ -225,8 +250,8 @@ async function enrichRowsWithVendorNames(rows, env) {
   const bns = [];
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
-    const bn1 = safeTrim(row.vendor_business_number_1w ?? row.vendor_business_number);
-    const bn2 = safeTrim(row.vendor_business_number_2w);
+    const bn1 = normalizeBusinessNumber(row.vendor_business_number_1w ?? row.vendor_business_number);
+    const bn2 = normalizeBusinessNumber(row.vendor_business_number_2w);
     if (bn1) bns.push(bn1);
     if (bn2) bns.push(bn2);
   }
@@ -235,10 +260,10 @@ async function enrichRowsWithVendorNames(rows, env) {
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
 
-    const bn1 = safeTrim(row.vendor_business_number_1w ?? row.vendor_business_number);
-    const bn2 = safeTrim(row.vendor_business_number_2w);
-    const n1 = bn1 ? nameMap.get(bn1) : null;
-    const n2 = bn2 ? nameMap.get(bn2) : null;
+    const bn1 = normalizeBusinessNumber(row.vendor_business_number_1w ?? row.vendor_business_number);
+    const bn2 = normalizeBusinessNumber(row.vendor_business_number_2w);
+    const n1 = bn1 ? (nameMap.get(bn1) || nameMap.get(digitsOnly(bn1))) : null;
+    const n2 = bn2 ? (nameMap.get(bn2) || nameMap.get(digitsOnly(bn2))) : null;
 
     if (n1) {
       row.vendor_name_1w = n1;
@@ -551,25 +576,35 @@ async function handleVendorsGet(url, env) {
 async function handleVendorCreate(request, env) {
   const body = await readJson(request);
   const name = safeTrim(body.name ?? body.vendor_name);
-  const businessNumber = safeTrim(body.business_number ?? body.vendor_business_number);
-  const vendorCode = safeTrim(body.vendor_code);
+  const rawBusinessNumber = safeTrim(body.business_number ?? body.vendor_business_number);
+  const businessNumber = normalizeBusinessNumber(rawBusinessNumber);
+  const vendorCodeInput = safeTrim(body.vendor_code);
 
   if (!name) return json({ error: "name is required" }, 400);
-  if (!businessNumber) return json({ error: "business_number is required" }, 400);
+  if (!digitsOnly(businessNumber)) return json({ error: "business_number is required" }, 400);
+  const vendorCode = buildVendorCodeFromBusinessNumber(businessNumber) || vendorCodeInput || null;
 
-  const existingQuery = new URLSearchParams();
-  existingQuery.set("select", "*");
-  existingQuery.set("business_number", `eq.${businessNumber}`);
-  existingQuery.set("limit", "1");
-  const existing = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${existingQuery.toString()}`, { method: "GET" });
+  const tryFindByBusinessNumber = async (bn) => {
+    const q = new URLSearchParams();
+    q.set("select", "*");
+    q.set("business_number", `eq.${bn}`);
+    q.set("limit", "1");
+    const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${q.toString()}`, { method: "GET" });
+    return Array.isArray(rows) ? rows : [];
+  };
+
+  let existing = await tryFindByBusinessNumber(businessNumber);
+  if ((!existing || existing.length === 0) && rawBusinessNumber && rawBusinessNumber !== businessNumber) {
+    existing = await tryFindByBusinessNumber(rawBusinessNumber);
+  }
 
   const patch = { name, business_number: businessNumber };
   if (vendorCode || Object.prototype.hasOwnProperty.call(body, "vendor_code")) {
-    patch.vendor_code = vendorCode || null;
+    patch.vendor_code = vendorCode;
   }
 
   let row = null;
-  if (Array.isArray(existing) && existing.length > 0 && typeof existing[0]?.id === "number") {
+  if (Array.isArray(existing) && existing.length > 0 && existing[0]?.id != null) {
     const params = new URLSearchParams();
     params.set("id", `eq.${existing[0].id}`);
     params.set("select", "*");

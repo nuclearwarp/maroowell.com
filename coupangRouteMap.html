@@ -1168,7 +1168,7 @@
     if (!v || typeof v !== "object") return null;
     const camp = (v.camp ?? "").toString().trim();
     const code = (v.code ?? "").toString().trim();
-    const mb_camp = (v.mb_camp ?? v.delivery_location_name ?? v.name ?? "").toString().trim();
+    const mb_camp = (v.mp_camp ?? v.mb_camp ?? v.delivery_location_name ?? v.name ?? "").toString().trim();
     const address = (v.address ?? v.delivery_location_address ?? "").toString().trim();
     if (!mb_camp) return null;
     return {
@@ -1176,6 +1176,7 @@
       camp,
       code,
       mb_camp,
+      mp_camp: (v.mp_camp ?? v.mb_camp ?? "").toString().trim(),
       address,
       latitude: v.latitude ?? v.delivery_location_lat ?? null,
       longitude: v.longitude ?? v.delivery_location_lng ?? null,
@@ -1250,16 +1251,57 @@
     return Array.from(mapByKey.values());
   }
 
-  function resolveDeliveryPinCampLabel() {
-    const fromInput = String(campInput?.value || "").trim();
-    if (fromInput) return fromInput;
+  async function resolveDeliveryPinLabel(variant) {
+    const picked = String(deliveryCampCandidate?.mp_camp || deliveryCampCandidate?.mb_camp || "").trim();
+    if (picked) return picked;
 
-    const firstRow = (Array.isArray(routeRows) && routeRows.length > 0) ? routeRows[0] : null;
-    const fromRow = String(firstRow?.camp || firstRow?.camp_name || "").trim();
-    return fromRow || "캠프";
+    const variantName = String(variant?.name || "").trim();
+    const variantAddress = String(variant?.address || "").trim();
+    const typed = String(deliveryNameInput?.value || "").trim();
+    const currentCamp = String(campInput?.value || "").trim();
+
+    const queries = Array.from(
+      new Set([variantName, typed].map((v) => String(v || "").trim()).filter(Boolean))
+    );
+
+    for (const q of queries) {
+      try {
+        const url = new URL(CAMPS_ENDPOINT);
+        url.searchParams.set("q", q);
+        url.searchParams.set("limit", "30");
+        if (currentCamp) url.searchParams.set("camp", currentCamp);
+
+        const data = await apiGet(url.toString());
+        const rows = Array.isArray(data) ? data : (data?.rows || data?.camps || []);
+        const list = (rows || []).map(normalizeCampSearchRow).filter(Boolean);
+        if (!list.length) continue;
+
+        const nameNorm = normalizeDeliveryCompareValue(variantName || q);
+        const addrNorm = normalizeDeliveryCompareValue(variantAddress);
+
+        const matched =
+          list.find((row) => {
+            const rowMp = normalizeDeliveryCompareValue(row?.mp_camp || row?.mb_camp || "");
+            const rowCamp = normalizeDeliveryCompareValue(row?.camp || "");
+            const rowAddr = normalizeDeliveryCompareValue(row?.address || "");
+
+            if (addrNorm && rowAddr && rowAddr === addrNorm) return true;
+            if (nameNorm && rowMp && rowMp === nameNorm) return true;
+            if (nameNorm && rowCamp && rowCamp === nameNorm) return true;
+            return false;
+          }) || list[0];
+
+        const label = String(matched?.mp_camp || matched?.mb_camp || "").trim();
+        if (label) return label;
+      } catch (e) {
+        log(`입차지 라벨 조회 실패: ${e?.message || String(e)}`);
+      }
+    }
+
+    return variantName || typed || "입차지";
   }
 
-  function showLoadedDeliveryPin() {
+  async function showLoadedDeliveryPin() {
     if (!map || !geocoder) {
       setStatus("지도가 아직 준비되지 않았습니다.", "WARN");
       return;
@@ -1287,7 +1329,7 @@
       return;
     }
 
-    const campLabel = resolveDeliveryPinCampLabel();
+    const pinLabel = await resolveDeliveryPinLabel(only);
     geocoder.addressSearch(address, (result, status) => {
       if (status !== kakao.maps.services.Status.OK || !result?.length) {
         clearDeliveryPin();
@@ -1306,43 +1348,38 @@
       clearDeliveryPin();
 
       const pos = new kakao.maps.LatLng(lat, lng);
-      const markerImage = new kakao.maps.MarkerImage(
-        "/favicon.ico?v=2",
-        new kakao.maps.Size(30, 30),
-        { offset: new kakao.maps.Point(15, 15) }
-      );
 
       deliveryPinMarker = new kakao.maps.Marker({
         position: pos,
-        image: markerImage,
-        zIndex: 980
+        zIndex: 980,
+        title: pinLabel || "입차지",
       });
       deliveryPinMarker.setMap(map);
 
       const label = document.createElement("div");
-      label.style.padding = "4px 9px";
-      label.style.borderRadius = "999px";
-      label.style.background = "rgba(0,0,0,0.62)";
-      label.style.border = "1px solid rgba(255,255,255,0.20)";
-      label.style.color = "#eaf2ff";
-      label.style.fontSize = "12px";
+      label.style.padding = "3px 8px";
+      label.style.borderRadius = "10px";
+      label.style.background = "rgba(255,255,255,0.96)";
+      label.style.border = "1px solid rgba(11,18,32,0.18)";
+      label.style.color = "#0b1220";
+      label.style.fontSize = "13px";
       label.style.fontWeight = "900";
       label.style.letterSpacing = "0.2px";
       label.style.whiteSpace = "nowrap";
-      label.style.boxShadow = "0 4px 14px rgba(0,0,0,0.32)";
+      label.style.boxShadow = "0 3px 10px rgba(0,0,0,0.22)";
       label.style.pointerEvents = "none";
-      label.textContent = campLabel;
+      label.textContent = pinLabel;
 
       deliveryPinLabelOverlay = new kakao.maps.CustomOverlay({
         position: pos,
         content: label,
-        yAnchor: 2.2,
+        yAnchor: 1.4,
         zIndex: 990
       });
       deliveryPinLabelOverlay.setMap(map);
 
       map.panTo(pos);
-      setStatus(`입차지 표시 완료: ${campLabel}`, "OK");
+      setStatus(`입차지 표시 완료: ${pinLabel}`, "OK");
     });
   }
 

@@ -32,10 +32,8 @@
 <body>
   <div class="header">
     <h1>네이버 뉴스 검색</h1>
-
-    <!-- ✅ 키워드 프리셋 select -->
     <select id="preset" title="키워드 선택">
-      <option value="" selected>키워드 선택…</option>
+      <option value="">키워드 선택…</option>
       <option value="쿠팡CLS">쿠팡CLS</option>
       <option value="쿠팡">쿠팡</option>
       <option value="쿠팡퀵플렉스">쿠팡퀵플렉스</option>
@@ -54,8 +52,8 @@
   <div class="row">
     <label>정렬:
       <select id="sort">
+        <option value="sim" selected>관련도순</option>
         <option value="date">최신순</option>
-        <option value="sim" selected>정확도순</option>
       </select>
     </label>
 
@@ -73,27 +71,39 @@
     const $ = (id) => document.getElementById(id);
 
     async function search() {
-      const query = $("q").value.trim();
+      const qEl = $("q");
+      const statusEl = $("status");
+      const listEl = $("list");
+
+      const query = (qEl?.value || "").trim();
       if (!query) return;
 
-      $("status").textContent = "검색 중...";
-      $("list").innerHTML = "";
+      statusEl.textContent = "검색 중...";
+      listEl.innerHTML = "";
 
-      const sort = $("sort").value;
+      const sort = $("sort").value;      // sim | date
       const display = $("display").value;
 
-      const url = `/newsSearch?query=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}&display=${encodeURIComponent(display)}`;
+      const api = `/newsSearch?query=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}&display=${encodeURIComponent(display)}`;
 
-      const res = await fetch(url);
+      let res;
+      try {
+        res = await fetch(api);
+      } catch (e) {
+        statusEl.textContent = "에러: API 호출 실패 (네트워크/Worker 확인)";
+        return;
+      }
+
       if (!res.ok) {
-        $("status").textContent = "에러: " + await res.text();
+        statusEl.textContent = "에러: " + await res.text();
         return;
       }
 
       const data = await res.json();
-      $("status").textContent = `총 ${data.total ?? "?"}건 / 현재 ${data.items?.length ?? 0}건`;
+      const items = data.items || [];
+      statusEl.textContent = `총 ${data.total ?? "?"}건 / 현재 ${items.length}건`;
 
-      for (const it of (data.items || [])) {
+      for (const it of items) {
         const div = document.createElement("div");
         div.className = "item";
 
@@ -102,28 +112,34 @@
         a.href = it.link;
         a.target = "_blank";
         a.rel = "noopener noreferrer";
-        a.textContent = it.title; // ✅ 제목만 표시
+        a.textContent = it.title;
 
         div.appendChild(a);
-        $("list").appendChild(div);
+        listEl.appendChild(div);
       }
     }
 
-    // 버튼/엔터 검색
-    $("btn").addEventListener("click", search);
-    $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+    function setKeywordAndSearch(keyword) {
+      $("q").value = keyword;
+      $("preset").value = keyword; // 옵션에 없으면 무시됨
+      search();
+    }
 
-    // ✅ 프리셋 선택하면 자동 검색
-    $("preset").addEventListener("change", () => {
-      const v = $("preset").value;
-      if (!v) return;
+    document.addEventListener("DOMContentLoaded", () => {
+      // 이벤트 바인딩
+      $("btn").addEventListener("click", search);
+      $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+      $("preset").addEventListener("change", () => {
+        const v = $("preset").value;
+        if (v) setKeywordAndSearch(v);
+      });
 
-      $("q").value = v;     // input에 반영
-      $("btn").click();     // 자동으로 검색 버튼 눌러서 실행
+      // ✅ 첫 진입 자동 검색: 쿠팡CLS
+      // (원하면 /naverSearch.html?k=쿠팡 처럼 k로 override 가능)
+      const params = new URLSearchParams(location.search);
+      const k = (params.get("k") || "").trim();
+      setKeywordAndSearch(k || "쿠팡CLS");
     });
-
-    // (선택) 첫 로딩 때 기본값을 바로 검색하고 싶으면 아래 한 줄 활성화
-    // $("preset").value = "쿠팡CLS"; $("preset").dispatchEvent(new Event("change"));
   </script>
 </body>
 </html>

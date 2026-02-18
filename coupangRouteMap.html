@@ -693,6 +693,7 @@
       <div class="row">
         <button id="deliverySaveBtn" class="btn ok">입차지 저장</button>
         <button id="deliveryClearBtn" class="btn danger">입차지 비우기</button>
+        <button id="deliveryShowBtn" class="btn" type="button">입차지 표시</button>
       </div>
 </div>
 
@@ -894,6 +895,7 @@
   const vendorClearBtn = $("vendorClearBtn");
   const deliverySaveBtn = $("deliverySaveBtn");
   const deliveryClearBtn = $("deliveryClearBtn");
+  const deliveryShowBtn = $("deliveryShowBtn");
   const shareBtn = $("shareBtn");
 
   const logEl = $("log");
@@ -1002,6 +1004,8 @@
   // ✅ 검색 선택 마커 (ESC로 삭제)
   let searchSelectedMarker = null;
   let searchSelectedOverlay = null;
+  let deliveryPinMarker = null;
+  let deliveryPinLabelOverlay = null;
 
   // ✅ 위성/로드뷰
   let isSatellite = false;
@@ -1144,6 +1148,7 @@
     stopEditing();
     stopDraw(true);
     clearOsm();
+    clearDeliveryPin();
 
     for (const {polygons, labels} of overlayById.values()) {
       polygons.forEach(p => p.setMap(null));
@@ -1210,6 +1215,135 @@
 
   function clearDeliveryDisplay() {
     setDeliveryCampCandidate(null);
+  }
+
+  function clearDeliveryPin() {
+    if (deliveryPinMarker) {
+      deliveryPinMarker.setMap(null);
+      deliveryPinMarker = null;
+    }
+    if (deliveryPinLabelOverlay) {
+      deliveryPinLabelOverlay.setMap(null);
+      deliveryPinLabelOverlay = null;
+    }
+  }
+
+  function normalizeDeliveryCompareValue(v) {
+    return String(v || "").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function collectLoadedDeliveryVariants() {
+    const rows = Array.isArray(routeRows) ? routeRows : [];
+    const mapByKey = new Map();
+
+    for (const row of rows) {
+      const name = String(row?.delivery_location_name || "").trim();
+      const address = String(row?.delivery_location_address || "").trim();
+      const key = `${normalizeDeliveryCompareValue(name)}\u0001${normalizeDeliveryCompareValue(address)}`;
+
+      if (!mapByKey.has(key)) {
+        mapByKey.set(key, { name, address, count: 0 });
+      }
+      mapByKey.get(key).count += 1;
+    }
+
+    return Array.from(mapByKey.values());
+  }
+
+  function resolveDeliveryPinCampLabel() {
+    const fromInput = String(campInput?.value || "").trim();
+    if (fromInput) return fromInput;
+
+    const firstRow = (Array.isArray(routeRows) && routeRows.length > 0) ? routeRows[0] : null;
+    const fromRow = String(firstRow?.camp || firstRow?.camp_name || "").trim();
+    return fromRow || "캠프";
+  }
+
+  function showLoadedDeliveryPin() {
+    if (!map || !geocoder) {
+      setStatus("지도가 아직 준비되지 않았습니다.", "WARN");
+      return;
+    }
+
+    if (!Array.isArray(routeRows) || routeRows.length === 0) {
+      clearDeliveryPin();
+      setStatus("먼저 라우트를 불러오세요.", "WARN");
+      return;
+    }
+
+    const variants = collectLoadedDeliveryVariants();
+    if (variants.length > 1) {
+      clearDeliveryPin();
+      alert("입차지가 다른 라우트가 있습니다.");
+      setStatus("입차지가 다른 라우트가 있습니다. 입차지 표시는 중단합니다.", "WARN");
+      return;
+    }
+
+    const only = variants[0] || { name: "", address: "" };
+    const address = String(deliveryAddrInput?.value || only.address || "").trim();
+    if (!address) {
+      clearDeliveryPin();
+      setStatus("입차지 주소가 없어 표시할 수 없습니다.", "WARN");
+      return;
+    }
+
+    const campLabel = resolveDeliveryPinCampLabel();
+    geocoder.addressSearch(address, (result, status) => {
+      if (status !== kakao.maps.services.Status.OK || !result?.length) {
+        clearDeliveryPin();
+        setStatus("입차지 주소를 찾을 수 없습니다.", "ERR");
+        return;
+      }
+
+      const lat = Number(result[0].y);
+      const lng = Number(result[0].x);
+      if (!isFinite(lat) || !isFinite(lng)) {
+        clearDeliveryPin();
+        setStatus("입차지 좌표를 해석할 수 없습니다.", "ERR");
+        return;
+      }
+
+      clearDeliveryPin();
+
+      const pos = new kakao.maps.LatLng(lat, lng);
+      const markerImage = new kakao.maps.MarkerImage(
+        "/favicon.ico?v=2",
+        new kakao.maps.Size(30, 30),
+        { offset: new kakao.maps.Point(15, 15) }
+      );
+
+      deliveryPinMarker = new kakao.maps.Marker({
+        position: pos,
+        image: markerImage,
+        zIndex: 980
+      });
+      deliveryPinMarker.setMap(map);
+
+      const label = document.createElement("div");
+      label.style.padding = "4px 9px";
+      label.style.borderRadius = "999px";
+      label.style.background = "rgba(0,0,0,0.62)";
+      label.style.border = "1px solid rgba(255,255,255,0.20)";
+      label.style.color = "#eaf2ff";
+      label.style.fontSize = "12px";
+      label.style.fontWeight = "900";
+      label.style.letterSpacing = "0.2px";
+      label.style.whiteSpace = "nowrap";
+      label.style.boxShadow = "0 4px 14px rgba(0,0,0,0.32)";
+      label.style.pointerEvents = "none";
+      label.textContent = campLabel;
+
+      deliveryPinLabelOverlay = new kakao.maps.CustomOverlay({
+        position: pos,
+        content: label,
+        yAnchor: 2.2,
+        zIndex: 990
+      });
+      deliveryPinLabelOverlay.setMap(map);
+
+      map.panTo(pos);
+      setStatus(`입차지 표시 완료: ${campLabel}`, "OK");
+    });
   }
 
   function clearOsm() {
@@ -3969,6 +4103,7 @@ function openWaveModal(action) {
       // ✅ 입차지 저장/비우기
       deliverySaveBtn.addEventListener("click", () => saveDeliveryOnly(false));
       deliveryClearBtn.addEventListener("click", () => saveDeliveryOnly(true));
+      if (deliveryShowBtn) deliveryShowBtn.addEventListener("click", showLoadedDeliveryPin);
 
       shareBtn.addEventListener("click", generateShareLink);
 
@@ -4694,6 +4829,7 @@ function openWaveModal(action) {
       <div class="row">
         <button id="deliverySaveBtn" class="btn ok">입차지 저장</button>
         <button id="deliveryClearBtn" class="btn danger">입차지 비우기</button>
+        <button id="deliveryShowBtn" class="btn" type="button">입차지 표시</button>
       </div>
 </div>
 

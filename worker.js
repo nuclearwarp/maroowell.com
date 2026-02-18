@@ -210,10 +210,11 @@ async function hydrateRouteRowsWithCamps(rows, env) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
   const byCamp = new Map(); // camp -> Map(mb_camp -> campRow)
-  let globalIndex = null;
 
   for (const row of rows) {
     const deliveryName = safeTrim(row?.delivery_location_name);
+    // subsubroutes의 기존 주소값이 남아 있어도 camps 기준으로 덮어쓰기 위해 초기화
+    if (deliveryName) row.delivery_location_address = null;
     if (!deliveryName) continue;
 
     const routeCamp = safeTrim(row?.camp);
@@ -223,13 +224,7 @@ async function hydrateRouteRowsWithCamps(rows, env) {
     if (!byCamp.has(routeCamp)) {
       byCamp.set(routeCamp, await loadCampIndex(env, routeCamp));
     }
-    let matched = byCamp.get(routeCamp).get(key);
-
-    // 같은 camp에서 못 찾으면 전체 camps에서 한 번 fallback
-    if (!matched) {
-      if (!globalIndex) globalIndex = await loadCampIndex(env, "");
-      matched = globalIndex.get(key);
-    }
+    const matched = byCamp.get(routeCamp).get(key);
 
     if (!matched) continue;
 
@@ -508,16 +503,32 @@ async function handleCampsGet(url, env) {
   if (mbCamp) base.set("mb_camp", `eq.${mbCamp}`);
 
   const wildcard = `*${q}*`;
-  const fields = ["mb_camp", "camp", "address", "code"];
+  const likeFields = ["mb_camp", "camp", "address", "code"];
+  const eqFields = ["mb_camp", "camp", "code"];
 
-  const results = await Promise.all(
-    fields.map(async (field) => {
+  const queries = [
+    ...eqFields.map((field) => {
+      const p = new URLSearchParams(base.toString());
+      p.set(field, `eq.${q}`);
+      return p;
+    }),
+    ...likeFields.map((field) => {
       const p = new URLSearchParams(base.toString());
       p.set(field, `ilike.${wildcard}`);
+      return p;
+    }),
+  ];
+
+  const results = [];
+  for (const p of queries) {
+    try {
       const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${p.toString()}`, { method: "GET" });
-      return Array.isArray(rows) ? rows : [];
-    })
-  );
+      results.push(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      // 일부 쿼리 실패해도 다른 쿼리 결과로 계속 진행
+      console.warn("camps 검색 쿼리 실패:", e?.message || String(e));
+    }
+  }
 
   const mergedMap = new Map();
   for (const arr of results) {
@@ -529,7 +540,32 @@ async function handleCampsGet(url, env) {
     }
   }
 
-  const out = Array.from(mergedMap.values())
+  let out = Array.from(mergedMap.values());
+
+  // PostgREST ilike 누락/인코딩 이슈 대비: 결과가 없으면 넓게 가져와 JS 필터링 fallback
+  if (out.length === 0) {
+    try {
+      const p = new URLSearchParams();
+      p.set("select", "*");
+      p.set("order", "updated_at.desc,created_at.desc,id.desc");
+      p.set("limit", String(Math.min(Math.max(limit * 8, 200), 1000)));
+      if (camp) p.set("camp", `eq.${camp}`);
+      if (mbCamp) p.set("mb_camp", `eq.${mbCamp}`);
+
+      const broad = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${p.toString()}`, { method: "GET" });
+      out = (Array.isArray(broad) ? broad : [])
+        .map(normalizeCampRow)
+        .filter(Boolean)
+        .filter((row) => {
+          const hay = `${safeTrim(row.mb_camp)}\n${safeTrim(row.camp)}\n${safeTrim(row.code)}\n${safeTrim(row.address)}`.toLowerCase();
+          return hay.includes(qLower);
+        });
+    } catch (e) {
+      console.warn("camps fallback 검색 실패:", e?.message || String(e));
+    }
+  }
+
+  out = out
     .sort((a, b) => scoreCampSearchMatch(b, qLower) - scoreCampSearchMatch(a, qLower))
     .slice(0, limit);
 

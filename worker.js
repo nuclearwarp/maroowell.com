@@ -1,35 +1,25 @@
 /**
- * Cloudflare Worker - route API + share OG/Twitter + v=yyyymmddHHMM 자동 부여
+ * Cloudflare Worker - route API (+ camps 기반 입차지 매핑, zipcode API)
  *
  * ENV:
  *  - SUPABASE_URL
  *  - SUPABASE_SERVICE_ROLE_KEY
- *
- * NOTE:
- *  - maroowell.com/share* 라우트가 Worker에 걸려있는 상태에서
- *    Worker가 템플릿을 maroowell.com/share.html 로 fetch하면 재귀가 납니다.
- *  - 그래서 템플릿은 "www" 서브도메인(Worker 미적용)에서 가져오도록 구성합니다.
- *
- * ✅ 패치 (vendor_name 컬럼 제거 대응 + 색상/벤더/센터좌표 개선)
- *  - DB: subsubroutes.vendor_name 삭제 전제
- *  - subsubroutes.vendor_business_number_1w / _2w 에 business_number 저장
- *  - 응답에서 vendors.business_number 를 매핑해서 vendor_name_1w/2w(표시용)을 내려줌
- *  - color는 DB에 저장하지 않고, 응답 생성 시 안정적인 HSL 해시 컬러로 생성
- *  - /vendors?q= 부분검색 API 제공
- *  - ✅ center_wgs84 PATCH/응답 파싱 지원 (라벨/중심점 이동용)
- *  - ✅ wave 정규화: "주간=2W / 야간=1W" (DAY/NIGHT/주간/야간 입력도 지원)
  */
 
+const ROUTE_TABLE = "subsubroutes";
+const ADDRESS_TABLE = "addresses";
+const CAMPS_TABLE = "camps";
+
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return cors(new Response("", { status: 204 }));
+    }
+
     try {
       const url = new URL(request.url);
       const path = url.pathname;
-
-      // CORS preflight
-      if (request.method === "OPTIONS") {
-        return cors(new Response("", { status: 204 }));
-      }
 
       if (path === "/health") {
         return cors(json({ ok: true }));
@@ -42,10 +32,13 @@ export default {
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
-      // ✅ 벤더 부분검색 + 신규 등록
-      if (path === "/vendors") {
-        if (request.method === "GET") return cors(await handleVendorsGet(url, env));
-        if (request.method === "POST") return cors(await handleVendorCreate(request, env));
+      if (path === "/addresses" && request.method === "GET") {
+        return cors(await handleAddressesGet(url, env));
+      }
+
+      if (path === "/camps") {
+        if (request.method === "GET") return cors(await handleCampsGet(url, env));
+        if (request.method === "POST") return cors(await handleCampsPost(request, env));
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
@@ -53,53 +46,23 @@ export default {
         return cors(await handleOsmGet(url));
       }
 
-      if (path === "/addresses" && request.method === "GET") {
-        return cors(await handleAddressesGet(url, env));
-      }
-
-      // 공유 미리보기(OG/Twitter/파비콘 + v 자동)
-      if ((path === "/share" || path === "/share.html") && request.method === "GET") {
-        return await handleShareHtml(url, env);
-      }
-
-      // 우편번호 경계 API (루트 경로에서 zipcode 파라미터로 처리)
-      if (path === "/" && request.method === "GET") {
-        const zipcode = url.searchParams.get("zipcode");
-        if (zipcode) {
-          return cors(await handleZipGet(zipcode));
-        }
+      // zipcode API: /?zipcode=07420 또는 /zip?zipcode=07420
+      if ((path === "/" || path === "/zip") && request.method === "GET") {
+        const zipcode = (url.searchParams.get("zipcode") || "").trim();
+        if (!zipcode) return cors(json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400));
+        return cors(await handleZipGet(zipcode));
       }
 
       return cors(json({ error: "Not Found" }, 404));
     } catch (e) {
       return cors(json({ error: e?.message || String(e) }, 500));
     }
-  }
+  },
 };
 
-const ROUTE_TABLE = "subsubroutes";
-const ADDRESS_TABLE = "addresses";
-const VENDORS_TABLE = "vendors";
-
-/**
- * ✅ 템플릿은 "www"에서 가져오기 (Worker 라우트 미적용이라 재귀 방지)
- * - www.maroowell.com/share.html 은 GitHub Pages 정적 파일이어야 합니다.
- */
-const SHARE_TEMPLATE_URL = "https://www.maroowell.com/share.html";
-
-/**
- * ✅ 브라우저 탭 파비콘 (HTML <link rel="icon">)
- */
-const FAVICON_URL = "https://maroowell.com/favicon.ico?v=2";
-
-/**
- * ✅ 카톡/메신저 미리보기 썸네일(og:image)
- */
-const OG_IMAGE_BASE = "https://maroowell.com/assets/og/maroowell-1200x630.png"; // 없으면 업로드 필요
-
-// ---------- helpers ----------
+// ---------- 공통 helpers ----------
 function cors(res) {
-  const h = new Headers(res.headers);
+  const h = new Headers(res.headers || {});
   h.set("Access-Control-Allow-Origin", "*");
   h.set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
   h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -110,20 +73,24 @@ function cors(res) {
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", ...extraHeaders }
+    headers: { "Content-Type": "application/json; charset=utf-8", ...extraHeaders },
   });
 }
 
 async function readJson(request) {
   const text = await request.text();
   if (!text) return {};
-  try { return JSON.parse(text); } catch { throw new Error("Invalid JSON body"); }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Invalid JSON body");
+  }
 }
 
-function mustEnv(env, k) {
-  const v = env[k];
-  if (!v) throw new Error(`Missing ENV: ${k}`);
-  return v;
+function mustEnv(env, key) {
+  const value = env[key];
+  if (!value) throw new Error(`Missing ENV: ${key}`);
+  return value;
 }
 
 async function supabaseFetch(env, pathWithQuery, init = {}) {
@@ -134,7 +101,9 @@ async function supabaseFetch(env, pathWithQuery, init = {}) {
   const headers = new Headers(init.headers || {});
   headers.set("apikey", key);
   headers.set("Authorization", `Bearer ${key}`);
-  headers.set("Content-Type", headers.get("Content-Type") || "application/json");
+  if (!headers.has("Content-Type") && init.method !== "GET" && init.method !== "HEAD") {
+    headers.set("Content-Type", "application/json");
+  }
 
   const res = await fetch(url, { ...init, headers });
   const text = await res.text();
@@ -149,216 +118,146 @@ async function supabaseFetch(env, pathWithQuery, init = {}) {
   }
 
   if (!text) return null;
-  try { return JSON.parse(text); } catch { return text; }
-}
-
-function escapeHtmlAttr(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function upsertHeadTag(html, matchRegex, newTag) {
-  if (matchRegex.test(html)) return html.replace(matchRegex, newTag);
-  const headOpen = html.match(/<head[^>]*>/i);
-  if (headOpen) return html.replace(/<head[^>]*>/i, headOpen[0] + "\n  " + newTag);
-  return newTag + "\n" + html;
-}
-
-function getKstYYYYMMDDHHMM() {
-  const now = new Date();
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000); // UTC+9
-  const yyyy = String(kst.getUTCFullYear());
-  const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(kst.getUTCDate()).padStart(2, "0");
-  const HH = String(kst.getUTCHours()).padStart(2, "0");
-  const MM = String(kst.getUTCMinutes()).padStart(2, "0");
-  return `${yyyy}${mm}${dd}${HH}${MM}`;
-}
-
-/**
- * ✅ wave 정규화
- * - 주간 = 2W
- * - 야간 = 1W
- *
- * 허용 입력:
- * - "1W" | "2W" | "1" | "2" | "W1" | "W2"
- * - "DAY" | "NIGHT"
- * - "주간" | "야간"
- */
-function normalizeWave(v) {
-  const s = String(v ?? "").trim().toUpperCase();
-  if (!s) return null;
-
-  // 직접 wave 지정은 그대로
-  if (s === "1W" || s === "1" || s === "W1") return "1W";
-  if (s === "2W" || s === "2" || s === "W2") return "2W";
-
-  // ✅ 사용자 정의: 주간=2W / 야간=1W
-  if (s === "DAY" || s === "주간".toUpperCase()) return "2W";
-  if (s === "NIGHT" || s === "야간".toUpperCase()) return "1W";
-
-  return null;
-}
-
-// ---------- ✅ color: 안정적인 HSL 해시 (저채도/중명도, DB 저장 X) ----------
-function fnv1a32(str) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
-  return h >>> 0;
 }
 
-function hslToRgb(h, s, l) {
-  const hh = ((h % 360) + 360) % 360;
-  const ss = Math.max(0, Math.min(100, s)) / 100;
-  const ll = Math.max(0, Math.min(100, l)) / 100;
-
-  const c = (1 - Math.abs(2 * ll - 1)) * ss;
-  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
-  const m = ll - c / 2;
-
-  let r1 = 0, g1 = 0, b1 = 0;
-  if (hh < 60) { r1 = c; g1 = x; b1 = 0; }
-  else if (hh < 120) { r1 = x; g1 = c; b1 = 0; }
-  else if (hh < 180) { r1 = 0; g1 = c; b1 = x; }
-  else if (hh < 240) { r1 = 0; g1 = x; b1 = c; }
-  else if (hh < 300) { r1 = x; g1 = 0; b1 = c; }
-  else { r1 = c; g1 = 0; b1 = x; }
-
-  const r = Math.round((r1 + m) * 255);
-  const g = Math.round((g1 + m) * 255);
-  const b = Math.round((b1 + m) * 255);
-  return [r, g, b];
+function safeTrim(v) {
+  return String(v ?? "").trim();
 }
 
-function toHex2(n) {
-  return n.toString(16).padStart(2, "0");
+function parseMaybeJson(v, fallback = null) {
+  if (v == null) return fallback;
+  if (typeof v === "object") return v;
+  if (typeof v !== "string") return fallback;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return fallback;
+  }
 }
 
-function rgbToHex(r, g, b) {
-  return `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`;
+function parseMaybeNumber(v) {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
-function generateColor(seed) {
-  const str = String(seed ?? "");
-  const h = fnv1a32(str);
-
-  const hue = h % 360;
-  // ✅ 너무 쨍하지 않게(채도↓), 너무 연하지 않게(명도 중간)
-  const sat = 58 + ((h >>> 8) % 15);     // 58..72
-  const light = 46 + ((h >>> 16) % 12);  // 46..57
-
-  const [r, g, b] = hslToRgb(hue, sat, light);
-  return rgbToHex(r, g, b);
+function normalizeCampKey(v) {
+  return safeTrim(v).toLowerCase();
 }
 
-// ---------- ✅ vendors name 매핑 (business_number -> name) ----------
-function quoteInValue(v) {
-  const s = String(v ?? "");
-  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+function applyRouteDerivedFields(row) {
+  if (!row || typeof row !== "object") return;
+  const fullCode = safeTrim(row.full_code || row.code);
+  if (fullCode && !row.color) row.color = generateColor(fullCode);
+
+  if (typeof row.polygon_wgs84 === "string") {
+    row.polygon_wgs84 = parseMaybeJson(row.polygon_wgs84, null);
+  }
+
+  // 프론트 편의: camp_name/route_code도 함께 내려줌
+  if (!row.camp_name && row.camp) row.camp_name = row.camp;
+  if (!row.route_code && row.full_code) row.route_code = row.full_code;
 }
 
-async function fetchVendorNameMap(env, businessNumbers) {
-  const bns = Array.from(new Set(businessNumbers))
-    .map(v => String(v || "").trim())
-    .filter(Boolean);
+function generateColor(code) {
+  const COLOR_PALETTE = [
+    "#00C2FF", "#FF4D6D", "#FFD166", "#06D6A0", "#A78BFA",
+    "#F97316", "#22C55E", "#E11D48", "#3B82F6", "#F59E0B",
+    "#14B8A6", "#8B5CF6", "#84CC16", "#EC4899", "#0EA5E9",
+    "#EF4444", "#10B981", "#FBBF24", "#6366F1", "#FB7185",
+  ];
 
-  if (bns.length === 0) return new Map();
+  const s = String(code || "");
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h << 5) - h + s.charCodeAt(i);
+    h |= 0;
+  }
+  return COLOR_PALETTE[Math.abs(h) % COLOR_PALETTE.length];
+}
 
-  // URL 길이 방어
-  const MAX = 200;
-  const sliced = bns.slice(0, MAX);
-
+// ---------- camps 매핑 ----------
+async function loadCampIndex(env, campName = "") {
   const params = new URLSearchParams();
-  params.set("select", "business_number,name");
-  params.set("business_number", `in.(${sliced.map(quoteInValue).join(",")})`);
+  params.set("select", "id,camp,code,address,latitude,longitude,mb_camp,created_at,updated_at");
+  if (campName) params.set("camp", `eq.${campName}`);
+  params.set("order", "updated_at.desc,created_at.desc,id.desc");
 
-  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
-
-  const map = new Map();
-  if (Array.isArray(rows)) {
-    for (const r of rows) {
-      const bn = String(r?.business_number || "").trim();
-      if (!bn) continue;
-      map.set(bn, r?.name ?? null);
-    }
+  let rows = [];
+  try {
+    const data = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, { method: "GET" });
+    rows = Array.isArray(data) ? data : [];
+  } catch (e) {
+    console.warn("camps 조회 실패:", e?.message || String(e));
+    rows = [];
   }
-  return map;
+
+  const byMbCamp = new Map();
+  for (const row of rows) {
+    const key = normalizeCampKey(row?.mb_camp);
+    if (!key || byMbCamp.has(key)) continue;
+    byMbCamp.set(key, row);
+  }
+  return byMbCamp;
 }
 
-async function enrichRoutes(rows, env) {
+async function hydrateRouteRowsWithCamps(rows, env) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
-  // business_number 수집 (1W/2W)
-  const bns = [];
-  for (const row of rows) {
-    if (!row) continue;
-    const bn1 = row.vendor_business_number_1w ?? row.vendor_business_number ?? null;
-    const bn2 = row.vendor_business_number_2w ?? null;
-    if (bn1) bns.push(bn1);
-    if (bn2) bns.push(bn2);
-  }
-
-  const nameMap = await fetchVendorNameMap(env, bns);
+  const byCamp = new Map(); // camp -> Map(mb_camp -> campRow)
+  let globalIndex = null;
 
   for (const row of rows) {
-    if (!row) continue;
+    const deliveryName = safeTrim(row?.delivery_location_name);
+    if (!deliveryName) continue;
 
-    const camp = String(row.camp ?? "").trim();
-    const fullCode = String(row.full_code ?? row.code ?? "").trim();
+    const routeCamp = safeTrim(row?.camp);
+    const key = normalizeCampKey(deliveryName);
+    if (!key) continue;
 
-    // ✅ color는 "항상" 계산해서 내려줌 (DB에 저장 안 하고, 기존/캐시 색상 무시)
-    if (fullCode) row.color = generateColor(`${camp}|${fullCode}`);
+    if (!byCamp.has(routeCamp)) {
+      byCamp.set(routeCamp, await loadCampIndex(env, routeCamp));
+    }
+    let matched = byCamp.get(routeCamp).get(key);
 
-    // polygon_wgs84 string -> json
-    if (row.polygon_wgs84 && typeof row.polygon_wgs84 === "string") {
-      try { row.polygon_wgs84 = JSON.parse(row.polygon_wgs84); } catch { row.polygon_wgs84 = null; }
+    // 같은 camp에서 못 찾으면 전체 camps에서 한 번 fallback
+    if (!matched) {
+      if (!globalIndex) globalIndex = await loadCampIndex(env, "");
+      matched = globalIndex.get(key);
     }
 
-    // ✅ center_wgs84 string -> json (있으면)
-    if (row.center_wgs84 && typeof row.center_wgs84 === "string") {
-      try { row.center_wgs84 = JSON.parse(row.center_wgs84); } catch { /* keep */ }
+    if (!matched) continue;
+
+    const addr = safeTrim(matched.address);
+    if (addr) row.delivery_location_address = addr;
+
+    const lat = parseMaybeNumber(matched.latitude);
+    const lng = parseMaybeNumber(matched.longitude);
+    if ((row.delivery_location_lat == null || row.delivery_location_lat === "") && lat != null) {
+      row.delivery_location_lat = lat;
     }
-
-    // vendor 번호 정규화 (legacy column 대비)
-    const bn1 = row.vendor_business_number_1w ?? row.vendor_business_number ?? null;
-    const bn2 = row.vendor_business_number_2w ?? null;
-
-    row.vendor_business_number_1w = bn1 ?? null;
-    row.vendor_business_number_2w = bn2 ?? null;
-
-    // legacy 호환
-    row.vendor_business_number = bn1 ?? null;
-
-    const name1 = bn1 ? (nameMap.get(String(bn1).trim()) ?? null) : null;
-    const name2 = bn2 ? (nameMap.get(String(bn2).trim()) ?? null) : null;
-
-    row.vendor_name_1w = name1;
-    row.vendor_name_2w = name2;
-
-    row.vendor_name = name1; // legacy 호환
+    if ((row.delivery_location_lng == null || row.delivery_location_lng === "") && lng != null) {
+      row.delivery_location_lng = lng;
+    }
   }
 
   return rows;
 }
 
-// ---------- /route GET ----------
+// ---------- /route ----------
 async function handleRouteGet(url, env) {
-  const camp = (url.searchParams.get("camp") || "").trim();
-  const code = (url.searchParams.get("code") || "").trim();
-  const mode = (url.searchParams.get("mode") || "prefix").trim(); // prefix | exact
+  const camp = safeTrim(url.searchParams.get("camp"));
+  const code = safeTrim(url.searchParams.get("code"));
+  const mode = safeTrim(url.searchParams.get("mode") || "prefix");
 
   if (!camp) return json({ error: "camp is required" }, 400);
 
   const params = new URLSearchParams();
-
-  // ✅ 컬럼 변경으로 인한 오류 방지: select=*
   params.set("select", "*");
   params.set("camp", `eq.${camp}`);
   params.set("order", "full_code.asc");
@@ -369,118 +268,120 @@ async function handleRouteGet(url, env) {
   }
 
   const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, { method: "GET" });
+  const out = Array.isArray(rows) ? rows : [];
 
-  const enriched = await enrichRoutes(Array.isArray(rows) ? rows : [], env);
+  out.forEach(applyRouteDerivedFields);
+  await hydrateRouteRowsWithCamps(out, env);
 
-  return json({ rows: enriched || [] }, 200, { "Cache-Control": "no-store" });
+  return json({ rows: out }, 200, { "Cache-Control": "no-store" });
 }
 
-// ---------- /route POST (upsert) ----------
+function buildRoutePatch(body) {
+  const camp = safeTrim(body.camp);
+  const code = safeTrim(body.code);
+  const patch = { camp, code, full_code: code };
+
+  // 벤더 계열 (구/신 컬럼 모두 허용)
+  const vendorKeys = [
+    "vendor_name",
+    "vendor_business_number",
+    "vendor_name_1w",
+    "vendor_name_2w",
+    "vendor_business_number_1w",
+    "vendor_business_number_2w",
+    "vendor_1w_name",
+    "vendor_2w_name",
+  ];
+  for (const k of vendorKeys) {
+    if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k] ?? null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_name")) {
+    patch.delivery_location_name = body.delivery_location_name ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lat")) {
+    patch.delivery_location_lat = parseMaybeNumber(body.delivery_location_lat);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lng")) {
+    patch.delivery_location_lng = parseMaybeNumber(body.delivery_location_lng);
+  }
+
+  // 중요: delivery_location_address는 camps 테이블에서 계산해서 내려주므로 저장 대상에서 제외
+  if (Object.prototype.hasOwnProperty.call(body, "polygon_wgs84")) {
+    patch.polygon_wgs84 = body.polygon_wgs84 ?? null;
+  }
+
+  return patch;
+}
+
 async function handleRoutePost(request, env) {
   const body = await readJson(request);
-
-  const camp = (body.camp || "").trim();
-  const code = (body.code || "").trim();
+  const camp = safeTrim(body.camp);
+  const code = safeTrim(body.code);
   const id = body.id;
 
   if (!camp) return json({ error: "camp is required" }, 400);
   if (!code) return json({ error: "code is required" }, 400);
 
-  const hasPoly = Object.prototype.hasOwnProperty.call(body, "polygon_wgs84");
+  const patch = buildRoutePatch(body);
+  let row = null;
 
-  const patch = { camp, code, full_code: code };
-
-  // ✅ vendor_name 컬럼은 제거되었으므로 더 이상 patch에 포함하지 않음
-  // ✅ 1W/2W 저장 지원:
-  //    - vendor_wave + vendor_business_number
-  //    - vendor_business_number_1w / vendor_business_number_2w
-  const wave = normalizeWave(body.vendor_wave);
-
-  if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number_1w")) {
-    patch.vendor_business_number_1w = body.vendor_business_number_1w ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number_2w")) {
-    patch.vendor_business_number_2w = body.vendor_business_number_2w ?? null;
-  }
-  if (Object.prototype.hasOwnProperty.call(body, "vendor_business_number")) {
-    const bn = body.vendor_business_number ?? null;
-    if (wave === "2W") patch.vendor_business_number_2w = bn;
-    else if (wave === "1W") patch.vendor_business_number_1w = bn;
-    else patch.vendor_business_number_1w = bn; // default
-  }
-
-  // ✅ center_wgs84 저장 지원 (라벨/중심점 이동)
-  if (Object.prototype.hasOwnProperty.call(body, "center_wgs84")) {
-    patch.center_wgs84 = body.center_wgs84 ?? null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_name")) patch.delivery_location_name = body.delivery_location_name ?? null;
-  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_address")) patch.delivery_location_address = body.delivery_location_address ?? null;
-  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lat")) patch.delivery_location_lat = body.delivery_location_lat ?? null;
-  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lng")) patch.delivery_location_lng = body.delivery_location_lng ?? null;
-  if (hasPoly) patch.polygon_wgs84 = body.polygon_wgs84 ?? null;
-
-  let saved;
-
-  // ID 기반 업데이트
   if (typeof id === "number") {
     const params = new URLSearchParams();
     params.set("id", `eq.${id}`);
     params.set("select", "*");
 
-    saved = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
+    const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify(patch)
+      body: JSON.stringify(patch),
     });
+    row = Array.isArray(updated) ? updated[0] : updated;
   } else {
-    // (camp + full_code) upsert-like
-    const queryParams = new URLSearchParams();
-    queryParams.set("camp", `eq.${camp}`);
-    queryParams.set("full_code", `eq.${code}`);
-    queryParams.set("select", "id");
+    // camp + code(full_code) 기준으로 존재하면 PATCH, 없으면 POST
+    const q = new URLSearchParams();
+    q.set("camp", `eq.${camp}`);
+    q.set("full_code", `eq.${code}`);
+    q.set("select", "id");
+    q.set("limit", "1");
 
-    const existing = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, { method: "GET" });
+    const existing = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${q.toString()}`, { method: "GET" });
 
-    if (Array.isArray(existing) && existing.length > 0) {
-      const existingId = existing[0].id;
+    if (Array.isArray(existing) && existing.length > 0 && typeof existing[0]?.id === "number") {
+      const params = new URLSearchParams();
+      params.set("id", `eq.${existing[0].id}`);
+      params.set("select", "*");
 
-      const patchParams = new URLSearchParams();
-      patchParams.set("id", `eq.${existingId}`);
-      patchParams.set("select", "*");
-
-      saved = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${patchParams.toString()}`, {
+      const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
         method: "PATCH",
         headers: { Prefer: "return=representation" },
-        body: JSON.stringify(patch)
+        body: JSON.stringify(patch),
       });
+      row = Array.isArray(updated) ? updated[0] : updated;
     } else {
-      const insertParams = new URLSearchParams();
-      insertParams.set("select", "*");
+      const params = new URLSearchParams();
+      params.set("select", "*");
 
-      saved = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${insertParams.toString()}`, {
+      const inserted = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
         method: "POST",
         headers: { Prefer: "return=representation" },
-        body: JSON.stringify(patch)
+        body: JSON.stringify(patch),
       });
+      row = Array.isArray(inserted) ? inserted[0] : inserted;
     }
   }
 
-  const row = Array.isArray(saved) ? saved[0] : saved;
+  applyRouteDerivedFields(row);
+  await hydrateRouteRowsWithCamps([row], env);
 
-  const enrichedArr = await enrichRoutes(row ? [row] : [], env);
-  const enriched = enrichedArr && enrichedArr[0] ? enrichedArr[0] : row;
-
-  return json({ row: enriched }, 200, { "Cache-Control": "no-store" });
+  return json({ row }, 200, { "Cache-Control": "no-store" });
 }
 
-// ---------- /route DELETE ----------
-// 실제 삭제가 아니라 polygon_wgs84=null 로 "폴리곤만 제거"
 async function handleRouteDelete(request, env) {
   const body = await readJson(request);
   const id = body.id;
-  const camp = (body.camp || "").trim();
-  const code = (body.code || "").trim();
+  const camp = safeTrim(body.camp);
+  const code = safeTrim(body.code);
 
   if (typeof id !== "number" && (!camp || !code)) {
     return json({ error: "id OR (camp + code) is required" }, 400);
@@ -488,7 +389,6 @@ async function handleRouteDelete(request, env) {
 
   const params = new URLSearchParams();
   params.set("select", "*");
-
   if (typeof id === "number") {
     params.set("id", `eq.${id}`);
   } else {
@@ -499,329 +399,165 @@ async function handleRouteDelete(request, env) {
   const updated = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ polygon_wgs84: null })
+    body: JSON.stringify({ polygon_wgs84: null }),
   });
 
   const row = Array.isArray(updated) ? updated[0] : updated;
+  applyRouteDerivedFields(row);
+  await hydrateRouteRowsWithCamps([row], env);
 
-  const enrichedArr = await enrichRoutes(row ? [row] : [], env);
-  const enriched = enrichedArr && enrichedArr[0] ? enrichedArr[0] : row;
-
-  return json({ row: enriched }, 200, { "Cache-Control": "no-store" });
+  return json({ row }, 200, { "Cache-Control": "no-store" });
 }
 
-// ---------- /vendors POST (신규 등록) ----------
-// body: { name, business_number }
-// - business_number는 하이픈 포함 그대로 저장
-// - business_number가 이미 있으면 기존 row 반환
-// - vendor_code는 "bn_숫자" 기본, 충돌 시 suffix 추가
-async function handleVendorCreate(request, env) {
-  const body = await readJson(request);
-
-  const name = String(body?.name || "").trim();
-  const business_number = String(body?.business_number || "").trim();
-
-  if (!name) return json({ error: "name is required" }, 400);
-  if (!business_number) return json({ error: "business_number is required" }, 400);
-
-  // 1) business_number 중복이면 그대로 반환
-  try {
-    const p0 = new URLSearchParams();
-    p0.set("select", "id,vendor_code,name,business_number,created_at");
-    p0.set("business_number", `eq.${business_number}`);
-    p0.set("limit", "1");
-
-    const existed = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${p0.toString()}`, { method: "GET" });
-    if (Array.isArray(existed) && existed.length > 0) {
-      return json({ row: existed[0], existed: true }, 200, { "Cache-Control": "no-store" });
-    }
-  } catch (e) {
-    // 조회 실패는 무시하고 생성 로직 진행 (단, insert 실패 시 다시 표면화)
-  }
-
-  // 2) vendor_code 생성 (bn_숫자)
-  const digits = business_number.replace(/\D/g, "");
-  const base = digits ? `bn_${digits}` : `bn_${Date.now()}`;
-
-  let vendor_code = base;
-
-  // vendor_code 충돌 시 suffix 부여
-  for (let i = 0; i < 60; i++) {
-    const p1 = new URLSearchParams();
-    p1.set("select", "id");
-    p1.set("vendor_code", `eq.${vendor_code}`);
-    p1.set("limit", "1");
-
-    const hit = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${p1.toString()}`, { method: "GET" });
-    if (!Array.isArray(hit) || hit.length === 0) break;
-
-    vendor_code = `${base}_${i + 2}`;
-  }
-
-  // 3) insert
-  try {
-    const p2 = new URLSearchParams();
-    p2.set("select", "id,vendor_code,name,business_number,created_at");
-
-    const inserted = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${p2.toString()}`, {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: JSON.stringify({ vendor_code, name, business_number })
-    });
-
-    const row = Array.isArray(inserted) ? inserted[0] : inserted;
-    return json({ row, existed: false }, 200, { "Cache-Control": "no-store" });
-  } catch (e) {
-    // 동시성/유니크 충돌 등으로 insert 실패 시 business_number로 재조회 후 반환
-    try {
-      const p3 = new URLSearchParams();
-      p3.set("select", "id,vendor_code,name,business_number,created_at");
-      p3.set("business_number", `eq.${business_number}`);
-      p3.set("limit", "1");
-
-      const existed2 = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${p3.toString()}`, { method: "GET" });
-      if (Array.isArray(existed2) && existed2.length > 0) {
-        return json({ row: existed2[0], existed: true }, 200, { "Cache-Control": "no-store" });
-      }
-    } catch {}
-    return json({ error: e?.message || String(e) }, 500);
-  }
-}
-
-// ---------- /vendors GET (부분검색) ----------
-async function handleVendorsGet(url, env) {
-  const qRaw = (url.searchParams.get("q") || "").trim();
-  if (!qRaw) return json({ error: "q is required" }, 400);
-
-  // PostgREST OR 필터에서 괄호/콤마는 구문을 깨기 쉬워서 제거
-  const q = qRaw.replace(/[(),]/g, " ").trim();
-  const pattern = `*${q}*`;
-
-  const params = new URLSearchParams();
-  params.set("select", "id,vendor_code,name,business_number,created_at");
-  params.set("order", "name.asc");
-  params.set("limit", "30");
-
-  // name, vendor_code, business_number 중 하나라도 매칭
-  params.set("or", `(name.ilike.${pattern},vendor_code.ilike.${pattern},business_number.ilike.${pattern})`);
-
-  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
-
-  return json({ rows: Array.isArray(rows) ? rows : [] }, 200, { "Cache-Control": "no-store" });
-}
-
-// ---------- /addresses GET ----------
+// ---------- /addresses ----------
 async function handleAddressesGet(url, env) {
-  const camp = (url.searchParams.get("camp") || "").trim();
-  const code = (url.searchParams.get("code") || "").trim();
+  const camp = safeTrim(url.searchParams.get("camp"));
+  const code = safeTrim(url.searchParams.get("code"));
 
   if (!camp) return json({ error: "camp is required" }, 400);
 
-  const select = [
-    "id",
-    "camp",
-    "full_code",
-    "address",
-    "center_wgs84",
-    "zipcode",
-    "detail",
-    "dong",
-    "created_at"
-  ].join(",");
-
   const params = new URLSearchParams();
-  params.set("select", select);
+  params.set("select", "*");
   params.set("camp", `eq.${camp}`);
   params.set("order", "full_code.asc,address.asc");
-
   if (code) params.set("full_code", `like.${code}%`);
 
   try {
     const rows = await supabaseFetch(env, `/rest/v1/${ADDRESS_TABLE}?${params.toString()}`, { method: "GET" });
+    const out = Array.isArray(rows) ? rows : [];
 
-    if (Array.isArray(rows)) {
-      rows.forEach(row => {
-        if (row && row.center_wgs84 && typeof row.center_wgs84 === "string") {
-          try { row.center_wgs84 = JSON.parse(row.center_wgs84); } catch { row.center_wgs84 = null; }
-        }
-      });
-    }
+    out.forEach((row) => {
+      if (row && typeof row.center_wgs84 === "string") {
+        row.center_wgs84 = parseMaybeJson(row.center_wgs84, null);
+      }
+    });
 
-    return json({ rows: rows || [] }, 200, { "Cache-Control": "no-store" });
+    return json({ rows: out }, 200, { "Cache-Control": "no-store" });
   } catch (e) {
-    console.error("addresses 조회 실패:", e);
-    return json({ error: e.message, rows: [] }, 200);
+    console.warn("addresses 조회 실패:", e?.message || String(e));
+    return json({ rows: [], error: e?.message || String(e) }, 200, { "Cache-Control": "no-store" });
   }
 }
 
-// ---------- /zip GET ----------
-async function handleZipGet(zipcode) {
-  try {
-    if (!zipcode) return json({ error: "zipcode 쿼리 파라미터가 필요함" }, 400);
-
-    const ts = Date.now();
-    const wfsUrl =
-      `https://www.juso.go.kr/wfs.do` +
-      `?callback=callback` +
-      `&svcType=WFS` +
-      `&typeName=BAS` +
-      `&basId=${encodeURIComponent(zipcode)}` +
-      `&maxFeatures=1` +
-      `&_=${ts}`;
-
-    const wfsRes = await fetch(wfsUrl, {
-      headers: { Referer: "https://maroowell.com/", Origin: "https://maroowell.com" }
-    });
-
-    if (!wfsRes.ok) return json({ error: "WFS 호출 실패", status: wfsRes.status }, 502);
-
-    const text = await wfsRes.text();
-    const xmlMatch = text.match(/xmlStr'\s*:\s*'([\s\S]*?)'\s*}\s*\)\s*;?\s*$/);
-    if (!xmlMatch) return json({ error: "WFS 응답에서 xmlStr를 찾지 못함", rawSample: text.slice(0, 200) }, 500);
-
-    let xml = xmlMatch[1].replace(/\\'/g, "'").replace(/\\\\/g, "\\");
-
-    const coordsMatch = xml.match(/<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/);
-    if (!coordsMatch) return json({ error: "gml:coordinates 태그를 찾지 못함", xmlSample: xml.slice(0, 300) }, 500);
-
-    const coordText = coordsMatch[1].trim();
-    const polygon5179 = coordText
-      .split(/\s+/)
-      .map(pair => pair.split(",").map(Number))
-      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-
-    if (polygon5179.length === 0) return json({ error: "좌표 파싱 결과가 비어 있음", coordSample: coordText.slice(0, 200) }, 500);
-
-    const xMatch = xml.match(/<kais_tmp:x_code>([^<]+)<\/kais_tmp:x_code>/);
-    const yMatch = xml.match(/<kais_tmp:y_code>([^<]+)<\/kais_tmp:y_code>/);
-    const center5179 = xMatch && yMatch ? [Number(xMatch[1]), Number(yMatch[1])] : null;
-
-    return json({ zipcode, srid: 5179, center5179, polygon5179 });
-  } catch (err) {
-    return json({ error: "Worker 내부 예외 발생", detail: String(err) }, 500);
-  }
+// ---------- /camps ----------
+function normalizeCampRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const out = { ...row };
+  out.camp = safeTrim(out.camp);
+  out.code = safeTrim(out.code);
+  out.mb_camp = safeTrim(out.mb_camp);
+  out.address = safeTrim(out.address);
+  out.latitude = parseMaybeNumber(out.latitude);
+  out.longitude = parseMaybeNumber(out.longitude);
+  return out;
 }
 
-// ---------- /share 동적 메타 태그 처리 (+ v 자동 부여) ----------
-async function handleShareHtml(url, env) {
-  const v = (url.searchParams.get("v") || "").trim();
-  const isValidV = /^\d{12}$/.test(v);
-  if (!isValidV) {
-    const v2 = getKstYYYYMMDDHHMM();
-    const newUrl = new URL(url.toString());
-    newUrl.searchParams.set("v", v2);
+function escapeIlikeKeyword(v) {
+  return String(v ?? "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll(",", "\\,")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+}
 
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: newUrl.toString(),
-        "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": "*"
-      }
+async function handleCampsGet(url, env) {
+  const q = safeTrim(url.searchParams.get("q"));
+  const camp = safeTrim(url.searchParams.get("camp"));
+  const mbCamp = safeTrim(url.searchParams.get("mb_camp"));
+  const limitRaw = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
+
+  const params = new URLSearchParams();
+  params.set("select", "*");
+  params.set("order", "updated_at.desc,created_at.desc,id.desc");
+  params.set("limit", String(limit));
+  if (camp) params.set("camp", `eq.${camp}`);
+  if (mbCamp) params.set("mb_camp", `eq.${mbCamp}`);
+
+  if (q) {
+    const k = escapeIlikeKeyword(q);
+    params.set("or", `mb_camp.ilike.*${k}*,address.ilike.*${k}*,camp.ilike.*${k}*`);
+  }
+
+  const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, { method: "GET" });
+  const out = (Array.isArray(rows) ? rows : []).map(normalizeCampRow).filter(Boolean);
+  return json({ rows: out }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleCampsPost(request, env) {
+  const body = await readJson(request);
+
+  const camp = safeTrim(body.camp);
+  const mbCamp = safeTrim(body.mb_camp ?? body.delivery_location_name ?? body.name);
+  const address = safeTrim(body.address);
+  const code = safeTrim(body.code);
+  const latitude = parseMaybeNumber(body.latitude);
+  const longitude = parseMaybeNumber(body.longitude);
+
+  if (!camp) return json({ error: "camp is required" }, 400);
+  if (!mbCamp) return json({ error: "mb_camp is required" }, 400);
+  if (!address) return json({ error: "address is required" }, 400);
+
+  const patch = {
+    camp,
+    mb_camp: mbCamp,
+    address,
+  };
+  if (code || Object.prototype.hasOwnProperty.call(body, "code")) {
+    patch.code = code || null;
+  }
+  if (latitude != null || Object.prototype.hasOwnProperty.call(body, "latitude")) {
+    patch.latitude = latitude;
+  }
+  if (longitude != null || Object.prototype.hasOwnProperty.call(body, "longitude")) {
+    patch.longitude = longitude;
+  }
+
+  // camp + mb_camp 존재 시 업데이트, 없으면 신규 생성
+  const q = new URLSearchParams();
+  q.set("select", "id");
+  q.set("camp", `eq.${camp}`);
+  q.set("mb_camp", `eq.${mbCamp}`);
+  q.set("limit", "1");
+  const existing = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${q.toString()}`, { method: "GET" });
+
+  let row = null;
+  if (Array.isArray(existing) && existing.length > 0 && typeof existing[0]?.id === "number") {
+    const params = new URLSearchParams();
+    params.set("id", `eq.${existing[0].id}`);
+    params.set("select", "*");
+
+    const updated = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
     });
-  }
-
-  const camp = (url.searchParams.get("camp") || "").trim();
-  const code = (url.searchParams.get("code") || "").trim();
-
-  let ogTitle = "배송 지도 공유";
-  let ogDescription = "배송 구역 및 경로를 확인하세요";
-
-  if (camp) {
-    try {
-      const queryParams = new URLSearchParams();
-      queryParams.set("select", "delivery_location_name,delivery_location_address,full_code");
-      queryParams.set("camp", `eq.${camp}`);
-      if (code) queryParams.set("full_code", `like.${code}%`);
-      queryParams.set("limit", "1");
-      queryParams.set("order", "full_code.asc");
-
-      const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${queryParams.toString()}`, { method: "GET" });
-
-      if (Array.isArray(rows) && rows.length > 0) {
-        const locationName = (rows[0].delivery_location_name || "").trim();
-        const locationAddr = (rows[0].delivery_location_address || "").trim();
-        const fullCode = (rows[0].full_code || code || "").trim();
-
-        ogTitle = `${camp}${locationName ? " " + locationName : ""}${fullCode ? " " + fullCode : ""}`.trim();
-        ogDescription = `${camp}${locationName ? " " + locationName : ""}${fullCode ? " " + fullCode : ""} 배송 구역을 확인하세요`.trim();
-        if (locationAddr) ogDescription = `${locationAddr} · ${ogDescription}`;
-      } else if (code) {
-        ogTitle = `${camp} ${code}`.trim();
-        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
-      } else {
-        ogTitle = `${camp} 배송지도`.trim();
-        ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
-      }
-    } catch (e) {
-      ogTitle = code ? `${camp} ${code}`.trim() : `${camp} 배송지도`.trim();
-      ogDescription = code
-        ? `${camp} ${code} 배송 구역을 확인하세요`.trim()
-        : `${camp} 배송 구역을 확인하세요`.trim();
-    }
-  }
-
-  const htmlRes = await fetch(SHARE_TEMPLATE_URL, {
-    headers: { "User-Agent": "maroowell-route-worker/1.0" }
-  });
-
-  if (!htmlRes.ok) {
-    return json(
-      { error: "Failed to fetch share template", template: SHARE_TEMPLATE_URL, status: htmlRes.status },
-      502
-    );
-  }
-
-  let html = await htmlRes.text();
-
-  const safeTitle = escapeHtmlAttr(ogTitle);
-  const safeDesc = escapeHtmlAttr(ogDescription);
-  const safeUrl = escapeHtmlAttr(url.toString());
-  const imgUrl = `${OG_IMAGE_BASE}?v=${v}`;
-  const safeImg = escapeHtmlAttr(imgUrl);
-  const safeFav = escapeHtmlAttr(FAVICON_URL);
-
-  if (/<title[^>]*>[\s\S]*?<\/title>/i.test(html)) {
-    html = html.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`);
+    row = Array.isArray(updated) ? updated[0] : updated;
   } else {
-    html = upsertHeadTag(html, /$^/i, `<title>${safeTitle}</title>`);
+    const params = new URLSearchParams();
+    params.set("select", "*");
+
+    const inserted = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    });
+    row = Array.isArray(inserted) ? inserted[0] : inserted;
   }
 
-  html = upsertHeadTag(html, /<meta\s+property=["']og:type["'][^>]*>/i, `<meta property="og:type" content="website" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${safeTitle}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:site_name["'][^>]*>/i, `<meta property="og:site_name" content="Maroowell" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:url["'][^>]*>/i, `<meta property="og:url" content="${safeUrl}" />`);
-
-  html = upsertHeadTag(html, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeImg}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:image:secure_url["'][^>]*>/i, `<meta property="og:image:secure_url" content="${safeImg}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="Maroowell" />`);
-
-  html = html.replace(/<link\s+rel=["']icon["'][^>]*>/gi, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']icon["'][^>]*>/i, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']shortcut icon["'][^>]*>/i, `<link rel="shortcut icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']apple-touch-icon["'][^>]*>/i, `<link rel="apple-touch-icon" href="${safeFav}" />`);
-
-  return new Response(html, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*"
-    }
-  });
+  return json({ row: normalizeCampRow(row) }, 200, { "Cache-Control": "no-store" });
 }
 
-// ---------- /osm GET (Overpass) ----------
+// ---------- /osm ----------
 async function handleOsmGet(url) {
-  const bboxStr = (url.searchParams.get("bbox") || "").trim();
+  const bboxStr = safeTrim(url.searchParams.get("bbox"));
   const parts = bboxStr.split(",").map(Number);
-  if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) {
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) {
     return json({ error: "bbox is required: minLng,minLat,maxLng,maxLat" }, 400);
   }
 
   const [minLng, minLat, maxLng, maxLat] = parts;
-  const bbox = `${minLat},${minLng},${maxLat},${maxLng}`;
+  const bbox = `${minLat},${minLng},${maxLat},${maxLng}`; // south,west,north,east
 
   const query = `
 [out:json][timeout:25];
@@ -840,16 +576,18 @@ out geom;
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-      "User-Agent": "maroowell-route-worker/1.0"
+      "User-Agent": "maroowell-route-worker/1.0",
     },
-    body: `data=${encodeURIComponent(query)}`
+    body: `data=${encodeURIComponent(query)}`,
   });
 
   const text = await res.text();
   if (!res.ok) return json({ error: `Overpass error: ${text || res.status}` }, 502);
 
   let data;
-  try { data = JSON.parse(text); } catch {
+  try {
+    data = JSON.parse(text);
+  } catch {
     return json({ error: "Overpass returned invalid JSON" }, 502);
   }
 
@@ -860,8 +598,8 @@ out geom;
   for (const el of elements) {
     if (!el || !el.type || !Array.isArray(el.geometry)) continue;
     const coords = el.geometry
-      .filter(g => typeof g?.lat === "number" && typeof g?.lon === "number")
-      .map(g => [g.lon, g.lat]);
+      .filter((g) => typeof g?.lat === "number" && typeof g?.lon === "number")
+      .map((g) => [g.lon, g.lat]);
 
     if (coords.length < 2) continue;
 
@@ -873,4 +611,103 @@ out geom;
   }
 
   return json({ roads, buildings }, 200, { "Cache-Control": "public, max-age=60" });
+}
+
+// ---------- zipcode boundary API ----------
+async function handleZipGet(zipcode) {
+  const apiUrl = "https://www.juso.go.kr/api/totalMap/selectKarbSbdList";
+
+  const payload = {
+    params_sido_val: null,
+    params_sido_data: [],
+    params_sgg_val: null,
+    params_sgg_data: [],
+    search_result: [],
+    result_count: 0,
+    result_offset: 0,
+    ctpvCd: "",
+    lgvReplcCd: "",
+    districtNo: zipcode,
+    pageable: {
+      first: 0,
+      totalRecords: 0,
+      currentRecords: 0,
+      totalPages: 0,
+      page: 0,
+      size: 10,
+      linkSize: 5,
+      orders: [{ property: "", direction: "" }],
+    },
+  };
+
+  const apiRes = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/plain, */*",
+      Origin: "https://www.juso.go.kr",
+      Referer: "https://www.juso.go.kr/map/totalMapView",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!apiRes.ok) {
+    return json({ error: "주소정보 API 호출 실패", status: apiRes.status }, 502);
+  }
+
+  const data = await apiRes.json();
+  if (!data?.results?.content || !Array.isArray(data.results.content)) {
+    return json({ error: "응답 데이터 형식 오류", response: data }, 500);
+  }
+  if (data.results.content.length === 0) {
+    return json({ error: "해당 우편번호의 경계 데이터가 없음", zipcode }, 404);
+  }
+
+  const item = data.results.content[0];
+  const metadata = {
+    ctpvNm: item.ctpvNm,
+    sigNm: item.sigNm,
+    sbdno: item.sbdno,
+    lgvReplcCd: item.lgvReplcCd,
+  };
+
+  if (!item.geom) {
+    return json({ error: "geom 필드가 없음", item }, 500);
+  }
+
+  let geojson;
+  try {
+    geojson = typeof item.geom === "string" ? JSON.parse(item.geom) : item.geom;
+  } catch (e) {
+    return json({ error: "GeoJSON 파싱 실패", detail: String(e), geom: item.geom }, 500);
+  }
+
+  if (geojson.type !== "MultiPolygon" || !Array.isArray(geojson.coordinates)) {
+    return json({ error: "예상치 못한 geometry 타입", type: geojson.type }, 500);
+  }
+
+  const polygon5179 = geojson.coordinates;
+  let center5179 = null;
+  if (polygon5179.length > 0 && polygon5179[0].length > 0 && polygon5179[0][0].length > 0) {
+    const firstRing = polygon5179[0][0];
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+
+    for (const [x, y] of firstRing) {
+      if (typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y)) {
+        sumX += x;
+        sumY += y;
+        count += 1;
+      }
+    }
+    if (count > 0) center5179 = [sumX / count, sumY / count];
+  }
+
+  return json({ zipcode, srid: 5179, center5179, polygon5179, metadata });
 }

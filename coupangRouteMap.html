@@ -655,9 +655,12 @@
       <div class="sep"></div>
 
       <div class="label sectionTitle">입차지 정보(서브라우트 단위)</div>
-      <input id="deliveryNameInput" type="text" placeholder="입차지 (예: 본캠프 or 식사동MB)" />
+      <div class="row" style="gap:10px;">
+        <input id="deliveryNameInput" type="text" placeholder="입차지(모바일캠프명) 검색 후 Enter" style="flex:1;" />
+        <button id="deliverySearchBtn" class="btn btnSearch" type="button">검색</button>
+      </div>
       <div style="height:8px"></div>
-      <input id="deliveryAddrInput" type="text" placeholder="입차지 주소 (상세히)" />
+      <input id="deliveryAddrInput" type="text" placeholder="입차지 주소 (camps 테이블에서 자동 조회)" readonly />
 
       <div style="height:10px"></div>
       <div class="row">
@@ -783,6 +786,21 @@
   </div>
 </div>
 
+<!-- ✅ 입차지(캠프) 검색/등록 모달 -->
+<div class="modal" id="deliveryCampModal" aria-hidden="true">
+  <div class="modalCard" role="dialog" aria-modal="true" aria-label="입차지 선택">
+    <div class="modalTop">
+      <div class="modalTitle">입차지 선택</div>
+      <button id="deliveryCampModalCloseBtn" class="miniBtn" style="background:rgba(255,80,80,.18);border-color:rgba(255,80,80,.26)">닫기</button>
+    </div>
+    <div class="modalMeta">
+      <div class="kbdHint">클릭: 선택 · 결과 없으면 아래에서 등록</div>
+      <div id="deliveryCampMetaCount">0개</div>
+    </div>
+    <div class="modalBody" id="deliveryCampResults"></div>
+  </div>
+</div>
+
 <script>
 (() => {
   if (window.__coupangRouteMapInitialized) return;
@@ -793,6 +811,7 @@
   const ROUTE_ENDPOINT = `${API_BASE}/route`;
   const OSM_ENDPOINT = `${API_BASE}/osm`;
   const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
+  const CAMPS_ENDPOINT = `${API_BASE}/camps`; // ✅ 입차지(캠프) 검색/등록
   const VENDORS_ENDPOINT = `${API_BASE}/vendors`; // ✅ 벤더 검색(이름 부분 일치)
 
   // ====== DOM ======
@@ -827,6 +846,13 @@
   // ✅ 입차지
   const deliveryNameInput = $("deliveryNameInput");
   const deliveryAddrInput = $("deliveryAddrInput");
+  const deliverySearchBtn = $("deliverySearchBtn");
+
+  // ✅ 입차지 선택 모달
+  const deliveryCampModalEl = $("deliveryCampModal");
+  const deliveryCampModalCloseBtn = $("deliveryCampModalCloseBtn");
+  const deliveryCampMetaCountEl = $("deliveryCampMetaCount");
+  const deliveryCampResultsEl = $("deliveryCampResults");
 
   const loadBtn = $("loadBtn");
   const drawNewBtn = $("drawNewBtn");
@@ -922,6 +948,10 @@
   // ✅ 벤더 검색/필터 상태
   let vendorCandidate = null;              // { name, business_number, vendor_code }
   let vendorFilterBusinessNumber = null;   // 불러오기(검색)용
+
+  // ✅ 입차지(캠프) 검색/선택 상태
+  let deliveryCampCandidate = null;        // { id, camp, code, mb_camp, address, latitude, longitude }
+  let deliveryCampModalOpen = false;
 
 
   // ✅ (추가) 폴리곤 개별 삭제 X 오버레이
@@ -1096,8 +1126,60 @@
     selectedInfo.textContent = "선택: 없음";
 
     clearVendorDisplay();
-    deliveryNameInput.value = "";
-    deliveryAddrInput.value = "";
+    clearDeliveryDisplay();
+  }
+
+  function normalizeDeliveryCamp(v) {
+    if (!v || typeof v !== "object") return null;
+    const camp = (v.camp ?? "").toString().trim();
+    const code = (v.code ?? "").toString().trim();
+    const mb_camp = (v.mb_camp ?? v.delivery_location_name ?? v.name ?? "").toString().trim();
+    const address = (v.address ?? v.delivery_location_address ?? "").toString().trim();
+    if (!mb_camp) return null;
+    return {
+      id: v.id ?? null,
+      camp,
+      code,
+      mb_camp,
+      address,
+      latitude: v.latitude ?? v.delivery_location_lat ?? null,
+      longitude: v.longitude ?? v.delivery_location_lng ?? null,
+    };
+  }
+
+  function resolveDeliveryLocationName() {
+    const picked = (deliveryCampCandidate?.mb_camp ?? "").toString().trim();
+    if (picked) return picked;
+    return (deliveryNameInput?.value ?? "").toString().trim();
+  }
+
+  function setDeliveryCampCandidate(v, { syncNameInput = true } = {}) {
+    deliveryCampCandidate = normalizeDeliveryCamp(v);
+
+    if (!deliveryCampCandidate) {
+      if (syncNameInput && deliveryNameInput) deliveryNameInput.value = "";
+      if (deliveryAddrInput) deliveryAddrInput.value = "";
+      return;
+    }
+
+    if (syncNameInput && deliveryNameInput) deliveryNameInput.value = deliveryCampCandidate.mb_camp;
+    if (deliveryAddrInput) deliveryAddrInput.value = deliveryCampCandidate.address || "";
+  }
+
+  function setDeliveryDisplayFromRow(row) {
+    const normalized = normalizeDeliveryCamp({
+      camp: row?.camp || row?.camp_name || "",
+      mb_camp: row?.delivery_location_name || "",
+      address: row?.delivery_location_address || "",
+      delivery_location_lat: row?.delivery_location_lat,
+      delivery_location_lng: row?.delivery_location_lng,
+    });
+    if (normalized) setDeliveryCampCandidate(normalized);
+    else clearDeliveryDisplay();
+  }
+
+  function clearDeliveryDisplay() {
+    setDeliveryCampCandidate(null);
   }
 
   function clearOsm() {
@@ -1702,9 +1784,7 @@
     codeInput.value = code;
 
     setVendorDisplayFromRow(row);
-
-    deliveryNameInput.value = row.delivery_location_name || "";
-    deliveryAddrInput.value = row.delivery_location_address || "";
+    setDeliveryDisplayFromRow(row);
 
     loadAddresses().catch(err => log(`배송지 로드 실패: ${err.message}`));
 
@@ -1739,9 +1819,7 @@
     codeInput.value = code;
 
     setVendorDisplayFromRow(row);
-
-    deliveryNameInput.value = row.delivery_location_name || "";
-    deliveryAddrInput.value = row.delivery_location_address || "";
+    setDeliveryDisplayFromRow(row);
 
     if (!polygons || polygons.length === 0) {
       setStatus(`선택 대상 ${code}는 polygon이 없습니다. "새로 그리기"로 생성하세요.`, "WARN");
@@ -2004,7 +2082,7 @@
           vendor_business_number_2w: null,
           vendor_name_1w: null,
           vendor_name_2w: null,
-          delivery_location_name: deliveryNameInput.value.trim(),
+          delivery_location_name: resolveDeliveryLocationName(),
           delivery_location_address: deliveryAddrInput.value.trim()
         },
         polygons: [],
@@ -2143,7 +2221,7 @@
     const deliveryAddr = deliveryAddrInput.value.trim();
 
     if (!deliveryAddr) {
-      setStatus("입차지 주소를 먼저 입력해주세요.", "WARN");
+      setStatus("입차지를 먼저 검색/선택해주세요.", "WARN");
       return;
     }
 
@@ -2357,8 +2435,7 @@ const data = await apiGet(url.toString());
         camp,
         code,
         polygon_wgs84,
-        delivery_location_name: deliveryNameInput.value.trim() || null,
-        delivery_location_address: deliveryAddrInput.value.trim() || null
+        delivery_location_name: resolveDeliveryLocationName() || null
       };
 
       if (typeof actualId === "number") payload.id = actualId;
@@ -2779,6 +2856,243 @@ function openWaveModal(action) {
     }
   }
 
+  // ====== ✅ 입차지(캠프) 검색/선택/등록 ======
+  function normalizeCampSearchRow(v) {
+    return normalizeDeliveryCamp(v);
+  }
+
+  function closeDeliveryCampModal() {
+    deliveryCampModalOpen = false;
+    if (!deliveryCampModalEl) return;
+    deliveryCampModalEl.style.display = "none";
+    deliveryCampModalEl.setAttribute("aria-hidden", "true");
+  }
+
+  function openDeliveryCampModal(list, q = "") {
+    if (!deliveryCampModalEl || !deliveryCampResultsEl) return;
+
+    const safeList = (Array.isArray(list) ? list : [])
+      .map(normalizeCampSearchRow)
+      .filter(Boolean);
+
+    deliveryCampModalOpen = true;
+    deliveryCampModalEl.style.display = "flex";
+    deliveryCampModalEl.setAttribute("aria-hidden", "false");
+
+    if (deliveryCampMetaCountEl) deliveryCampMetaCountEl.textContent = `${safeList.length}개`;
+    deliveryCampResultsEl.innerHTML = "";
+
+    if (deliveryCampCandidate?.mb_camp) {
+      const sel = document.createElement("div");
+      sel.className = "pillRow";
+      sel.style.marginBottom = "10px";
+
+      const t = document.createElement("div");
+      const campText = deliveryCampCandidate.camp ? `${deliveryCampCandidate.camp} / ` : "";
+      const addrText = deliveryCampCandidate.address ? ` · ${deliveryCampCandidate.address}` : "";
+      t.textContent = `선택됨: ${campText}${deliveryCampCandidate.mb_camp}${addrText}`;
+
+      const x = document.createElement("button");
+      x.className = "pillX";
+      x.type = "button";
+      x.title = "선택 해제";
+      x.textContent = "✕";
+      x.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDeliveryCampCandidate(null, { syncNameInput: false });
+        openDeliveryCampModal(safeList, q);
+      });
+
+      sel.appendChild(t);
+      sel.appendChild(x);
+      deliveryCampResultsEl.appendChild(sel);
+    }
+
+    if (safeList.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "emptyMsg";
+      empty.textContent = `검색 결과 없음 : "${q || ""}"`;
+      deliveryCampResultsEl.appendChild(empty);
+    } else {
+      for (const c of safeList) {
+        const card = document.createElement("div");
+        card.className = "resultCard";
+
+        const left = document.createElement("div");
+        left.style.flex = "1";
+        left.style.minWidth = "0";
+
+        const title = document.createElement("div");
+        title.className = "resultTitle";
+        title.textContent = c.mb_camp || "-";
+
+        const meta = document.createElement("div");
+        meta.className = "resultSub";
+        const campText = c.camp ? `캠프: ${c.camp}\n` : "";
+        const addrText = c.address ? `주소: ${c.address}` : "주소: -";
+        meta.textContent = `${campText}${addrText}`.trim();
+
+        left.appendChild(title);
+        left.appendChild(meta);
+
+        const tag = document.createElement("div");
+        tag.className = "tagPill";
+        tag.textContent = "입차지";
+
+        card.appendChild(left);
+        card.appendChild(tag);
+        card.addEventListener("click", () => {
+          setDeliveryCampCandidate(c);
+          closeDeliveryCampModal();
+          setStatus(`입차지 선택: ${c.mb_camp}`, "OK");
+        });
+
+        deliveryCampResultsEl.appendChild(card);
+      }
+    }
+
+    // 결과가 없을 때 신규 등록 폼 표시
+    if (safeList.length === 0) {
+      const divider = document.createElement("div");
+      divider.style.height = "10px";
+      deliveryCampResultsEl.appendChild(divider);
+
+      const box = document.createElement("div");
+      box.className = "createBox";
+
+      const head = document.createElement("div");
+      head.className = "createHead";
+      head.textContent = "신규 입차지 등록";
+
+      const desc = document.createElement("div");
+      desc.className = "createDesc";
+      desc.textContent = "검색 결과가 없으면 camps 테이블에 바로 등록합니다.";
+
+      const form = document.createElement("div");
+      form.className = "createForm";
+
+      const mkField = (labelText, placeholder) => {
+        const wrap = document.createElement("div");
+        wrap.className = "createField";
+
+        const lab = document.createElement("div");
+        lab.className = "createLabel";
+        lab.textContent = labelText;
+
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.className = "createInput";
+        inp.placeholder = placeholder;
+
+        wrap.appendChild(lab);
+        wrap.appendChild(inp);
+        return { wrap, inp };
+      };
+
+      const fCamp = mkField("캠프", "예: 김포1");
+      const fMbCamp = mkField("입차지명(mb_camp)", "예: 본캠프 / 식사동MB");
+      const fAddr = mkField("주소", "예: 경기 고양시 ...");
+
+      fCamp.inp.value = campInput.value.trim();
+      fMbCamp.inp.value = (q || "").trim();
+
+      form.appendChild(fCamp.wrap);
+      form.appendChild(fMbCamp.wrap);
+      form.appendChild(fAddr.wrap);
+
+      const actions = document.createElement("div");
+      actions.className = "createActions";
+
+      const createBtn = document.createElement("button");
+      createBtn.className = "createBtn";
+      createBtn.textContent = "등록";
+      actions.appendChild(createBtn);
+
+      box.appendChild(head);
+      box.appendChild(desc);
+      box.appendChild(form);
+      box.appendChild(actions);
+
+      const doCreate = async () => {
+        const campName = (fCamp.inp.value || "").trim();
+        const mbCampName = (fMbCamp.inp.value || "").trim();
+        const address = (fAddr.inp.value || "").trim();
+
+        if (!campName) { setStatus("캠프를 입력하세요.", "WARN"); fCamp.inp.focus(); return; }
+        if (!mbCampName) { setStatus("입차지명을 입력하세요.", "WARN"); fMbCamp.inp.focus(); return; }
+        if (!address) { setStatus("주소를 입력하세요.", "WARN"); fAddr.inp.focus(); return; }
+
+        createBtn.disabled = true;
+        createBtn.textContent = "등록중...";
+
+        try {
+          const res = await apiJson("POST", CAMPS_ENDPOINT, {
+            camp: campName,
+            mb_camp: mbCampName,
+            address,
+          });
+
+          const created = normalizeCampSearchRow(res?.row || res);
+          if (!created) throw new Error("등록 응답이 올바르지 않습니다.");
+
+          setDeliveryCampCandidate(created);
+          closeDeliveryCampModal();
+          setStatus("입차지 등록 완료", "OK");
+        } catch (e) {
+          setStatus(`입차지 등록 실패: ${e?.message || String(e)}`, "ERR");
+        } finally {
+          createBtn.disabled = false;
+          createBtn.textContent = "등록";
+        }
+      };
+
+      createBtn.addEventListener("click", doCreate);
+      fAddr.inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") doCreate(); });
+      fCamp.inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") fMbCamp.inp.focus(); });
+      fMbCamp.inp.addEventListener("keydown", (ev) => { if (ev.key === "Enter") fAddr.inp.focus(); });
+
+      deliveryCampResultsEl.appendChild(box);
+    }
+  }
+
+  async function fetchCampsByName(q) {
+    const query = (q || "").trim();
+    const camp = campInput.value.trim();
+
+    const url = new URL(CAMPS_ENDPOINT);
+    url.searchParams.set("q", query);
+    if (camp) url.searchParams.set("camp", camp);
+
+    const data = await apiGet(url.toString());
+    const rows = Array.isArray(data) ? data : (data?.rows || data?.camps || []);
+    return (rows || []).map(normalizeCampSearchRow).filter(Boolean);
+  }
+
+  async function runDeliveryCampSearch(q) {
+    const query = (q || "").trim();
+    if (!query) {
+      setStatus("입차지 검색어를 입력하세요.", "WARN");
+      return;
+    }
+
+    setStatus(`입차지 검색중: "${query}" ...`, "OK");
+    let list = [];
+    try {
+      list = await fetchCampsByName(query);
+    } catch (e) {
+      setStatus(`입차지 검색 실패: ${e?.message || String(e)}`, "ERR");
+      openDeliveryCampModal([], query);
+      return;
+    }
+
+    if (list.length === 1) setDeliveryCampCandidate(list[0]);
+    openDeliveryCampModal(list, query);
+
+    if (list.length === 0) setStatus(`입차지 검색 결과 없음: "${query}" (신규 등록 가능)`, "WARN");
+    else setStatus(`입차지 후보 ${list.length}개: "${query}"`, "OK");
+  }
+
   // ====== 폴리곤 중심점 계산 ======
   function getRouteCenter() {
     if (!selectedRouteId || !overlayById.has(selectedRouteId)) return null;
@@ -2810,6 +3124,10 @@ function openWaveModal(action) {
       const code = codeInput.value.trim();
       if (!camp) { setStatus("camp가 비었습니다.", "ERR"); return; }
       if (!code) { setStatus("code가 비었습니다.", "ERR"); return; }
+      if (!clear && !resolveDeliveryLocationName()) {
+        setStatus("입차지를 먼저 검색/선택하세요.", "ERR");
+        return;
+      }
 
       let id = selectedRouteId;
 
@@ -2824,8 +3142,7 @@ function openWaveModal(action) {
       const payload = {
         camp,
         code,
-        delivery_location_name: clear ? null : (deliveryNameInput.value.trim() || null),
-        delivery_location_address: clear ? null : (deliveryAddrInput.value.trim() || null),
+        delivery_location_name: clear ? null : (resolveDeliveryLocationName() || null),
       };
 
       if (typeof id === "number") payload.id = id;
@@ -3362,6 +3679,11 @@ function openWaveModal(action) {
           setStatus("벤더 선택 닫기", "OK");
           return;
         }
+        if (deliveryCampModalOpen) {
+          closeDeliveryCampModal();
+          setStatus("입차지 선택 닫기", "OK");
+          return;
+        }
         if (searchModalOpen) {
           closeSearchModal();
           clearSearchSelectedMarker();
@@ -3422,8 +3744,7 @@ function openWaveModal(action) {
           stopEditing();
           selectedInfo.textContent = "선택: 없음";
           clearVendorDisplay();
-          deliveryNameInput.value = "";
-          deliveryAddrInput.value = "";
+          clearDeliveryDisplay();
           setStatus("선택 해제", "OK");
           return;
         }
@@ -3443,6 +3764,9 @@ function openWaveModal(action) {
       MID_IMG = makeHandleImage("#93a4c7", "#0b1220");
 
       attachMapEvents();
+
+      // 입차지 주소는 camps 매핑 결과를 출력만 하도록 고정
+      if (deliveryAddrInput) deliveryAddrInput.readOnly = true;
 
       window.addEventListener("resize", () => {
         if (!map) return;
@@ -3495,6 +3819,35 @@ function openWaveModal(action) {
         });
       }
 
+      // ✅ Enter/버튼으로 입차지 검색 (camps)
+      if (deliveryNameInput) {
+        deliveryNameInput.addEventListener("keydown", (e) => {
+          if (e.isComposing) return;
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          e.stopPropagation();
+          runDeliveryCampSearch(deliveryNameInput.value);
+        });
+        deliveryNameInput.addEventListener("input", () => {
+          const typed = (deliveryNameInput.value || "").trim();
+          const picked = (deliveryCampCandidate?.mb_camp || "").trim();
+          if (!typed) {
+            setDeliveryCampCandidate(null, { syncNameInput: false });
+            return;
+          }
+          if (picked && typed !== picked) {
+            // 선택값과 타이핑값이 달라지면 주소는 다시 조회되어야 하므로 후보 해제
+            setDeliveryCampCandidate(null, { syncNameInput: false });
+          }
+        });
+      }
+      if (deliverySearchBtn) {
+        deliverySearchBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          runDeliveryCampSearch(deliveryNameInput?.value || "");
+        });
+      }
+
       // ✅ 벤더 저장/비우기: 1W/2W 선택 모달
       vendorSaveBtn.addEventListener("click", () => {
         const camp = campInput.value.trim();
@@ -3518,6 +3871,10 @@ function openWaveModal(action) {
       // ✅ 모달 닫기/이벤트
       if (vendorModalCloseBtn) vendorModalCloseBtn.addEventListener("click", closeVendorModal);
       if (vendorModalEl) vendorModalEl.addEventListener("click", (e) => { if (e.target === vendorModalEl) closeVendorModal(); });
+      if (deliveryCampModalCloseBtn) deliveryCampModalCloseBtn.addEventListener("click", closeDeliveryCampModal);
+      if (deliveryCampModalEl) deliveryCampModalEl.addEventListener("click", (e) => {
+        if (e.target === deliveryCampModalEl) closeDeliveryCampModal();
+      });
 
       if (waveModalCloseBtn) waveModalCloseBtn.addEventListener("click", closeWaveModal);
       if (waveModalEl) waveModalEl.addEventListener("click", (e) => { if (e.target === waveModalEl) closeWaveModal(); });

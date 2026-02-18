@@ -1,1 +1,283 @@
-<!doctype html> <html lang="ko" style="width: 650px;"> <head> <meta charset="utf-8" /> <meta name="viewport" content="width=device-width,initial-scale=1" /> <title>네이버 뉴스 검색</title> <style> body { font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 24px; } /* ✅ 전체 폭을 결과(가장 긴 제목) 기준으로 강제할 래퍼 */ #wrap{ width: 860px; /* 초기값(자동검색 후 JS가 다시 맞춤) */ max-width: calc(100vw - 48px); min-width: 560px; /* 너무 쪼그라들지 않게 */ box-sizing: border-box; } .header { display:flex; align-items: baseline; gap: 12px; margin-bottom: 16px; width: 100%; } h1 { margin: 0; font-size: 32px; } #preset { padding: 8px 10px; font-size: 14px; } .row { display:flex; gap:8px; align-items:center; margin-bottom:12px; width: 100%; } input { flex:1; min-width: 240px; padding:10px 12px; font-size:16px; box-sizing: border-box; } button { padding:10px 12px; font-size:16px; cursor:pointer; } select { padding:6px 8px; } #status { margin: 10px 0 12px; font-weight: 600; width: 100%; } /* ✅ 카드/간격: 기사마다 아래로 띄우기 */ .item { padding: 12px 0 18px; border-bottom: 1px solid #eee; /* ✅ 이 줄이 이제 wrap 폭까지만 나옴 */ width: 100%; box-sizing: border-box; } /* ✅ 링크는 텍스트만 클릭되게 inline */ a.title { display: inline; /* 텍스트만 클릭 */ font-size: 18px; font-weight: 800; color:#111; text-decoration:none; line-height: 1.35; word-break: keep-all; } a.title:hover { text-decoration: underline; } /* ✅ 발행일은 제목 아래 작게 */ .date { margin-top: 6px; font-size: 13px; color: #666; } /* ✅ 결과 없음 표시(가독성) */ .empty { padding: 14px 12px; border: 1px solid #e6e6e6; border-radius: 10px; background: #fafafa; color: #111; font-weight: 700; } </style> </head> <body style="width: 650px;"> <div id="wrap"> <div class="header"> <h1>네이버 뉴스 검색</h1> <select id="preset" title="키워드 선택"> <option value="">키워드 선택…</option> <option value="쿠팡CLS">쿠팡CLS</option> <option value="쿠팡">쿠팡</option> <option value="쿠팡퀵플렉스">쿠팡퀵플렉스</option> <option value="쿠팡파트너스연합회">쿠팡파트너스연합회</option> <option value="쿠팡택배">쿠팡택배</option> <option value="쿠팡CES">쿠팡CES</option> <option value="쿠팡CFS">쿠팡CFS</option> </select> </div> <div class="row"> <input id="q" placeholder="키워드 입력 (예: 쿠팡CLS)" /> <button id="btn">검색</button> </div> <div class="row"> <label>정렬: <select id="sort"> <option value="sim" selected>관련도순</option> <option value="date">최신순</option> </select> </label> <label>개수: <select id="display"> <option>10</option><option>20</option><option>30</option><option>50</option> </select> </label> </div> <div id="status"></div> <div id="list"></div> </div> <script> const $ = (id) => document.getElementById(id); // Naver pubDate: "Tue, 17 Feb 2026 07:46:00 +0900" 형태가 많아서 보기 좋게 변환 function formatPubDate(pubDate) { if (!pubDate) return ""; const d = new Date(pubDate); if (isNaN(d.getTime())) return pubDate; // 파싱 실패하면 원문 const yyyy = d.getFullYear(); const mm = String(d.getMonth() + 1).padStart(2, "0"); const dd = String(d.getDate()).padStart(2, "0"); const hh = String(d.getHours()).padStart(2, "0"); const mi = String(d.getMinutes()).padStart(2, "0"); return ${yyyy}-${mm}-${dd} ${hh}:${mi}; } // ✅ 가장 긴 제목 길이에 맞춰 #wrap 폭 자동 설정 const _canvas = document.createElement("canvas"); const _ctx = _canvas.getContext("2d"); function _fontStringFromComputed(cs) { // cs.font가 비어있는 브라우저가 있어서 안전하게 조합 if (cs.font && cs.font !== "") return cs.font; const style = cs.fontStyle || "normal"; const variant = cs.fontVariant || "normal"; const weight = cs.fontWeight || "400"; const size = cs.fontSize || "16px"; const lineHeight = cs.lineHeight || "normal"; const family = cs.fontFamily || "sans-serif"; return ${style} ${variant} ${weight} ${size}/${lineHeight} ${family}; } function measureTextWidthPx(text, sampleEl) { const cs = getComputedStyle(sampleEl); _ctx.font = _fontStringFromComputed(cs); const base = _ctx.measureText(text).width; const lsRaw = cs.letterSpacing; const ls = (!lsRaw || lsRaw === "normal") ? 0 : parseFloat(lsRaw); if (!ls || isNaN(ls)) return base; // 글자수-1 만큼 letter-spacing 추가 const n = text.length; return base + Math.max(0, n - 1) * ls; } function fitWrapToLongestTitle() { const wrap = $("wrap"); const titles = [...document.querySelectorAll('a.title')]; if (!wrap) return; // 결과가 없으면 UI 기본값으로만 맞춤 if (titles.length === 0) { const maxW = Math.floor(window.innerWidth - 48); wrap.style.width = Math.min(720, maxW) + "px"; return; } let maxTitleW = 0; for (const a of titles) { const t = (a.textContent || "").trim(); if (!t) continue; const w = measureTextWidthPx(t, a); if (w > maxTitleW) maxTitleW = w; } // ✅ "검색 버튼까지 딱" 맞추기: 불필요한 여백 최소화(살짝만 여유) const slack = 12; // 너무 딱 붙어 답답하면 20~28로 올려 let target = Math.ceil(maxTitleW + slack); // 너무 작아지는 거 방지 + 화면 밖 방지 const minW = 560; const maxW = Math.floor(window.innerWidth - 48); target = Math.max(minW, Math.min(target, maxW)); wrap.style.width = target + "px"; } async function search() { const query = ($("q").value || "").trim(); if (!query) return; $("status").textContent = "검색 중..."; $("list").innerHTML = ""; const sort = $("sort").value; // sim | date const display = $("display").value; const api = /newsSearch?query=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}&display=${encodeURIComponent(display)}; let res; try { res = await fetch(api); } catch (e) { $("status").textContent = "에러: API 호출 실패 (네트워크/Worker 확인)"; return; } if (!res.ok) { $("status").textContent = "에러: " + await res.text(); return; } const data = await res.json(); const items = data.items || []; $("status").textContent = 총 ${data.total ?? "?"}건 / 현재 ${items.length}건; if (items.length === 0) { const empty = document.createElement("div"); empty.className = "empty"; empty.textContent = "검색 결과 없음"; $("list").appendChild(empty); // 결과없음일 때도 폭 정리 fitWrapToLongestTitle(); return; } for (const it of items) { const item = document.createElement("div"); item.className = "item"; // ✅ 제목 링크(텍스트만 클릭되도록 inline) const a = document.createElement("a"); a.className = "title"; a.href = it.link; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = it.title; // ✅ 발행일 const date = document.createElement("div"); date.className = "date"; date.textContent = it.pubDate ? 발행: ${formatPubDate(it.pubDate)} : ""; item.appendChild(a); if (date.textContent) item.appendChild(date); $("list").appendChild(item); } // ✅ 렌더 후, "가장 긴 제목" 기준으로 wrap 폭 맞춤 // (레이아웃 반영 이후 측정 안정화) requestAnimationFrame(() => { fitWrapToLongestTitle(); }); } function setKeywordAndSearch(keyword) { $("q").value = keyword; $("preset").value = keyword; // 옵션에 없으면 무시됨 search(); } document.addEventListener("DOMContentLoaded", () => { $("btn").addEventListener("click", search); $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); }); $("preset").addEventListener("change", () => { const v = $("preset").value; if (v) setKeywordAndSearch(v); }); window.addEventListener("resize", () => { // 화면 바뀌면 다시 폭 재계산 fitWrapToLongestTitle(); }); // ✅ 첫 진입 자동 검색: 쿠팡CLS (필요시 k= 로 override) const params = new URLSearchParams(location.search); const k = (params.get("k") || "").trim(); setKeywordAndSearch(k || "쿠팡CLS"); }); </script> </body> </html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>네이버 뉴스 검색</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 24px; }
+
+    /* ✅ 전체 폭을 결과(가장 긴 제목) 기준으로 강제할 래퍼 */
+    #wrap{
+      width: 860px; /* 초기값(자동검색 후 JS가 다시 맞춤) */
+      max-width: calc(100vw - 48px);
+      min-width: 560px; /* 너무 쪼그라들지 않게 */
+      box-sizing: border-box;
+    }
+
+    .header { display:flex; align-items: baseline; gap: 12px; margin-bottom: 16px; width: 100%; }
+    h1 { margin: 0; font-size: 32px; }
+    #preset { padding: 8px 10px; font-size: 14px; }
+
+    .row { display:flex; gap:8px; align-items:center; margin-bottom:12px; width: 100%; }
+    input { flex:1; min-width: 240px; padding:10px 12px; font-size:16px; box-sizing: border-box; }
+    button { padding:10px 12px; font-size:16px; cursor:pointer; }
+    select { padding:6px 8px; }
+
+    #status { margin: 10px 0 12px; font-weight: 600; width: 100%; }
+
+    /* ✅ 카드/간격: 기사마다 아래로 띄우기 */
+    .item {
+      padding: 12px 0 18px;
+      border-bottom: 1px solid #eee; /* ✅ 이 줄이 이제 wrap 폭까지만 나옴 */
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    /* ✅ 링크는 텍스트만 클릭되게 inline */
+    a.title {
+      display: inline;            /* 텍스트만 클릭 */
+      font-size: 18px;
+      font-weight: 800;
+      color:#111;
+      text-decoration:none;
+      line-height: 1.35;
+      word-break: keep-all;
+    }
+    a.title:hover { text-decoration: underline; }
+
+    /* ✅ 발행일은 제목 아래 작게 */
+    .date {
+      margin-top: 6px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    /* ✅ 결과 없음 표시(가독성) */
+    .empty {
+      padding: 14px 12px;
+      border: 1px solid #e6e6e6;
+      border-radius: 10px;
+      background: #fafafa;
+      color: #111;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="header">
+      <h1>네이버 뉴스 검색</h1>
+      <select id="preset" title="키워드 선택">
+        <option value="">키워드 선택…</option>
+        <option value="쿠팡CLS">쿠팡CLS</option>
+        <option value="쿠팡">쿠팡</option>
+        <option value="쿠팡퀵플렉스">쿠팡퀵플렉스</option>
+        <option value="쿠팡파트너스연합회">쿠팡파트너스연합회</option>
+        <option value="쿠팡택배">쿠팡택배</option>
+        <option value="쿠팡CES">쿠팡CES</option>
+        <option value="쿠팡CFS">쿠팡CFS</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <input id="q" placeholder="키워드 입력 (예: 쿠팡CLS)" />
+      <button id="btn">검색</button>
+    </div>
+
+    <div class="row">
+      <label>정렬:
+        <select id="sort">
+          <option value="sim" selected>관련도순</option>
+          <option value="date">최신순</option>
+        </select>
+      </label>
+
+      <label>개수:
+        <select id="display">
+          <option>10</option><option>20</option><option>30</option><option>50</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="status"></div>
+    <div id="list"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // Naver pubDate: "Tue, 17 Feb 2026 07:46:00 +0900" 형태가 많아서 보기 좋게 변환
+    function formatPubDate(pubDate) {
+      if (!pubDate) return "";
+      const d = new Date(pubDate);
+      if (isNaN(d.getTime())) return pubDate; // 파싱 실패하면 원문
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const dd = String(d.getDate()).padStart(2, "0");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mi = String(d.getMinutes()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+    }
+
+    // ✅ 가장 긴 제목 길이에 맞춰 #wrap 폭 자동 설정
+    const _canvas = document.createElement("canvas");
+    const _ctx = _canvas.getContext("2d");
+
+    function _fontStringFromComputed(cs) {
+      // cs.font가 비어있는 브라우저가 있어서 안전하게 조합
+      if (cs.font && cs.font !== "") return cs.font;
+      const style = cs.fontStyle || "normal";
+      const variant = cs.fontVariant || "normal";
+      const weight = cs.fontWeight || "400";
+      const size = cs.fontSize || "16px";
+      const lineHeight = cs.lineHeight || "normal";
+      const family = cs.fontFamily || "sans-serif";
+      return `${style} ${variant} ${weight} ${size}/${lineHeight} ${family}`;
+    }
+
+    function measureTextWidthPx(text, sampleEl) {
+      const cs = getComputedStyle(sampleEl);
+      _ctx.font = _fontStringFromComputed(cs);
+
+      const base = _ctx.measureText(text).width;
+      const lsRaw = cs.letterSpacing;
+      const ls = (!lsRaw || lsRaw === "normal") ? 0 : parseFloat(lsRaw);
+      if (!ls || isNaN(ls)) return base;
+
+      // 글자수-1 만큼 letter-spacing 추가
+      const n = text.length;
+      return base + Math.max(0, n - 1) * ls;
+    }
+
+    function fitWrapToLongestTitle() {
+      const wrap = $("wrap");
+      const titles = [...document.querySelectorAll('a.title')];
+      if (!wrap) return;
+
+      // 결과가 없으면 UI 기본값으로만 맞춤
+      if (titles.length === 0) {
+        const maxW = Math.floor(window.innerWidth - 48);
+        wrap.style.width = Math.min(720, maxW) + "px";
+        return;
+      }
+
+      let maxTitleW = 0;
+      for (const a of titles) {
+        const t = (a.textContent || "").trim();
+        if (!t) continue;
+        const w = measureTextWidthPx(t, a);
+        if (w > maxTitleW) maxTitleW = w;
+      }
+
+      // ✅ "검색 버튼까지 딱" 맞추기: 불필요한 여백 최소화(살짝만 여유)
+      const slack = 12; // 너무 딱 붙어 답답하면 20~28로 올려
+      let target = Math.ceil(maxTitleW + slack);
+
+      // 너무 작아지는 거 방지 + 화면 밖 방지
+      const minW = 560;
+      const maxW = Math.floor(window.innerWidth - 48);
+      target = Math.max(minW, Math.min(target, maxW));
+
+      wrap.style.width = target + "px";
+    }
+
+    async function search() {
+      const query = ($("q").value || "").trim();
+      if (!query) return;
+
+      $("status").textContent = "검색 중...";
+      $("list").innerHTML = "";
+
+      const sort = $("sort").value;      // sim | date
+      const display = $("display").value;
+
+      const api = `/newsSearch?query=${encodeURIComponent(query)}&sort=${encodeURIComponent(sort)}&display=${encodeURIComponent(display)}`;
+
+      let res;
+      try {
+        res = await fetch(api);
+      } catch (e) {
+        $("status").textContent = "에러: API 호출 실패 (네트워크/Worker 확인)";
+        return;
+      }
+
+      if (!res.ok) {
+        $("status").textContent = "에러: " + await res.text();
+        return;
+      }
+
+      const data = await res.json();
+      const items = data.items || [];
+
+      $("status").textContent = `총 ${data.total ?? "?"}건 / 현재 ${items.length}건`;
+
+      if (items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "검색 결과 없음";
+        $("list").appendChild(empty);
+
+        // 결과없음일 때도 폭 정리
+        fitWrapToLongestTitle();
+        return;
+      }
+
+      for (const it of items) {
+        const item = document.createElement("div");
+        item.className = "item";
+
+        // ✅ 제목 링크(텍스트만 클릭되도록 inline)
+        const a = document.createElement("a");
+        a.className = "title";
+        a.href = it.link;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = it.title;
+
+        // ✅ 발행일
+        const date = document.createElement("div");
+        date.className = "date";
+        date.textContent = it.pubDate ? `발행: ${formatPubDate(it.pubDate)}` : "";
+
+        item.appendChild(a);
+        if (date.textContent) item.appendChild(date);
+
+        $("list").appendChild(item);
+      }
+
+      // ✅ 렌더 후, "가장 긴 제목" 기준으로 wrap 폭 맞춤
+      // (레이아웃 반영 이후 측정 안정화)
+      requestAnimationFrame(() => {
+        fitWrapToLongestTitle();
+      });
+    }
+
+    function setKeywordAndSearch(keyword) {
+      $("q").value = keyword;
+      $("preset").value = keyword; // 옵션에 없으면 무시됨
+      search();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      $("btn").addEventListener("click", search);
+      $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+
+      $("preset").addEventListener("change", () => {
+        const v = $("preset").value;
+        if (v) setKeywordAndSearch(v);
+      });
+
+      window.addEventListener("resize", () => {
+        // 화면 바뀌면 다시 폭 재계산
+        fitWrapToLongestTitle();
+      });
+
+      // ✅ 첫 진입 자동 검색: 쿠팡CLS (필요시 k= 로 override)
+      const params = new URLSearchParams(location.search);
+      const k = (params.get("k") || "").trim();
+      setKeywordAndSearch(k || "쿠팡CLS");
+    });
+  </script>
+</body>
+</html>

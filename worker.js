@@ -475,7 +475,12 @@ function campRowDedupeKey(row) {
 async function handleCampsGet(url, env) {
   const q = safeTrim(url.searchParams.get("q"));
   const camp = safeTrim(url.searchParams.get("camp"));
-  const mbCamp = safeTrim(url.searchParams.get("mb_camp"));
+  // 레거시/오타 파라미터(orbm_camp, ormb_camp)도 mb_camp로 흡수
+  const mbCamp = safeTrim(
+    url.searchParams.get("mb_camp") ||
+      url.searchParams.get("orbm_camp") ||
+      url.searchParams.get("ormb_camp")
+  );
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
 

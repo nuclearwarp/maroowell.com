@@ -450,20 +450,14 @@ function normalizeCampRow(row) {
 function scoreCampSearchMatch(row, qLower) {
   const mb = safeTrim(row?.mb_camp).toLowerCase();
   const camp = safeTrim(row?.camp).toLowerCase();
-  const code = safeTrim(row?.code).toLowerCase();
-  const addr = safeTrim(row?.address).toLowerCase();
 
   if (!qLower) return 0;
   if (mb === qLower) return 120;
   if (camp === qLower) return 115;
-  if (code === qLower) return 110;
   if (mb.startsWith(qLower)) return 100;
   if (camp.startsWith(qLower)) return 95;
-  if (code.startsWith(qLower)) return 90;
   if (mb.includes(qLower)) return 80;
   if (camp.includes(qLower)) return 75;
-  if (code.includes(qLower)) return 70;
-  if (addr.includes(qLower)) return 60;
   return 0;
 }
 
@@ -498,7 +492,7 @@ async function handleCampsGet(url, env) {
     return json({ rows: out }, 200, { "Cache-Control": "no-store" });
   }
 
-  // q가 있으면 camp/mb_camp/address/code 각각 검색 후 병합
+  // q가 있으면 camps.camp / camps.mb_camp 두 컬럼만 검색
   const qLower = q.toLowerCase();
   const base = new URLSearchParams();
   base.set("select", "*");
@@ -508,8 +502,8 @@ async function handleCampsGet(url, env) {
   if (mbCamp) base.set("mb_camp", `eq.${mbCamp}`);
 
   const wildcard = `*${q}*`;
-  const likeFields = ["mb_camp", "camp", "address", "code"];
-  const eqFields = ["mb_camp", "camp", "code"];
+  const likeFields = ["mb_camp", "camp"];
+  const eqFields = ["mb_camp", "camp"];
 
   const queries = [
     ...eqFields.map((field) => {
@@ -562,7 +556,7 @@ async function handleCampsGet(url, env) {
         .map(normalizeCampRow)
         .filter(Boolean)
         .filter((row) => {
-          const hay = `${safeTrim(row.mb_camp)}\n${safeTrim(row.camp)}\n${safeTrim(row.code)}\n${safeTrim(row.address)}`.toLowerCase();
+          const hay = `${safeTrim(row.mb_camp)}\n${safeTrim(row.camp)}`.toLowerCase();
           return hay.includes(qLower);
         });
     } catch (e) {

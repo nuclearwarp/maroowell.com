@@ -452,12 +452,29 @@ function normalizeCampRow(row) {
   return out;
 }
 
-function escapeIlikeKeyword(v) {
-  return String(v ?? "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll(",", "\\,")
-    .replaceAll("%", "\\%")
-    .replaceAll("_", "\\_");
+function scoreCampSearchMatch(row, qLower) {
+  const mb = safeTrim(row?.mb_camp).toLowerCase();
+  const camp = safeTrim(row?.camp).toLowerCase();
+  const code = safeTrim(row?.code).toLowerCase();
+  const addr = safeTrim(row?.address).toLowerCase();
+
+  if (!qLower) return 0;
+  if (mb === qLower) return 120;
+  if (camp === qLower) return 115;
+  if (code === qLower) return 110;
+  if (mb.startsWith(qLower)) return 100;
+  if (camp.startsWith(qLower)) return 95;
+  if (code.startsWith(qLower)) return 90;
+  if (mb.includes(qLower)) return 80;
+  if (camp.includes(qLower)) return 75;
+  if (code.includes(qLower)) return 70;
+  if (addr.includes(qLower)) return 60;
+  return 0;
+}
+
+function campRowDedupeKey(row) {
+  if (row?.id != null) return `id:${row.id}`;
+  return `key:${safeTrim(row?.camp)}|${safeTrim(row?.mb_camp)}|${safeTrim(row?.code)}`;
 }
 
 async function handleCampsGet(url, env) {
@@ -467,20 +484,55 @@ async function handleCampsGet(url, env) {
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
 
-  const params = new URLSearchParams();
-  params.set("select", "*");
-  params.set("order", "updated_at.desc,created_at.desc,id.desc");
-  params.set("limit", String(limit));
-  if (camp) params.set("camp", `eq.${camp}`);
-  if (mbCamp) params.set("mb_camp", `eq.${mbCamp}`);
+  // q가 없으면 단순 조회
+  if (!q) {
+    const params = new URLSearchParams();
+    params.set("select", "*");
+    params.set("order", "updated_at.desc,created_at.desc,id.desc");
+    params.set("limit", String(limit));
+    if (camp) params.set("camp", `eq.${camp}`);
+    if (mbCamp) params.set("mb_camp", `eq.${mbCamp}`);
 
-  if (q) {
-    const k = escapeIlikeKeyword(q);
-    params.set("or", `mb_camp.ilike.*${k}*,address.ilike.*${k}*,camp.ilike.*${k}*`);
+    const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, { method: "GET" });
+    const out = (Array.isArray(rows) ? rows : []).map(normalizeCampRow).filter(Boolean);
+    return json({ rows: out }, 200, { "Cache-Control": "no-store" });
   }
 
-  const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${params.toString()}`, { method: "GET" });
-  const out = (Array.isArray(rows) ? rows : []).map(normalizeCampRow).filter(Boolean);
+  // q가 있으면 camp/mb_camp/address/code 각각 검색 후 병합
+  const qLower = q.toLowerCase();
+  const base = new URLSearchParams();
+  base.set("select", "*");
+  base.set("order", "updated_at.desc,created_at.desc,id.desc");
+  base.set("limit", String(Math.min(limit * 2, 200)));
+  if (camp) base.set("camp", `eq.${camp}`);
+  if (mbCamp) base.set("mb_camp", `eq.${mbCamp}`);
+
+  const wildcard = `*${q}*`;
+  const fields = ["mb_camp", "camp", "address", "code"];
+
+  const results = await Promise.all(
+    fields.map(async (field) => {
+      const p = new URLSearchParams(base.toString());
+      p.set(field, `ilike.${wildcard}`);
+      const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${p.toString()}`, { method: "GET" });
+      return Array.isArray(rows) ? rows : [];
+    })
+  );
+
+  const mergedMap = new Map();
+  for (const arr of results) {
+    for (const row of arr) {
+      const normalized = normalizeCampRow(row);
+      if (!normalized) continue;
+      const key = campRowDedupeKey(normalized);
+      if (!mergedMap.has(key)) mergedMap.set(key, normalized);
+    }
+  }
+
+  const out = Array.from(mergedMap.values())
+    .sort((a, b) => scoreCampSearchMatch(b, qLower) - scoreCampSearchMatch(a, qLower))
+    .slice(0, limit);
+
   return json({ rows: out }, 200, { "Cache-Control": "no-store" });
 }
 

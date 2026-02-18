@@ -2861,6 +2861,26 @@ function openWaveModal(action) {
     return normalizeDeliveryCamp(v);
   }
 
+  function scoreDeliveryCampSearch(row, qLower) {
+    const mb = (row?.mb_camp || "").toString().toLowerCase();
+    const camp = (row?.camp || "").toString().toLowerCase();
+    const code = (row?.code || "").toString().toLowerCase();
+    const addr = (row?.address || "").toString().toLowerCase();
+
+    if (!qLower) return 0;
+    if (mb === qLower) return 120;
+    if (camp === qLower) return 115;
+    if (code === qLower) return 110;
+    if (mb.startsWith(qLower)) return 100;
+    if (camp.startsWith(qLower)) return 95;
+    if (code.startsWith(qLower)) return 90;
+    if (mb.includes(qLower)) return 80;
+    if (camp.includes(qLower)) return 75;
+    if (code.includes(qLower)) return 70;
+    if (addr.includes(qLower)) return 60;
+    return 0;
+  }
+
   function closeDeliveryCampModal() {
     deliveryCampModalOpen = false;
     if (!deliveryCampModalEl) return;
@@ -3058,15 +3078,22 @@ function openWaveModal(action) {
 
   async function fetchCampsByName(q) {
     const query = (q || "").trim();
-    const camp = campInput.value.trim();
 
     const url = new URL(CAMPS_ENDPOINT);
     url.searchParams.set("q", query);
-    if (camp) url.searchParams.set("camp", camp);
+    url.searchParams.set("limit", "100");
 
     const data = await apiGet(url.toString());
     const rows = Array.isArray(data) ? data : (data?.rows || data?.camps || []);
-    return (rows || []).map(normalizeCampSearchRow).filter(Boolean);
+    const out = (rows || []).map(normalizeCampSearchRow).filter(Boolean);
+
+    const qLower = query.toLowerCase();
+    const filtered = out.filter((row) => {
+      const hay = `${row?.mb_camp || ""}\n${row?.camp || ""}\n${row?.code || ""}\n${row?.address || ""}`.toLowerCase();
+      return hay.includes(qLower);
+    });
+
+    return filtered.sort((a, b) => scoreDeliveryCampSearch(b, qLower) - scoreDeliveryCampSearch(a, qLower));
   }
 
   async function runDeliveryCampSearch(q) {

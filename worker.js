@@ -10,6 +10,9 @@ const ROUTE_TABLE = "subsubroutes";
 const ADDRESS_TABLE = "addresses";
 const CAMPS_TABLE = "camps";
 const VENDORS_TABLE = "vendors";
+const SHARE_TEMPLATE_URL = "https://www.maroowell.com/share.html";
+const FAVICON_URL = "https://maroowell.com/favicon.ico?v=2";
+const OG_IMAGE_URL = "https://maroowell.com/assets/og/maroowell-1200x630.png?v=1";
 
 export default {
   async fetch(request, env) {
@@ -35,6 +38,11 @@ export default {
 
       if (path === "/addresses" && request.method === "GET") {
         return cors(await handleAddressesGet(url, env));
+      }
+
+      // share 페이지(OG/Twitter 메타 주입 + v 파라미터 자동 보정)
+      if ((path === "/share" || path === "/share.html") && request.method === "GET") {
+        return await handleShareHtml(url, env);
       }
 
       if (path === "/camps") {
@@ -151,6 +159,33 @@ function parseMaybeNumber(v) {
   if (v == null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function escapeHtmlAttr(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function upsertHeadTag(html, matchRegex, newTag) {
+  if (matchRegex.test(html)) return html.replace(matchRegex, newTag);
+  const headOpen = html.match(/<head[^>]*>/i);
+  if (headOpen) return html.replace(/<head[^>]*>/i, `${headOpen[0]}\n  ${newTag}`);
+  return `${newTag}\n${html}`;
+}
+
+function getKstYYYYMMDDHHMM() {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000); // UTC+9
+  const yyyy = String(kst.getUTCFullYear());
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(kst.getUTCDate()).padStart(2, "0");
+  const HH = String(kst.getUTCHours()).padStart(2, "0");
+  const MM = String(kst.getUTCMinutes()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}${HH}${MM}`;
 }
 
 function normalizeCampKey(v) {
@@ -859,6 +894,117 @@ async function handleCampsPost(request, env) {
   }
 
   return json({ row: normalizeCampRow(row) }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /share ----------
+async function handleShareHtml(url, env) {
+  // v 파라미터가 없거나 형식이 다르면 KST 기준 타임스탬프로 리다이렉트
+  const v = safeTrim(url.searchParams.get("v"));
+  if (!/^\d{12}$/.test(v)) {
+    const next = new URL(url.toString());
+    next.searchParams.set("v", getKstYYYYMMDDHHMM());
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: next.toString(),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  const camp = safeTrim(url.searchParams.get("camp"));
+  const code = safeTrim(url.searchParams.get("code"));
+
+  let ogTitle = "배송 지도 공유";
+  let ogDescription = "배송 구역 및 경로를 확인하세요";
+
+  if (camp) {
+    try {
+      const q = new URLSearchParams();
+      q.set("select", "camp,full_code,delivery_location_name,delivery_location_address");
+      q.set("camp", `eq.${camp}`);
+      if (code) q.set("full_code", `like.${code}%`);
+      q.set("order", "full_code.asc");
+      q.set("limit", "1");
+
+      const rows = await supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${q.toString()}`, { method: "GET" });
+      const out = Array.isArray(rows) ? rows : [];
+      await hydrateRouteRowsWithCamps(out, env);
+      const row = out[0];
+
+      if (row) {
+        const locationName = safeTrim(row.delivery_location_name);
+        const locationAddr = safeTrim(row.delivery_location_address);
+        const fullCode = safeTrim(row.full_code || code);
+
+        ogTitle = [camp, locationName, fullCode].filter(Boolean).join(" ").trim();
+        ogDescription = [camp, locationName, fullCode, "배송 구역을 확인하세요"].filter(Boolean).join(" ").trim();
+        if (locationAddr) ogDescription = `${locationAddr} · ${ogDescription}`;
+      } else if (code) {
+        ogTitle = `${camp} ${code}`.trim();
+        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
+      } else {
+        ogTitle = `${camp} 배송지도`.trim();
+        ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
+      }
+    } catch {
+      ogTitle = code ? `${camp} ${code}`.trim() : `${camp} 배송지도`.trim();
+      ogDescription = code
+        ? `${camp} ${code} 배송 구역을 확인하세요`.trim()
+        : `${camp} 배송 구역을 확인하세요`.trim();
+    }
+  }
+
+  const htmlRes = await fetch(SHARE_TEMPLATE_URL, {
+    headers: { "User-Agent": "maroowell-route-worker/1.0" },
+  });
+  if (!htmlRes.ok) {
+    return json({ error: "Failed to fetch share template", status: htmlRes.status }, 502);
+  }
+
+  let html = await htmlRes.text();
+
+  const safeTitle = escapeHtmlAttr(ogTitle);
+  const safeDesc = escapeHtmlAttr(ogDescription);
+  const safeUrl = escapeHtmlAttr(url.toString());
+  const safeImg = escapeHtmlAttr(OG_IMAGE_URL);
+  const safeFav = escapeHtmlAttr(FAVICON_URL);
+
+  if (/<title[^>]*>[\s\S]*?<\/title>/i.test(html)) {
+    html = html.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`);
+  } else {
+    html = upsertHeadTag(html, /$^/i, `<title>${safeTitle}</title>`);
+  }
+
+  // OG
+  html = upsertHeadTag(html, /<meta\s+property=["']og:type["'][^>]*>/i, `<meta property="og:type" content="website" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${safeTitle}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:site_name["'][^>]*>/i, `<meta property="og:site_name" content="Maroowell" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:url["'][^>]*>/i, `<meta property="og:url" content="${safeUrl}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeImg}" />`);
+  html = upsertHeadTag(html, /<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="Maroowell" />`);
+
+  // Twitter
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:card["'][^>]*>/i, `<meta name="twitter:card" content="summary_large_image" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${safeTitle}" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${safeDesc}" />`);
+  html = upsertHeadTag(html, /<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${safeImg}" />`);
+
+  // favicon
+  html = html.replace(/<link\s+rel=["']icon["'][^>]*>/gi, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
+  html = upsertHeadTag(html, /<link\s+rel=["']icon["'][^>]*>/i, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
+  html = upsertHeadTag(html, /<link\s+rel=["']shortcut icon["'][^>]*>/i, `<link rel="shortcut icon" href="${safeFav}" />`);
+  html = upsertHeadTag(html, /<link\s+rel=["']apple-touch-icon["'][^>]*>/i, `<link rel="apple-touch-icon" href="${safeFav}" />`);
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
 }
 
 // ---------- /osm ----------

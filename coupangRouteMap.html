@@ -25,6 +25,8 @@
     *{box-sizing:border-box}
     html,body{height:100%; margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans KR", Arial, sans-serif; background:#0a0f1a;}
     .wrap{display:flex; height:100%;}
+    /* 병합 사고로 본문이 중복된 경우, 첫 번째 앱 컨테이너만 표시 */
+    body > .wrap:not(:first-of-type){display:none !important;}
     .left{
       width:360px; min-width:340px; max-width:420px;
       background:linear-gradient(180deg,var(--bg),#070b13);
@@ -234,6 +236,29 @@
       color:var(--muted);
     }
     .map{flex:1; position:relative;}
+    .mobile-toggle-btn{
+      display:none;
+      position:fixed;
+      top:12px;
+      left:12px;
+      z-index:1400;
+      padding:8px 12px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(7,12,21,.75);
+      color:#fff;
+      font-size:12px;
+      font-weight:800;
+      cursor:pointer;
+      backdrop-filter:blur(6px);
+    }
+    .mobile-left-backdrop{
+      display:none;
+      position:fixed;
+      inset:0;
+      background:rgba(2,6,23,.55);
+      z-index:1150;
+    }
 
     /* ✅ mapWrap/roadview (index.html 스타일 이식) */
     #mapWrap{
@@ -623,6 +648,45 @@
     font-weight:900;
     font-size:13px;
   }
+
+  @media (max-width: 980px){
+    .wrap{height:100dvh; min-height:100dvh;}
+    .left{
+      position:fixed;
+      left:0;
+      top:0;
+      bottom:0;
+      width:min(88vw, 360px);
+      min-width:0;
+      max-width:none;
+      z-index:1200;
+      transform:translateX(-102%);
+      transition:transform .22s ease;
+      box-shadow:0 18px 44px rgba(0,0,0,.45);
+    }
+    .map{
+      width:100%;
+      min-width:0;
+      min-height:100dvh;
+    }
+    .mobile-toggle-btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .mobile-left-backdrop{
+      display:block;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .22s ease;
+    }
+    body.mobile-left-open .left{transform:translateX(0);}
+    body.mobile-left-open .mobile-left-backdrop{
+      opacity:1;
+      pointer-events:auto;
+    }
+    body.mobile-left-open{overflow:hidden;}
+  }
 </style>
 
   <!-- Kakao Maps -->
@@ -736,6 +800,7 @@
 </div>
 
   <div class="map">
+    <button id="mobileLeftToggleBtn" class="mobile-toggle-btn" type="button" aria-expanded="false">메뉴</button>
     <div id="mapWrap">
       <div id="map"></div>
       <div id="roadview"></div>
@@ -778,6 +843,7 @@
 
   </div>
 </div>
+<div id="mobileLeftBackdrop" class="mobile-left-backdrop" aria-hidden="true"></div>
 
 
 
@@ -831,6 +897,23 @@
 
 <script>
 (() => {
+  function cleanupDuplicatedMarkup() {
+    const seenIds = new Set();
+    document.querySelectorAll("[id]").forEach((el) => {
+      if (!el.id) return;
+      if (seenIds.has(el.id)) {
+        el.remove();
+        return;
+      }
+      seenIds.add(el.id);
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", cleanupDuplicatedMarkup, { once: true });
+  } else {
+    cleanupDuplicatedMarkup();
+  }
+
   if (window.__coupangRouteMapInitialized) return;
   window.__coupangRouteMapInitialized = true;
 
@@ -908,6 +991,8 @@
   const toggleRoadviewBtn = $("toggleRoadview");
   const roadviewHintEl = $("roadviewHint");
   const mapWrapEl = $("mapWrap");
+  const mobileLeftToggleBtn = $("mobileLeftToggleBtn");
+  const mobileLeftBackdropEl = $("mobileLeftBackdrop");
 
   // 검색 모달
   const searchModalEl = $("searchModal");
@@ -1023,6 +1108,29 @@
   let placeTotal = 0;
   let placeItems = [];
   let addrItems = [];
+
+  const isMobileViewport = () => !!window.matchMedia?.("(max-width: 980px)")?.matches;
+
+  function setMobileLeftOpen(open) {
+    const mobile = isMobileViewport();
+    const shouldOpen = mobile && !!open;
+    document.body.classList.toggle("mobile-left-open", shouldOpen);
+    if (mobileLeftToggleBtn) {
+      mobileLeftToggleBtn.textContent = shouldOpen ? "닫기" : "메뉴";
+      mobileLeftToggleBtn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    }
+    if (mobileLeftBackdropEl) {
+      mobileLeftBackdropEl.setAttribute("aria-hidden", shouldOpen ? "false" : "true");
+    }
+  }
+
+  function syncMobileLeftUI() {
+    if (!isMobileViewport()) {
+      setMobileLeftOpen(false);
+      return;
+    }
+    setMobileLeftOpen(document.body.classList.contains("mobile-left-open"));
+  }
 
   // ====== 컬러(인접 라우트 색 차이 + 눈부심 완화) ======
   // - 라우트 목록(full_code 정렬) 기준으로 "골든 앵글" 분산 색상을 부여합니다.
@@ -3859,6 +3967,9 @@ function openWaveModal(action) {
   // ====== 지도 이벤트(그리기 모드 + 커스텀 드래그) ======
   function attachMapEvents() {
     kakao.maps.event.addListener(map, "click", (mouseEvent) => {
+      if (isMobileViewport() && document.body.classList.contains("mobile-left-open")) {
+        setMobileLeftOpen(false);
+      }
       if (drawMode) {
         const latlng = mouseEvent.latLng;
         addDrawPoint(latlng);
@@ -4006,6 +4117,7 @@ function openWaveModal(action) {
       map = new kakao.maps.Map($("map"), { center, level: 6 });
       geocoder = new kakao.maps.services.Geocoder();
       places = new kakao.maps.services.Places();
+      syncMobileLeftUI();
 
       VERTEX_IMG = makeHandleImage("#ffffff", "#0b1220");
       MID_IMG = makeHandleImage("#93a4c7", "#0b1220");
@@ -4021,6 +4133,7 @@ function openWaveModal(action) {
         map.relayout();
         map.setCenter(c);
         if (roadviewOn && roadview && typeof roadview.relayout === "function") roadview.relayout();
+        syncMobileLeftUI();
       });
 
       loadBtn.addEventListener("click", loadRoutes);
@@ -4146,6 +4259,14 @@ function openWaveModal(action) {
 
       if (toggleMapTypeBtn) toggleMapTypeBtn.addEventListener("click", () => setMapTypeSatellite(!isSatellite));
       if (toggleRoadviewBtn) toggleRoadviewBtn.addEventListener("click", () => setRoadviewOn(!roadviewOn));
+      if (mobileLeftToggleBtn) {
+        mobileLeftToggleBtn.addEventListener("click", () => {
+          setMobileLeftOpen(!document.body.classList.contains("mobile-left-open"));
+        });
+      }
+      if (mobileLeftBackdropEl) {
+        mobileLeftBackdropEl.addEventListener("click", () => setMobileLeftOpen(false));
+      }
 
       // ✅ 검색 모달 이벤트
       searchRunBtn.addEventListener("click", () => runSearch(searchQEl.value, 1));

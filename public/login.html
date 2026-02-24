@@ -2,6 +2,10 @@
 <html lang="ko">
 <head>
     <script src="/config.js"></script>
+  <script>
+    // false 로 바꾸면 회원가입 버튼이 숨겨집니다.
+    function MAROOWELL_ENABLE_SIGNUP() { return true; }
+  </script>
 <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Maroowell.com Login</title>
@@ -39,12 +43,20 @@
       padding:22px;
       box-shadow:0 10px 30px rgba(15,23,42,.08);
     }
+    .logo{
+      display:block;
+      width:84px;
+      height:84px;
+      margin:2px auto 10px;
+      object-fit:contain;
+    }
     .title{
       margin:0 0 18px;
       font-size:28px;
       line-height:1.2;
       font-weight:800;
       letter-spacing:-.2px;
+      text-align:center;
     }
     .label{
       display:block;
@@ -80,6 +92,13 @@
       cursor:pointer;
     }
     .btn:hover{background:var(--btnHover)}
+    .btn.secondary{
+      margin-top:8px;
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+    }
+    .btn.secondary:hover{background:#f1f5f9}
     .status{
       margin-top:12px;
       min-height:20px;
@@ -93,12 +112,14 @@
 <body>
 <div class="wrap">
   <div class="card">
+    <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
     <h1 class="title">Maroowell.com Login</h1>
     <label class="label" for="email">이메일</label>
     <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
     <label class="label" for="password">비밀번호</label>
     <input id="password" type="password" placeholder="********" autocomplete="current-password" />
     <button class="btn" id="btnSignIn" type="button">로그인</button>
+    <button class="btn secondary" id="btnSignUp" type="button">회원가입</button>
     <div class="status" id="statusLogin"></div>
   </div>
 </div>
@@ -128,7 +149,9 @@
   const email = document.getElementById("email");
   const password = document.getElementById("password");
   const btnSignIn = document.getElementById("btnSignIn");
+  const btnSignUp = document.getElementById("btnSignUp");
   const statusLogin = document.getElementById("statusLogin");
+  const ENABLE_SIGNUP = !!(window.MAROOWELL_ENABLE_SIGNUP?.());
 
   const params = new URLSearchParams(location.search);
   const next = params.get("next") || DEFAULT_NEXT;
@@ -179,7 +202,44 @@
     }
   }
 
+  async function signUp() {
+    try {
+      if (!requireSupabase()) return;
+      setStatus("회원가입 중...");
+
+      const em = (email.value || "").trim().toLowerCase();
+      const pw = password.value || "";
+      if (!em) throw new Error("이메일을 입력하세요.");
+      if (!pw) throw new Error("비밀번호를 입력하세요.");
+      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
+
+      const { data, error } = await supabase.auth.signUp({
+        email: em,
+        password: pw,
+        options: { emailRedirectTo: location.origin + (PATHS?.login || "/login.html") }
+      });
+      if (error) throw error;
+
+      if (data?.session) {
+        setStatus("회원가입 완료");
+        location.replace(safeNextUrl(next));
+        return;
+      }
+
+      setStatus("회원가입 완료. 이메일 인증 후 로그인하세요.");
+    } catch (e) {
+      setStatus("회원가입 실패: " + (e?.message || String(e)));
+    }
+  }
+
+  if (!ENABLE_SIGNUP && btnSignUp) {
+    btnSignUp.style.display = "none";
+  }
+
   btnSignIn.addEventListener("click", signIn);
+  if (btnSignUp && ENABLE_SIGNUP) {
+    btnSignUp.addEventListener("click", signUp);
+  }
   password.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();

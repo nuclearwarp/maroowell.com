@@ -5,8 +5,6 @@
 <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <title>Maroowell Login</title>
-  <link rel="icon" href="/favicon.ico" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#0b1220'/><path d='M14 44V18h8l10 14 10-14h8v26h-8V31L32 44 22 31v13h-8z' fill='#22d3ee'/></svg>" />
   <style>
     :root{
       --bg:#0b1220; --panel:#0f1a2d; --txt:#e6eefc; --muted:#93a4c7;
@@ -91,16 +89,16 @@
         <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
         <div class="label" style="margin-top:10px;">비밀번호</div>
         <input id="password" type="password" placeholder="********" autocomplete="current-password" />
-        <div class="signupOnly" style="display:none;">
-          <div class="label" style="margin-top:10px;">비밀번호 확인</div>
-          <input id="password2" type="password" placeholder="********" autocomplete="new-password" />
-        </div>
+      <div class="field" id="pw2Wrap" style="display:none">
+        <label for="password2">비밀번호 확인</label>
+        <input id="password2" type="password" placeholder="비밀번호 확인" autocomplete="new-password" />
+      </div>
         <div class="row">
           <button class="btn cyan" id="btnSignIn">로그인</button>
-          <button class="btn" id="btnSignUp">회원가입</button>
+      <button class="btn" id="btnSignUp">회원가입</button>
           <button class="btn" id="btnMagic">이메일 링크 로그인</button>
-        </div>
-        <div class="sub" id="signupHint" style="margin:10px 0 0; display:none;">회원가입 모드: 비밀번호 확인을 입력하세요.</div>
+        </div>      <div class="muted" id="signupHint" style="margin-top:8px;display:none">회원가입 모드: 비밀번호 확인을 입력하세요.</div>
+
         <div class="status" id="statusLogin">READY</div>
       </div>
 
@@ -152,21 +150,28 @@
 <script>
 (() => {
   // =========================
-  // ✅ Maroowell Login (Supabase Auth)
-  // - config.js(window.MARUWELL_CONFIG)에서 URL/KEY/PATHS를 읽음
-  // - 회원가입 버튼은 나중에 ENABLE_SIGNUP=false 로 숨길 수 있음
+  // TODO: 여기에 Supabase 값 넣기
   // =========================
-  const ENABLE_SIGNUP = true; // 나중에 false로 바꾸면 회원가입 버튼/필드 숨김
+  const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+const DEFAULT_NEXT = (PATHS?.index || "/index.html");
+const LOGIN_PATH = (PATHS?.login || "/login.html");
 
-  const cfg = window.MARUWELL_CONFIG || {};
-  const SUPABASE_URL = cfg.SUPABASE_URL;
-  const SUPABASE_ANON_KEY = cfg.SUPABASE_ANON_KEY;
-  const PATHS = cfg.PATHS || {};
-  const INDEX_PATH = PATHS.index || "/index.html";
-  const LOGIN_PATH = PATHS.login || "/login.html";
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.warn("[Config Missing] SUPABASE_URL / SUPABASE_ANON_KEY (check /config.js)");
+}
 
-  const qs = new URLSearchParams(location.search);
-  const NEXT = qs.get("next") || INDEX_PATH;
+
+  const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+function requireSupabase() {
+  if (supabase) return true;
+  console.error("[Supabase Init Failed] Check /config.js and Supabase SDK load");
+  alert("Supabase 설정이 비어있거나 SDK 로딩에 실패했습니다. /config.js(SUPABASE_URL/ANON_KEY)와 네트워크를 확인하세요.");
+  return false;
+}
+
 
   const $ = (id) => document.getElementById(id);
 
@@ -179,208 +184,253 @@
 
   const email = $("email");
   const password = $("password");
-  const password2 = $("password2");
-  const signupOnlyWrap = document.querySelector(".signupOnly");
-  const signupHint = $("signupHint");
-
   const btnSignIn = $("btnSignIn");
-  const btnSignUp = $("btnSignUp");
   const btnMagic = $("btnMagic");
   const statusLogin = $("statusLogin");
+
+  const btnSignUp = $("btnSignUp");
+  const password2 = $("password2");
+  const pw2Wrap = $("pw2Wrap");
+  const signupHint = $("signupHint");
+
+  // ✅ 나중에 숨길 수 있도록 토글(필요 시 false로)
+  const ENABLE_SIGNUP = true;
+
+  if (!ENABLE_SIGNUP) {
+    btnSignUp.style.display = "none";
+  }
+
+
+  const statusSession = $("statusSession");
+  const btnGoIndex = $("btnGoIndex");
+  const btnLogout = $("btnLogout");
 
   const newPassword = $("newPassword");
   const newPassword2 = $("newPassword2");
   const btnUpdatePassword = $("btnUpdatePassword");
   const statusAccount = $("statusAccount");
 
-  const statusSession = $("statusSession");
-  const btnGoIndex = $("btnGoIndex");
-  const btnLogout = $("btnLogout");
+  const params = new URLSearchParams(location.search);
+  const next = params.get("next") || DEFAULT_NEXT;
 
-  function setActiveTab(which) {
+  // ✅ Enter 키로 빠른 실행
+  bindEnter(password, () => {
+    // 회원가입 모드(pw2 표시)면 Enter로 회원가입 시도, 아니면 로그인
+    const signupMode = (pw2Wrap.style.display !== "none");
+    if (ENABLE_SIGNUP && signupMode) {
+      if (!(password2.value || "")) { password2.focus(); return; }
+      btnSignUp.click();
+      return;
+    }
+    btnSignIn.click();
+  });
+  bindEnter(password2, () => btnSignUp.click());
+  bindEnter(newPassword2, () => btnUpdatePassword.click());
+
+  function showTab(which) {
     tabLogin.classList.toggle("active", which === "login");
     tabAccount.classList.toggle("active", which === "account");
     tabHelp.classList.toggle("active", which === "help");
-    panelLogin.style.display = (which === "login") ? "" : "none";
-    panelAccount.style.display = (which === "account") ? "" : "none";
-    panelHelp.style.display = (which === "help") ? "" : "none";
+
+    panelLogin.style.display = which === "login" ? "" : "none";
+    panelAccount.style.display = which === "account" ? "" : "none";
+    panelHelp.style.display = which === "help" ? "" : "none";
   }
 
-  function setStatus(el, msg) {
+  tabLogin.onclick = () => showTab("login");
+  tabAccount.onclick = () => showTab("account");
+  tabHelp.onclick = () => showTab("help");
+
+  function setStatus(el, msg){ el.textContent = msg; }
+
+  function bindEnter(el, handler) {
     if (!el) return;
-    el.textContent = msg;
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handler();
+      }
+    });
   }
 
-  function safeNextPath(p) {
-    if (!p) return INDEX_PATH;
-    if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
-    if (!p.startsWith("/")) return INDEX_PATH;
-    return p;
-  }
 
-  // config missing
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase || !window.supabase.createClient) {
-    setStatus(statusLogin, "설정 오류: config.js 또는 Supabase SDK 로딩 실패");
-    setStatus(statusSession, "세션 확인 불가 (설정 오류)");
-    btnSignIn.disabled = true;
-    btnMagic.disabled = true;
-    if (btnSignUp) btnSignUp.disabled = true;
-    btnGoIndex.disabled = true;
-    btnLogout.disabled = true;
-    return;
-  }
-
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-  // Signup toggle
-  if (!ENABLE_SIGNUP) {
-    if (btnSignUp) btnSignUp.style.display = "none";
-    if (signupOnlyWrap) signupOnlyWrap.style.display = "none";
-    if (signupHint) signupHint.style.display = "none";
+  function safeNextUrl(u) {
+    // 외부 오픈리다이렉트 방지: 같은 origin의 상대경로만 허용
+    if (!u) return DEFAULT_NEXT;
+    if (u.startsWith("http://") || u.startsWith("https://")) return DEFAULT_NEXT;
+    if (!u.startsWith("/")) return DEFAULT_NEXT;
+    return u;
   }
 
   async function refreshSession() {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setStatus(statusSession, `세션 있음: ${session.user?.email || ""}`);
-        btnGoIndex.disabled = false;
-        btnLogout.disabled = false;
-      } else {
-        setStatus(statusSession, "세션 없음 (미로그인)");
-        btnGoIndex.disabled = true;
-        btnLogout.disabled = true;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setStatus(statusSession, "세션 없음 (미로그인)");
+      return null;
+    }
+    setStatus(statusSession, `로그인됨: ${session.user.email || session.user.id}`);
+    return session;
+  }
+
+  async function redirectIfLoggedIn() {
+    const s = await refreshSession();
+    if (s) {
+      // ✅ 이미 로그인된 상태면 바로(또는 짧은 딜레이 후) 이동
+      // - 일부 브라우저에서 초기 렌더/레이아웃과 충돌 시 이동이 씹히는 케이스가 있어 setTimeout을 사용
+      setStatus(statusLogin, "이미 로그인됨 → 이동 중...");
+      if (!redirectIfLoggedIn._scheduled) {
+        redirectIfLoggedIn._scheduled = true;
+        setTimeout(() => location.replace(safeNextUrl(next)), 120);
       }
-    } catch (e) {
-      setStatus(statusSession, "세션 확인 실패");
-      btnGoIndex.disabled = true;
-      btnLogout.disabled = true;
     }
   }
 
-  async function goNext() {
-    const next = safeNextPath(NEXT);
-    location.replace(next);
-  }
+  btnGoIndex.onclick = async () => {
+    const s = await refreshSession();
+    if (!s) return alert("로그인이 필요합니다.");
+    location.href = safeNextUrl(next);
+  };
+
+  btnLogout.onclick = async () => {
+    await supabase.auth.signOut();
+    await refreshSession();
+    alert("로그아웃 완료");
+  };
 
   btnSignIn.onclick = async () => {
-    setStatus(statusLogin, "로그인 중...");
+    // 로그인 모드: 회원가입 보조 UI 숨김
+    pw2Wrap.style.display = "none";
+    signupHint.style.display = "none";
+    password2.value = "";
+
     try {
-      const em = (email.value || "").trim();
-      const pw = (password.value || "").trim();
-      if (!em || !pw) return setStatus(statusLogin, "이메일/비밀번호를 입력하세요.");
+      if (!requireSupabase()) return;
+      if (!requireSupabase()) return;
+      setStatus(statusLogin, "로그인 중...");
+      const em = (email.value || "").trim().toLowerCase();
+      const pw = password.value || "";
+      if (!em) throw new Error("이메일을 입력하세요.");
+      if (!pw) throw new Error("비밀번호를 입력하세요.");
 
-      const { data, error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
-      if (error) return setStatus(statusLogin, "로그인 실패: " + error.message);
+      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
+      if (error) throw error;
 
-      setStatus(statusLogin, "로그인 성공");
-      await refreshSession();
-      await goNext();
+      setStatus(statusLogin, "로그인 성공 → 이동");
+      location.replace(safeNextUrl(next));
     } catch (e) {
-      setStatus(statusLogin, "로그인 실패");
+      setStatus(statusLogin, "로그인 실패: " + (e?.message || String(e)));
     }
   };
 
-  if (btnSignUp) {
-    btnSignUp.onclick = async () => {
-      if (!ENABLE_SIGNUP) {
-        setStatus(statusLogin, "회원가입 비활성화 상태입니다.");
-        return;
-      }
-      // show confirm UI
-      if (signupOnlyWrap) signupOnlyWrap.style.display = "";
-      if (signupHint) signupHint.style.display = "";
+
+  btnSignUp.onclick = async () => {
+    try {
+      if (!requireSupabase()) return;
+      if (!ENABLE_SIGNUP) return;
+
+      // 회원가입 모드 UI 표시
+      pw2Wrap.style.display = "";
+      signupHint.style.display = "";
+      setStatus(statusLogin, "");
+
+      const em = (email.value || "").trim().toLowerCase();
+      const pw = password.value || "";
+      const pw2 = password2.value || "";
+
+      if (!em) throw new Error("이메일을 입력하세요.");
+      if (!pw) throw new Error("비밀번호를 입력하세요.");
+      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 권장");
+      if (pw !== pw2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
 
       setStatus(statusLogin, "회원가입 중...");
-      try {
-        const em = (email.value || "").trim();
-        const pw = (password.value || "").trim();
-        const pw2 = (password2?.value || "").trim();
-        if (!em || !pw || !pw2) return setStatus(statusLogin, "이메일/비밀번호/비밀번호확인을 입력하세요.");
-        if (pw !== pw2) return setStatus(statusLogin, "비밀번호가 서로 다릅니다.");
 
-        const { data, error } = await supabase.auth.signUp({
-          email: em,
-          password: pw,
-          options: {
-            emailRedirectTo: location.origin + LOGIN_PATH
-          }
-        });
-
-        if (error) return setStatus(statusLogin, "회원가입 실패: " + error.message);
-
-        // 이메일 인증 OFF면 session이 바로 생김
-        if (data?.session) {
-          setStatus(statusLogin, "회원가입 완료(로그인됨) → 이동");
-          await refreshSession();
-          await goNext();
-        } else {
-          setStatus(statusLogin, "회원가입 완료. 이메일 인증이 필요할 수 있습니다.");
-          await refreshSession();
+      const { data, error } = await supabase.auth.signUp({
+        email: em,
+        password: pw,
+        options: {
+          // 이메일 인증/매직링크 클릭 후 돌아올 주소
+          emailRedirectTo: location.origin + (PATHS?.login || "/login.html")
         }
-      } catch (e) {
-        setStatus(statusLogin, "회원가입 실패");
+      });
+      if (error) throw error;
+
+      // 이메일 인증 OFF면 session이 바로 들어올 수 있음
+      if (data?.session) {
+        setStatus(statusLogin, "회원가입 완료 → 로그인됨 → 이동");
+        location.replace(safeNextUrl(next));
+        return;
       }
-    };
-  }
+
+      // 이메일 인증 ON이면 안내
+      setStatus(statusLogin, "회원가입 완료. 이메일 인증이 필요하면 메일함에서 확인 후 다시 로그인하세요.");
+    } catch (e) {
+      setStatus(statusLogin, "회원가입 실패: " + (e?.message || String(e)));
+    }
+  };
+
 
   btnMagic.onclick = async () => {
-    setStatus(statusLogin, "이메일 링크 발송 중...");
+    // 매직링크 모드: 회원가입 보조 UI 숨김
+    pw2Wrap.style.display = "none";
+    signupHint.style.display = "none";
+    password2.value = "";
+
     try {
-      const em = (email.value || "").trim();
-      if (!em) return setStatus(statusLogin, "이메일을 입력하세요.");
+      if (!requireSupabase()) return;
+      setStatus(statusLogin, "이메일 링크 발송 중...");
+      const em = (email.value || "").trim().toLowerCase();
+      if (!em) throw new Error("이메일을 입력하세요.");
 
       const { error } = await supabase.auth.signInWithOtp({
         email: em,
-        options: { emailRedirectTo: location.origin + LOGIN_PATH }
+        options: {
+          // 메일 링크 클릭 후 돌아올 주소
+          emailRedirectTo: location.origin + "/login.html"
+        }
       });
+      if (error) throw error;
 
-      if (error) return setStatus(statusLogin, "발송 실패: " + error.message);
-      setStatus(statusLogin, "발송 완료. 메일함 확인 후 링크로 접속하세요.");
+      setStatus(statusLogin, "이메일 링크를 보냈습니다. 메일함 확인 후 링크 클릭하세요.");
     } catch (e) {
-      setStatus(statusLogin, "발송 실패");
+      setStatus(statusLogin, "발송 실패: " + (e?.message || String(e)));
     }
   };
 
   btnUpdatePassword.onclick = async () => {
-    setStatus(statusAccount, "처리 중...");
     try {
-      const p1 = (newPassword.value || "").trim();
-      const p2 = (newPassword2.value || "").trim();
-      if (!p1 || !p2) return setStatus(statusAccount, "새 비밀번호/확인을 입력하세요.");
-      if (p1 !== p2) return setStatus(statusAccount, "비밀번호가 서로 다릅니다.");
+      if (!requireSupabase()) return;
+      setStatus(statusAccount, "비밀번호 변경 중...");
+      const s = await refreshSession();
+      if (!s) throw new Error("로그인이 필요합니다.");
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return setStatus(statusAccount, "로그인 상태가 필요합니다.");
+      const p1 = newPassword.value || "";
+      const p2 = newPassword2.value || "";
+      if (p1.length < 8) throw new Error("비밀번호는 최소 8자 이상 권장");
+      if (p1 !== p2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
 
       const { error } = await supabase.auth.updateUser({ password: p1 });
-      if (error) return setStatus(statusAccount, "실패: " + error.message);
+      if (error) throw error;
 
       setStatus(statusAccount, "비밀번호 설정/변경 완료");
+      newPassword.value = "";
+      newPassword2.value = "";
     } catch (e) {
-      setStatus(statusAccount, "실패");
+      setStatus(statusAccount, "실패: " + (e?.message || String(e)));
     }
   };
 
-  btnGoIndex.onclick = () => { location.href = INDEX_PATH; };
-
-  btnLogout.onclick = async () => {
-    try {
-      await supabase.auth.signOut();
-      setStatus(statusLogin, "로그아웃 완료");
+  (async () => {
+    // 세션 변화 감지
+    supabase.auth.onAuthStateChange(async () => {
       await refreshSession();
-    } catch (e) {
-      setStatus(statusLogin, "로그아웃 실패");
-    }
-  };
+      // 로그인 이벤트면 이동
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) location.replace(safeNextUrl(next));
+    });
 
-  tabLogin.onclick = () => setActiveTab("login");
-  tabAccount.onclick = () => setActiveTab("account");
-  tabHelp.onclick = () => setActiveTab("help");
-
-  setActiveTab("login");
-  refreshSession();
-  supabase.auth.onAuthStateChange(() => { refreshSession(); });
+    // 이미 로그인 상태면 바로 이동
+    await redirectIfLoggedIn();
+  })();
 })();
 </script>
 </body>

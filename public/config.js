@@ -8,8 +8,8 @@ window.MARUWELL_CONFIG = {
 
   // 경로(확장자 없는 URL 기준)
   PATHS: {
-    login: "/login",
-    index: "/index.html",
-    route: "/coupangRouteMap.html"
+    login: "public/login",
+    index: "public/index",
+    route: "public/coupangRouteMap"
   }
 };

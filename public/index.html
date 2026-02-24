@@ -1,8 +1,6 @@
 <!doctype html>
 <html lang="ko">
 <head>
-  <style id="mw-prehide">html{visibility:hidden}</style>
-
     <script src="/config.js"></script>
 <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -15,10 +13,12 @@
   <meta property="og:image:alt" content="Maroowell" />
 
   <title>Maroowell 우편번호 검색기</title>
-  <link rel="icon" href="/favicon.ico" />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#0b1220'/><path d='M14 44V18h8l10 14 10-14h8v26h-8V31L32 44 22 31v13h-8z' fill='#22d3ee'/></svg>" />
-<style>
-    :root{
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    
+    html{visibility:hidden}
+:root{
       --headerH: 52px;
       --bg:#0f1115;
       --card:#161a22;
@@ -259,7 +259,7 @@
     }
   </style>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src=\"https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2\"></script>
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
@@ -346,22 +346,26 @@
     (async function(){
       "use strict";
 
-      // =========================
+      
+      console.log('[mw] index.html loaded v5');
+// =========================
       // ✅ Auth Guard (Supabase)
-      // - 로그인 없으면 /login.html 로 강제 이동
+      // - 로그인 없으면 /login 으로 강제 이동
       // - next 파라미터로 원래 페이지 복귀
-      // - 깜빡임 최소화: 인증 OK일 때만 화면 표시
       // =========================
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
-      const INDEX_PATH = (PATHS?.index || "/index.html");
-      const LOGIN_PATH = (PATHS?.login || "/login.html");
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        console.error("[Config Missing] SUPABASE_URL / SUPABASE_ANON_KEY");
+      }
+      const LOGIN_PATH = (PATHS?.login || "/login");
 
       const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       function safeNextPath(p) {
-        if (!p) return INDEX_PATH;
-        if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
-        if (!p.startsWith("/")) return INDEX_PATH;
+        // 외부 오픈리다이렉트 방지: same-origin 상대경로만
+        if (!p) return "/index";
+        if (p.startsWith("http://") || p.startsWith("https://")) return "/index";
+        if (!p.startsWith("/")) return "/index";
         return p;
       }
 
@@ -369,9 +373,7 @@
         try {
           if (!supabase || !supabase.auth) throw new Error("Supabase client not initialized");
           const { data: { session } } = await supabase.auth.getSession();
-
           if (session) {
-            // ✅ 인증 OK → 화면 표시
             document.documentElement.style.visibility = "visible";
 
             // 로그아웃 감지 → 로그인으로
@@ -384,9 +386,8 @@
             return true;
           }
         } catch (e) {
-          // fallthrough
+          // fallthrough: redirect
         }
-
         const next = safeNextPath(location.pathname + location.search + location.hash);
         location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
         return false;
@@ -743,31 +744,49 @@
         if (!targets.length) return;
 
         const notFound = [];
-        const zipErrors = [];
+        const reasons = [];
 
         for (const zip of targets) {
+          const url = `${ZIP_API_URL}${encodeURIComponent(zip)}`;
           try {
-            const res = await fetch(`${ZIP_API_URL}${encodeURIComponent(zip)}`, { cache: "no-store" });
-            const raw = await res.text();
-            let data = null;
-            try { data = raw ? JSON.parse(raw) : null; } catch (e) {
-              throw new Error(`ZIP API 응답이 JSON이 아님 (HTTP ${res.status})`);
-            }
-            if (!res.ok) {
-              const msg = (data && (data.error || data.message)) ? (data.error || data.message) : (raw || `HTTP ${res.status}`);
-              throw new Error(`ZIP API 실패: ${msg}`);
-            }
+            const res0 = await fetch(url, { cache: "no-store" });
+            const res = res0;
+            const resClone = res0.clone();
 
-            if (!data || !Array.isArray(data.polygon5179) || data.polygon5179.length === 0) {
+            if (!res.ok) {
+              const t = await res.text().catch(() => "");
+              console.warn("[ZIP_API] HTTP error", zip, res.status, t.slice(0, 300));
+              reasons.push(`${zip}: HTTP ${res.status}`);
               notFound.push(zip);
               continue;
             }
 
-            const norm = normalizeToMultiPolygon5179(data.polygon5179);
-            if (!norm) { notFound.push(zip); continue; }
+            let data = null;
+            try {
+              data = await res.json();
+            } catch (e) {
+              const t = await resClone.text().catch(() => "");
+              console.warn("[ZIP_API] JSON parse fail", zip, String(e), t.slice(0, 300));
+              reasons.push(`${zip}: JSON parse fail`);
+              notFound.push(zip);
+              continue;
+            }
+
+            const polyRaw =
+              (data && (data.polygon5179 ?? data.polygon_5179 ?? data.polygon)) ?? null;
+
+            if (!Array.isArray(polyRaw) || polyRaw.length === 0) {
+              console.warn("[ZIP_API] polygon5179 missing/empty", zip, data);
+              reasons.push(`${zip}: polygon missing`);
+              notFound.push(zip);
+              continue;
+            }
+
+            const norm = normalizeToMultiPolygon5179(polyRaw);
+            if (!norm) { reasons.push(`${zip}: normalize fail`); notFound.push(zip); continue; }
 
             const wgs = convert5179MultiToWgs84(norm);
-            if (!wgs) { notFound.push(zip); continue; }
+            if (!wgs) { reasons.push(`${zip}: convert fail`); notFound.push(zip); continue; }
 
             const feature = {
               type: "Feature",
@@ -777,16 +796,16 @@
             state.geoByZip.set(zip, feature);
 
             drawZipMultiPolygon(zip, wgs);
-          } catch (e) {
-            console.warn("[ZIP]", zip, e);
+          } catch (err) {
+            console.warn("[ZIP_API] fetch failed", zip, String(err));
+            reasons.push(`${zip}: fetch failed`);
             notFound.push(zip);
-            if (e && e.message) zipErrors.push(`${zip}: ${e.message}`);
           }
         }
 
         if (notFound.length) {
-          const extra = zipErrors.length ? `\n\n상세(최대 8개):\n- ${zipErrors.slice(0,8).join("\n- ")}` : "";
-          alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}${extra}`);
+          const detail = reasons.length ? `\n\n상세(최대 8개):\n- ${reasons.slice(0, 8).join("\n- ")}` : "";
+          alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}${detail}`);
         }
       }
 

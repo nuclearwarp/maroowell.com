@@ -642,6 +642,8 @@
         <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
       </a>
       <span>마루웰 라우트 편집기</span>
+      <span style="flex:1"></span>
+      <button id="logoutBtn" class="btn" type="button" style="flex:0 0 auto;padding:6px 12px;background:rgba(127,29,29,.32);border-color:rgba(252,165,165,.38);color:#fecaca;display:none;">로그아웃</button>
     </div>
 
     <div class="group">
@@ -848,8 +850,20 @@
   const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
   const INDEX_PATH = (PATHS?.index || "/index.html");
   const LOGIN_PATH = (PATHS?.login || "/login.html");
+  const authStorage = (() => {
+    try { return window.sessionStorage; }
+    catch { return null; }
+  })();
+  const logoutBtnEl = document.getElementById("logoutBtn");
 
-  const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: !!authStorage,
+      storage: authStorage || undefined,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
 
   function safeNextPath(p) {
     if (!p) return INDEX_PATH;
@@ -865,6 +879,7 @@
 
       if (session) {
         document.documentElement.style.visibility = "visible";
+        if (logoutBtnEl) logoutBtnEl.style.display = "inline-flex";
         supabase.auth.onAuthStateChange((_evt, s) => {
           if (!s) {
             const next = safeNextPath(location.pathname + location.search + location.hash);
@@ -1072,6 +1087,25 @@
   let placeTotal = 0;
   let placeItems = [];
   let addrItems = [];
+
+  const isTouchDevice = () =>
+    !!window.matchMedia?.("(pointer: coarse)")?.matches ||
+    (navigator.maxTouchPoints || 0) > 0 ||
+    "ontouchstart" in window;
+
+  function ensureMobileMapInteractions() {
+    if (!map || !isTouchDevice()) return;
+    try { map.setDraggable(true); } catch {}
+    try { map.setZoomable(true); } catch {}
+
+    const mapEl = $("map");
+    const roadviewEl = $("roadview");
+    [mapWrapEl, mapEl, roadviewEl].forEach((el) => {
+      if (!el) return;
+      el.style.touchAction = "none";
+      el.style.overscrollBehavior = "contain";
+    });
+  }
 
   // ====== 컬러(인접 라우트 색 차이 + 눈부심 완화) ======
   // - 라우트 목록(full_code 정렬) 기준으로 "골든 앵글" 분산 색상을 부여합니다.
@@ -3466,6 +3500,7 @@ function openWaveModal(action) {
     searchModalOpen = false;
     searchModalEl.style.display = "none";
     searchModalEl.setAttribute("aria-hidden", "true");
+    setTimeout(ensureMobileMapInteractions, 0);
   }
 
   function renderSearchSection(title, countText, items, kind) {
@@ -3513,6 +3548,7 @@ function openWaveModal(action) {
           map.setLevel(4);
           closeSearchModal();
           setStatus(`주소 선택: ${titleEl.textContent}`, "OK");
+          setTimeout(ensureMobileMapInteractions, 0);
         };
       } else {
         titleEl.textContent = it.place_name || it.name || "장소";
@@ -3529,6 +3565,7 @@ function openWaveModal(action) {
           map.setLevel(4);
           closeSearchModal();
           setStatus(`장소 선택: ${titleEl.textContent}`, "OK");
+          setTimeout(ensureMobileMapInteractions, 0);
         };
       }
 
@@ -3879,6 +3916,7 @@ function openWaveModal(action) {
       const c = map.getCenter();
       map.relayout();
       map.setCenter(c);
+      ensureMobileMapInteractions();
     }
     if (!roadviewOn) {
       setRoadviewOverlay(false);
@@ -3956,10 +3994,13 @@ function openWaveModal(action) {
       draggingVertex = null;
       map.setDraggable(true);
       rebuildHandles();
+      ensureMobileMapInteractions();
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("touchend", handleMouseUp, { passive: true });
+    window.addEventListener("touchcancel", handleMouseUp, { passive: true });
 
     // ✅ 키보드: Enter/ESC 동작 (모달 → 그리기 → 편집/선택 우선순위)
     window.addEventListener("keydown", (e) => {
@@ -4055,6 +4096,7 @@ function openWaveModal(action) {
       map = new kakao.maps.Map($("map"), { center, level: 6 });
       geocoder = new kakao.maps.services.Geocoder();
       places = new kakao.maps.services.Places();
+      ensureMobileMapInteractions();
 
       VERTEX_IMG = makeHandleImage("#ffffff", "#0b1220");
       MID_IMG = makeHandleImage("#93a4c7", "#0b1220");
@@ -4070,6 +4112,7 @@ function openWaveModal(action) {
         map.relayout();
         map.setCenter(c);
         if (roadviewOn && roadview && typeof roadview.relayout === "function") roadview.relayout();
+        ensureMobileMapInteractions();
       });
 
       loadBtn.addEventListener("click", loadRoutes);
@@ -4195,6 +4238,21 @@ function openWaveModal(action) {
 
       if (toggleMapTypeBtn) toggleMapTypeBtn.addEventListener("click", () => setMapTypeSatellite(!isSatellite));
       if (toggleRoadviewBtn) toggleRoadviewBtn.addEventListener("click", () => setRoadviewOn(!roadviewOn));
+      if (logoutBtnEl) {
+        logoutBtnEl.addEventListener("click", async () => {
+          if (!supabase?.auth) return;
+          logoutBtnEl.disabled = true;
+          try {
+            await supabase.auth.signOut();
+          } catch (e) {
+            console.error("[Auth] signOut failed", e);
+            alert("로그아웃 중 오류가 발생했습니다.");
+            logoutBtnEl.disabled = false;
+            return;
+          }
+          location.replace(LOGIN_PATH);
+        });
+      }
 
       // ✅ 검색 모달 이벤트
       searchRunBtn.addEventListener("click", () => runSearch(searchQEl.value, 1));

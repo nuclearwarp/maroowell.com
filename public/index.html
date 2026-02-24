@@ -62,6 +62,18 @@
       user-select:none;
     }
     header a.saveLink:hover{opacity:.22;border-color:rgba(255,255,255,.18)}
+    header button.logoutBtn{
+      background:transparent;
+      color:#fca5a5;
+      border:1px solid rgba(252,165,165,.34);
+      padding:6px 10px;
+      border-radius:10px;
+      cursor:pointer;
+      display:none;
+      font-size:12px;
+      font-weight:700;
+    }
+    header button.logoutBtn:hover{border-color:rgba(252,165,165,.64);background:rgba(127,29,29,.18)}
 
     #app{
       display:grid;
@@ -83,6 +95,8 @@
       height:100%;
       min-height:0;
       display:flex;
+      overscroll-behavior:contain;
+      touch-action:none;
     }
 
     #map,#roadview{
@@ -91,6 +105,8 @@
       height:100%;
       min-width:0;
       min-height:0;
+      overscroll-behavior:contain;
+      touch-action:none;
     }
     #roadview{display:none}
     #mapWrap.roadview-open #roadview{display:block}
@@ -275,6 +291,7 @@
     <span class="muted">다중 우편번호 권역 검색기 · Kakao Map</span>
     <span class="spacer"></span>
     <a id="saveLink" class="saveLink" href="https://map.kakao.com" target="_blank" rel="noreferrer">Kakao Map</a>
+    <button id="logoutBtn" class="logoutBtn" type="button">로그아웃</button>
   </header>
 
   <div id="app">
@@ -359,8 +376,20 @@
       }
       const INDEX_PATH = (PATHS?.index || "/index.html");
       const LOGIN_PATH = (PATHS?.login || "/login.html");
+      const authStorage = (() => {
+        try { return window.sessionStorage; }
+        catch { return null; }
+      })();
+      const logoutBtnEl = document.getElementById("logoutBtn");
 
-      const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: !!authStorage,
+          storage: authStorage || undefined,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      });
 
       function safeNextPath(p) {
         // 외부 오픈리다이렉트 방지: same-origin 상대경로만
@@ -382,6 +411,7 @@
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
             document.documentElement.style.visibility = "visible";
+            if (logoutBtnEl) logoutBtnEl.style.display = "inline-flex";
 
             // 로그아웃 감지 → 로그인으로
             supabase.auth.onAuthStateChange((_evt, s) => {
@@ -412,6 +442,10 @@
 
       const $ = (sel) => document.querySelector(sel);
       const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
+      const isTouchDevice = () =>
+        !!window.matchMedia?.("(pointer: coarse)")?.matches ||
+        (navigator.maxTouchPoints || 0) > 0 ||
+        "ontouchstart" in window;
 
       const state = {
         map: null,
@@ -440,6 +474,19 @@
           "#34d399","#f97316"
         ]
       };
+
+      function enableMobileMapInteractions() {
+        if (!state.map || !isTouchDevice()) return;
+        try { state.map.setDraggable(true); } catch {}
+        try { state.map.setZoomable(true); } catch {}
+
+        ["mapWrap", "map", "roadview"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.style.touchAction = "none";
+          el.style.overscrollBehavior = "contain";
+        });
+      }
 
       function pickColor(seed) {
         let h = 0;
@@ -487,6 +534,7 @@
           center: new kakao.maps.LatLng(37.5665, 126.978),
           level: 8
         });
+        enableMobileMapInteractions();
 
         window.addEventListener("resize", () => {
           if (!state.map) return;
@@ -496,6 +544,7 @@
           if (state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function") {
             state.roadview.relayout();
           }
+          enableMobileMapInteractions();
         });
       }
 
@@ -555,6 +604,7 @@
           const c = state.map.getCenter();
           state.map.relayout();
           state.map.setCenter(c);
+          enableMobileMapInteractions();
         }
 
         if (state.roadviewOn) {
@@ -845,7 +895,10 @@
             }
           }
         }
-        if (has) state.map.setBounds(b);
+        if (has) {
+          state.map.setBounds(b);
+          enableMobileMapInteractions();
+        }
       }
 
       function fitBoundsToRings(rings){
@@ -862,7 +915,10 @@
             has = true;
           }
         }
-        if (has) state.map.setBounds(b);
+        if (has) {
+          state.map.setBounds(b);
+          enableMobileMapInteractions();
+        }
       }
 
       // ===== 병합 =====
@@ -1295,6 +1351,7 @@
           await drawSelected();
           if (state.mergeMode) await mergeOn(true);
           else fitBoundsAllOriginal();
+          enableMobileMapInteractions();
         };
 
         $("#mergeBtn").onclick = async () => { await toggleMerge(); };
@@ -1311,12 +1368,28 @@
               if (d.zonecode) {
                 state.selectedZips.add(d.zonecode);
                 renderZipChips();
+                enableMobileMapInteractions();
               }
             }
           }).open();
         };
 
         $("#saveLink").onclick = (e) => { e.preventDefault(); openSaveModal(); };
+        if (logoutBtnEl) {
+          logoutBtnEl.onclick = async () => {
+            if (!supabase?.auth) return;
+            logoutBtnEl.disabled = true;
+            try {
+              await supabase.auth.signOut();
+            } catch (e) {
+              console.error("[Auth] signOut failed", e);
+              alert("로그아웃 중 오류가 발생했습니다.");
+              logoutBtnEl.disabled = false;
+              return;
+            }
+            location.replace(LOGIN_PATH);
+          };
+        }
 
         $("#saveCloseBtn").onclick = closeSaveModal;
         $("#saveDoBtn").onclick = saveMergedToDB;

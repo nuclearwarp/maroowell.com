@@ -34,9 +34,25 @@
       justify-content:center;
       padding:24px;
     }
-    .card{
+    .auth-stack{
       width:100%;
       max-width:420px;
+    }
+    .logo-panel{
+      width:100%;
+      aspect-ratio:1 / 1;
+      margin:0 auto 14px;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      box-shadow:0 10px 30px rgba(15,23,42,.06);
+    }
+    .card{
+      width:100%;
       background:var(--card);
       border:1px solid var(--line);
       border-radius:16px;
@@ -45,9 +61,8 @@
     }
     .logo{
       display:block;
-      width:84px;
-      height:84px;
-      margin:2px auto 10px;
+      width:100%;
+      height:100%;
       object-fit:contain;
     }
     .title{
@@ -99,6 +114,25 @@
       border:1px solid var(--line);
     }
     .btn.secondary:hover{background:#f1f5f9}
+    .remember-row{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin-top:12px;
+      color:var(--muted);
+      font-size:13px;
+      user-select:none;
+    }
+    .remember-row input[type="checkbox"]{
+      width:16px;
+      height:16px;
+      margin:0;
+      padding:0;
+      border-radius:4px;
+      accent-color:#0f172a;
+      box-shadow:none;
+      cursor:pointer;
+    }
     .status{
       margin-top:12px;
       min-height:20px;
@@ -106,21 +140,33 @@
       color:var(--muted);
       white-space:pre-wrap;
     }
+    @media (max-width: 520px){
+      .wrap{padding:14px;}
+      .logo-panel{margin-bottom:10px;}
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
-    <h1 class="title">Maroowell.com Login</h1>
-    <label class="label" for="email">이메일</label>
-    <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
-    <label class="label" for="password">비밀번호</label>
-    <input id="password" type="password" placeholder="********" autocomplete="current-password" />
-    <button class="btn" id="btnSignIn" type="button">로그인</button>
-    <button class="btn secondary" id="btnSignUp" type="button">회원가입</button>
-    <div class="status" id="statusLogin"></div>
+  <div class="auth-stack">
+    <div class="logo-panel" aria-hidden="true">
+      <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
+    </div>
+    <div class="card">
+      <h1 class="title">Maroowell.com Login</h1>
+      <label class="label" for="email">이메일</label>
+      <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
+      <label class="label" for="password">비밀번호</label>
+      <input id="password" type="password" placeholder="********" autocomplete="current-password" />
+      <label class="remember-row" for="rememberEmail">
+        <input id="rememberEmail" type="checkbox" />
+        <span>아이디 저장</span>
+      </label>
+      <button class="btn" id="btnSignIn" type="button">로그인</button>
+      <button class="btn secondary" id="btnSignUp" type="button">회원가입</button>
+      <div class="status" id="statusLogin"></div>
+    </div>
   </div>
 </div>
 
@@ -148,16 +194,26 @@
 
   const email = document.getElementById("email");
   const password = document.getElementById("password");
+  const rememberEmail = document.getElementById("rememberEmail");
   const btnSignIn = document.getElementById("btnSignIn");
   const btnSignUp = document.getElementById("btnSignUp");
   const statusLogin = document.getElementById("statusLogin");
   const ENABLE_SIGNUP = !!(window.MAROOWELL_ENABLE_SIGNUP?.());
+  const SAVED_EMAIL_KEY = "mw_saved_login_email";
 
   const params = new URLSearchParams(location.search);
   const next = params.get("next") || DEFAULT_NEXT;
 
   function setStatus(msg) {
     statusLogin.textContent = msg;
+  }
+
+  function loadSavedEmail() {
+    let saved = "";
+    try { saved = (window.localStorage.getItem(SAVED_EMAIL_KEY) || "").trim(); } catch {}
+    if (!saved) return;
+    email.value = saved;
+    if (rememberEmail) rememberEmail.checked = true;
   }
 
   function safeNextUrl(u) {
@@ -194,6 +250,11 @@
 
       const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
       if (error) throw error;
+
+      try {
+        if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
+        else window.localStorage.removeItem(SAVED_EMAIL_KEY);
+      } catch {}
 
       setStatus("로그인 성공");
       location.replace(safeNextUrl(next));
@@ -236,6 +297,7 @@
     btnSignUp.style.display = "none";
   }
 
+  loadSavedEmail();
   btnSignIn.addEventListener("click", signIn);
   if (btnSignUp && ENABLE_SIGNUP) {
     btnSignUp.addEventListener("click", signUp);

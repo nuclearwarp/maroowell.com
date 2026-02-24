@@ -1,6 +1,8 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <style id="mw-prehide">html{visibility:hidden}</style>
+
     <script src="/config.js"></script>
 <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -13,9 +15,9 @@
   <meta property="og:image:alt" content="Maroowell" />
 
   <title>Maroowell 우편번호 검색기</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-
-  <style>
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='#0b1220'/><path d='M14 44V18h8l10 14 10-14h8v26h-8V31L32 44 22 31v13h-8z' fill='#22d3ee'/></svg>" />
+<style>
     :root{
       --headerH: 52px;
       --bg:#0f1115;
@@ -266,7 +268,7 @@
 
 <body>
   <header>
-    <a href="/coupangRouteMap.html" style="display:flex;align-items:center">
+    <a href="/coupangRouteMap" style="display:flex;align-items:center">
       <img src="/favicon.ico" alt="Maroowell Logo" style="width:24px;height:24px;transform:translateY(-2px);cursor:pointer" />
     </a>
     <h1>Maroowell 우편번호 검색기</h1>
@@ -346,20 +348,17 @@
 
       // =========================
       // ✅ Auth Guard (Supabase)
-      // - 로그인 없으면 /login 으로 강제 이동
+      // - 로그인 없으면 /login.html 로 강제 이동
       // - next 파라미터로 원래 페이지 복귀
+      // - 깜빡임 최소화: 인증 OK일 때만 화면 표시
       // =========================
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
-      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-        console.error("[Config Missing] SUPABASE_URL / SUPABASE_ANON_KEY");
-      }
       const INDEX_PATH = (PATHS?.index || "/index.html");
       const LOGIN_PATH = (PATHS?.login || "/login.html");
 
       const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       function safeNextPath(p) {
-        // 외부 오픈리다이렉트 방지: same-origin 상대경로만
         if (!p) return INDEX_PATH;
         if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
         if (!p.startsWith("/")) return INDEX_PATH;
@@ -370,7 +369,11 @@
         try {
           if (!supabase || !supabase.auth) throw new Error("Supabase client not initialized");
           const { data: { session } } = await supabase.auth.getSession();
+
           if (session) {
+            // ✅ 인증 OK → 화면 표시
+            document.documentElement.style.visibility = "visible";
+
             // 로그아웃 감지 → 로그인으로
             supabase.auth.onAuthStateChange((_evt, s) => {
               if (!s) {
@@ -381,8 +384,9 @@
             return true;
           }
         } catch (e) {
-          // fallthrough: redirect
+          // fallthrough
         }
+
         const next = safeNextPath(location.pathname + location.search + location.hash);
         location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
         return false;
@@ -739,11 +743,20 @@
         if (!targets.length) return;
 
         const notFound = [];
+        const zipErrors = [];
 
         for (const zip of targets) {
           try {
             const res = await fetch(`${ZIP_API_URL}${encodeURIComponent(zip)}`, { cache: "no-store" });
-            const data = await res.json();
+            const raw = await res.text();
+            let data = null;
+            try { data = raw ? JSON.parse(raw) : null; } catch (e) {
+              throw new Error(`ZIP API 응답이 JSON이 아님 (HTTP ${res.status})`);
+            }
+            if (!res.ok) {
+              const msg = (data && (data.error || data.message)) ? (data.error || data.message) : (raw || `HTTP ${res.status}`);
+              throw new Error(`ZIP API 실패: ${msg}`);
+            }
 
             if (!data || !Array.isArray(data.polygon5179) || data.polygon5179.length === 0) {
               notFound.push(zip);
@@ -764,12 +777,17 @@
             state.geoByZip.set(zip, feature);
 
             drawZipMultiPolygon(zip, wgs);
-          } catch {
+          } catch (e) {
+            console.warn("[ZIP]", zip, e);
             notFound.push(zip);
+            if (e && e.message) zipErrors.push(`${zip}: ${e.message}`);
           }
         }
 
-        if (notFound.length) alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}`);
+        if (notFound.length) {
+          const extra = zipErrors.length ? `\n\n상세(최대 8개):\n- ${zipErrors.slice(0,8).join("\n- ")}` : "";
+          alert(`폴리곤을 그리지 못한 우편번호: ${notFound.join(", ")}${extra}`);
+        }
       }
 
       // ===== Bounds =====

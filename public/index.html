@@ -375,17 +375,230 @@
       }
       const INDEX_PATH = (PATHS?.index || "/index.html");
       const LOGIN_PATH = (PATHS?.login || "/login.html");
+
+      function getSupabaseProjectRef(url) {
+        try {
+          const host = new URL(url).hostname || "";
+          return host.split(".")[0] || "";
+        } catch {
+          return "";
+        }
+      }
+
+  function createSupabaseSessionBridge(url) {
+    const projectRef = getSupabaseProjectRef(url);
+    const prefixes = projectRef ? [
+      "sb-" + projectRef + "-auth-token",
+      "sb-" + projectRef + "-auth-token-code-verifier"
+    ] : [];
+    const origin = window.location.origin;
+    const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
+    const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const pending = new Map();
+    let channel = null;
+    let started = false;
+
+    function matchesKey(key) {
+      return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+    }
+
+    function readEntries(storage) {
+      const target = storage || window.sessionStorage;
+      const rows = [];
+      try {
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (!matchesKey(key)) continue;
+          rows.push({ key, value: target.getItem(key) });
+        }
+      } catch {}
+      return rows;
+    }
+
+    function hasSession(storage) {
+      return readEntries(storage).some(row => row.key.includes("-auth-token") && !row.key.includes("code-verifier") && !!row.value);
+    }
+
+    function writeEntries(entries, storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        for (const row of entries || []) {
+          if (!row || !matchesKey(row.key)) continue;
+          if (row.value == null) target.removeItem(row.key);
+          else target.setItem(row.key, row.value);
+        }
+      } catch {}
+    }
+
+    function clearSession(storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        const keys = [];
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (matchesKey(key)) keys.push(key);
+        }
+        keys.forEach(key => target.removeItem(key));
+      } catch {}
+    }
+
+    function resolvePending(requestId, entries) {
+      const item = pending.get(requestId);
+      if (!item) return;
+      pending.delete(requestId);
+      clearTimeout(item.timer);
+      if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
+      item.resolve(hasSession(window.sessionStorage));
+    }
+
+    function handleSyncState(state) {
+      if (state === "SIGNED_OUT") {
+        clearSession(window.sessionStorage);
+        return;
+      }
+      if (state === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
+        requestSessionCopy(1200).catch(() => {});
+      }
+    }
+
+    function onWindowMessage(event) {
+      if (event.origin !== origin) return;
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          event.source?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          }, origin);
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function onChannelMessage(event) {
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          channel?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          });
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function start() {
+      if (started || !projectRef) return;
+      started = true;
+      window.addEventListener("message", onWindowMessage);
+      try {
+        if ("BroadcastChannel" in window) {
+          channel = new BroadcastChannel(channelName);
+          channel.addEventListener("message", onChannelMessage);
+        }
+      } catch {}
+    }
+
+    function requestSessionCopy(timeoutMs) {
+      start();
+      if (!projectRef) return Promise.resolve(false);
+      if (hasSession(window.sessionStorage)) return Promise.resolve(true);
+
+      const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const payload = {
+        type: "MW_SESSION_REQUEST",
+        projectRef,
+        requestId,
+        fromTabId: tabId
+      };
+
+      return new Promise(resolve => {
+        const timer = window.setTimeout(() => {
+          pending.delete(requestId);
+          resolve(hasSession(window.sessionStorage));
+        }, Math.max(300, Number(timeoutMs) || 900));
+
+        pending.set(requestId, { resolve, timer });
+
+        try { channel?.postMessage(payload); } catch {}
+        try {
+          if (window.opener && window.opener !== window) {
+            window.opener.postMessage(payload, origin);
+          }
+        } catch {}
+      });
+    }
+
+    function broadcastAuthState(state) {
+      start();
+      const payload = {
+        type: "MW_AUTH_SYNC",
+        projectRef,
+        state,
+        fromTabId: tabId
+      };
+      try { channel?.postMessage(payload); } catch {}
+      try {
+        if (window.opener && window.opener !== window) {
+          window.opener.postMessage(payload, origin);
+        }
+      } catch {}
+    }
+
+    return {
+      projectRef,
+      start,
+      hasSession,
+      clearSession,
+      requestSessionCopy,
+      broadcastAuthState
+    };
+  }
+
       const authStorage = (() => {
-        try { return window.localStorage; } catch {}
         try { return window.sessionStorage; } catch {}
         return null;
       })();
       const logoutBtnEl = document.getElementById("logoutBtn");
+      const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
+      sessionBridge.start();
+      await sessionBridge.requestSessionCopy(1200);
 
       const supabase = window.supabase?.createClient?.(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
-          persistSession: true,
-          storage: window.sessionStorage,
+          persistSession: !!authStorage,
+          storage: authStorage || undefined,
           autoRefreshToken: true,
           detectSessionInUrl: true
         }
@@ -414,10 +627,15 @@
             if (logoutBtnEl) logoutBtnEl.style.display = "inline-flex";
 
             // 로그아웃 감지 → 로그인으로
-            supabase.auth.onAuthStateChange((_evt, s) => {
-              if (!s) {
+            supabase.auth.onAuthStateChange((evt, s) => {
+              if (evt === "SIGNED_OUT" || !s) {
+                sessionBridge.broadcastAuthState("SIGNED_OUT");
                 const next = safeNextPath(location.pathname + location.search + location.hash);
                 location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+                return;
+              }
+              if (evt === "SIGNED_IN" || evt === "TOKEN_REFRESHED" || evt === "USER_UPDATED") {
+                sessionBridge.broadcastAuthState("SESSION_UPDATED");
               }
             });
             return true;
@@ -1381,6 +1599,7 @@
             logoutBtnEl.disabled = true;
             try {
               await supabase.auth.signOut();
+              sessionBridge.broadcastAuthState("SIGNED_OUT");
             } catch (e) {
               console.error("[Auth] signOut failed", e);
               alert("로그아웃 중 오류가 발생했습니다.");

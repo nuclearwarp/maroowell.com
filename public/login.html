@@ -253,7 +253,7 @@
 <div class="wrap">
   <div class="auth-stack">
     <div class="logo-panel" aria-hidden="true">
-      <img class="logo" src="/maroowell-logo2.png?v=20260316-1" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico?v=2';}else{this.dataset.fallback='1';this.src='/assets/og/maroowell-1200x630.png?v=20260316-1';}" />
+      <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
     </div>
     <div class="card">
       <h1 class="title">Maroowell.com Login</h1>
@@ -318,7 +318,7 @@
 </div>
 
 <script>
-(() => {
+(async () => {
   const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
   const DEFAULT_NEXT = (PATHS?.index || "/index.html");
   const LOGIN_PATH = (PATHS?.login || "/login.html");
@@ -362,12 +362,218 @@
     } catch {}
   }
 
+
+  function createSupabaseSessionBridge(url) {
+    const projectRef = getSupabaseProjectRef(url);
+    const prefixes = projectRef ? [
+      "sb-" + projectRef + "-auth-token",
+      "sb-" + projectRef + "-auth-token-code-verifier"
+    ] : [];
+    const origin = window.location.origin;
+    const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
+    const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const pending = new Map();
+    let channel = null;
+    let started = false;
+
+    function matchesKey(key) {
+      return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+    }
+
+    function readEntries(storage) {
+      const target = storage || window.sessionStorage;
+      const rows = [];
+      try {
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (!matchesKey(key)) continue;
+          rows.push({ key, value: target.getItem(key) });
+        }
+      } catch {}
+      return rows;
+    }
+
+    function hasSession(storage) {
+      return readEntries(storage).some(row => row.key.includes("-auth-token") && !row.key.includes("code-verifier") && !!row.value);
+    }
+
+    function writeEntries(entries, storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        for (const row of entries || []) {
+          if (!row || !matchesKey(row.key)) continue;
+          if (row.value == null) target.removeItem(row.key);
+          else target.setItem(row.key, row.value);
+        }
+      } catch {}
+    }
+
+    function clearSession(storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        const keys = [];
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (matchesKey(key)) keys.push(key);
+        }
+        keys.forEach(key => target.removeItem(key));
+      } catch {}
+    }
+
+    function resolvePending(requestId, entries) {
+      const item = pending.get(requestId);
+      if (!item) return;
+      pending.delete(requestId);
+      clearTimeout(item.timer);
+      if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
+      item.resolve(hasSession(window.sessionStorage));
+    }
+
+    function handleSyncState(state) {
+      if (state === "SIGNED_OUT") {
+        clearSession(window.sessionStorage);
+        return;
+      }
+      if (state === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
+        requestSessionCopy(1200).catch(() => {});
+      }
+    }
+
+    function onWindowMessage(event) {
+      if (event.origin !== origin) return;
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          event.source?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          }, origin);
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function onChannelMessage(event) {
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          channel?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          });
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function start() {
+      if (started || !projectRef) return;
+      started = true;
+      window.addEventListener("message", onWindowMessage);
+      try {
+        if ("BroadcastChannel" in window) {
+          channel = new BroadcastChannel(channelName);
+          channel.addEventListener("message", onChannelMessage);
+        }
+      } catch {}
+    }
+
+    function requestSessionCopy(timeoutMs) {
+      start();
+      if (!projectRef) return Promise.resolve(false);
+      if (hasSession(window.sessionStorage)) return Promise.resolve(true);
+
+      const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const payload = {
+        type: "MW_SESSION_REQUEST",
+        projectRef,
+        requestId,
+        fromTabId: tabId
+      };
+
+      return new Promise(resolve => {
+        const timer = window.setTimeout(() => {
+          pending.delete(requestId);
+          resolve(hasSession(window.sessionStorage));
+        }, Math.max(300, Number(timeoutMs) || 900));
+
+        pending.set(requestId, { resolve, timer });
+
+        try { channel?.postMessage(payload); } catch {}
+        try {
+          if (window.opener && window.opener !== window) {
+            window.opener.postMessage(payload, origin);
+          }
+        } catch {}
+      });
+    }
+
+    function broadcastAuthState(state) {
+      start();
+      const payload = {
+        type: "MW_AUTH_SYNC",
+        projectRef,
+        state,
+        fromTabId: tabId
+      };
+      try { channel?.postMessage(payload); } catch {}
+      try {
+        if (window.opener && window.opener !== window) {
+          window.opener.postMessage(payload, origin);
+        }
+      } catch {}
+    }
+
+    return {
+      projectRef,
+      start,
+      hasSession,
+      clearSession,
+      requestSessionCopy,
+      broadcastAuthState
+    };
+  }
+
+
   const authStorage = (() => {
     try { return window.sessionStorage; } catch {}
     return null;
   })();
+  const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
 
   clearLegacySupabaseLocalSession(SUPABASE_URL);
+  sessionBridge.start();
+  await sessionBridge.requestSessionCopy(1200);
 
   const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -619,6 +825,7 @@
 
       clearFailCount(em);
       refreshForgotPasswordUi();
+      sessionBridge.broadcastAuthState("SESSION_UPDATED");
       setStatus("로그인 성공", "success");
       location.replace(next);
     } catch (e) {
@@ -692,6 +899,7 @@
       closeModal(true);
 
       if (data?.session) {
+        sessionBridge.broadcastAuthState("SESSION_UPDATED");
         setStatus("회원가입 완료", "success");
         showMessageModal("회원가입 완료", "이메일 인증 없이 바로 가입이 완료되었습니다.", {
           badge: "SIGNED UP",
@@ -726,6 +934,7 @@
       if (error) throw error;
 
       await supabase.auth.signOut();
+      sessionBridge.broadcastAuthState("SIGNED_OUT");
       suppressAutoRedirect = false;
       clearFlowFromUrl();
       closeModal(true);
@@ -799,6 +1008,12 @@
     if (!requireSupabase()) return;
 
     supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        sessionBridge.broadcastAuthState("SIGNED_OUT");
+      } else if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED")) {
+        sessionBridge.broadcastAuthState("SESSION_UPDATED");
+      }
+
       if (event === "PASSWORD_RECOVERY") {
         handleRecoverySession();
         return;

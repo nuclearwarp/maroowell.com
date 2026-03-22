@@ -389,8 +389,7 @@
   function openModal(el){ el.style.display="flex"; el.setAttribute("aria-hidden","false"); }
   function closeModal(el){ el.style.display="none"; el.setAttribute("aria-hidden","true"); }
 
-  // ✅ 요청사항 2: "어떤 비알파뉴메릭 구분자든" 토큰 분리
-  // 예: "405,406" / "405 406" / "405/406" / "405|406"
+  // 어떤 비알파뉴메릭 구분자든 토큰 분리
   function parseCodes(raw){
     return String(raw || "")
       .trim()
@@ -399,8 +398,6 @@
       .filter(Boolean);
   }
 
-  // ✅ 요청사항 4: 인접 라우트 동일색 회피 목적
-  // - 코드별로 유니크한 색을 주기 위해 golden-angle 분포 사용
   function hash32(str){
     str = String(str||"");
     let h = 2166136261;
@@ -447,14 +444,11 @@
     for (const ll of latlngs){ lat += ll.getLat(); lng += ll.getLng(); }
     return new kakao.maps.LatLng(lat/latlngs.length, lng/latlngs.length);
   }
-  // FIX: Kakao Maps Polygon.getPath() returns Array.<LatLng>, not Google Maps MVCArray.
-  // Normalize to a plain Array so we can safely use .length and [i].
+  // Kakao Maps Polygon.getPath() 는 Array.<LatLng> (Google MVCArray 아님)
   function polygonPathToArray(polygon){
     const raw = polygon?.getPath?.();
     if (!raw) return [];
     if (Array.isArray(raw)) return raw;
-
-    // Defensive compatibility (if a MVCArray-like object is ever passed in)
     if (typeof raw.getLength === "function" && typeof raw.getAt === "function"){
       const arr = [];
       for (let i=0; i<raw.getLength(); i++) arr.push(raw.getAt(i));
@@ -463,8 +457,7 @@
     return [];
   }
 
-  // UI 개선2: 기본 핀 마커 대신 "점(dot)" 마커를 사용 (MarkerImage 활용)
-  // - Kakao Marker는 image 옵션으로 MarkerImage를 받을 수 있음. citeturn1search4
+  // UI 개선: 편집/그리기 점(dot) MarkerImage
   let __mwDotEditImg = null;
   let __mwDotDrawImg = null;
   function makeDotMarkerImage({ size=12, fill="#ffffff", stroke="#0b1220", strokeWidth=2 } = {}){
@@ -495,7 +488,6 @@
   let map=null, geocoder=null;
   let roadview=null, roadviewClient=null, roadviewOn=false;
 
-  // ✅ 요청사항 1: 라우트 라벨 기본 ON / 벤더 라벨 기본 OFF
   let routeLabelOn = true;
   let vendorLabelOn = false;
 
@@ -503,7 +495,6 @@
   const overlayById = new Map(); // id -> {row, polygons, labels}
   let selectedRouteId = null;
 
-  // ✅ 요청사항 3(Enter 분기용): 입력 변경 여부(dirty)
   let campDirty=false, codeDirty=false;
   campInput.addEventListener("input", ()=>{ campDirty=true; });
   codeInput.addEventListener("input", ()=>{ codeDirty=true; });
@@ -521,7 +512,6 @@
     const color = row.__color || "rgba(0,194,255,1)";
 
     const el = document.createElement("div");
-    // UI 개선1: 라우트 라벨 크기/패딩 축소 + 그림자(음영) 완화
     const showCode = routeLabelOn;
     const showVendor = vendorLabelOn;
     el.style.padding = showVendor ? "6px 9px" : "4px 8px";
@@ -533,8 +523,6 @@
     el.style.backdropFilter = "blur(1.5px)";
     el.style.pointerEvents = "none";
     el.style.maxWidth = "220px";
-
-    // 라우트 라벨 OFF + 벤더 라벨 ON이면 강조선 추가
     if (!showCode && showVendor){
       el.style.borderLeft = `4px solid ${color}`;
     }
@@ -585,6 +573,7 @@
     editMarkers=[];
     editing=false;
   }
+
   function enterEditMode(){
     if (!selectedRouteId){ setStatus("선택된 라우트가 없습니다.", "WARN"); return; }
     const pack = overlayById.get(selectedRouteId);
@@ -626,6 +615,7 @@
     if (drawLine){ drawLine.setMap(null); drawLine=null; }
     if (resetHint) hint("", false);
   }
+
   function beginDraw(mode){
     if (!selectedRouteId){ setStatus("먼저 라우트를 선택하세요.", "WARN"); return; }
     stopEditMode();
@@ -643,6 +633,64 @@
     hint("그리기: 지도 클릭 점추가 · Enter 완료 · 우클릭 마지막 점 취소 · ESC 취소", true);
     setStatus(mode==="new" ? "새로 그리기 시작" : "구역 추가 시작", "OK");
   }
+
+  // BUGFIX: 선택된 라우트 없이도 새로 그리기/구역 추가가 동작하도록 입력 기반 자동 선택/자동 로드
+  function normalizeCodeKey(s){ return String(s||"").trim().toUpperCase(); }
+  function findRouteIdByCampAndCodeExact(camp, code){
+    const tCamp = String(camp||"").trim();
+    const tCode = normalizeCodeKey(code);
+    for (const [id, pack] of overlayById.entries()){
+      const r = pack?.row;
+      if (!r) continue;
+      const rCamp = String(r.camp||"").trim();
+      const rCode = normalizeCodeKey(r.full_code || r.code);
+      if (rCamp === tCamp && rCode === tCode) return id;
+    }
+    return null;
+  }
+  async function ensureSelectedRouteFromInputsForDraw(){
+    if (selectedRouteId) return true;
+    const camp = campInput.value.trim();
+    const codes = parseCodes(codeInput.value);
+
+    if (!camp){ setStatus("캠프를 입력하세요.", "WARN"); campInput.focus(); return false; }
+    if (codes.length === 0){ setStatus("라우트 코드를 입력하세요.", "WARN"); codeInput.focus(); return false; }
+    if (codes.length > 1){ setStatus("새로 그리기/구역 추가는 라우트 코드를 1개만 입력하세요.", "WARN"); return false; }
+
+    const code = codes[0];
+
+    // 1) 이미 로드된 데이터에서 정확 일치 탐색
+    const found = findRouteIdByCampAndCodeExact(camp, code);
+    if (found){ selectRoute(found); return true; }
+
+    // 2) 자동 로드 후 정확 일치 재탐색
+    try{
+      setStatus("라우트 자동 불러오기...", "OK");
+      await loadRoutes();
+    }catch(e){
+      setStatus("라우트 자동 불러오기 실패: " + e.message, "ERR");
+      return false;
+    }
+
+    const found2 = findRouteIdByCampAndCodeExact(camp, code);
+    if (found2){ selectRoute(found2); return true; }
+
+    // 3) 그래도 못 찾았는데 결과가 1개면 그거 선택
+    if (overlayById.size === 1){
+      const onlyId = overlayById.keys().next().value;
+      if (onlyId){ selectRoute(onlyId); return true; }
+    }
+
+    const candidates = [];
+    for (const pack of overlayById.values()){
+      const rc = String(pack?.row?.full_code || pack?.row?.code || "").trim();
+      if (rc) candidates.push(rc);
+    }
+    const unique = Array.from(new Set(candidates));
+    setStatus(`선택할 라우트를 찾지 못했습니다. code=${code}. ${unique.length ? "불러온 라우트: "+unique.slice(0,12).join(", ")+(unique.length>12?" ...":"") : "불러온 라우트 없음"}`, "WARN");
+    return false;
+  }
+
   function addDrawPoint(latlng){
     drawPoints.push(latlng);
     const mk = new kakao.maps.Marker({ position: latlng, image: drawDotImage(), zIndex: 200 });
@@ -724,7 +772,6 @@
 
     campInput.value = String(pack.row.camp || "").trim();
     codeInput.value = String(pack.row.full_code || pack.row.code || "").trim();
-    // ✅ Enter 분기 핵심: 선택 시 dirty를 false로 되돌려 “Enter=편집”이 가능해짐
     campDirty=false; codeDirty=false;
 
     const { week, night } = getVendorText(pack.row);
@@ -739,7 +786,6 @@
     loadAddresses().catch(e=>log("주소 로드 실패: "+e.message));
   }
 
-  // UI 개선3: ESC로 "선택 해제" 복원 (편집 중 ESC는 편집 종료 + 선택 유지)
   function clearSelection(reason="선택 해제"){
     selectedRouteId = null;
     stopEditMode();
@@ -830,7 +876,6 @@
     if (any) map.setBounds(bounds);
     rebuildAllLabels();
 
-    // ✅ 검색 완료 시 dirty 해제: 이후 Enter가 “편집모드”로 분기될 수 있게 함
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
   }
@@ -914,11 +959,17 @@
     const MM = String(kst.getUTCMinutes()).padStart(2,"0");
     return `${yyyy}${mm}${dd}${HH}${MM}`;
   }
+
+  function getShareOrigin(){
+    if (location.hostname.endsWith("maroowell.com")) return "https://maroowell.com";
+    return location.origin;
+  }
+
   function generateShareLink(){
     const camp = campInput.value.trim();
     const code = codeInput.value.trim();
     if (!camp){ setStatus("캠프를 입력하세요.", "WARN"); return; }
-    const shareUrl = new URL("/share.html", location.origin);
+    const shareUrl = new URL("/share.html", getShareOrigin());
     shareUrl.searchParams.set("camp", camp);
     if (code) shareUrl.searchParams.set("code", code);
     shareUrl.searchParams.set("v", kstYYYYMMDDHHMM());
@@ -1211,7 +1262,6 @@
     });
   }
 
-  // ✅ 요청사항 1: 토글 클릭 시 rebuildAllLabels()로 오버레이 즉시 재생성
   labelToggleBtn.addEventListener("click", ()=>{
     routeLabelOn = !routeLabelOn;
     refreshLabelToggleText();
@@ -1232,9 +1282,6 @@
     return tag === "input" || tag === "textarea" || a?.isContentEditable;
   }
 
-  // ✅ 요청사항 3: Enter 분기 규칙
-  // - 선택 라우트가 있고, 입력이 dirty가 아니면(=입력 변경 없음) Enter → 편집모드
-  // - 입력이 dirty면 Enter → 검색(loadRoutes)
   function inputEnterHandler(e){
     if (e.key !== "Enter") return;
     e.preventDefault(); e.stopPropagation();
@@ -1278,8 +1325,16 @@
   });
 
   loadBtn.addEventListener("click", ()=> loadRoutes().catch(err=>setStatus(err.message,"ERR")));
-  drawNewBtn.addEventListener("click", ()=> beginDraw("new"));
-  drawAddBtn.addEventListener("click", ()=> beginDraw("add"));
+  drawNewBtn.addEventListener("click", async ()=>{
+    const ok = await ensureSelectedRouteFromInputsForDraw();
+    if (!ok) return;
+    beginDraw("new");
+  });
+  drawAddBtn.addEventListener("click", async ()=>{
+    const ok = await ensureSelectedRouteFromInputsForDraw();
+    if (!ok) return;
+    beginDraw("add");
+  });
   saveBtn.addEventListener("click", ()=> saveCurrent().catch(err=>setStatus(err.message,"ERR")));
   deletePolyBtn.addEventListener("click", ()=> deletePolygon().catch(err=>setStatus(err.message,"ERR")));
   resetBtn.addEventListener("click", ()=> { clearOverlays(); setStatus("초기화 완료","OK"); });

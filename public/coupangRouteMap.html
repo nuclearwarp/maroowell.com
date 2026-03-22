@@ -195,7 +195,7 @@
 
       <div style="height:8px"></div>
       <div class="row">
-        <!-- ✅ 요청사항: 공유 링크 버튼은 한 칸 아래로 -->
+        <!-- ✅ 요청사항 5: 공유 링크 버튼은 한 칸 아래로 (UI만 변경) -->
         <button id="shareBtn" class="btn ok" style="width:100%;flex:1;" type="button">🔗 공유 링크 생성</button>
       </div>
 
@@ -389,7 +389,8 @@
   function openModal(el){ el.style.display="flex"; el.setAttribute("aria-hidden","false"); }
   function closeModal(el){ el.style.display="none"; el.setAttribute("aria-hidden","true"); }
 
-  // ===== 검색 파서: 어떤 구분자든 OK =====
+  // ✅ 요청사항 2: "어떤 비알파뉴메릭 구분자든" 토큰 분리
+  // 예: "405,406" / "405 406" / "405/406" / "405|406"
   function parseCodes(raw){
     return String(raw || "")
       .trim()
@@ -398,7 +399,8 @@
       .filter(Boolean);
   }
 
-  // ===== color: 코드별 유니크 재할당(인접 동일색 회피 목적) =====
+  // ✅ 요청사항 4: 인접 라우트 동일색 회피 목적
+  // - 코드별로 유니크한 색을 주기 위해 golden-angle 분포 사용
   function hash32(str){
     str = String(str||"");
     let h = 2166136261;
@@ -422,7 +424,6 @@
     rows.forEach(r=>{ r.__color = cmap.get(keyOf(r)) || colorByIndex(0, startHue); });
   }
 
-  // ===== polygons + labels =====
   function parsePolygonWgs84(v){
     if (!v) return null;
     if (Array.isArray(v)) return v;
@@ -455,6 +456,7 @@
   let map=null, geocoder=null;
   let roadview=null, roadviewClient=null, roadviewOn=false;
 
+  // ✅ 요청사항 1: 라우트 라벨 기본 ON / 벤더 라벨 기본 OFF
   let routeLabelOn = true;
   let vendorLabelOn = false;
 
@@ -462,17 +464,14 @@
   const overlayById = new Map(); // id -> {row, polygons, labels}
   let selectedRouteId = null;
 
-  // dirty flags: 입력이 바뀌었는지
+  // ✅ 요청사항 3(Enter 분기용): 입력 변경 여부(dirty)
   let campDirty=false, codeDirty=false;
   campInput.addEventListener("input", ()=>{ campDirty=true; });
   codeInput.addEventListener("input", ()=>{ codeDirty=true; });
 
-  // edit mode: vertex markers
   let editing=false;
   let editMarkers=[];
-
-  // draw mode:
-  let drawMode=null; // "new"|"add"
+  let drawMode=null;
   let drawPoints=[];
   let drawPointMarkers=[];
   let drawLine=null;
@@ -549,7 +548,6 @@
     stopEditMode();
     editing=true;
 
-    // vertex markers
     for (const poly of pack.polygons){
       const path = poly.getPath();
       const len = path.getLength();
@@ -567,7 +565,7 @@
           if (p.getLength() <= 3){ setStatus("점 삭제 불가(최소 3점)", "WARN"); return; }
           p.removeAt(i);
           poly.setPath(p);
-          enterEditMode(); // rebuild markers
+          enterEditMode();
         });
         editMarkers.push(mk);
       }
@@ -681,6 +679,7 @@
 
     campInput.value = String(pack.row.camp || "").trim();
     codeInput.value = String(pack.row.full_code || pack.row.code || "").trim();
+    // ✅ Enter 분기 핵심: 선택 시 dirty를 false로 되돌려 “Enter=편집”이 가능해짐
     campDirty=false; codeDirty=false;
 
     const { week, night } = getVendorText(pack.row);
@@ -725,7 +724,6 @@
     if (codes.length === 0) await fetchOne("");
     else for (const c of codes){ try{ await fetchOne(c); }catch(e){ log(`조회 실패(${c}): ${e.message}`); } }
 
-    // render
     clearOverlays();
     routeRows = all;
 
@@ -771,6 +769,7 @@
     if (any) map.setBounds(bounds);
     rebuildAllLabels();
 
+    // ✅ 검색 완료 시 dirty 해제: 이후 Enter가 “편집모드”로 분기될 수 있게 함
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
   }
@@ -817,7 +816,6 @@
     await loadRoutes();
   }
 
-  // ===== addresses =====
   async function loadAddresses(){
     const camp = campInput.value.trim();
     const code = codeInput.value.trim();
@@ -845,7 +843,6 @@
     });
   }
 
-  // ===== share =====
   function kstYYYYMMDDHHMM(){
     const now = new Date();
     const kst = new Date(now.getTime() + 9*60*60*1000);
@@ -868,7 +865,6 @@
     navigator.clipboard.writeText(url).then(()=>setStatus("공유 링크 복사 완료", "OK")).catch(()=>prompt("공유 링크", url));
   }
 
-  // ===== vendor modal flows =====
   let vendorCandidate=null;
   let waveAction=null;
 
@@ -1014,7 +1010,6 @@
     await loadRoutes();
   }
 
-  // ===== camps modal flows =====
   let deliveryCampCandidate=null;
   function setDeliveryCampCandidate(c){
     deliveryCampCandidate=c||null;
@@ -1155,7 +1150,7 @@
     });
   }
 
-  // ===== label toggles =====
+  // ✅ 요청사항 1: 토글 클릭 시 rebuildAllLabels()로 오버레이 즉시 재생성
   labelToggleBtn.addEventListener("click", ()=>{
     routeLabelOn = !routeLabelOn;
     refreshLabelToggleText();
@@ -1170,18 +1165,19 @@
   });
   refreshLabelToggleText();
 
-  // ===== Enter behavior: 검색 vs 편집모드 =====
   function isTypingInInput(){
     const a = document.activeElement;
     const tag = (a?.tagName || "").toLowerCase();
     return tag === "input" || tag === "textarea" || a?.isContentEditable;
   }
 
+  // ✅ 요청사항 3: Enter 분기 규칙
+  // - 선택 라우트가 있고, 입력이 dirty가 아니면(=입력 변경 없음) Enter → 편집모드
+  // - 입력이 dirty면 Enter → 검색(loadRoutes)
   function inputEnterHandler(e){
     if (e.key !== "Enter") return;
     e.preventDefault(); e.stopPropagation();
 
-    // 선택 라우트 + 입력 변경 없음이면 편집모드 우선
     const canEdit = !!selectedRouteId && !campDirty && !codeDirty;
     if (canEdit){
       if (editing) saveCurrent().catch(err=>setStatus(err.message,"ERR"));
@@ -1204,7 +1200,7 @@
     }
 
     if (e.key !== "Enter") return;
-    if (isTypingInInput()) return; // input에서는 inputEnterHandler가 처리
+    if (isTypingInInput()) return;
 
     if (drawMode){ e.preventDefault(); finishDraw(); return; }
     if (!selectedRouteId) return;
@@ -1213,7 +1209,6 @@
     else enterEditMode();
   });
 
-  // ===== buttons =====
   loadBtn.addEventListener("click", ()=> loadRoutes().catch(err=>setStatus(err.message,"ERR")));
   drawNewBtn.addEventListener("click", ()=> beginDraw("new"));
   drawAddBtn.addEventListener("click", ()=> beginDraw("add"));
@@ -1239,12 +1234,10 @@
   deliveryClearBtn.addEventListener("click", ()=> saveDelivery(true).catch(err=>setStatus(err.message,"ERR")));
   deliveryShowBtn.addEventListener("click", showDeliveryPin);
 
-  // ===== map init =====
   kakao.maps.load(()=> {
     map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5665,126.9780), level: 7 });
     geocoder = new kakao.maps.services.Geocoder();
 
-    // satellite toggle
     let isSatellite=false;
     toggleMapTypeBtn.addEventListener("click", ()=> {
       isSatellite=!isSatellite;
@@ -1252,7 +1245,6 @@
       toggleMapTypeBtn.textContent = isSatellite ? "일반" : "위성";
     });
 
-    // roadview toggle (간단)
     function ensureRoadview(){
       if (roadview && roadviewClient) return;
       roadview = new kakao.maps.Roadview($("roadview"));
@@ -1283,7 +1275,6 @@
     }
     toggleRoadviewBtn.addEventListener("click", ()=> setRoadviewOn(!roadviewOn));
 
-    // draw click handlers
     kakao.maps.event.addListener(map, "click", (e)=>{ if (drawMode) addDrawPoint(e.latLng); });
     kakao.maps.event.addListener(map, "rightclick", ()=>{ if (drawMode) popDrawPoint(); });
 

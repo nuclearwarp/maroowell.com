@@ -192,6 +192,81 @@
       pointer-events:none;
     }
 
+    .gps-control{
+      position:absolute;
+      right:12px;
+      bottom:18px;
+      z-index:26;
+      pointer-events:auto;
+    }
+    .gps-btn{
+      width:44px;
+      height:44px;
+      border:1px solid rgba(0,0,0,.12);
+      border-radius:999px;
+      background:rgba(255,255,255,.96);
+      box-shadow:0 4px 14px rgba(0,0,0,.18);
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:0;
+      appearance:none;
+      -webkit-appearance:none;
+    }
+    .gps-btn:hover{background:#fff;}
+    .gps-btn .gpsIcon{
+      width:22px;
+      height:22px;
+      position:relative;
+      display:block;
+    }
+    .gps-btn .gpsIcon::before,
+    .gps-btn .gpsIcon::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      margin:auto;
+      border-radius:999px;
+      box-sizing:border-box;
+    }
+    .gps-btn .gpsIcon::before{
+      width:20px;
+      height:20px;
+      border:2px solid #475569;
+      background:transparent;
+    }
+    .gps-btn .gpsIcon::after{
+      width:6px;
+      height:6px;
+      background:#475569;
+    }
+    .gps-btn .gpsCrossX,
+    .gps-btn .gpsCrossY{
+      position:absolute;
+      left:50%;
+      top:50%;
+      transform:translate(-50%,-50%);
+      background:#475569;
+      border-radius:999px;
+    }
+    .gps-btn .gpsCrossX{width:2px;height:22px;}
+    .gps-btn .gpsCrossY{width:22px;height:2px;}
+
+    .gps-btn.is-mark .gpsIcon::before{border-color:#2b7cff;}
+    .gps-btn.is-mark .gpsIcon::after,
+    .gps-btn.is-mark .gpsCrossX,
+    .gps-btn.is-mark .gpsCrossY{background:#2b7cff;}
+
+    .gps-btn.is-follow{
+      background:#2b7cff;
+      border-color:rgba(0,0,0,.08);
+    }
+    .gps-btn.is-follow .gpsIcon::before{border-color:#fff;}
+    .gps-btn.is-follow .gpsIcon::after,
+    .gps-btn.is-follow .gpsCrossX,
+    .gps-btn.is-follow .gpsCrossY{background:#fff;}
+
     .sidebar-fab{
       display:none;
       position:absolute;
@@ -419,6 +494,15 @@
         line-height:1;
       }
 
+      .gps-control{
+        right:10px;
+        bottom:16px;
+      }
+      .gps-btn{
+        width:40px;
+        height:40px;
+      }
+
       .modalCard{
         width:min(94vw, 720px);
         max-height:min(86vh, 820px);
@@ -555,6 +639,15 @@
       <button id="toggleMapType" title="일반/위성 전환">위성</button>
       <button id="toggleRoadview" title="로드뷰 보기/종료">로드뷰</button>
       <span id="roadviewHint" class="hint">로드뷰: 지도 클릭</span>
+    </div>
+
+    <div class="gps-control">
+      <button id="gpsBtn" class="gps-btn" type="button" title="현재 위치 표시" aria-label="현재 위치 표시">
+        <span class="gpsIcon" aria-hidden="true">
+          <span class="gpsCrossX"></span>
+          <span class="gpsCrossY"></span>
+        </span>
+      </button>
     </div>
 
     <div class="floatingHint" id="hint"></div>
@@ -738,6 +831,7 @@
   const toggleRoadviewBtn = $("toggleRoadview");
   const roadviewHintEl = $("roadviewHint");
   const mapWrapEl = $("mapWrap");
+  const gpsBtn = $("gpsBtn");
 
   const placeSearchModalEl = $("placeSearchModal");
   const placeSearchCloseBtn = $("placeSearchCloseBtn");
@@ -1347,6 +1441,200 @@
   function clearDeliveryPin(){
     if (deliveryPinMarker) deliveryPinMarker.setMap(null);
     deliveryPinMarker = null;
+  }
+
+  const GPS_STATE = { OFF: 0, MARK: 1, FOLLOW: 2 };
+  let gpsState = GPS_STATE.OFF;
+  let gpsWatchId = null;
+  let gpsMarker = null;
+  let gpsLatLng = null;
+  let __mwGpsDotImg = null;
+  let gpsFollowDragEndListener = null;
+  let gpsFollowZoomChangedListener = null;
+
+  function gpsDotImage(){
+    if (!__mwGpsDotImg){
+      __mwGpsDotImg = makeDotMarkerImage({
+        size: 18,
+        fill: "#2b7cff",
+        stroke: "#ffffff",
+        strokeWidth: 4
+      });
+    }
+    return __mwGpsDotImg;
+  }
+
+  function setGpsButtonState(){
+    if (!gpsBtn) return;
+    gpsBtn.classList.toggle("is-mark", gpsState === GPS_STATE.MARK);
+    gpsBtn.classList.toggle("is-follow", gpsState === GPS_STATE.FOLLOW);
+
+    const title =
+      gpsState === GPS_STATE.OFF ? "현재 위치 표시" :
+      gpsState === GPS_STATE.MARK ? "현재 위치 고정" :
+      "현재 위치 해제";
+
+    gpsBtn.title = title;
+    gpsBtn.setAttribute("aria-label", title);
+  }
+
+  function clearGpsMarker(){
+    try{ gpsMarker?.setMap?.(null); }catch{}
+    gpsMarker = null;
+    gpsLatLng = null;
+  }
+
+  function stopGpsWatch(){
+    if (gpsWatchId == null) return;
+    try{ navigator.geolocation.clearWatch(gpsWatchId); }catch{}
+    gpsWatchId = null;
+  }
+
+  function removeGpsFollowLocks(){
+    if (!map) return;
+    if (gpsFollowDragEndListener){
+      kakao.maps.event.removeListener(map, "dragend", gpsFollowDragEndListener);
+      gpsFollowDragEndListener = null;
+    }
+    if (gpsFollowZoomChangedListener){
+      kakao.maps.event.removeListener(map, "zoom_changed", gpsFollowZoomChangedListener);
+      gpsFollowZoomChangedListener = null;
+    }
+  }
+
+  function applyGpsFollowLocks(){
+    if (!map) return;
+    removeGpsFollowLocks();
+    gpsFollowDragEndListener = ()=>{
+      if (gpsState === GPS_STATE.FOLLOW && gpsLatLng) map.panTo(gpsLatLng);
+    };
+    gpsFollowZoomChangedListener = ()=>{
+      if (gpsState === GPS_STATE.FOLLOW && gpsLatLng) map.panTo(gpsLatLng);
+    };
+    kakao.maps.event.addListener(map, "dragend", gpsFollowDragEndListener);
+    kakao.maps.event.addListener(map, "zoom_changed", gpsFollowZoomChangedListener);
+  }
+
+  function gpsErrorMessage(err){
+    switch (err?.code){
+      case 1: return "위치 권한이 거부되었습니다.";
+      case 2: return "현재 위치를 확인할 수 없습니다.";
+      case 3: return "위치 확인 시간이 초과되었습니다.";
+      default: return err?.message || "GPS 오류";
+    }
+  }
+
+  function updateGpsMarkerFromPosition(pos, centerNow=false){
+    const lat = Number(pos?.coords?.latitude);
+    const lng = Number(pos?.coords?.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("위치 좌표가 올바르지 않습니다.");
+    }
+
+    const latlng = new kakao.maps.LatLng(lat, lng);
+    gpsLatLng = latlng;
+
+    if (!gpsMarker){
+      gpsMarker = new kakao.maps.Marker({
+        position: latlng,
+        image: gpsDotImage(),
+        zIndex: 1200,
+        clickable: false
+      });
+      gpsMarker.setMap(map);
+    } else {
+      gpsMarker.setPosition(latlng);
+    }
+
+    if (centerNow || gpsState === GPS_STATE.FOLLOW){
+      map.panTo(latlng);
+    }
+  }
+
+  function getCurrentPosition(centerNow=false){
+    return new Promise((resolve, reject)=>{
+      if (!navigator.geolocation){
+        return reject(new Error("이 브라우저는 위치 기능을 지원하지 않습니다."));
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos)=>{
+          try{
+            updateGpsMarkerFromPosition(pos, centerNow);
+            resolve(pos);
+          }catch(e){
+            reject(e);
+          }
+        },
+        reject,
+        {
+          enableHighAccuracy: true,
+          maximumAge: 10000,
+          timeout: 12000
+        }
+      );
+    });
+  }
+
+  function ensureGpsWatch(){
+    if (gpsWatchId != null || !navigator.geolocation) return;
+
+    gpsWatchId = navigator.geolocation.watchPosition(
+      (pos)=>{
+        try{
+          updateGpsMarkerFromPosition(pos, false);
+        }catch{}
+      },
+      (err)=>{
+        setStatus(gpsErrorMessage(err), "ERR");
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 15000
+      }
+    );
+  }
+
+  async function handleGpsButtonClick(){
+    try{
+      if (gpsState === GPS_STATE.OFF){
+        await getCurrentPosition(false);
+        gpsState = GPS_STATE.MARK;
+        setGpsButtonState();
+        ensureGpsWatch();
+        removeGpsFollowLocks();
+        setStatus("현재 위치 표시", "OK");
+        return;
+      }
+
+      if (gpsState === GPS_STATE.MARK){
+        gpsState = GPS_STATE.FOLLOW;
+        setGpsButtonState();
+        ensureGpsWatch();
+        applyGpsFollowLocks();
+
+        if (gpsLatLng) map.panTo(gpsLatLng);
+        else await getCurrentPosition(true);
+
+        setStatus("현재 위치 고정", "OK");
+        return;
+      }
+
+      gpsState = GPS_STATE.OFF;
+      setGpsButtonState();
+      removeGpsFollowLocks();
+      stopGpsWatch();
+      clearGpsMarker();
+      setStatus("현재 위치 해제", "OK");
+    } catch (err){
+      gpsState = GPS_STATE.OFF;
+      setGpsButtonState();
+      removeGpsFollowLocks();
+      stopGpsWatch();
+      clearGpsMarker();
+      setStatus(gpsErrorMessage(err), "ERR");
+    }
   }
 
   function clearOverlays(){
@@ -2059,6 +2347,9 @@
 
     kakao.maps.event.addListener(map, "click", (e)=>{ if (drawMode) addDrawPoint(e.latLng); });
     kakao.maps.event.addListener(map, "rightclick", ()=>{ if (drawMode) popDrawPoint(); });
+
+    setGpsButtonState();
+    gpsBtn?.addEventListener("click", handleGpsButtonClick);
 
     setStatus("지도 로드 완료", "OK");
     applySidebarPref();

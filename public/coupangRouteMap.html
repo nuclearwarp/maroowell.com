@@ -448,6 +448,22 @@
     for (const ll of latlngs){ lat += ll.getLat(); lng += ll.getLng(); }
     return new kakao.maps.LatLng(lat/latlngs.length, lng/latlngs.length);
   }
+  // FIX: Kakao Maps Polygon.getPath() returns Array.<LatLng>, not Google Maps MVCArray.
+  // Normalize to a plain Array so we can safely use .length and [i].
+  function polygonPathToArray(polygon){
+    const raw = polygon?.getPath?.();
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+
+    // Defensive compatibility (if a MVCArray-like object is ever passed in)
+    if (typeof raw.getLength === "function" && typeof raw.getAt === "function"){
+      const arr = [];
+      for (let i=0; i<raw.getLength(); i++) arr.push(raw.getAt(i));
+      return arr;
+    }
+    return [];
+  }
+
   function getVendorText(row){
     const week = (row?.vendor_name_2w ?? row?.vendor_2w_name ?? row?.vendor_week_name ?? row?.vendor_name_week ?? "-");
     const night = (row?.vendor_name_1w ?? row?.vendor_1w_name ?? row?.vendor_night_name ?? row?.vendor_name_night ?? "-");
@@ -521,9 +537,7 @@
     pack.labels = [];
     if (!routeLabelOn && !vendorLabelOn) return;
     for (const poly of pack.polygons){
-      const path = poly.getPath();
-      const pts = [];
-      for (let i=0;i<path.getLength();i++) pts.push(path.getAt(i));
+      const pts = polygonPathToArray(poly);
       if (pts.length < 3) continue;
       const lb = makeLabelOverlay(pack.row, centroid(pts));
       lb.setMap(map);
@@ -550,21 +564,21 @@
     editing=true;
 
     for (const poly of pack.polygons){
-      const path = poly.getPath();
-      const len = path.getLength();
+      const path = polygonPathToArray(poly);
+      const len = path.length;
       for (let i=0;i<len;i++){
-        const mk = new kakao.maps.Marker({ position: path.getAt(i), draggable: true, zIndex: 100 });
+        const mk = new kakao.maps.Marker({ position: path[i], draggable: true, zIndex: 100 });
         mk.setMap(map);
         kakao.maps.event.addListener(mk, "dragend", () => {
-          const p = poly.getPath();
-          p.setAt(i, mk.getPosition());
+          const p = polygonPathToArray(poly).slice();
+          p[i] = mk.getPosition();
           poly.setPath(p);
           rebuildLabelsFor(selectedRouteId);
         });
         kakao.maps.event.addListener(mk, "rightclick", () => {
-          const p = poly.getPath();
-          if (p.getLength() <= 3){ setStatus("점 삭제 불가(최소 3점)", "WARN"); return; }
-          p.removeAt(i);
+          const p = polygonPathToArray(poly).slice();
+          if (p.length <= 3){ setStatus("점 삭제 불가(최소 3점)", "WARN"); return; }
+          p.splice(i, 1);
           poly.setPath(p);
           enterEditMode();
         });
@@ -778,10 +792,10 @@
   function polygonsToWgs84(polygons){
     const out=[];
     for (const p of polygons){
-      const path = p.getPath();
+      const path = polygonPathToArray(p);
       const ring=[];
-      for (let i=0;i<path.getLength();i++){
-        const ll = path.getAt(i);
+      for (let i=0;i<path.length;i++){
+        const ll = path[i];
         ring.push([ll.getLng(), ll.getLat()]);
       }
       if (ring.length>=3) out.push(ring);

@@ -22,11 +22,49 @@
     }
     *{box-sizing:border-box}
     html,body{height:100%; margin:0; font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif; background:#0a0f1a;}
-    .wrap{display:flex;height:100%;}
-    .left{width:360px;min-width:340px;max-width:420px;background:linear-gradient(180deg,var(--bg),#070b13);color:var(--txt);border-right:1px solid var(--line);padding:14px 14px 10px 14px;overflow:auto;}
-    .title{font-size:18px;font-weight:900;letter-spacing:.2px;margin:2px 0 10px;display:flex;align-items:center;gap:8px;}
+    .wrap{display:flex;height:100%;position:relative;}
+
+    .left{
+      width:360px;
+      min-width:340px;
+      max-width:420px;
+      background:linear-gradient(180deg,var(--bg),#070b13);
+      color:var(--txt);
+      border-right:1px solid var(--line);
+      padding:14px 14px 10px 14px;
+      overflow:auto;
+    }
+
+    .title{
+      font-size:18px;
+      font-weight:900;
+      letter-spacing:.2px;
+      margin:2px 0 10px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
     .title a{display:flex;align-items:center;text-decoration:none}
     .title img{width:24px;height:24px;transform:translateY(-2px);cursor:pointer}
+    .titleText{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .titleSpacer{flex:1;}
+
+    .topIconBtn{
+      height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:900;
+      font-size:12px;
+      white-space:nowrap;
+    }
+    .topIconBtn:hover{background:rgba(255,255,255,.10)}
+    .topIconBtn.danger{background:rgba(107,27,27,.35);border-color:rgba(255,60,60,.22)}
+    .mobileOnly{display:none;}
+
     .group{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:10px;margin:10px 0;}
     .label{font-size:12px;color:var(--muted);margin:6px 0 6px;}
     .label.sectionTitle{text-align:center;font-weight:900;letter-spacing:.2px;}
@@ -68,6 +106,23 @@
     .map-controls .hint{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.55);color:#cbd5e1;font-size:12px;display:none;}
     .floatingHint{position:absolute;top:10px;left:10px;z-index:20;background:rgba(0,0,0,.55);color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:8px 10px;font-size:12px;max-width:520px;display:none;pointer-events:none;}
 
+    .sidebar-fab{
+      display:none;
+      position:absolute;
+      top:10px;
+      left:10px;
+      z-index:30;
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(255,255,255,.14);
+      color:#fff;
+      padding:8px 12px;
+      border-radius:999px;
+      cursor:pointer;
+      font-weight:900;
+      font-size:12px;
+      backdrop-filter:blur(6px);
+    }
+
     /* Modal */
     .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(2px);}
     .modalCard{width:min(720px, calc(100% - 40px));max-height:min(720px, calc(100% - 40px));background:linear-gradient(180deg, rgba(15,26,45,.96), rgba(8,14,26,.96));border:1px solid rgba(255,255,255,.12);border-radius:18px;box-shadow:0 22px 80px rgba(0,0,0,.55);overflow:hidden;display:flex;flex-direction:column;}
@@ -99,6 +154,26 @@
     .waveBtn{border-radius:16px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.20);color:#fff;cursor:pointer;padding:14px 12px;text-align:left;font-weight:900;}
     .waveBtn:hover{background:rgba(0,0,0,.30)}
     .waveBtn .sub{display:block;margin-top:6px;color:rgba(230,238,252,.70);font-size:12px;font-weight:800;}
+
+    @media (max-width: 860px){
+      .mobileOnly{display:inline-flex;}
+      .left{
+        position:absolute;
+        top:0;
+        left:0;
+        bottom:0;
+        width:min(92vw,420px);
+        max-width:420px;
+        min-width:0;
+        transform:translateX(0);
+        transition:transform .18s ease;
+        z-index:120;
+        box-shadow:12px 0 40px rgba(0,0,0,.35);
+      }
+      .wrap.sidebar-hidden .left{transform:translateX(-105%);}
+      .sidebar-fab{display:inline-flex;}
+      .floatingHint{top:56px;left:10px;}
+    }
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -110,7 +185,10 @@
   <div class="left">
     <div class="title">
       <a href="/index.html"><img src="/favicon.ico" alt="Maroowell" /></a>
-      <span>라우트 편집기</span>
+      <span class="titleText">라우트 편집기</span>
+      <span class="titleSpacer"></span>
+      <button id="sidebarHideBtn" class="topIconBtn mobileOnly" type="button" title="메뉴 숨기기">⟨</button>
+      <button id="logoutBtn" class="topIconBtn danger" type="button" title="로그아웃">로그아웃</button>
     </div>
 
     <div class="group">
@@ -192,6 +270,7 @@
       <div class="row">
         <button id="labelToggleBtn" class="btn" type="button">라우트 라벨 ON</button>
         <button id="resetBtn" class="btn" type="button">지도 초기화</button>
+        <button id="addrSearchBtn" class="btn" type="button">주소검색</button>
       </div>
 
       <div style="height:8px"></div>
@@ -214,6 +293,8 @@
   </div>
 
   <div class="map">
+    <button id="sidebarFabBtn" class="sidebar-fab mobileOnly" type="button" title="메뉴">☰</button>
+
     <div id="mapWrap">
       <div id="map"></div>
       <div id="roadview"></div>
@@ -283,6 +364,35 @@
   if (window.__mwRouteFixInit) return;
   window.__mwRouteFixInit = true;
 
+  // Auth (Supabase) - config.js 기반
+  const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+  const LOGIN_PATH = (PATHS?.login || "/login.html");
+  const authStorage = (()=>{ try { return window.sessionStorage; } catch { return null; } })();
+  const mwSupabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: !!authStorage,
+          storage: authStorage || undefined,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      })
+    : null;
+
+  async function ensureLoggedIn(){
+    if (!mwSupabase?.auth) return true;
+    try{
+      const { data: { session } } = await mwSupabase.auth.getSession();
+      if (session) return true;
+    }catch(e){}
+    const next = location.pathname + location.search;
+    location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+    return false;
+  }
+
+  // 로그인 세션 없으면 login.html로 이동
+  if (!(await ensureLoggedIn())) return;
+
   const API_BASE = "https://route.maroowell.com";
   const ROUTE_ENDPOINT = `${API_BASE}/route`;
   const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
@@ -292,10 +402,17 @@
   const GOLDEN_ANGLE = 137.50776405003785;
 
   const $ = (id) => document.getElementById(id);
+  const wrapEl = document.querySelector(".wrap");
+
   const logEl = $("log");
   const statusPill = $("statusPill");
   const selectedInfo = $("selectedInfo");
   const hintEl = $("hint");
+
+  const sidebarHideBtn = $("sidebarHideBtn");
+  const sidebarFabBtn = $("sidebarFabBtn");
+  const logoutBtn = $("logoutBtn");
+  const addrSearchBtn = $("addrSearchBtn");
 
   const campInput = $("campInput");
   const codeInput = $("codeInput");
@@ -353,10 +470,43 @@
   const roadviewHintEl = $("roadviewHint");
   const mapWrapEl = $("mapWrap");
 
+  // Mobile sidebar
+  const SIDEBAR_PREF_KEY = "mw_route_sidebar_hidden";
+  const mqMobile = window.matchMedia("(max-width: 860px)");
+  function setSidebarHidden(hidden){
+    if (!wrapEl) return;
+    wrapEl.classList.toggle("sidebar-hidden", !!hidden);
+    if (sidebarFabBtn) sidebarFabBtn.textContent = hidden ? "☰" : "⟨";
+    try{ window.localStorage.setItem(SIDEBAR_PREF_KEY, hidden ? "1" : "0"); }catch{}
+  }
+  function applySidebarPref(){
+    if (!mqMobile.matches){ setSidebarHidden(false); return; }
+    let hidden=false;
+    try{ hidden = window.localStorage.getItem(SIDEBAR_PREF_KEY) === "1"; }catch{}
+    setSidebarHidden(hidden);
+  }
+  applySidebarPref();
+  if (mqMobile.addEventListener) mqMobile.addEventListener("change", applySidebarPref);
+  sidebarHideBtn?.addEventListener("click", ()=> setSidebarHidden(true));
+  sidebarFabBtn?.addEventListener("click", ()=> {
+    const hidden = wrapEl?.classList.contains("sidebar-hidden");
+    setSidebarHidden(!hidden);
+  });
+
+  // Logout
+  async function doLogout(){
+    try{ await mwSupabase?.auth?.signOut?.(); }catch{}
+    location.replace(LOGIN_PATH);
+  }
+  logoutBtn?.addEventListener("click", async ()=>{
+    if (!confirm("로그아웃할까요?")) return;
+    await doLogout();
+  });
+
   const ts = () => {
     const d = new Date();
     return `[${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}]`;
-  };
+    };
   function log(m){ logEl.textContent += `${ts()} ${m}\n`; logEl.scrollTop = logEl.scrollHeight; }
   function setStatus(m, k="OK"){ statusPill.textContent = k; if (m) log(`${k} ${m}`); }
   function hint(m, show=true){ hintEl.textContent = m; hintEl.style.display = show ? "block" : "none"; }
@@ -506,6 +656,38 @@
   let drawPointMarkers=[];
   let drawLine=null;
 
+  // Address search overlay
+  let addrSearchMarker=null;
+  let addrSearchInfo=null;
+  function clearAddrSearchOverlay(){
+    try{ addrSearchInfo?.close?.(); }catch{}
+    addrSearchInfo = null;
+    try{ addrSearchMarker?.setMap?.(null); }catch{}
+    addrSearchMarker = null;
+  }
+  function runAddressSearch(){
+    if (!geocoder || !map){ setStatus("지도 준비 중입니다.", "WARN"); return; }
+    const q = prompt("검색할 주소를 입력하세요", "");
+    if (!q) return;
+
+    // Kakao 공식: geocoder.addressSearch(addr, callback) citeturn0search5turn0search0
+    geocoder.addressSearch(q, (res, st)=>{
+      if (st !== kakao.maps.services.Status.OK || !res?.length){
+        setStatus("주소 검색 결과가 없습니다.", "WARN");
+        return;
+      }
+      const pos = new kakao.maps.LatLng(Number(res[0].y), Number(res[0].x));
+      clearAddrSearchOverlay();
+      addrSearchMarker = new kakao.maps.Marker({ position: pos, zIndex: 1000 });
+      addrSearchMarker.setMap(map);
+      addrSearchInfo = new kakao.maps.InfoWindow({ content: `<div style="padding:6px 10px;font-size:12px;font-weight:900;">${escapeHtml(q)}</div>` });
+      addrSearchInfo.open(map, addrSearchMarker);
+      map.setCenter(pos);
+      setStatus("주소검색 완료", "OK");
+    });
+  }
+  addrSearchBtn?.addEventListener("click", runAddressSearch);
+
   function makeLabelOverlay(row, position){
     const code = String(row?.full_code || row?.code || "").trim();
     const { week, night } = getVendorText(row);
@@ -632,9 +814,12 @@
     drawLine.setMap(map);
     hint("그리기: 지도 클릭 점추가 · Enter 완료 · 우클릭 마지막 점 취소 · ESC 취소", true);
     setStatus(mode==="new" ? "새로 그리기 시작" : "구역 추가 시작", "OK");
+
+    // 모바일이면 작업 시작 시 사이드바를 자동으로 숨김(지도를 넓게)
+    if (mqMobile.matches) setSidebarHidden(true);
   }
 
-  // BUGFIX: 선택된 라우트 없이도 새로 그리기/구역 추가가 동작하도록 입력 기반 자동 선택/자동 로드
+  // 선택된 라우트 없이도 새로 그리기/구역 추가가 동작하도록 입력 기반 자동 선택/자동 로드
   function normalizeCodeKey(s){ return String(s||"").trim().toUpperCase(); }
   function findRouteIdByCampAndCodeExact(camp, code){
     const tCamp = String(camp||"").trim();
@@ -659,11 +844,9 @@
 
     const code = codes[0];
 
-    // 1) 이미 로드된 데이터에서 정확 일치 탐색
     const found = findRouteIdByCampAndCodeExact(camp, code);
     if (found){ selectRoute(found); return true; }
 
-    // 2) 자동 로드 후 정확 일치 재탐색
     try{
       setStatus("라우트 자동 불러오기...", "OK");
       await loadRoutes();
@@ -675,19 +858,12 @@
     const found2 = findRouteIdByCampAndCodeExact(camp, code);
     if (found2){ selectRoute(found2); return true; }
 
-    // 3) 그래도 못 찾았는데 결과가 1개면 그거 선택
     if (overlayById.size === 1){
       const onlyId = overlayById.keys().next().value;
       if (onlyId){ selectRoute(onlyId); return true; }
     }
 
-    const candidates = [];
-    for (const pack of overlayById.values()){
-      const rc = String(pack?.row?.full_code || pack?.row?.code || "").trim();
-      if (rc) candidates.push(rc);
-    }
-    const unique = Array.from(new Set(candidates));
-    setStatus(`선택할 라우트를 찾지 못했습니다. code=${code}. ${unique.length ? "불러온 라우트: "+unique.slice(0,12).join(", ")+(unique.length>12?" ...":"") : "불러온 라우트 없음"}`, "WARN");
+    setStatus(`선택할 라우트를 찾지 못했습니다. code=${code}`, "WARN");
     return false;
   }
 
@@ -784,6 +960,8 @@
     selectedInfo.textContent = `선택: ${campInput.value} / ${codeInput.value} (id=${id})`;
     setStatus("라우트 선택됨 (Enter=편집모드)", "OK");
     loadAddresses().catch(e=>log("주소 로드 실패: "+e.message));
+
+    if (mqMobile.matches) setSidebarHidden(true);
   }
 
   function clearSelection(reason="선택 해제"){
@@ -878,6 +1056,7 @@
 
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
+    if (mqMobile.matches) setSidebarHidden(true);
   }
 
   function polygonsToWgs84(polygons){
@@ -1250,13 +1429,43 @@
     await loadRoutes();
   }
 
+  // 입차지 표시 개선: 선택 강제 제거(불러온 라우트들이 동일 입차지면 자동 사용)
+  let deliveryPinMarker=null;
+  function inferLoadedDeliveryIfUnique(){
+    const addrSet = new Set();
+    const nameSet = new Set();
+    for (const pack of overlayById.values()){
+      const a = String(pack?.row?.delivery_location_address || "").trim();
+      if (a) addrSet.add(a);
+      const n = String(pack?.row?.delivery_location_name || "").trim();
+      if (n) nameSet.add(n);
+    }
+    if (addrSet.size === 1){
+      return { address: Array.from(addrSet)[0], name: nameSet.size === 1 ? Array.from(nameSet)[0] : "" };
+    }
+    return null;
+  }
+
   function showDeliveryPin(){
-    const addr = deliveryAddrInput.value.trim();
-    if (!addr){ setStatus("입차지 주소가 없습니다.","WARN"); return; }
+    let addr = deliveryAddrInput.value.trim();
+    if (!addr){
+      const inferred = inferLoadedDeliveryIfUnique();
+      if (inferred?.address){
+        addr = inferred.address;
+        deliveryAddrInput.value = addr;
+        if (!deliveryNameInput.value.trim() && inferred.name) deliveryNameInput.value = inferred.name;
+      }
+    }
+    if (!addr){
+      setStatus("입차지 주소가 없습니다. (노선 선택 또는, 불러온 라우트들이 동일 입차지를 가져야 합니다.)","WARN");
+      return;
+    }
     geocoder.addressSearch(addr, (res, st)=>{
       if (st !== kakao.maps.services.Status.OK || !res?.length){ setStatus("입차지 주소를 찾을 수 없습니다.","ERR"); return; }
       const pos = new kakao.maps.LatLng(Number(res[0].y), Number(res[0].x));
-      new kakao.maps.Marker({ position: pos, zIndex: 999 }).setMap(map);
+      if (deliveryPinMarker) deliveryPinMarker.setMap(null);
+      deliveryPinMarker = new kakao.maps.Marker({ position: pos, zIndex: 999 });
+      deliveryPinMarker.setMap(map);
       map.panTo(pos);
       setStatus("입차지 표시 완료","OK");
     });
@@ -1337,7 +1546,13 @@
   });
   saveBtn.addEventListener("click", ()=> saveCurrent().catch(err=>setStatus(err.message,"ERR")));
   deletePolyBtn.addEventListener("click", ()=> deletePolygon().catch(err=>setStatus(err.message,"ERR")));
-  resetBtn.addEventListener("click", ()=> { clearOverlays(); setStatus("초기화 완료","OK"); });
+  resetBtn.addEventListener("click", ()=> {
+    clearOverlays();
+    clearAddrSearchOverlay();
+    if (deliveryPinMarker) deliveryPinMarker.setMap(null);
+    deliveryPinMarker = null;
+    setStatus("초기화 완료","OK");
+  });
   shareBtn.addEventListener("click", generateShareLink);
 
   vendorSearchInput.addEventListener("keydown",(e)=>{ if(!e.isComposing && e.key==="Enter"){ e.preventDefault(); runVendorSearch(); }});

@@ -196,7 +196,6 @@
 
       <div style="height:8px"></div>
       <div class="row">
-        <!-- ✅ 요청사항 5: 공유 링크 버튼은 한 칸 아래로 (UI만 변경) -->
         <button id="shareBtn" class="btn ok" style="width:100%;flex:1;" type="button">🔗 공유 링크 생성</button>
       </div>
 
@@ -464,6 +463,29 @@
     return [];
   }
 
+  // UI 개선2: 기본 핀 마커 대신 "점(dot)" 마커를 사용 (MarkerImage 활용)
+  // - Kakao Marker는 image 옵션으로 MarkerImage를 받을 수 있음. citeturn1search4
+  let __mwDotEditImg = null;
+  let __mwDotDrawImg = null;
+  function makeDotMarkerImage({ size=12, fill="#ffffff", stroke="#0b1220", strokeWidth=2 } = {}){
+    const s = Number(size) || 12;
+    const cx = s / 2;
+    const r = Math.max(1, cx - strokeWidth / 2);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}">
+      <circle cx="${cx}" cy="${cx}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>
+    </svg>`;
+    const uri = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    return new kakao.maps.MarkerImage(uri, new kakao.maps.Size(s, s), { offset: new kakao.maps.Point(cx, cx) });
+  }
+  function editDotImage(){
+    if (!__mwDotEditImg) __mwDotEditImg = makeDotMarkerImage({ size: 12, fill: "rgba(255,255,255,0.95)", stroke: "#0b1220", strokeWidth: 2 });
+    return __mwDotEditImg;
+  }
+  function drawDotImage(){
+    if (!__mwDotDrawImg) __mwDotDrawImg = makeDotMarkerImage({ size: 10, fill: "#00C2FF", stroke: "#0b1220", strokeWidth: 2 });
+    return __mwDotDrawImg;
+  }
+
   function getVendorText(row){
     const week = (row?.vendor_name_2w ?? row?.vendor_2w_name ?? row?.vendor_week_name ?? row?.vendor_name_week ?? "-");
     const night = (row?.vendor_name_1w ?? row?.vendor_1w_name ?? row?.vendor_night_name ?? row?.vendor_name_night ?? "-");
@@ -499,28 +521,36 @@
     const color = row.__color || "rgba(0,194,255,1)";
 
     const el = document.createElement("div");
-    el.style.padding = "6px 10px";
-    el.style.borderRadius = "14px";
+    // UI 개선1: 라우트 라벨 크기/패딩 축소 + 그림자(음영) 완화
+    const showCode = routeLabelOn;
+    const showVendor = vendorLabelOn;
+    el.style.padding = showVendor ? "6px 9px" : "4px 8px";
+    el.style.borderRadius = "12px";
     el.style.background = "rgba(0,0,0,0.55)";
-    el.style.border = "1px solid rgba(255,255,255,0.18)";
-    el.style.boxShadow = "0 4px 14px rgba(0,0,0,0.28)";
+    el.style.border = "1px solid rgba(255,255,255,0.16)";
+    el.style.boxShadow = "0 3px 10px rgba(0,0,0,0.22)";
     el.style.color = "#fff";
-    el.style.backdropFilter = "blur(2px)";
+    el.style.backdropFilter = "blur(1.5px)";
     el.style.pointerEvents = "none";
-    el.style.maxWidth = "240px";
+    el.style.maxWidth = "220px";
+
+    // 라우트 라벨 OFF + 벤더 라벨 ON이면 강조선 추가
+    if (!showCode && showVendor){
+      el.style.borderLeft = `4px solid ${color}`;
+    }
 
     const parts = [];
-    if (routeLabelOn){
+    if (showCode){
       parts.push(`
         <div style="display:flex;align-items:center;gap:6px;">
-          <span style="width:8px;height:8px;border-radius:999px;background:${color};box-shadow:0 0 0 2px rgba(255,255,255,0.12)"></span>
-          <span style="font-weight:900;font-size:12px;letter-spacing:.2px;line-height:1.1;">${escapeHtml(code)}</span>
+          <span style="width:7px;height:7px;border-radius:999px;background:${color};box-shadow:0 0 0 2px rgba(255,255,255,0.12)"></span>
+          <span style="font-weight:900;font-size:11px;letter-spacing:.2px;line-height:1.1;">${escapeHtml(code)}</span>
         </div>
       `);
     }
-    if (vendorLabelOn){
+    if (showVendor){
       parts.push(`
-        <div style="margin-top:${routeLabelOn ? "4px" : "0"};font-size:11px;line-height:1.25;color:rgba(255,255,255,0.88);">
+        <div style="margin-top:${showCode ? "3px" : "0"};font-size:10px;line-height:1.25;color:rgba(255,255,255,0.88);">
           <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">주간: ${escapeHtml(week)}</div>
           <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">야간: ${escapeHtml(night)}</div>
         </div>
@@ -567,7 +597,7 @@
       const path = polygonPathToArray(poly);
       const len = path.length;
       for (let i=0;i<len;i++){
-        const mk = new kakao.maps.Marker({ position: path[i], draggable: true, zIndex: 100 });
+        const mk = new kakao.maps.Marker({ position: path[i], draggable: true, image: editDotImage(), zIndex: 100 });
         mk.setMap(map);
         kakao.maps.event.addListener(mk, "dragend", () => {
           const p = polygonPathToArray(poly).slice();
@@ -615,7 +645,7 @@
   }
   function addDrawPoint(latlng){
     drawPoints.push(latlng);
-    const mk = new kakao.maps.Marker({ position: latlng, zIndex: 200 });
+    const mk = new kakao.maps.Marker({ position: latlng, image: drawDotImage(), zIndex: 200 });
     mk.setMap(map);
     drawPointMarkers.push(mk);
     drawLine.setPath(drawPoints);
@@ -707,6 +737,22 @@
     selectedInfo.textContent = `선택: ${campInput.value} / ${codeInput.value} (id=${id})`;
     setStatus("라우트 선택됨 (Enter=편집모드)", "OK");
     loadAddresses().catch(e=>log("주소 로드 실패: "+e.message));
+  }
+
+  // UI 개선3: ESC로 "선택 해제" 복원 (편집 중 ESC는 편집 종료 + 선택 유지)
+  function clearSelection(reason="선택 해제"){
+    selectedRouteId = null;
+    stopEditMode();
+    stopDrawMode(true);
+    highlightSelection();
+    selectedInfo.textContent = "선택: 없음";
+    vendorWeekValue.textContent = "-";
+    vendorNightValue.textContent = "-";
+    deliveryNameInput.value = "";
+    deliveryAddrInput.value = "";
+    addressListGroup.style.display = "none";
+    addressList.innerHTML = "";
+    setStatus(reason, "OK");
   }
 
   async function loadRoutes(){
@@ -1206,11 +1252,18 @@
 
   window.addEventListener("keydown", (e)=>{
     if (e.key === "Escape"){
+      const modalWasOpen =
+        (vendorModalEl.style.display==="flex") ||
+        (waveModalEl.style.display==="flex") ||
+        (deliveryCampModalEl.style.display==="flex");
       if (vendorModalEl.style.display==="flex") closeModal(vendorModalEl);
       if (waveModalEl.style.display==="flex") closeModal(waveModalEl);
       if (deliveryCampModalEl.style.display==="flex") closeModal(deliveryCampModalEl);
-      if (drawMode){ stopDrawMode(true); setStatus("그리기 취소","OK"); }
-      if (editing){ stopEditMode(); setStatus("편집 종료","OK"); }
+      if (modalWasOpen) return;
+
+      if (drawMode){ stopDrawMode(true); setStatus("그리기 취소","OK"); return; }
+      if (editing){ stopEditMode(); setStatus("편집 종료(선택 유지)","OK"); return; }
+      if (selectedRouteId){ clearSelection(); return; }
       return;
     }
 

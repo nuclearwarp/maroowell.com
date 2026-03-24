@@ -483,10 +483,14 @@
     return url.toString();
   }
 
-  function buildMetaTitle(campValue, displayName, displayCode) {
-    let title = `${campValue} ${displayName}`.trim();
-    if (displayCode) title += ` ${displayCode}`;
-    return title || "배송 지도 공유";
+  function buildMetaTitle(campValue, displayCode, fallbackName) {
+    const campText = String(campValue || "").trim();
+    const codeText = String(displayCode || "").trim();
+    const fallbackText = String(fallbackName || "").trim();
+
+    if (campText && codeText) return `${campText} ${codeText}`.trim();
+    if (campText && fallbackText) return `${campText} ${fallbackText}`.trim();
+    return campText || fallbackText || "배송 지도 공유";
   }
 
   function updateMetaTags(title, description) {
@@ -1048,11 +1052,15 @@
       const displayAddress = routeData.delivery_location_address || "주소 정보 없음";
       const displayCode = code || (allRoutes.length === 1 ? (allRoutes[0].full_code || allRoutes[0].code || "") : "");
 
-      campName.textContent = `📍 ${camp} ${displayName}`;
+      campName.textContent = displayCode
+        ? `📍 ${camp} ${displayCode}`
+        : `📍 ${camp} ${displayName}`;
       campAddress.textContent = displayAddress;
 
-      const pageTitle = buildMetaTitle(camp, displayName, displayCode);
-      const pageDescription = `${pageTitle} 배송 구역을 확인하세요`;
+      const pageTitle = buildMetaTitle(camp, displayCode, displayName);
+      const pageDescription = displayAddress && displayAddress !== "주소 정보 없음"
+        ? `${displayAddress} · ${pageTitle} 배송 구역을 확인하세요`
+        : `${pageTitle} 배송 구역을 확인하세요`;
       updateMetaTags(pageTitle, pageDescription);
 
       if (displayAddress && displayAddress !== "주소 정보 없음") {
@@ -1112,7 +1120,7 @@
   }
 
   function init() {
-    const bootTitle = camp && code ? `${camp} ${code}` : (camp || "배송 지도 공유");
+    const bootTitle = buildMetaTitle(camp, code, "");
     const bootDescription = camp ? `${bootTitle} 배송 구역을 확인하세요` : "배송 구역 및 경로를 확인하세요";
     updateMetaTags(bootTitle, bootDescription);
 

@@ -10,7 +10,6 @@ const ROUTE_TABLE = "subsubroutes";
 const ADDRESS_TABLE = "addresses";
 const CAMPS_TABLE = "camps";
 const VENDORS_TABLE = "vendors";
-const SHARE_TEMPLATE_URL = "https://www.maroowell.com/share.html";
 const FAVICON_URL = "https://maroowell.com/favicon.ico?v=2";
 const OG_IMAGE_URL = "https://maroowell.com/assets/og/maroowell-1200x630.png?v=1";
 
@@ -40,9 +39,9 @@ export default {
         return cors(await handleAddressesGet(url, env));
       }
 
-      // share 페이지(OG/Twitter 메타 주입 + v 파라미터 자동 보정)
-      if ((path === "/share" || path === "/share.html") && request.method === "GET") {
-        return await handleShareHtml(url, env);
+      // 실제 공유 엔드포인트는 /share 만 처리
+      if (path === "/share" && request.method === "GET") {
+        return await handleShareHtml(request, url, env);
       }
 
       if (path === "/camps") {
@@ -170,11 +169,34 @@ function escapeHtmlAttr(s) {
     .replace(/'/g, "&#39;");
 }
 
-function upsertHeadTag(html, matchRegex, newTag) {
-  if (matchRegex.test(html)) return html.replace(matchRegex, newTag);
+function quoteJsString(s) {
+  return JSON.stringify(String(s ?? ""));
+}
+
+function removeHtmlTags(html, regexList = []) {
+  let out = String(html ?? "");
+  for (const re of regexList) {
+    out = out.replace(re, "");
+  }
+  return out;
+}
+
+function prependHeadBlock(html, block) {
   const headOpen = html.match(/<head[^>]*>/i);
-  if (headOpen) return html.replace(/<head[^>]*>/i, `${headOpen[0]}\n  ${newTag}`);
-  return `${newTag}\n${html}`;
+  if (headOpen) {
+    return html.replace(/<head[^>]*>/i, `${headOpen[0]}\n${block}`);
+  }
+  return `${block}\n${html}`;
+}
+
+function buildVersionedAssetUrl(rawUrl, versionValue) {
+  try {
+    const u = new URL(String(rawUrl));
+    if (versionValue) u.searchParams.set("ogv", versionValue);
+    return u.toString();
+  } catch {
+    return String(rawUrl || "");
+  }
 }
 
 function getKstYYYYMMDDHHMM() {
@@ -201,7 +223,6 @@ function applyRouteDerivedFields(row) {
     row.polygon_wgs84 = parseMaybeJson(row.polygon_wgs84, null);
   }
 
-  // 프론트 편의: camp_name/route_code도 함께 내려줌
   if (!row.camp_name && row.camp) row.camp_name = row.camp;
   if (!row.route_code && row.full_code) row.route_code = row.full_code;
 }
@@ -341,11 +362,10 @@ async function loadCampIndex(env, campName = "") {
 async function hydrateRouteRowsWithCamps(rows, env) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
 
-  const byCamp = new Map(); // camp -> Map(mb_camp -> campRow)
+  const byCamp = new Map();
 
   for (const row of rows) {
     const deliveryName = safeTrim(row?.delivery_location_name);
-    // subsubroutes의 기존 주소값이 남아 있어도 camps 기준으로 덮어쓰기 위해 초기화
     if (deliveryName) row.delivery_location_address = null;
     if (!deliveryName) continue;
 
@@ -409,7 +429,6 @@ function buildRoutePatch(body) {
   const code = safeTrim(body.code);
   const patch = { camp, code, full_code: code };
 
-  // 벤더 계열 (구/신 컬럼 모두 허용)
   const vendorKeys = [
     "vendor_name",
     "vendor_business_number",
@@ -434,7 +453,6 @@ function buildRoutePatch(body) {
     patch.delivery_location_lng = parseMaybeNumber(body.delivery_location_lng);
   }
 
-  // 중요: delivery_location_address는 camps 테이블에서 계산해서 내려주므로 저장 대상에서 제외
   if (Object.prototype.hasOwnProperty.call(body, "polygon_wgs84")) {
     patch.polygon_wgs84 = body.polygon_wgs84 ?? null;
   }
@@ -466,7 +484,6 @@ async function handleRoutePost(request, env) {
     });
     row = Array.isArray(updated) ? updated[0] : updated;
   } else {
-    // camp + code(full_code) 기준으로 존재하면 PATCH, 없으면 POST
     const q = new URLSearchParams();
     q.set("camp", `eq.${camp}`);
     q.set("full_code", `eq.${code}`);
@@ -730,16 +747,14 @@ function campRowDedupeKey(row) {
 async function handleCampsGet(url, env) {
   const q = safeTrim(url.searchParams.get("q"));
   const camp = safeTrim(url.searchParams.get("camp"));
-  // 레거시/오타 파라미터(orbm_camp, ormb_camp)도 mb_camp로 흡수
   const mbCamp = safeTrim(
     url.searchParams.get("mb_camp") ||
-      url.searchParams.get("orbm_camp") ||
-      url.searchParams.get("ormb_camp")
+    url.searchParams.get("orbm_camp") ||
+    url.searchParams.get("ormb_camp")
   );
   const limitRaw = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
 
-  // q가 없으면 단순 조회
   if (!q) {
     const params = new URLSearchParams();
     params.set("select", "*");
@@ -753,7 +768,6 @@ async function handleCampsGet(url, env) {
     return json({ rows: out }, 200, { "Cache-Control": "no-store" });
   }
 
-  // q가 있으면 camps.camp / camps.mb_camp 두 컬럼만 검색
   const qLower = q.toLowerCase();
   const base = new URLSearchParams();
   base.set("select", "*");
@@ -785,7 +799,6 @@ async function handleCampsGet(url, env) {
       const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?${p.toString()}`, { method: "GET" });
       results.push(Array.isArray(rows) ? rows : []);
     } catch (e) {
-      // 일부 쿼리 실패해도 다른 쿼리 결과로 계속 진행
       console.warn("camps 검색 쿼리 실패:", e?.message || String(e));
     }
   }
@@ -802,7 +815,6 @@ async function handleCampsGet(url, env) {
 
   let out = Array.from(mergedMap.values());
 
-  // PostgREST ilike 누락/인코딩 이슈 대비: 결과가 없으면 넓게 가져와 JS 필터링 fallback
   if (out.length === 0) {
     try {
       const p = new URLSearchParams();
@@ -861,7 +873,6 @@ async function handleCampsPost(request, env) {
     patch.longitude = longitude;
   }
 
-  // camp + mb_camp 존재 시 업데이트, 없으면 신규 생성
   const q = new URLSearchParams();
   q.set("select", "id");
   q.set("camp", `eq.${camp}`);
@@ -897,8 +908,37 @@ async function handleCampsPost(request, env) {
 }
 
 // ---------- /share ----------
-async function handleShareHtml(url, env) {
-  // v 파라미터가 없거나 형식이 다르면 KST 기준 타임스탬프로 리다이렉트
+async function fetchShareTemplateFromOrigin(request) {
+  const originUrl = new URL(request.url);
+  originUrl.pathname = "/share.html";
+  originUrl.search = "";
+  originUrl.hash = "";
+
+  const res = await fetch(new Request(originUrl.toString(), {
+    method: "GET",
+    headers: {
+      "User-Agent": "maroowell-route-worker/1.0",
+      "Accept": "text/html,application/xhtml+xml",
+      "Cache-Control": "no-cache",
+    },
+    redirect: "follow",
+  }), {
+    cf: { cacheTtl: 0, cacheEverything: false },
+  });
+
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch share template from origin: HTTP ${res.status}`);
+  }
+  if (!text || !/<html[\s>]/i.test(text)) {
+    throw new Error("Failed to fetch share template from origin: invalid html");
+  }
+
+  return text;
+}
+
+async function handleShareHtml(request, url, env) {
   const v = safeTrim(url.searchParams.get("v"));
   if (!/^\d{12}$/.test(v)) {
     const next = new URL(url.toString());
@@ -955,47 +995,66 @@ async function handleShareHtml(url, env) {
     }
   }
 
-  const htmlRes = await fetch(SHARE_TEMPLATE_URL, {
-    headers: { "User-Agent": "maroowell-route-worker/1.0" },
-  });
-  if (!htmlRes.ok) {
-    return json({ error: "Failed to fetch share template", status: htmlRes.status }, 502);
-  }
+  let html = await fetchShareTemplateFromOrigin(request);
 
-  let html = await htmlRes.text();
+  const versionedOgImageUrl = buildVersionedAssetUrl(OG_IMAGE_URL, v);
 
   const safeTitle = escapeHtmlAttr(ogTitle);
   const safeDesc = escapeHtmlAttr(ogDescription);
   const safeUrl = escapeHtmlAttr(url.toString());
-  const safeImg = escapeHtmlAttr(OG_IMAGE_URL);
+  const safeImg = escapeHtmlAttr(versionedOgImageUrl);
   const safeFav = escapeHtmlAttr(FAVICON_URL);
 
-  if (/<title[^>]*>[\s\S]*?<\/title>/i.test(html)) {
-    html = html.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${safeTitle}</title>`);
-  } else {
-    html = upsertHeadTag(html, /$^/i, `<title>${safeTitle}</title>`);
-  }
+  html = removeHtmlTags(html, [
+    /<title[^>]*>[\s\S]*?<\/title>\s*/gi,
+    /<meta\s+name=["']description["'][^>]*>\s*/gi,
+    /<meta\s+name=["']robots["'][^>]*>\s*/gi,
+    /<meta\s+property=["']og:[^"']+["'][^>]*>\s*/gi,
+    /<meta\s+name=["']twitter:[^"']+["'][^>]*>\s*/gi,
+    /<link\s+rel=["']canonical["'][^>]*>\s*/gi,
+    /<link\s+rel=["']icon["'][^>]*>\s*/gi,
+    /<link\s+rel=["']shortcut icon["'][^>]*>\s*/gi,
+    /<link\s+rel=["']apple-touch-icon["'][^>]*>\s*/gi,
+  ]);
 
-  // OG
-  html = upsertHeadTag(html, /<meta\s+property=["']og:type["'][^>]*>/i, `<meta property="og:type" content="website" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${safeTitle}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:site_name["'][^>]*>/i, `<meta property="og:site_name" content="Maroowell" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:url["'][^>]*>/i, `<meta property="og:url" content="${safeUrl}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeImg}" />`);
-  html = upsertHeadTag(html, /<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="Maroowell" />`);
+  const seoBlock = [
+    `  <title>${safeTitle}</title>`,
+    `  <meta name="description" content="${safeDesc}" />`,
+    `  <meta name="robots" content="index,follow,max-image-preview:large" />`,
+    ``,
+    `  <meta property="og:type" content="website" />`,
+    `  <meta property="og:site_name" content="Maroowell" />`,
+    `  <meta property="og:locale" content="ko_KR" />`,
+    `  <meta property="og:title" content="${safeTitle}" />`,
+    `  <meta property="og:description" content="${safeDesc}" />`,
+    `  <meta property="og:url" content="${safeUrl}" />`,
+    `  <meta property="og:image" content="${safeImg}" />`,
+    `  <meta property="og:image:url" content="${safeImg}" />`,
+    `  <meta property="og:image:secure_url" content="${safeImg}" />`,
+    `  <meta property="og:image:type" content="image/png" />`,
+    `  <meta property="og:image:width" content="1200" />`,
+    `  <meta property="og:image:height" content="630" />`,
+    `  <meta property="og:image:alt" content="${safeTitle}" />`,
+    ``,
+    `  <meta name="twitter:card" content="summary_large_image" />`,
+    `  <meta name="twitter:title" content="${safeTitle}" />`,
+    `  <meta name="twitter:description" content="${safeDesc}" />`,
+    `  <meta name="twitter:url" content="${safeUrl}" />`,
+    `  <meta name="twitter:image" content="${safeImg}" />`,
+    `  <meta name="twitter:image:alt" content="${safeTitle}" />`,
+    ``,
+    `  <link rel="canonical" href="${safeUrl}" />`,
+    `  <link rel="icon" type="image/x-icon" href="${safeFav}" />`,
+    `  <link rel="shortcut icon" href="${safeFav}" />`,
+    `  <link rel="apple-touch-icon" href="${safeFav}" />`,
+  ].join("\n");
 
-  // Twitter
-  html = upsertHeadTag(html, /<meta\s+name=["']twitter:card["'][^>]*>/i, `<meta name="twitter:card" content="summary_large_image" />`);
-  html = upsertHeadTag(html, /<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${safeTitle}" />`);
-  html = upsertHeadTag(html, /<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${safeDesc}" />`);
-  html = upsertHeadTag(html, /<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${safeImg}" />`);
+  html = prependHeadBlock(html, seoBlock);
 
-  // favicon
-  html = html.replace(/<link\s+rel=["']icon["'][^>]*>/gi, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']icon["'][^>]*>/i, `<link rel="icon" type="image/x-icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']shortcut icon["'][^>]*>/i, `<link rel="shortcut icon" href="${safeFav}" />`);
-  html = upsertHeadTag(html, /<link\s+rel=["']apple-touch-icon["'][^>]*>/i, `<link rel="apple-touch-icon" href="${safeFav}" />`);
+  html = html.replace(
+    /const\s+OG_IMAGE_URL\s*=\s*["'][^"']*["'];/i,
+    `const OG_IMAGE_URL = ${quoteJsString(versionedOgImageUrl)};`
+  );
 
   return new Response(html, {
     status: 200,
@@ -1016,7 +1075,7 @@ async function handleOsmGet(url) {
   }
 
   const [minLng, minLat, maxLng, maxLat] = parts;
-  const bbox = `${minLat},${minLng},${maxLat},${maxLng}`; // south,west,north,east
+  const bbox = `${minLat},${minLng},${maxLat},${maxLng}`;
 
   const query = `
 [out:json][timeout:25];

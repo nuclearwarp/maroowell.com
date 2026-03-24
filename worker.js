@@ -975,23 +975,31 @@ async function handleShareHtml(request, url, env) {
       if (row) {
         const locationName = safeTrim(row.delivery_location_name);
         const locationAddr = safeTrim(row.delivery_location_address);
-        const fullCode = safeTrim(row.full_code || code);
+        const fullCode = safeTrim(code || row.full_code);
 
-        ogTitle = [camp, locationName, fullCode].filter(Boolean).join(" ").trim();
-        ogDescription = [camp, locationName, fullCode, "배송 구역을 확인하세요"].filter(Boolean).join(" ").trim();
-        if (locationAddr) ogDescription = `${locationAddr} · ${ogDescription}`;
+        ogTitle = [camp, fullCode].filter(Boolean).join(" ").trim() || camp;
+        ogDescription = [
+          locationAddr || locationName,
+          ogTitle ? `${ogTitle} 배송 구역을 확인하세요` : ""
+        ].filter(Boolean).join(" · ");
+
+        if (!ogDescription) {
+          ogDescription = ogTitle
+            ? `${ogTitle} 배송 구역을 확인하세요`
+            : "배송 구역 및 경로를 확인하세요";
+        }
       } else if (code) {
         ogTitle = `${camp} ${code}`.trim();
-        ogDescription = `${camp} ${code} 배송 구역을 확인하세요`.trim();
+        ogDescription = `${ogTitle} 배송 구역을 확인하세요`.trim();
       } else {
         ogTitle = `${camp} 배송지도`.trim();
         ogDescription = `${camp} 배송 구역을 확인하세요`.trim();
       }
     } catch {
       ogTitle = code ? `${camp} ${code}`.trim() : `${camp} 배송지도`.trim();
-      ogDescription = code
-        ? `${camp} ${code} 배송 구역을 확인하세요`.trim()
-        : `${camp} 배송 구역을 확인하세요`.trim();
+      ogDescription = ogTitle
+        ? `${ogTitle} 배송 구역을 확인하세요`.trim()
+        : "배송 구역 및 경로를 확인하세요";
     }
   }
 

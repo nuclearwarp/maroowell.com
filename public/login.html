@@ -263,10 +263,16 @@
       <input id="password" type="password" placeholder="********" autocomplete="current-password" />
 
       <div class="remember-actions">
-        <label class="remember-row" for="rememberEmail">
-          <input id="rememberEmail" type="checkbox" />
-          <span>아이디 저장</span>
-        </label>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <label class="remember-row" for="rememberEmail">
+            <input id="rememberEmail" type="checkbox" />
+            <span>아이디 저장</span>
+          </label>
+          <label class="remember-row" for="rememberPassword">
+            <input id="rememberPassword" type="checkbox" />
+            <span>비밀번호 저장</span>
+          </label>
+        </div>
         <button class="text-btn" id="btnForgotPassword" type="button" hidden>비밀번호 찾기</button>
       </div>
       <div class="helper" id="forgotHint">비밀번호 5회 연속 실패 시 비밀번호 찾기가 활성화됩니다.</div>
@@ -326,6 +332,7 @@
   const FLOW_SIGNUP_COMPLETE = "signup-complete";
   const FLOW_RECOVERY = "recovery";
   const SAVED_EMAIL_KEY = "mw_saved_login_email";
+  const SAVED_PASSWORD_KEY = "mw_saved_login_password";
   const FAIL_COUNT_PREFIX = "mw_login_fail_count:";
 
   const params = new URLSearchParams(location.search);
@@ -589,6 +596,7 @@
   const email = document.getElementById("email");
   const password = document.getElementById("password");
   const rememberEmail = document.getElementById("rememberEmail");
+  const rememberPassword = document.getElementById("rememberPassword");
   const btnSignIn = document.getElementById("btnSignIn");
   const btnSignUp = document.getElementById("btnSignUp");
   const btnForgotPassword = document.getElementById("btnForgotPassword");
@@ -769,6 +777,61 @@
     if (rememberEmail) rememberEmail.checked = true;
   }
 
+  function loadSavedPassword() {
+    let raw = "";
+    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
+    if (!raw) return;
+
+    try {
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved !== "object") return;
+
+      const savedEmail = normalizeEmail(saved.email || "");
+      const savedPassword = String(saved.password || "");
+
+      if (!savedEmail || !savedPassword) return;
+
+      if (!email.value) {
+        email.value = savedEmail;
+      }
+
+      if (normalizeEmail(email.value) === savedEmail) {
+        password.value = savedPassword;
+        if (rememberPassword) rememberPassword.checked = true;
+      }
+    } catch {}
+  }
+
+  function syncSavedPasswordByEmail() {
+    let raw = "";
+    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
+    if (!raw) {
+      if (rememberPassword) rememberPassword.checked = false;
+      return;
+    }
+
+    try {
+      const saved = JSON.parse(raw);
+      const savedEmail = normalizeEmail(saved?.email || "");
+      const savedPassword = String(saved?.password || "");
+
+      if (normalizeEmail(email.value) === savedEmail && savedPassword) {
+        password.value = savedPassword;
+        if (rememberPassword) rememberPassword.checked = true;
+      } else {
+        password.value = "";
+        if (rememberPassword) rememberPassword.checked = false;
+      }
+    } catch {
+      password.value = "";
+      if (rememberPassword) rememberPassword.checked = false;
+    }
+  }
+
+  function clearSavedPassword() {
+    try { window.localStorage.removeItem(SAVED_PASSWORD_KEY); } catch {}
+  }
+
   function shouldCountLoginFailure(err) {
     const msg = String(err?.message || "").toLowerCase();
     return msg.includes("invalid login credentials") || msg.includes("invalid_credentials");
@@ -821,6 +884,15 @@
       try {
         if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
         else window.localStorage.removeItem(SAVED_EMAIL_KEY);
+
+        if (rememberPassword?.checked) {
+          window.localStorage.setItem(SAVED_PASSWORD_KEY, JSON.stringify({
+            email: em,
+            password: pw
+          }));
+        } else {
+          window.localStorage.removeItem(SAVED_PASSWORD_KEY);
+        }
       } catch {}
 
       clearFailCount(em);
@@ -980,11 +1052,22 @@
   }
 
   loadSavedEmail();
+  loadSavedPassword();
   refreshForgotPasswordUi();
 
-  email.addEventListener("input", refreshForgotPasswordUi);
+  email.addEventListener("input", () => {
+    refreshForgotPasswordUi();
+    syncSavedPasswordByEmail();
+  });
   btnSignIn.addEventListener("click", signIn);
   btnForgotPassword.addEventListener("click", sendPasswordReset);
+  if (rememberPassword) {
+    rememberPassword.addEventListener("change", () => {
+      if (!rememberPassword.checked) {
+        clearSavedPassword();
+      }
+    });
+  }
   if (btnSignUp && ENABLE_SIGNUP) {
     btnSignUp.addEventListener("click", openSignupModal);
   }

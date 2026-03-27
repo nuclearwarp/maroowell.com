@@ -1348,6 +1348,71 @@
   }
 
   function normalizeCodeKey(s){ return String(s||"").trim().toUpperCase(); }
+  function makeDraftRouteId(camp, code){
+    return `__draft__/${String(camp||"").trim()}/${normalizeCodeKey(code)}`;
+  }
+  function getDraftRouteColor(camp, code){
+    const startHue = hash32(String(camp||"").trim()) % 360;
+    const idx = hash32(String(code||"").trim()) % 17;
+    return colorByIndex(idx, startHue);
+  }
+  function createDraftRouteSelection(camp, code){
+    const safeCamp = String(camp || "").trim();
+    const safeCode = String(code || "").trim();
+    if (!safeCamp || !safeCode) return null;
+
+    const draftId = makeDraftRouteId(safeCamp, safeCode);
+    let pack = overlayById.get(draftId);
+    if (!pack){
+      const row = {
+        id: null,
+        camp: safeCamp,
+        code: safeCode,
+        full_code: safeCode,
+        polygon_wgs84: null,
+        __color: getDraftRouteColor(safeCamp, safeCode),
+        __isDraft: true
+      };
+      pack = { row, polygons: [], labels: [] };
+      overlayById.set(draftId, pack);
+      routeRows.push(row);
+    }
+
+    selectedRouteId = draftId;
+    stopEditMode();
+    stopDrawMode(true);
+    highlightSelection();
+
+    campInput.value = safeCamp;
+    codeInput.value = safeCode;
+    campDirty = false;
+    codeDirty = false;
+
+    vendorWeekValue.textContent = "-";
+    vendorNightValue.textContent = "-";
+    deliveryNameInput.value = "";
+    deliveryAddrInput.value = "";
+    addressListGroup.style.display = "none";
+    addressList.innerHTML = "";
+
+    selectedInfo.textContent = `선택: ${safeCamp} / ${safeCode} (신규)`;
+    setStatus(`신규 라우트 생성 모드: ${safeCode}`, "OK");
+    return draftId;
+  }
+  function bindPolygonEvents(polygon, getTargetId){
+    kakao.maps.event.addListener(polygon, "click", (mouseEvent)=>{
+      if (drawMode){
+        if (mouseEvent?.latLng) addDrawPoint(mouseEvent.latLng);
+        return;
+      }
+      if (roadviewOn) return;
+      const targetId = typeof getTargetId === "function" ? getTargetId() : getTargetId;
+      if (targetId) selectRoute(targetId);
+    });
+    kakao.maps.event.addListener(polygon, "rightclick", ()=>{
+      if (drawMode) popDrawPoint();
+    });
+  }
   function findRouteIdByCampAndCodeExact(camp, code){
     const tCamp = String(camp||"").trim();
     const tCode = normalizeCodeKey(code);
@@ -1390,8 +1455,8 @@
       if (onlyId){ selectRoute(onlyId); return true; }
     }
 
-    setStatus(`선택할 라우트를 찾지 못했습니다. code=${code}`, "WARN");
-    return false;
+    createDraftRouteSelection(camp, code);
+    return true;
   }
 
   function addDrawPoint(latlng){
@@ -1424,7 +1489,7 @@
       zIndex: 5
     });
     poly.setMap(map);
-    kakao.maps.event.addListener(poly, "click", ()=>{ if (!drawMode && !roadviewOn) selectRoute(selectedRouteId); });
+    bindPolygonEvents(poly, ()=> selectedRouteId);
 
     if (drawMode === "new"){
       pack.polygons.forEach(p=>p.setMap(null));
@@ -1768,7 +1833,7 @@
           zIndex: 1
         });
         polygon.setMap(map);
-        kakao.maps.event.addListener(polygon, "click", ()=>{ if (!roadviewOn && !drawMode) selectRoute(id); });
+        bindPolygonEvents(polygon, id);
 
         pack.polygons.push(polygon);
         any=true;
@@ -1803,15 +1868,21 @@
   async function saveCurrent(){
     if (!selectedRouteId){ setStatus("선택된 라우트가 없습니다.", "WARN"); return; }
     const pack = overlayById.get(selectedRouteId);
-    if (!pack?.row?.id){ setStatus("저장할 id가 없습니다.", "ERR"); return; }
+    if (!pack?.row){ setStatus("저장할 라우트 정보가 없습니다.", "ERR"); return; }
+
+    const saveCamp = String(pack.row.camp || campInput.value || "").trim();
+    const saveCode = String(pack.row.full_code || pack.row.code || codeInput.value || "").trim();
+    if (!saveCamp){ setStatus("캠프가 없습니다.", "WARN"); return; }
+    if (!saveCode){ setStatus("라우트 코드가 없습니다.", "WARN"); return; }
 
     const payload = {
-      id: pack.row.id,
-      camp: pack.row.camp,
-      code: pack.row.full_code || pack.row.code,
+      camp: saveCamp,
+      code: saveCode,
       polygon_wgs84: polygonsToWgs84(pack.polygons),
     };
-    setStatus("저장 중...", "OK");
+    if (pack.row.id != null) payload.id = pack.row.id;
+
+    setStatus(pack.row.id != null ? "저장 중..." : "신규 라우트 저장 중...", "OK");
     await apiJson("POST", ROUTE_ENDPOINT, payload);
     setStatus("저장 완료", "OK");
     await loadRoutes();

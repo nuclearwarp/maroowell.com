@@ -657,6 +657,46 @@
 
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
+      const ZIP_FETCH_TIMEOUT_MS = 15000;
+
+      let loadingDepth = 0;
+
+      function setBusy(on, message) {
+        loadingDepth = on ? (loadingDepth + 1) : Math.max(0, loadingDepth - 1);
+        const active = loadingDepth > 0;
+        const labels = [
+          ["#addBtn", "추가"],
+          ["#searchBtn", "지도표시"],
+          ["#mergeBtn", "병합"],
+          ["#saveBtn", "저장"],
+          ["#clearBtn", "초기화"],
+          ["#openAddr", "주소검색 추가"]
+        ];
+        labels.forEach(([sel, label]) => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          if (active) {
+            el.dataset.prevDisabled = el.disabled ? "1" : "0";
+            if (sel === "#searchBtn") el.textContent = message || "조회 중...";
+            el.disabled = true;
+          } else {
+            if (el.dataset.prevDisabled !== "1") el.disabled = false;
+            delete el.dataset.prevDisabled;
+            el.textContent = label;
+          }
+        });
+      }
+
+      async function fetchWithTimeout(url, options = {}, timeoutMs = ZIP_FETCH_TIMEOUT_MS) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(new DOMException("timeout", "AbortError")), timeoutMs);
+        try {
+          const merged = { ...options, signal: controller.signal };
+          return await fetch(url, merged);
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
 
       const $ = (sel) => document.querySelector(sel);
       const parseZips = (raw) => [...new Set((raw || "").match(/\d{5}/g) || [])];
@@ -1022,61 +1062,68 @@
         const notFound = [];
         const reasons = [];
 
-        for (const zip of targets) {
-          const url = `${ZIP_API_URL}${encodeURIComponent(zip)}`;
-          try {
-            const res0 = await fetch(url, { cache: "no-store" });
-            const res = res0;
-            const resClone = res0.clone();
-
-            if (!res.ok) {
-              const t = await res.text().catch(() => "");
-              console.warn("[ZIP_API] HTTP error", zip, res.status, t.slice(0, 300));
-              reasons.push(`${zip}: HTTP ${res.status}`);
-              notFound.push(zip);
-              continue;
-            }
-
-            let data = null;
+        setBusy(true, "조회 중...");
+        try {
+          for (const zip of targets) {
+            const url = `${ZIP_API_URL}${encodeURIComponent(zip)}`;
             try {
-              data = await res.json();
-            } catch (e) {
-              const t = await resClone.text().catch(() => "");
-              console.warn("[ZIP_API] JSON parse fail", zip, String(e), t.slice(0, 300));
-              reasons.push(`${zip}: JSON parse fail`);
+              const res0 = await fetchWithTimeout(url, { cache: "no-store" }, ZIP_FETCH_TIMEOUT_MS);
+              const res = res0;
+              const resClone = res0.clone();
+
+              if (!res.ok) {
+                const t = await res.text().catch(() => "");
+                console.warn("[ZIP_API] HTTP error", zip, res.status, t.slice(0, 300));
+                reasons.push(`${zip}: HTTP ${res.status}`);
+                notFound.push(zip);
+                continue;
+              }
+
+              let data = null;
+              try {
+                data = await res.json();
+              } catch (e) {
+                const t = await resClone.text().catch(() => "");
+                console.warn("[ZIP_API] JSON parse fail", zip, String(e), t.slice(0, 300));
+                reasons.push(`${zip}: JSON parse fail`);
+                notFound.push(zip);
+                continue;
+              }
+
+              const polyRaw =
+                (data && (data.polygon5179 ?? data.polygon_5179 ?? data.polygon)) ?? null;
+
+              if (!Array.isArray(polyRaw) || polyRaw.length === 0) {
+                console.warn("[ZIP_API] polygon5179 missing/empty", zip, data);
+                reasons.push(`${zip}: polygon missing`);
+                notFound.push(zip);
+                continue;
+              }
+
+              const norm = normalizeToMultiPolygon5179(polyRaw);
+              if (!norm) { reasons.push(`${zip}: normalize fail`); notFound.push(zip); continue; }
+
+              const wgs = convert5179MultiToWgs84(norm);
+              if (!wgs) { reasons.push(`${zip}: convert fail`); notFound.push(zip); continue; }
+
+              const feature = {
+                type: "Feature",
+                properties: { zip },
+                geometry: { type: "MultiPolygon", coordinates: wgs }
+              };
+              state.geoByZip.set(zip, feature);
+
+              drawZipMultiPolygon(zip, wgs);
+            } catch (err) {
+              const msg = String(err || "");
+              console.warn("[ZIP_API] fetch failed", zip, msg);
+              if (err?.name === "AbortError") reasons.push(`${zip}: 요청 시간초과(${Math.round(ZIP_FETCH_TIMEOUT_MS / 1000)}초)`);
+              else reasons.push(`${zip}: fetch failed`);
               notFound.push(zip);
-              continue;
             }
-
-            const polyRaw =
-              (data && (data.polygon5179 ?? data.polygon_5179 ?? data.polygon)) ?? null;
-
-            if (!Array.isArray(polyRaw) || polyRaw.length === 0) {
-              console.warn("[ZIP_API] polygon5179 missing/empty", zip, data);
-              reasons.push(`${zip}: polygon missing`);
-              notFound.push(zip);
-              continue;
-            }
-
-            const norm = normalizeToMultiPolygon5179(polyRaw);
-            if (!norm) { reasons.push(`${zip}: normalize fail`); notFound.push(zip); continue; }
-
-            const wgs = convert5179MultiToWgs84(norm);
-            if (!wgs) { reasons.push(`${zip}: convert fail`); notFound.push(zip); continue; }
-
-            const feature = {
-              type: "Feature",
-              properties: { zip },
-              geometry: { type: "MultiPolygon", coordinates: wgs }
-            };
-            state.geoByZip.set(zip, feature);
-
-            drawZipMultiPolygon(zip, wgs);
-          } catch (err) {
-            console.warn("[ZIP_API] fetch failed", zip, String(err));
-            reasons.push(`${zip}: fetch failed`);
-            notFound.push(zip);
           }
+        } finally {
+          setBusy(false);
         }
 
         if (notFound.length) {

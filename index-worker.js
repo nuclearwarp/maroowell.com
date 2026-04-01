@@ -31,6 +31,24 @@ const SEC_CH_UA_PLATFORM = '"Windows"';
 
 const RETRY_DELAYS_MS = [0, 250, 900];
 const ERROR_BODY_SNIPPET = 800;
+const BOOTSTRAP_TIMEOUT_MS = 6000;
+const API_TIMEOUT_MS = 8000;
+
+function timeoutError(label, ms) {
+  const err = new Error(`${label} timeout after ${ms}ms`);
+  err.name = "AbortError";
+  return err;
+}
+
+async function fetchWithTimeout(url, init = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(timeoutError("upstream fetch", timeoutMs)), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -345,7 +363,7 @@ function extractCookieHeaderFromSetCookie(setCookieHeaders) {
 
 async function bootstrapJusoSession() {
   try {
-    const res = await fetch(JUSO_MAP_URL, {
+    const res = await fetchWithTimeout(JUSO_MAP_URL, {
       method: "GET",
       headers: buildBootstrapHeaders(),
       redirect: "follow",
@@ -353,7 +371,7 @@ async function bootstrapJusoSession() {
         cacheTtl: 0,
         cacheEverything: false,
       },
-    });
+    }, BOOTSTRAP_TIMEOUT_MS);
 
     const setCookieHeaders = collectSetCookieHeaders(res.headers);
     const cookieHeader = extractCookieHeaderFromSetCookie(setCookieHeaders);
@@ -374,7 +392,7 @@ async function bootstrapJusoSession() {
 }
 
 async function postSelectKarbSbdList(zipcode, payloadVariant, cookieHeader) {
-  const res = await fetch(JUSO_API_URL, {
+  const res = await fetchWithTimeout(JUSO_API_URL, {
     method: "POST",
     headers: buildBrowserLikeHeaders(cookieHeader),
     body: JSON.stringify(payloadVariant.body),
@@ -382,7 +400,7 @@ async function postSelectKarbSbdList(zipcode, payloadVariant, cookieHeader) {
       cacheTtl: 0,
       cacheEverything: false,
     },
-  });
+  }, API_TIMEOUT_MS);
 
   const text = await res.text();
   let data = null;
@@ -452,7 +470,7 @@ async function fetchFromJuso(zipcode, debug = false) {
           status: 0,
           attemptCount,
           variant: payloadVariant.name,
-          detail: String(e),
+          detail: (e && e.name === "AbortError") ? `timeout after ${API_TIMEOUT_MS}ms` : String(e),
           responseSnippet: "",
         };
       }

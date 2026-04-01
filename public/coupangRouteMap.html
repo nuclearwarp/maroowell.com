@@ -1426,6 +1426,50 @@
     return null;
   }
 
+  function normalizeSearchKey(v){
+    return String(v || "").trim().toLowerCase();
+  }
+  function scoreCampCandidate(row, q){
+    const qKey = normalizeSearchKey(q);
+    const mb = normalizeSearchKey(row?.mb_camp);
+    const camp = normalizeSearchKey(row?.camp);
+    if (!qKey) return 0;
+    if (mb === qKey) return 120;
+    if (camp === qKey) return 115;
+    if (mb.startsWith(qKey)) return 100;
+    if (camp.startsWith(qKey)) return 95;
+    if (mb.includes(qKey)) return 80;
+    if (camp.includes(qKey)) return 75;
+    return 0;
+  }
+  function pickResolvedCampFromList(list, q){
+    const byCamp = new Map();
+    for (const row of Array.isArray(list) ? list : []){
+      const camp = String(row?.camp || "").trim();
+      if (!camp) continue;
+      const score = scoreCampCandidate(row, q);
+      const prev = byCamp.get(camp);
+      if (!prev || score > prev.score) byCamp.set(camp, { camp, score, row });
+    }
+    const ranked = Array.from(byCamp.values())
+      .sort((a, b)=> (b.score - a.score) || a.camp.localeCompare(b.camp, "ko"));
+    if (!ranked.length) return null;
+    if (ranked.length === 1) return ranked[0].camp;
+    if (ranked[0].score >= 115) return ranked[0].camp;
+    if (ranked[0].score > ranked[1].score) return ranked[0].camp;
+    return null;
+  }
+  async function resolveCampQuery(query){
+    const q = String(query || "").trim();
+    if (!q) return null;
+    try{
+      const list = await fetchCamps(q);
+      return pickResolvedCampFromList(list, q);
+    }catch{
+      return null;
+    }
+  }
+
   async function ensureSelectedRouteFromInputsForDraw(){
     if (selectedRouteId) return true;
     const camp = campInput.value.trim();
@@ -1775,18 +1819,20 @@
     stopEditMode();
     stopDrawMode(true);
 
-    const camp = campInput.value.trim();
-    if (!camp){ setStatus("camp가 비었습니다.", "ERR"); return; }
+    const campQuery = campInput.value.trim();
+    if (!campQuery){ setStatus("camp가 비었습니다.", "ERR"); return; }
 
     const codes = parseCodes(codeInput.value);
     setStatus("라우트 조회 중...", "OK");
 
     const all=[];
     const seen=new Set();
+    let resolvedCamp = campQuery;
+    let resolvedByAlias = false;
 
-    async function fetchOne(prefix){
+    async function fetchOne(prefix, targetCamp){
       const url = new URL(ROUTE_ENDPOINT);
-      url.searchParams.set("camp", camp);
+      url.searchParams.set("camp", targetCamp);
       url.searchParams.set("mode", "prefix");
       if (prefix) url.searchParams.set("code", prefix);
       const data = await apiGet(url.toString());
@@ -1798,14 +1844,31 @@
       });
     }
 
-    if (codes.length === 0) await fetchOne("");
-    else for (const c of codes){ try{ await fetchOne(c); }catch(e){ log(`조회 실패(${c}): ${e.message}`); } }
+    async function fetchAllForCamp(targetCamp){
+      all.length = 0;
+      seen.clear();
+      if (codes.length === 0) await fetchOne("", targetCamp);
+      else for (const c of codes){ try{ await fetchOne(c, targetCamp); }catch(e){ log(`조회 실패(${c}): ${e.message}`); } }
+    }
+
+    await fetchAllForCamp(resolvedCamp);
+
+    if (!all.length){
+      const aliasCamp = await resolveCampQuery(campQuery);
+      if (aliasCamp && aliasCamp !== resolvedCamp){
+        resolvedCamp = aliasCamp;
+        resolvedByAlias = true;
+        setStatus(`캠프 자동 해석: ${campQuery} → ${resolvedCamp}`, "OK");
+        await fetchAllForCamp(resolvedCamp);
+      }
+    }
 
     clearOverlays();
     routeRows = all;
 
     if (!routeRows.length){ setStatus("조회된 라우트가 없습니다.", "WARN"); return; }
 
+    if (resolvedByAlias) campInput.value = resolvedCamp;
     assignColors(routeRows);
 
     const bounds = new kakao.maps.LatLngBounds();

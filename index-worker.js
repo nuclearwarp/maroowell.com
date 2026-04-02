@@ -32,7 +32,7 @@ const SEC_CH_UA_PLATFORM = '"Windows"';
 const RETRY_DELAYS_MS = [0, 250, 900];
 const ERROR_BODY_SNIPPET = 800;
 const BOOTSTRAP_TIMEOUT_MS = 6000;
-const API_TIMEOUT_MS = 8000;
+const API_TIMEOUT_MS = 9000;
 
 function timeoutError(label, ms) {
   const err = new Error(`${label} timeout after ${ms}ms`);
@@ -271,8 +271,74 @@ function buildBootstrapHeaders() {
   };
 }
 
+const JUSO_SIDO_PROFILES = [
+  { ctpvCd: "11", sidoVal: "110001", label: "서울특별시" },
+  { ctpvCd: "26", sidoVal: "260001", label: "부산광역시" },
+  { ctpvCd: "27", sidoVal: "270001", label: "대구광역시" },
+  { ctpvCd: "28", sidoVal: "280001", label: "인천광역시" },
+  { ctpvCd: "29", sidoVal: "290001", label: "광주광역시" },
+  { ctpvCd: "30", sidoVal: "300001", label: "대전광역시" },
+  { ctpvCd: "31", sidoVal: "310001", label: "울산광역시" },
+  { ctpvCd: "36", sidoVal: "361102", label: "세종특별자치시" },
+  { ctpvCd: "41", sidoVal: "410001", label: "경기도" },
+  { ctpvCd: "51", sidoVal: "510001", label: "강원특별자치도" },
+  { ctpvCd: "43", sidoVal: "430001", label: "충청북도" },
+  { ctpvCd: "44", sidoVal: "440001", label: "충청남도" },
+  { ctpvCd: "45", sidoVal: "450001", label: "전북특별자치도" },
+  { ctpvCd: "46", sidoVal: "460001", label: "전라남도" },
+  { ctpvCd: "47", sidoVal: "470001", label: "경상북도" },
+  { ctpvCd: "48", sidoVal: "480001", label: "경상남도" },
+  { ctpvCd: "50", sidoVal: "500001", label: "제주특별자치도" }
+];
+
+const JUSO_SIDO_DATA = [
+  { label: "선택", value: null },
+  ...JUSO_SIDO_PROFILES.map((row) => ({ value: row.sidoVal, label: row.label })),
+];
+
+const JUSO_EMPTY_SGG_DATA = [
+  { label: "선택", value: null }
+];
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function makeBasePageable() {
+  return {
+    first: 0,
+    totalRecords: 0,
+    currentRecords: 0,
+    totalPages: 0,
+    page: 0,
+    size: 10,
+    linkSize: 5,
+    orders: [{ property: "", direction: "" }],
+  };
+}
+
 function buildPayloadVariants(zipcode) {
+  const districtNo = String(zipcode || "").trim();
+
+  const provinceVariants = JUSO_SIDO_PROFILES.map((profile) => ({
+    name: `province_${profile.ctpvCd}_${profile.label}`,
+    body: {
+      params_sido_val: profile.sidoVal,
+      params_sido_data: cloneJson(JUSO_SIDO_DATA),
+      params_sgg_val: null,
+      params_sgg_data: cloneJson(JUSO_EMPTY_SGG_DATA),
+      search_result: [],
+      result_count: 0,
+      result_offset: 0,
+      ctpvCd: profile.ctpvCd,
+      lgvReplcCd: "",
+      districtNo,
+      pageable: makeBasePageable(),
+    },
+  }));
+
   return [
+    ...provinceVariants,
     {
       name: "browser_like_empty_string",
       body: {
@@ -285,17 +351,8 @@ function buildPayloadVariants(zipcode) {
         result_offset: 0,
         ctpvCd: "",
         lgvReplcCd: "",
-        districtNo: zipcode,
-        pageable: {
-          first: 0,
-          totalRecords: 0,
-          currentRecords: 0,
-          totalPages: 0,
-          page: 0,
-          size: 10,
-          linkSize: 5,
-          orders: [{ property: "", direction: "" }],
-        },
+        districtNo,
+        pageable: makeBasePageable(),
       },
     },
     {
@@ -310,17 +367,8 @@ function buildPayloadVariants(zipcode) {
         result_offset: 0,
         ctpvCd: "",
         lgvReplcCd: "",
-        districtNo: zipcode,
-        pageable: {
-          first: 0,
-          totalRecords: 0,
-          currentRecords: 0,
-          totalPages: 0,
-          page: 0,
-          size: 10,
-          linkSize: 5,
-          orders: [{ property: "", direction: "" }],
-        },
+        districtNo,
+        pageable: makeBasePageable(),
       },
     },
   ];
@@ -430,15 +478,17 @@ async function fetchFromJuso(zipcode, debug = false) {
 
   const payloadVariants = buildPayloadVariants(zipcode);
 
-  for (const payloadVariant of payloadVariants) {
-    for (let i = 0; i < RETRY_DELAYS_MS.length; i++) {
-      const delay = RETRY_DELAYS_MS[i];
-      if (delay > 0) await sleep(delay);
+  for (let retryIndex = 0; retryIndex < RETRY_DELAYS_MS.length; retryIndex++) {
+    const delay = RETRY_DELAYS_MS[retryIndex];
+    if (delay > 0) await sleep(delay);
 
-      const attemptCount = lastFailure.attemptCount + 1;
+    const session = await bootstrapJusoSession();
+    const cookieHeader = session.cookieHeader || "";
+    let variantStep = 0;
 
-      const session = await bootstrapJusoSession();
-      const cookieHeader = session.cookieHeader || "";
+    for (const payloadVariant of payloadVariants) {
+      variantStep += 1;
+      const attemptCount = retryIndex * payloadVariants.length + variantStep;
 
       try {
         const result = await postSelectKarbSbdList(zipcode, payloadVariant, cookieHeader);
@@ -480,10 +530,19 @@ async function fetchFromJuso(zipcode, debug = false) {
           JSON.stringify({
             tag: "ZIP_API_ATTEMPT",
             zipcode,
+            retryIndex,
             attempt: attemptCount,
             variant: payloadVariant.name,
             sessionStatus: session.status,
             hasCookie: !!cookieHeader,
+            payloadPreview: payloadVariant.body ? {
+              params_sido_val: payloadVariant.body.params_sido_val,
+              params_sgg_val: payloadVariant.body.params_sgg_val,
+              ctpvCd: payloadVariant.body.ctpvCd,
+              districtNo: payloadVariant.body.districtNo,
+              sidoCount: Array.isArray(payloadVariant.body.params_sido_data) ? payloadVariant.body.params_sido_data.length : 0,
+              sggCount: Array.isArray(payloadVariant.body.params_sgg_data) ? payloadVariant.body.params_sgg_data.length : 0,
+            } : null,
             lastFailure,
           })
         );

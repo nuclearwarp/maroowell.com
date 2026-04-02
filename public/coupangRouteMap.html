@@ -983,6 +983,7 @@
 
   let __mwDotEditImg = null;
   let __mwDotDrawImg = null;
+  let __mwDotMidImg = null;
   function makeDotMarkerImage({ size=12, fill="#ffffff", stroke="#0b1220", strokeWidth=2 } = {}){
     const s = Number(size) || 12;
     const cx = s / 2;
@@ -998,6 +999,16 @@
   function drawDotImage(){
     if (!__mwDotDrawImg) __mwDotDrawImg = makeDotMarkerImage({ size: 10, fill: "#00C2FF", stroke: "#0b1220", strokeWidth: 2 });
     return __mwDotDrawImg;
+  }
+  function midDotImage(){
+    if (!__mwDotMidImg) __mwDotMidImg = makeDotMarkerImage({ size: 10, fill: "rgba(148,163,184,0.96)", stroke: "#0b1220", strokeWidth: 2 });
+    return __mwDotMidImg;
+  }
+  function midpointLatLng(a, b){
+    return new kakao.maps.LatLng(
+      (Number(a?.getLat?.()) + Number(b?.getLat?.())) / 2,
+      (Number(a?.getLng?.()) + Number(b?.getLng?.())) / 2
+    );
   }
 
   function getVendorText(row){
@@ -1305,6 +1316,7 @@
           p[i] = mk.getPosition();
           poly.setPath(p);
           rebuildLabelsFor(selectedRouteId);
+          enterEditMode();
         });
         kakao.maps.event.addListener(mk, "rightclick", () => {
           const p = polygonPathToArray(poly).slice();
@@ -1315,8 +1327,39 @@
         });
         editMarkers.push(mk);
       }
+
+      for (let i=0;i<len;i++){
+        const nextIndex = (i + 1) % len;
+        const midMk = new kakao.maps.Marker({
+          position: midpointLatLng(path[i], path[nextIndex]),
+          draggable: true,
+          image: midDotImage(),
+          zIndex: 95
+        });
+        midMk.setMap(map);
+
+        let inserted = false;
+        const commitInsert = (latlng) => {
+          if (inserted) return;
+          inserted = true;
+          const p = polygonPathToArray(poly).slice();
+          p.splice(nextIndex, 0, latlng || midMk.getPosition());
+          poly.setPath(p);
+          rebuildLabelsFor(selectedRouteId);
+          enterEditMode();
+        };
+
+        kakao.maps.event.addListener(midMk, "click", () => {
+          commitInsert(midMk.getPosition());
+        });
+        kakao.maps.event.addListener(midMk, "dragend", () => {
+          commitInsert(midMk.getPosition());
+        });
+
+        editMarkers.push(midMk);
+      }
     }
-    setStatus("편집모드: 꼭짓점 드래그(우클릭=점삭제) · Enter=저장 · ESC=종료", "OK");
+    setStatus("편집모드: 흰점 드래그 · 흰점 우클릭=삭제 · 회색 중간점 클릭/드래그=점추가 · Enter=저장 · ESC=종료", "OK");
   }
 
   function stopDrawMode(resetHint){

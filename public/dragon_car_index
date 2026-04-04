@@ -293,13 +293,22 @@
       border-color:#60a5fa;
     }
 
+    .centerSelectWrap{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:44px;
+      padding:6px;
+    }
+
     .chipSelect{
-      width:calc(100% - 12px);
-      margin:6px;
+      width:100%;
+      margin:0;
       height:32px;
       border-radius:999px;
       font-weight:900;
       text-align:center;
+      text-align-last:center;
       appearance:none;
       -webkit-appearance:none;
       padding:0 28px 0 10px;
@@ -308,6 +317,29 @@
       background-repeat:no-repeat;
       background-size:10px 10px;
       background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%236b7280"><path d="M5.5 7.5 10 12l4.5-4.5" stroke="%236b7280" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    }
+
+    .routeTextarea{
+      min-height:56px;
+      white-space:pre-wrap;
+      word-break:break-word;
+      overflow-wrap:anywhere;
+      line-height:1.35;
+    }
+
+    .amountInput{
+      text-align:right;
+      font-variant-numeric:tabular-nums;
+      font-weight:900;
+    }
+
+    .amountInput.autoAmount{
+      color:#475569;
+    }
+
+    .amountInput.manualAmount{
+      color:#0f172a;
+      background:rgba(59,130,246,.06);
     }
 
     .taxTrue{ background:var(--greenBg); color:var(--greenTxt); }
@@ -764,24 +796,23 @@
           <colgroup>
             <col style="width:185px">
             <col style="width:135px">
-            <col style="width:125px">
-            <col style="width:95px">
-            <col style="width:88px">
-            <col style="width:105px">
-            <col style="width:88px">
-            <col style="width:100px">
-            <col style="width:95px">
             <col style="width:115px">
-            <col style="width:78px">
-            <col style="width:78px">
-            <col style="width:78px">
-            <col style="width:110px">
+            <col style="width:90px">
+            <col style="width:88px">
+            <col style="width:150px">
+            <col style="width:88px">
+            <col style="width:96px">
             <col style="width:92px">
+            <col style="width:78px">
+            <col style="width:78px">
+            <col style="width:78px">
+            <col style="width:118px">
             <col style="width:86px">
-            <col style="width:86px">
+            <col style="width:82px">
+            <col style="width:82px">
             <col style="width:96px">
             <col style="width:96px">
-            <col style="width:155px">
+            <col style="width:170px">
             <col style="width:120px">
           </colgroup>
 
@@ -796,7 +827,6 @@
               <th>단가</th>
               <th>정산일자</th>
               <th>투입 기사</th>
-              <th>Order Vendor</th>
               <th>배송 수량</th>
               <th>반품 수량</th>
               <th>합계</th>
@@ -833,7 +863,6 @@
               <th><input class="filterInput" data-filter="price" placeholder="단가" /></th>
               <th><input class="filterInput" data-filter="settlement_day" placeholder="정산일자" /></th>
               <th><input class="filterInput" data-filter="delivery_driver" placeholder="기사" /></th>
-              <th><input class="filterInput" data-filter="order_vendor" placeholder="Order Vendor" /></th>
               <th><input class="filterInput" data-filter="parcel" placeholder="배송" /></th>
               <th><input class="filterInput" data-filter="return_count" placeholder="반품" /></th>
               <th><input class="filterInput" data-filter="total_count" placeholder="합계" /></th>
@@ -1365,10 +1394,56 @@
         return toInt(row.parcel) + toInt(row.return_count);
       }
 
-      function amountValue(row) {
+      function computedAmountValue(row) {
         const price = toNum(row.price);
         if (price == null) return null;
         return price * totalCount(row);
+      }
+
+      function hasManualAmount(row) {
+        return !!row.__amountManual && String(row.amount ?? "").trim() !== "";
+      }
+
+      function amountValue(row) {
+        if (hasManualAmount(row)) {
+          const manual = toNum(row.amount);
+          return manual == null ? null : manual;
+        }
+        return computedAmountValue(row);
+      }
+
+      function amountDisplayValue(row) {
+        return formatNumber(amountValue(row));
+      }
+
+      function syncAmountInputState(input, row) {
+        if (!input || !row) return;
+        input.classList.toggle("autoAmount", !hasManualAmount(row));
+        input.classList.toggle("manualAmount", hasManualAmount(row));
+        input.title = hasManualAmount(row)
+          ? "수기 금액 · 비우면 자동계산으로 복귀"
+          : "자동 계산 금액 · 직접 수정 가능";
+      }
+
+      function resizeAutoTextarea(el) {
+        if (!el) return;
+        el.style.height = "auto";
+        el.style.height = Math.max(44, el.scrollHeight) + "px";
+      }
+
+      function resizeAllAutoTextareas(root = sheetBody) {
+        root.querySelectorAll(".autoGrow").forEach(resizeAutoTextarea);
+      }
+
+      function syncRowCalculatedCells(tr, row) {
+        if (!tr || !row) return;
+        const totalCell = tr.querySelector(".js-total-cell");
+        const amountInput = tr.querySelector(".js-amount-input");
+        if (totalCell) totalCell.textContent = formatNumber(totalCount(row)) || "0";
+        if (amountInput) {
+          amountInput.value = amountDisplayValue(row);
+          syncAmountInputState(amountInput, row);
+        }
       }
 
       function formatNumber(v) {
@@ -1430,12 +1505,14 @@
           delivery_driver: "",
           parcel: 0,
           return_count: 0,
+          amount: "",
           settlement_month: "",
           dragon_car_id: "",
           dragon_car_pw: "",
           tax_invoice: false,
           payment_confirm: false,
           dragon_car_note: "",
+          __amountManual: false,
           __dirty: true,
           __new: true
         };
@@ -1540,7 +1617,7 @@
         if (!rows.length) {
           sheetBody.innerHTML = `
             <tr class="emptyDataRow">
-              <td colspan="21">데이터가 없습니다. 상단 새 행 버튼으로 입력을 시작하거나 필터를 초기화하세요. 헤더 아래 줄은 필터입니다.</td>
+              <td colspan="20">데이터가 없습니다. 상단 새 행 버튼으로 입력을 시작하거나 필터를 초기화하세요. 헤더 아래 줄은 필터입니다.</td>
             </tr>
           `;
           refreshStatus();
@@ -1553,6 +1630,7 @@
           const amount = amountValue(row);
           const taxClass = row.tax_invoice ? "taxTrue" : "taxFalse";
           const payClass = row.payment_confirm ? "payTrue" : "payFalse";
+          const amountClass = hasManualAmount(row) ? "manualAmount" : "autoAmount";
 
           return `
             <tr data-row="${rowIndex}">
@@ -1561,31 +1639,34 @@
               <td><input class="cellInput" data-row="${rowIndex}" data-field="order_name" value="${esc(row.order_name || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="camp" value="${esc(row.camp || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="wave" value="${esc(row.wave || "")}"></td>
-              <td><input class="cellInput" data-row="${rowIndex}" data-field="route" value="${esc(row.route || "")}"></td>
+              <td><textarea class="cellTextarea routeTextarea autoGrow" data-row="${rowIndex}" data-field="route">${esc(row.route || "")}</textarea></td>
               <td><input class="cellInput" inputmode="decimal" data-row="${rowIndex}" data-field="price" value="${esc(row.price ?? "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="settlement_day" value="${esc(row.settlement_day || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="delivery_driver" value="${esc(row.delivery_driver || "")}"></td>
-              <td><input class="cellInput" data-row="${rowIndex}" data-field="order_vendor" value="${esc(row.order_vendor || "")}" ${row.vendor_id ? "readonly" : ""} placeholder="${row.vendor_id ? "" : "직접입력 가능"}"></td>
               <td><input class="cellInput" inputmode="numeric" data-row="${rowIndex}" data-field="parcel" value="${esc(row.parcel ?? 0)}"></td>
               <td><input class="cellInput" inputmode="numeric" data-row="${rowIndex}" data-field="return_count" value="${esc(row.return_count ?? 0)}"></td>
               <td><div class="readonlyCell totalCell js-total-cell">${esc(formatNumber(total) || "0")}</div></td>
-              <td><div class="readonlyCell amountCell js-amount-cell">${esc(formatNumber(amount))}</div></td>
+              <td><input class="cellInput amountInput ${amountClass} js-amount-input" inputmode="numeric" data-row="${rowIndex}" data-field="amount" value="${esc(amountDisplayValue(row))}" placeholder="${esc(formatNumber(computedAmountValue(row)))}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="settlement_month" value="${esc(row.settlement_month || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="dragon_car_id" value="${esc(row.dragon_car_id || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="dragon_car_pw" value="${esc(row.dragon_car_pw || "")}"></td>
               <td>
-                <select class="chipSelect ${taxClass}" data-row="${rowIndex}" data-field="tax_invoice">
-                  <option value="true" ${row.tax_invoice ? "selected" : ""}>발행</option>
-                  <option value="false" ${!row.tax_invoice ? "selected" : ""}>미발행</option>
-                </select>
+                <div class="centerSelectWrap">
+                  <select class="chipSelect ${taxClass}" data-row="${rowIndex}" data-field="tax_invoice">
+                    <option value="true" ${row.tax_invoice ? "selected" : ""}>발행</option>
+                    <option value="false" ${!row.tax_invoice ? "selected" : ""}>미발행</option>
+                  </select>
+                </div>
               </td>
               <td>
-                <select class="chipSelect ${payClass}" data-row="${rowIndex}" data-field="payment_confirm">
-                  <option value="true" ${row.payment_confirm ? "selected" : ""}>입금</option>
-                  <option value="false" ${!row.payment_confirm ? "selected" : ""}>미입금</option>
-                </select>
+                <div class="centerSelectWrap">
+                  <select class="chipSelect ${payClass}" data-row="${rowIndex}" data-field="payment_confirm">
+                    <option value="true" ${row.payment_confirm ? "selected" : ""}>입금</option>
+                    <option value="false" ${!row.payment_confirm ? "selected" : ""}>미입금</option>
+                  </select>
+                </div>
               </td>
-              <td><textarea class="cellTextarea" data-row="${rowIndex}" data-field="dragon_car_note">${esc(row.dragon_car_note || "")}</textarea></td>
+              <td><textarea class="cellTextarea autoGrow" data-row="${rowIndex}" data-field="dragon_car_note">${esc(row.dragon_car_note || "")}</textarea></td>
               <td>
                 <div class="rowActions">
                   <button class="miniBtn save" data-action="save" data-row="${rowIndex}" type="button">저장</button>
@@ -1597,6 +1678,11 @@
           `;
         }).join("");
 
+        resizeAllAutoTextareas();
+        sheetBody.querySelectorAll(".js-amount-input").forEach((input) => {
+          const row = state.rows[Number(input.dataset.row)];
+          syncAmountInputState(input, row);
+        });
         refreshStatus();
       }
 
@@ -1606,11 +1692,15 @@
       }
 
       function buildPayload(row) {
+        const linkedVendorName = row.vendor_id
+          ? (vendorNameById(row.vendor_id) || row.order_vendor || "")
+          : (row.order_vendor || "");
+
         return {
           vendor_id: row.vendor_id || null,
           order_date: toDateInput(row.order_date) || null,
           order_name: nullIfBlank(row.order_name),
-          order_vendor: nullIfBlank(row.order_vendor),
+          order_vendor: nullIfBlank(linkedVendorName),
           camp: nullIfBlank(row.camp),
           wave: nullIfBlank(row.wave),
           route: nullIfBlank(row.route),
@@ -1619,6 +1709,7 @@
           delivery_driver: nullIfBlank(row.delivery_driver),
           parcel: toInt(row.parcel),
           return_count: toInt(row.return_count),
+          amount: hasManualAmount(row) ? toNum(row.amount) : null,
           settlement_month: nullIfBlank(row.settlement_month),
           dragon_car_id: nullIfBlank(row.dragon_car_id),
           dragon_car_pw: nullIfBlank(row.dragon_car_pw),
@@ -1739,6 +1830,9 @@
 
           state.rows = (Array.isArray(data) ? data : []).map(row => ({
             ...row,
+            order_vendor: row.vendor_id ? (vendorNameById(row.vendor_id) || row.order_vendor || "") : (row.order_vendor || ""),
+            amount: row.amount ?? "",
+            __amountManual: row.amount != null && String(row.amount).trim() !== "",
             __dirty: false,
             __new: false
           }));
@@ -1820,14 +1914,24 @@
         if (!Number.isInteger(rowIndex) || !field || !state.rows[rowIndex]) return;
 
         const row = state.rows[rowIndex];
+        const tr = el.closest("tr");
+
+        if (field === "amount") {
+          row.amount = el.value;
+          row.__amountManual = String(el.value ?? "").trim() !== "";
+          syncAmountInputState(el, row);
+          markDirty(row);
+          return;
+        }
+
         row[field] = el.value;
 
+        if (el.classList.contains("autoGrow")) {
+          resizeAutoTextarea(el);
+        }
+
         if (field === "price" || field === "parcel" || field === "return_count") {
-          const tr = el.closest("tr");
-          const totalCell = tr ? tr.querySelector(".js-total-cell") : null;
-          const amountCell = tr ? tr.querySelector(".js-amount-cell") : null;
-          if (totalCell) totalCell.textContent = formatNumber(totalCount(row)) || "0";
-          if (amountCell) amountCell.textContent = formatNumber(amountValue(row));
+          syncRowCalculatedCells(tr, row);
         }
 
         markDirty(row);
@@ -1850,9 +1954,7 @@
 
         if (field === "vendor_id") {
           row.vendor_id = el.value || "";
-          if (row.vendor_id) {
-            row.order_vendor = vendorNameById(row.vendor_id) || row.order_vendor || "";
-          }
+          row.order_vendor = row.vendor_id ? (vendorNameById(row.vendor_id) || "") : "";
           markDirty(row);
           render();
           return;
@@ -1864,6 +1966,46 @@
           render();
         }
       });
+
+      sheetBody.addEventListener("blur", (e) => {
+        const el = e.target;
+        const rowIndex = Number(el.dataset?.row);
+        const field = el.dataset?.field;
+        if (!Number.isInteger(rowIndex) || !field || !state.rows[rowIndex]) return;
+
+        const row = state.rows[rowIndex];
+
+        if (field === "amount") {
+          if (hasManualAmount(row)) {
+            const manual = toNum(row.amount);
+            row.amount = manual == null ? "" : String(manual);
+          } else {
+            row.amount = "";
+          }
+          el.value = amountDisplayValue(row);
+          syncAmountInputState(el, row);
+          return;
+        }
+
+        if (field === "price") {
+          const price = toNum(row.price);
+          row.price = price == null ? "" : String(price);
+          el.value = formatNumber(price);
+          syncRowCalculatedCells(el.closest("tr"), row);
+          return;
+        }
+
+        if (field === "parcel" || field === "return_count") {
+          row[field] = String(toInt(row[field]));
+          el.value = row[field];
+          syncRowCalculatedCells(el.closest("tr"), row);
+          return;
+        }
+
+        if (el.classList.contains("autoGrow")) {
+          resizeAutoTextarea(el);
+        }
+      }, true);
 
       sheetBody.addEventListener("click", async (e) => {
         const btn = e.target.closest("[data-action]");

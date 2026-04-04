@@ -10,6 +10,7 @@ window.MARUWELL_CONFIG = {
   PATHS: {
     login: "/login.html",
     index: "/index.html",
-    route: "/coupangRouteMap.html"
+    route: "/coupangRouteMap.html",
+    dragon_car_index : "/dragon_car_index.html"
   }
 };

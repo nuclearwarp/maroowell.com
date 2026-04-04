@@ -567,6 +567,110 @@
       font-weight:800;
     }
 
+    .vendorEmptyActions{
+      padding:0 8px 10px;
+    }
+
+    .vendorAddInlineBtn{
+      width:100%;
+      height:40px;
+      border:1px solid #bfdbfe;
+      border-radius:12px;
+      background:#eff6ff;
+      color:#1d4ed8;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .vendorCreateOverlay{
+      position:fixed;
+      inset:0;
+      z-index:10020;
+      background:rgba(15,23,42,.34);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+
+    .vendorCreateOverlay.hidden{
+      display:none;
+    }
+
+    .vendorCreateModal{
+      width:min(420px, calc(100vw - 24px));
+      border:1px solid #d5deeb;
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 24px 60px rgba(15,23,42,.24);
+      overflow:hidden;
+    }
+
+    .vendorCreateHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      padding:14px 16px;
+      border-bottom:1px solid #e2e8f0;
+      background:#f8fafc;
+    }
+
+    .vendorCreateTitle{
+      color:#0f172a;
+      font-size:16px;
+      font-weight:900;
+    }
+
+    .vendorCreateBody{
+      padding:16px;
+      display:grid;
+      gap:12px;
+    }
+
+    .vendorCreateField{
+      display:grid;
+      gap:6px;
+    }
+
+    .vendorCreateField label{
+      color:#334155;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .vendorCreateField input{
+      width:100%;
+      height:40px;
+      border:1px solid #cbd5e1;
+      border-radius:12px;
+      padding:0 12px;
+      font-size:14px;
+      outline:none;
+    }
+
+    .vendorCreateField input:focus{
+      border-color:#60a5fa;
+      box-shadow:0 0 0 3px rgba(59,130,246,.12);
+    }
+
+    .vendorCreateHelp{
+      color:#64748b;
+      font-size:12px;
+      font-weight:700;
+      line-height:1.45;
+    }
+
+    .vendorCreateFoot{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap:8px;
+      padding:14px 16px;
+      border-top:1px solid #e2e8f0;
+      background:#f8fafc;
+    }
+
     .amountInput{
       text-align:right;
       font-variant-numeric:tabular-nums;
@@ -1291,6 +1395,16 @@
         query: ""
       };
 
+      const vendorCreateState = {
+        root: null,
+        nameInput: null,
+        codeInput: null,
+        bizInput: null,
+        saveBtn: null,
+        ctx: null,
+        submitting: false
+      };
+
       const state = {
         user: null,
         vendors: [],
@@ -1783,6 +1897,26 @@
         return normalize([vendor?.name, vendor?.vendor_code, vendor?.business_number].filter(Boolean).join(" "));
       }
 
+      function compareVendorName(a, b) {
+        return String(a?.name || "").localeCompare(String(b?.name || ""), "ko-KR", {
+          sensitivity: "base",
+          numeric: true
+        });
+      }
+
+      function sortVendors(list) {
+        return (Array.isArray(list) ? list.slice() : []).sort(compareVendorName);
+      }
+
+      function upsertVendorInState(vendor) {
+        if (!vendor?.id) return;
+        const idx = state.vendors.findIndex(v => String(v.id) === String(vendor.id));
+        if (idx >= 0) state.vendors[idx] = vendor;
+        else state.vendors.push(vendor);
+        state.vendors = sortVendors(state.vendors);
+        setVendorFilterOptions();
+      }
+
       function setVendorDisplayButtonState(btn, vendorId, placeholder) {
         if (!btn) return;
         const name = vendorNameById(vendorId);
@@ -1845,9 +1979,10 @@
 
       function filteredVendors(query) {
         const q = normalize(query);
+        const base = sortVendors(state.vendors);
         const list = !q
-          ? state.vendors.slice(0, 80)
-          : state.vendors.filter(v => vendorSearchText(v).includes(q)).slice(0, 80);
+          ? base.slice(0, 80)
+          : base.filter(v => vendorSearchText(v).includes(q)).slice(0, 80);
         return list;
       }
 
@@ -1856,6 +1991,7 @@
         const ctx = vendorLookupState.ctx || {};
         const vendors = filteredVendors(vendorLookupState.query);
         const emptyLabel = ctx.emptyLabel || "미선택";
+        const q = String(vendorLookupState.query || "").trim();
         const items = [];
         if (ctx.allowEmpty !== false) {
           items.push(`
@@ -1873,7 +2009,17 @@
             </button>
           `);
         }
-        vendorLookupState.body.innerHTML = items.join("") || '<div class="vendorEmpty">검색 결과가 없습니다.</div>';
+        if (!vendors.length) {
+          items.push('<div class="vendorEmpty">검색 결과가 없습니다.</div>');
+          if (ctx.allowCreate !== false && q) {
+            items.push(`
+              <div class="vendorEmptyActions">
+                <button class="vendorAddInlineBtn" type="button" data-vendor-action="open-create">"${esc(q)}" 신규 등록</button>
+              </div>
+            `);
+          }
+        }
+        vendorLookupState.body.innerHTML = items.join("");
         positionVendorLookup();
       }
 
@@ -1888,7 +2034,7 @@
           </div>
           <div class="vendorPopoverBody"></div>
           <div class="vendorPopoverFoot">
-            <span class="vendorHint">검색 후 클릭하면 즉시 선택됩니다.</span>
+            <span class="vendorHint">가나다순으로 표시됩니다. 없으면 신규 등록할 수 있습니다.</span>
             <button class="calendarActionBtn danger" type="button" data-vendor-action="clear">선택 해제</button>
           </div>
         `;
@@ -1916,6 +2062,16 @@
             closeVendorLookup();
             return;
           }
+          if (action === 'open-create') {
+            openVendorCreateModal({
+              initialName: vendorLookupState.query,
+              onCreated: (vendor) => {
+                ctx?.onSelect?.(vendor?.id || "");
+                closeVendorLookup();
+              }
+            });
+            return;
+          }
           if (action === 'pick') {
             ctx?.onSelect?.(btn.dataset.vendorId || "");
             closeVendorLookup();
@@ -1931,7 +2087,10 @@
         });
 
         document.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape') closeVendorLookup();
+          if (e.key === 'Escape') {
+            closeVendorLookup();
+            closeVendorCreateModal();
+          }
         });
 
         window.addEventListener('resize', positionVendorLookup);
@@ -1950,6 +2109,124 @@
         vendorLookupState.root.classList.remove('hidden');
         renderVendorLookupList();
         vendorLookupState.searchInput.focus();
+      }
+
+      function closeVendorCreateModal() {
+        if (!vendorCreateState.root) return;
+        vendorCreateState.root.classList.add('hidden');
+        vendorCreateState.ctx = null;
+        vendorCreateState.submitting = false;
+        if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = false;
+      }
+
+      function ensureVendorCreateModal() {
+        if (vendorCreateState.root) return;
+        const root = document.createElement('div');
+        root.className = 'vendorCreateOverlay hidden';
+        root.innerHTML = `
+          <div class="vendorCreateModal" role="dialog" aria-modal="true">
+            <div class="vendorCreateHead">
+              <div class="vendorCreateTitle">벤더 신규 등록</div>
+              <button class="calendarCloseBtn" type="button" data-vendor-create-action="close">✕</button>
+            </div>
+            <div class="vendorCreateBody">
+              <div class="vendorCreateField">
+                <label for="vendorCreateName">벤더명</label>
+                <input id="vendorCreateName" type="text" placeholder="벤더명을 입력하세요" />
+              </div>
+              <div class="vendorCreateField">
+                <label for="vendorCreateCode">벤더 코드</label>
+                <input id="vendorCreateCode" type="text" placeholder="선택 입력" />
+              </div>
+              <div class="vendorCreateField">
+                <label for="vendorCreateBiz">사업자번호</label>
+                <input id="vendorCreateBiz" type="text" placeholder="선택 입력" />
+              </div>
+              <div class="vendorCreateHelp">등록이 완료되면 현재 선택 위치에 바로 연결됩니다.</div>
+            </div>
+            <div class="vendorCreateFoot">
+              <button class="btn" type="button" data-vendor-create-action="cancel">취소</button>
+              <button class="btn primary" type="button" data-vendor-create-action="save">등록</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(root);
+        vendorCreateState.root = root;
+        vendorCreateState.nameInput = root.querySelector('#vendorCreateName');
+        vendorCreateState.codeInput = root.querySelector('#vendorCreateCode');
+        vendorCreateState.bizInput = root.querySelector('#vendorCreateBiz');
+        vendorCreateState.saveBtn = root.querySelector('[data-vendor-create-action="save"]');
+
+        root.addEventListener('click', async (e) => {
+          const actionEl = e.target.closest('[data-vendor-create-action]');
+          if (actionEl) {
+            const action = actionEl.dataset.vendorCreateAction;
+            if (action === 'close' || action === 'cancel') {
+              closeVendorCreateModal();
+              return;
+            }
+            if (action === 'save') {
+              if (vendorCreateState.submitting) return;
+              const name = String(vendorCreateState.nameInput?.value || '').trim();
+              const vendor_code = String(vendorCreateState.codeInput?.value || '').trim();
+              const business_number = String(vendorCreateState.bizInput?.value || '').trim();
+              if (!name) {
+                vendorCreateState.nameInput?.focus();
+                setStatus('벤더명은 필수입니다.', 'err');
+                return;
+              }
+              try {
+                vendorCreateState.submitting = true;
+                if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = true;
+                const payload = {
+                  name,
+                  vendor_code: vendor_code || null,
+                  business_number: business_number || null
+                };
+                const { data, error } = await supabase
+                  .from(VENDORS_TABLE)
+                  .insert(payload)
+                  .select('id,name,vendor_code,business_number')
+                  .single();
+                if (error) throw error;
+                upsertVendorInState(data);
+                closeVendorCreateModal();
+                vendorCreateState.ctx?.onCreated?.(data);
+                setStatus('벤더 신규 등록 완료', 'ok');
+                render();
+              } catch (err) {
+                console.error(err);
+                vendorCreateState.submitting = false;
+                if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = false;
+                setStatus('벤더 등록 실패: ' + formatDbError(err), 'err');
+              }
+              return;
+            }
+          }
+          if (e.target === root) closeVendorCreateModal();
+        });
+
+        root.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') {
+            e.preventDefault();
+            vendorCreateState.saveBtn?.click();
+          }
+        });
+      }
+
+      function openVendorCreateModal(options = {}) {
+        ensureVendorCreateModal();
+        vendorCreateState.ctx = options;
+        vendorCreateState.submitting = false;
+        if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = false;
+        vendorCreateState.nameInput.value = String(options.initialName || '').trim();
+        vendorCreateState.codeInput.value = '';
+        vendorCreateState.bizInput.value = '';
+        vendorCreateState.root.classList.remove('hidden');
+        setTimeout(() => {
+          vendorCreateState.nameInput?.focus();
+          vendorCreateState.nameInput?.select();
+        }, 0);
       }
 
       function emptyRow() {
@@ -2314,7 +2591,7 @@
 
           if (error) throw error;
 
-          state.vendors = Array.isArray(data) ? data : [];
+          state.vendors = sortVendors(Array.isArray(data) ? data : []);
           setVendorFilterOptions();
 
           if (!state.vendors.length) {

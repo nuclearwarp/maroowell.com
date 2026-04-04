@@ -165,7 +165,7 @@
     }
 
     .sheetInner{
-      min-width:2080px;
+      min-width:2210px;
     }
 
     table{
@@ -254,6 +254,25 @@
       justify-content:center;
       font-weight:900;
       background:rgba(15,23,42,.04);
+    }
+
+    .totalCell{
+      justify-content:center;
+      font-variant-numeric:tabular-nums;
+    }
+
+    .amountCell{
+      justify-content:flex-end;
+      padding:0 12px;
+      font-variant-numeric:tabular-nums;
+    }
+
+    .emptyDataRow td{
+      padding:18px 14px;
+      text-align:center;
+      color:#64748b;
+      font-weight:800;
+      background:#f8fbff !important;
     }
 
     .filterInput,
@@ -358,8 +377,8 @@
       height:44px;
       display:flex;
       align-items:center;
-      gap:6px;
-      padding:0 8px;
+      gap:4px;
+      padding:0 6px;
     }
 
     .dateDisplay{
@@ -369,8 +388,8 @@
       border-radius:10px;
       background:#fff;
       color:#0f172a;
-      padding:0 10px;
-      font-size:14px;
+      padding:0 8px;
+      font-size:13px;
       text-align:left;
       cursor:pointer;
     }
@@ -388,8 +407,8 @@
     }
 
     .dateIconBtn{
-      height:30px;
-      min-width:30px;
+      height:28px;
+      min-width:28px;
       border:1px solid #c7d2e2;
       background:#fff;
       border-radius:10px;
@@ -743,26 +762,27 @@
       <div class="sheetInner">
         <table>
           <colgroup>
-            <col style="width:130px">
-            <col style="width:180px">
-            <col style="width:170px">
-            <col style="width:140px">
-            <col style="width:120px">
-            <col style="width:130px">
-            <col style="width:120px">
-            <col style="width:120px">
-            <col style="width:120px">
-            <col style="width:180px">
+            <col style="width:185px">
+            <col style="width:135px">
+            <col style="width:125px">
+            <col style="width:95px">
+            <col style="width:88px">
+            <col style="width:105px">
+            <col style="width:88px">
+            <col style="width:100px">
+            <col style="width:95px">
+            <col style="width:115px">
+            <col style="width:78px">
+            <col style="width:78px">
+            <col style="width:78px">
             <col style="width:110px">
-            <col style="width:110px">
-            <col style="width:90px">
+            <col style="width:92px">
+            <col style="width:86px">
+            <col style="width:86px">
+            <col style="width:96px">
+            <col style="width:96px">
+            <col style="width:155px">
             <col style="width:120px">
-            <col style="width:150px">
-            <col style="width:160px">
-            <col style="width:120px">
-            <col style="width:120px">
-            <col style="width:240px">
-            <col style="width:150px">
           </colgroup>
 
           <thead>
@@ -780,9 +800,10 @@
               <th>배송 수량</th>
               <th>반품 수량</th>
               <th>합계</th>
+              <th>금액</th>
               <th>정산월</th>
-              <th>dragon_car_id</th>
-              <th>dragon_car_pw</th>
+              <th>ID</th>
+              <th>PW</th>
               <th>세금계산서</th>
               <th>입금여부</th>
               <th>비고</th>
@@ -816,6 +837,7 @@
               <th><input class="filterInput" data-filter="parcel" placeholder="배송" /></th>
               <th><input class="filterInput" data-filter="return_count" placeholder="반품" /></th>
               <th><input class="filterInput" data-filter="total_count" placeholder="합계" /></th>
+              <th><input class="filterInput" data-filter="amount" placeholder="금액" /></th>
               <th><input class="filterInput" data-filter="settlement_month" placeholder="정산월" /></th>
               <th><input class="filterInput" data-filter="dragon_car_id" placeholder="ID" /></th>
               <th><input class="filterInput" data-filter="dragon_car_pw" placeholder="PW" /></th>
@@ -847,7 +869,7 @@
       <span id="pillState" class="pill ok">READY</span>
       <span id="pillRows" class="pill">행 0</span>
       <span id="pillDirty" class="pill warn">변경 0</span>
-      <span id="statusText" class="statusText">불러오기 후 편집하세요.</span>
+      <span id="statusText" class="statusText">헤더 아래 줄은 필터입니다. 새 행 후 아래 데이터 줄을 편집하세요.</span>
     </div>
   </div>
 
@@ -1343,6 +1365,19 @@
         return toInt(row.parcel) + toInt(row.return_count);
       }
 
+      function amountValue(row) {
+        const price = toNum(row.price);
+        if (price == null) return null;
+        return price * totalCount(row);
+      }
+
+      function formatNumber(v) {
+        if (v == null || v === "") return "";
+        const n = Number(v);
+        if (!Number.isFinite(n)) return String(v);
+        return new Intl.NumberFormat("ko-KR").format(n);
+      }
+
       function normalize(v) {
         return String(v ?? "").trim().toLowerCase();
       }
@@ -1420,8 +1455,13 @@
         if (key === "tax_invoice" || key === "payment_confirm") return String(!!row[key]) === String(filterValue);
 
         let raw = "";
-        if (key === "total_count") raw = String(totalCount(row));
-        else raw = String(row[key] ?? "");
+        if (key === "total_count") {
+          const total = totalCount(row);
+          raw = `${total} ${formatNumber(total)}`;
+        } else if (key === "amount") {
+          const amount = amountValue(row);
+          raw = amount == null ? "" : `${amount} ${formatNumber(amount)}`;
+        } else raw = String(row[key] ?? "");
 
         return normalize(raw).includes(normalize(filterValue));
       }
@@ -1437,7 +1477,7 @@
         return state.rows.filter(row => {
           const keys = [
             "order_date","vendor_id","order_name","camp","wave","route","price","settlement_day",
-            "delivery_driver","order_vendor","parcel","return_count","total_count","settlement_month",
+            "delivery_driver","order_vendor","parcel","return_count","total_count","amount","settlement_month",
             "dragon_car_id","dragon_car_pw","tax_invoice","payment_confirm","dragon_car_note"
           ];
 
@@ -1497,9 +1537,20 @@
       function render() {
         const rows = getFilteredRows();
 
+        if (!rows.length) {
+          sheetBody.innerHTML = `
+            <tr class="emptyDataRow">
+              <td colspan="21">데이터가 없습니다. 상단 새 행 버튼으로 입력을 시작하거나 필터를 초기화하세요. 헤더 아래 줄은 필터입니다.</td>
+            </tr>
+          `;
+          refreshStatus();
+          return;
+        }
+
         sheetBody.innerHTML = rows.map(row => {
           const rowIndex = state.rows.indexOf(row);
           const total = totalCount(row);
+          const amount = amountValue(row);
           const taxClass = row.tax_invoice ? "taxTrue" : "taxFalse";
           const payClass = row.payment_confirm ? "payTrue" : "payFalse";
 
@@ -1517,7 +1568,8 @@
               <td><input class="cellInput" data-row="${rowIndex}" data-field="order_vendor" value="${esc(row.order_vendor || "")}" ${row.vendor_id ? "readonly" : ""} placeholder="${row.vendor_id ? "" : "직접입력 가능"}"></td>
               <td><input class="cellInput" inputmode="numeric" data-row="${rowIndex}" data-field="parcel" value="${esc(row.parcel ?? 0)}"></td>
               <td><input class="cellInput" inputmode="numeric" data-row="${rowIndex}" data-field="return_count" value="${esc(row.return_count ?? 0)}"></td>
-              <td><div class="readonlyCell">${esc(total)}</div></td>
+              <td><div class="readonlyCell totalCell js-total-cell">${esc(formatNumber(total) || "0")}</div></td>
+              <td><div class="readonlyCell amountCell js-amount-cell">${esc(formatNumber(amount))}</div></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="settlement_month" value="${esc(row.settlement_month || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="dragon_car_id" value="${esc(row.dragon_car_id || "")}"></td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="dragon_car_pw" value="${esc(row.dragon_car_pw || "")}"></td>
@@ -1606,7 +1658,7 @@
           setStatus("저장 중...", "warn");
           await saveRowByObject(row);
           render();
-          setStatus("저장 완료", "ok");
+          setStatus("저장 완료 · ID " + (row.id || "-"), "ok");
         } catch (e) {
           console.error(e);
           setStatus("저장 실패: " + formatDbError(e), "err");
@@ -1703,7 +1755,7 @@
         const rows = getFilteredRows();
         const headers = [
           "order_date","vendor_name","order_name","camp","wave","route","price","settlement_day",
-          "delivery_driver","order_vendor","parcel","return_count","total_count","settlement_month",
+          "delivery_driver","order_vendor","parcel","return_count","total_count","amount","settlement_month",
           "dragon_car_id","dragon_car_pw","tax_invoice","payment_confirm","dragon_car_note"
         ];
 
@@ -1724,6 +1776,7 @@
             toInt(row.parcel),
             toInt(row.return_count),
             totalCount(row),
+            amountValue(row) ?? "",
             row.settlement_month || "",
             row.dragon_car_id || "",
             row.dragon_car_pw || "",
@@ -1769,10 +1822,12 @@
         const row = state.rows[rowIndex];
         row[field] = el.value;
 
-        if (field === "parcel" || field === "return_count") {
+        if (field === "price" || field === "parcel" || field === "return_count") {
           const tr = el.closest("tr");
-          const totalCell = tr ? tr.querySelector(".readonlyCell") : null;
-          if (totalCell) totalCell.textContent = String(totalCount(row));
+          const totalCell = tr ? tr.querySelector(".js-total-cell") : null;
+          const amountCell = tr ? tr.querySelector(".js-amount-cell") : null;
+          if (totalCell) totalCell.textContent = formatNumber(totalCount(row)) || "0";
+          if (amountCell) amountCell.textContent = formatNumber(amountValue(row));
         }
 
         markDirty(row);

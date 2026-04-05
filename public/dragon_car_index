@@ -1130,7 +1130,7 @@
 
       <div class="toolGroup">
         <label for="toolbarMonthFilter">정산월</label>
-        <input id="toolbarMonthFilter" type="text" placeholder="예: 2026-03 / 3월" />
+        <input id="toolbarMonthFilter" type="text" placeholder="예: 2026-04" />
       </div>
 
       <div class="toolGroup">
@@ -1557,6 +1557,83 @@
         if (e.details) parts.push(e.details);
         if (e.hint) parts.push(`hint: ${e.hint}`);
         return parts.join(" / ") || String(e);
+      }
+
+      function getKstNow() {
+        const now = new Date();
+        const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+        return new Date(utc + (9 * 60 * 60 * 1000));
+      }
+
+      function settlementMonthInfo(year, month) {
+        const safeYear = Number(year);
+        const safeMonth = Number(month);
+        if (!Number.isInteger(safeYear) || !Number.isInteger(safeMonth) || safeMonth < 1 || safeMonth > 12) return null;
+
+        const cycleStart = new Date(safeYear, safeMonth - 2, 26);
+        const cycleEnd = new Date(safeYear, safeMonth - 1, 25);
+
+        return {
+          year: safeYear,
+          month: safeMonth,
+          monthKey: `${safeYear}-${String(safeMonth).padStart(2, "0")}`,
+          label: `${String(safeYear).slice(-2)}년 ${safeMonth}월 정산`,
+          cycleStart,
+          cycleEnd,
+          cycleStartIso: isoFromDate(cycleStart),
+          cycleEndIso: isoFromDate(cycleEnd)
+        };
+      }
+
+      function getDefaultSettlementMonthInfo(baseDate = getKstNow()) {
+        const year = baseDate.getFullYear();
+        const month = baseDate.getMonth() + 1;
+        const day = baseDate.getDate();
+        if (day >= 26) {
+          if (month === 12) return settlementMonthInfo(year + 1, 1);
+          return settlementMonthInfo(year, month + 1);
+        }
+        return settlementMonthInfo(year, month);
+      }
+
+      function parseSettlementMonthInput(value) {
+        const raw = String(value ?? "").trim();
+        if (!raw) return null;
+
+        const compact = raw.replace(/\s+/g, "");
+        let match = compact.match(/^(\d{4})[-./]?(\d{1,2})$/);
+        if (match) return settlementMonthInfo(Number(match[1]), Number(match[2]));
+
+        match = compact.match(/^(\d{2})[-./]?(\d{1,2})$/);
+        if (match) return settlementMonthInfo(2000 + Number(match[1]), Number(match[2]));
+
+        match = compact.match(/^(\d{4})년(\d{1,2})월$/);
+        if (match) return settlementMonthInfo(Number(match[1]), Number(match[2]));
+
+        match = compact.match(/^(\d{2})년(\d{1,2})월$/);
+        if (match) return settlementMonthInfo(2000 + Number(match[1]), Number(match[2]));
+
+        match = compact.match(/^(\d{1,2})월$/);
+        if (match) {
+          const fallback = getDefaultSettlementMonthInfo();
+          return settlementMonthInfo(fallback.year, Number(match[1]));
+        }
+
+        return null;
+      }
+
+      function getSelectedSettlementMonthInfo() {
+        const parsed = parseSettlementMonthInput(toolbarMonthFilter.value);
+        if (parsed) return parsed;
+        const fallback = getDefaultSettlementMonthInfo();
+        toolbarMonthFilter.value = fallback.monthKey;
+        return fallback;
+      }
+
+      function applyDefaultSettlementMonth() {
+        const info = getDefaultSettlementMonthInfo();
+        toolbarMonthFilter.value = info.monthKey;
+        return info;
       }
 
       async function routeApiGet(url) {
@@ -2382,7 +2459,6 @@
         const head = getHeaderFilters();
         const quick = quickSearch.value || "";
         const toolbarVendor = toolbarVendorFilter.value || "";
-        const toolbarMonth = toolbarMonthFilter.value || "";
         const dateFrom = toolbarDateFrom.value || "";
         const dateTo = toolbarDateTo.value || "";
 
@@ -2398,7 +2474,6 @@
           }
 
           if (toolbarVendor && String(row.vendor_id || "") !== String(toolbarVendor)) return false;
-          if (toolbarMonth && !normalize(row.settlement_month).includes(normalize(toolbarMonth))) return false;
 
           const d = toDateInput(row.order_date);
           if (dateFrom && d && d < dateFrom) return false;
@@ -2702,11 +2777,14 @@
       }
 
       async function loadRows() {
+        const monthInfo = getSelectedSettlementMonthInfo();
         try {
-          setStatus("불러오는 중...", "warn");
+          setStatus(`${monthInfo.label} 불러오는 중...`, "warn");
           const { data, error } = await supabase
             .from(TABLE)
             .select("*")
+            .gte("order_date", monthInfo.cycleStartIso)
+            .lte("order_date", monthInfo.cycleEndIso)
             .order("order_date", { ascending: false, nullsFirst: false })
             .order("id", { ascending: false });
 
@@ -2722,10 +2800,10 @@
           }));
 
           render();
-          setStatus("불러오기 완료", "ok");
+          setStatus(`${monthInfo.label} 불러오기 완료 (${monthInfo.cycleStartIso} ~ ${monthInfo.cycleEndIso})`, "ok");
         } catch (e) {
           console.error(e);
-          setStatus("불러오기 실패: " + formatDbError(e), "err");
+          setStatus(`${monthInfo.label} 불러오기 실패: ` + formatDbError(e), "err");
         }
       }
 
@@ -2777,19 +2855,20 @@
         URL.revokeObjectURL(url);
       }
 
-      function clearFilters() {
+      async function clearFilters() {
         quickSearch.value = "";
         toolbarVendorFilter.value = "";
-        toolbarMonthFilter.value = "";
         toolbarDateFrom.value = "";
         toolbarDateTo.value = "";
         document.querySelectorAll(".filterInput, .filterSelect").forEach(el => {
           el.value = "";
         });
+        applyDefaultSettlementMonth();
         syncExternalDateDisplays();
         syncVendorDisplays();
         setVendorFilterOptions();
         render();
+        await loadRows();
       }
 
       sheetBody.addEventListener("input", (e) => {
@@ -2989,7 +3068,23 @@
 
       quickSearch.addEventListener("input", render);
       toolbarVendorFilter.addEventListener("change", render);
-      toolbarMonthFilter.addEventListener("input", render);
+      toolbarMonthFilter.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          loadRows();
+        }
+      });
+      toolbarMonthFilter.addEventListener("change", () => {
+        const parsed = parseSettlementMonthInput(toolbarMonthFilter.value);
+        if (parsed) {
+          toolbarMonthFilter.value = parsed.monthKey;
+          loadRows();
+          return;
+        }
+        const fallback = getSelectedSettlementMonthInfo();
+        toolbarMonthFilter.value = fallback.monthKey;
+        setStatus("정산월은 YYYY-MM 형식으로 입력하세요. 예: 2026-04", "warn");
+      });
       toolbarDateFrom.addEventListener("change", render);
       toolbarDateTo.addEventListener("change", render);
 
@@ -3008,7 +3103,7 @@
         setStatus("새 행 추가 완료", "ok");
       });
       btnSaveAll.addEventListener("click", saveAll);
-      btnClearFilters.addEventListener("click", clearFilters);
+      btnClearFilters.addEventListener("click", () => { clearFilters(); });
       btnExportCsv.addEventListener("click", exportCsv);
 
       btnLogout.addEventListener("click", async () => {
@@ -3019,6 +3114,7 @@
 
       syncExternalDateDisplays();
       syncVendorDisplays();
+      applyDefaultSettlementMonth();
 
       if (!(await requireAuth())) return;
       await loadVendors();

@@ -1323,6 +1323,8 @@
       const TABLE = "dragon_car";
       const VENDORS_TABLE = "vendors";
       const WEEKDAYS = ["일","월","화","수","목","금","토"];
+      const ROUTE_API_BASE = "https://route.maroowell.com";
+      const ROUTE_VENDOR_ENDPOINT = `${ROUTE_API_BASE}/vendors`;
 
       const FIXED_HOLIDAYS = Object.freeze({
         "01-01": "신정",
@@ -1392,13 +1394,15 @@
         searchInput: null,
         ctx: null,
         anchorEl: null,
-        query: ""
+        query: "",
+        loading: false,
+        searchSeq: 0,
+        results: []
       };
 
       const vendorCreateState = {
         root: null,
         nameInput: null,
-        codeInput: null,
         bizInput: null,
         saveBtn: null,
         ctx: null,
@@ -1531,6 +1535,42 @@
         if (e.details) parts.push(e.details);
         if (e.hint) parts.push(`hint: ${e.hint}`);
         return parts.join(" / ") || String(e);
+      }
+
+      async function routeApiGet(url) {
+        const res = await fetch(url, { method: "GET" });
+        const text = await res.text();
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch {}
+        if (!res.ok) throw new Error(json?.error || json?.message || text || `HTTP ${res.status}`);
+        return json;
+      }
+
+      async function routeApiJson(method, url, body) {
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined
+        });
+        const text = await res.text();
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch {}
+        if (!res.ok) throw new Error(json?.error || json?.message || text || `HTTP ${res.status}`);
+        return json;
+      }
+
+      async function fetchRouteVendors(query) {
+        const url = new URL(ROUTE_VENDOR_ENDPOINT);
+        url.searchParams.set("q", query || "");
+        url.searchParams.set("limit", "100");
+        const data = await routeApiGet(url.toString());
+        const rows = Array.isArray(data) ? data : (data?.rows || data?.vendors || []);
+        return sortVendors((rows || []).map(v => ({
+          id: v.id ?? null,
+          name: String(v.name ?? v.vendor_name ?? "").trim(),
+          vendor_code: String(v.vendor_code ?? "").trim(),
+          business_number: String(v.business_number ?? v.vendor_business_number ?? "").trim()
+        })).filter(v => v.name));
       }
 
       function getHolidayName(v) {
@@ -1956,6 +1996,9 @@
         vendorLookupState.ctx = null;
         vendorLookupState.anchorEl = null;
         vendorLookupState.query = "";
+        vendorLookupState.loading = false;
+        vendorLookupState.results = [];
+        vendorLookupState.searchSeq += 1;
       }
 
       function positionVendorLookup() {
@@ -1979,11 +2022,38 @@
 
       function filteredVendors(query) {
         const q = normalize(query);
-        const base = sortVendors(state.vendors);
-        const list = !q
-          ? base.slice(0, 80)
-          : base.filter(v => vendorSearchText(v).includes(q)).slice(0, 80);
-        return list;
+        const base = q
+          ? sortVendors(vendorLookupState.results || [])
+          : sortVendors(state.vendors);
+        return base.slice(0, 80);
+      }
+
+      async function searchVendorLookup(query) {
+        const q = String(query || "").trim();
+        const seq = ++vendorLookupState.searchSeq;
+        vendorLookupState.loading = !!q;
+        if (!q) {
+          vendorLookupState.results = [];
+          vendorLookupState.loading = false;
+          renderVendorLookupList();
+          return;
+        }
+        renderVendorLookupList();
+        try {
+          const rows = await fetchRouteVendors(q);
+          if (seq !== vendorLookupState.searchSeq) return;
+          vendorLookupState.results = rows;
+          rows.forEach(upsertVendorInState);
+        } catch (err) {
+          if (seq !== vendorLookupState.searchSeq) return;
+          vendorLookupState.results = [];
+          setStatus('벤더 검색 실패: ' + formatDbError(err), 'err');
+        } finally {
+          if (seq === vendorLookupState.searchSeq) {
+            vendorLookupState.loading = false;
+            renderVendorLookupList();
+          }
+        }
       }
 
       function renderVendorLookupList() {
@@ -2001,22 +2071,26 @@
             </button>
           `);
         }
-        for (const vendor of vendors) {
-          items.push(`
-            <button class="vendorResultBtn" type="button" data-vendor-action="pick" data-vendor-id="${esc(vendor.id)}">
-              <span class="name">${esc(vendor.name || "-")}</span>
-              <span class="meta">${esc(vendorMeta(vendor) || "벤더")}</span>
-            </button>
-          `);
-        }
-        if (!vendors.length) {
-          items.push('<div class="vendorEmpty">검색 결과가 없습니다.</div>');
-          if (ctx.allowCreate !== false && q) {
+        if (vendorLookupState.loading) {
+          items.push('<div class="vendorEmpty">검색 중...</div>');
+        } else {
+          for (const vendor of vendors) {
             items.push(`
-              <div class="vendorEmptyActions">
-                <button class="vendorAddInlineBtn" type="button" data-vendor-action="open-create">"${esc(q)}" 신규 등록</button>
-              </div>
+              <button class="vendorResultBtn" type="button" data-vendor-action="pick" data-vendor-id="${esc(vendor.id)}">
+                <span class="name">${esc(vendor.name || "-")}</span>
+                <span class="meta">${esc(vendorMeta(vendor) || "벤더")}</span>
+              </button>
             `);
+          }
+          if (!vendors.length) {
+            items.push(`<div class="vendorEmpty">${q ? `검색 결과 없음 : &quot;${esc(q)}&quot;` : '검색어를 입력하세요.'}</div>`);
+            if (ctx.allowCreate !== false && q) {
+              items.push(`
+                <div class="vendorEmptyActions">
+                  <button class="vendorAddInlineBtn" type="button" data-vendor-action="open-create">"${esc(q)}" 신규 등록</button>
+                </div>
+              `);
+            }
           }
         }
         vendorLookupState.body.innerHTML = items.join("");
@@ -2029,7 +2103,7 @@
         root.className = "vendorPopover hidden";
         root.innerHTML = `
           <div class="vendorPopoverHead">
-            <input class="vendorSearchInput" type="text" placeholder="벤더명 / 코드 / 사업자번호 검색" />
+            <input class="vendorSearchInput" type="text" placeholder="벤더명 / 사업자번호 검색" />
             <button class="calendarCloseBtn" type="button" data-vendor-action="close">✕</button>
           </div>
           <div class="vendorPopoverBody"></div>
@@ -2045,7 +2119,7 @@
 
         vendorLookupState.searchInput.addEventListener('input', () => {
           vendorLookupState.query = vendorLookupState.searchInput.value || "";
-          renderVendorLookupList();
+          searchVendorLookup(vendorLookupState.query);
         });
 
         root.addEventListener('click', (e) => {
@@ -2105,6 +2179,8 @@
         vendorLookupState.ctx = options || {};
         vendorLookupState.anchorEl = options?.anchorEl || null;
         vendorLookupState.query = "";
+        vendorLookupState.loading = false;
+        vendorLookupState.results = [];
         vendorLookupState.searchInput.value = "";
         vendorLookupState.root.classList.remove('hidden');
         renderVendorLookupList();
@@ -2135,14 +2211,10 @@
                 <input id="vendorCreateName" type="text" placeholder="벤더명을 입력하세요" />
               </div>
               <div class="vendorCreateField">
-                <label for="vendorCreateCode">벤더 코드</label>
-                <input id="vendorCreateCode" type="text" placeholder="선택 입력" />
-              </div>
-              <div class="vendorCreateField">
                 <label for="vendorCreateBiz">사업자번호</label>
-                <input id="vendorCreateBiz" type="text" placeholder="선택 입력" />
+                <input id="vendorCreateBiz" type="text" placeholder="예: 123-45-67890" />
               </div>
-              <div class="vendorCreateHelp">등록이 완료되면 현재 선택 위치에 바로 연결됩니다.</div>
+              <div class="vendorCreateHelp">기존 라우트 편집기와 동일하게 사업자번호 기준으로 등록합니다.</div>
             </div>
             <div class="vendorCreateFoot">
               <button class="btn" type="button" data-vendor-create-action="cancel">취소</button>
@@ -2153,7 +2225,6 @@
         document.body.appendChild(root);
         vendorCreateState.root = root;
         vendorCreateState.nameInput = root.querySelector('#vendorCreateName');
-        vendorCreateState.codeInput = root.querySelector('#vendorCreateCode');
         vendorCreateState.bizInput = root.querySelector('#vendorCreateBiz');
         vendorCreateState.saveBtn = root.querySelector('[data-vendor-create-action="save"]');
 
@@ -2168,30 +2239,34 @@
             if (action === 'save') {
               if (vendorCreateState.submitting) return;
               const name = String(vendorCreateState.nameInput?.value || '').trim();
-              const vendor_code = String(vendorCreateState.codeInput?.value || '').trim();
               const business_number = String(vendorCreateState.bizInput?.value || '').trim();
               if (!name) {
                 vendorCreateState.nameInput?.focus();
                 setStatus('벤더명은 필수입니다.', 'err');
                 return;
               }
+              if (!business_number) {
+                vendorCreateState.bizInput?.focus();
+                setStatus('사업자번호는 필수입니다.', 'err');
+                return;
+              }
               try {
                 vendorCreateState.submitting = true;
                 if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = true;
-                const payload = {
+                const created = await routeApiJson('POST', ROUTE_VENDOR_ENDPOINT, {
                   name,
-                  vendor_code: vendor_code || null,
-                  business_number: business_number || null
+                  business_number
+                });
+                const vendor = created?.row || created || {};
+                const normalizedVendor = {
+                  id: vendor.id ?? null,
+                  name: String(vendor.name ?? name).trim(),
+                  vendor_code: String(vendor.vendor_code ?? '').trim(),
+                  business_number: String(vendor.business_number ?? business_number).trim()
                 };
-                const { data, error } = await supabase
-                  .from(VENDORS_TABLE)
-                  .insert(payload)
-                  .select('id,name,vendor_code,business_number')
-                  .single();
-                if (error) throw error;
-                upsertVendorInState(data);
+                upsertVendorInState(normalizedVendor);
                 closeVendorCreateModal();
-                vendorCreateState.ctx?.onCreated?.(data);
+                vendorCreateState.ctx?.onCreated?.(normalizedVendor);
                 setStatus('벤더 신규 등록 완료', 'ok');
                 render();
               } catch (err) {
@@ -2220,7 +2295,6 @@
         vendorCreateState.submitting = false;
         if (vendorCreateState.saveBtn) vendorCreateState.saveBtn.disabled = false;
         vendorCreateState.nameInput.value = String(options.initialName || '').trim();
-        vendorCreateState.codeInput.value = '';
         vendorCreateState.bizInput.value = '';
         vendorCreateState.root.classList.remove('hidden');
         setTimeout(() => {

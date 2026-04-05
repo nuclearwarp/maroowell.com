@@ -214,6 +214,14 @@
       background:var(--cellAlt);
     }
 
+    tbody tr.paidRow td{
+      background:rgba(219,234,254,.72);
+    }
+
+    tbody tr.paidRow:nth-child(even) td{
+      background:rgba(210,228,250,.82);
+    }
+
     .cellInput,
     .cellSelect,
     .cellTextarea{
@@ -1080,9 +1088,18 @@
       flex:0 0 auto;
     }
 
+    @media (max-width:1280px){
+      .summaryCards{
+        grid-template-columns:repeat(3, minmax(120px, 1fr));
+      }
+    }
+
     @media (max-width:900px){
       .btn{ padding:0 10px; font-size:12px; }
       .toolbar{ padding:8px; }
+      .summaryCards{
+        grid-template-columns:repeat(2, minmax(120px, 1fr));
+      }
     }
   </style>
 
@@ -1453,6 +1470,8 @@
       const toolbarDateTo = document.getElementById("toolbarDateTo");
 
       const summaryAmount = document.getElementById("summaryAmount");
+      const summaryPaidAmount = document.getElementById("summaryPaidAmount");
+      const summaryUnpaidAmount = document.getElementById("summaryUnpaidAmount");
       const summaryParcel = document.getElementById("summaryParcel");
       const summaryReturn = document.getElementById("summaryReturn");
       const summaryTotal = document.getElementById("summaryTotal");
@@ -2516,17 +2535,31 @@
 
       function computeSummary(rows) {
         return rows.reduce((acc, row) => {
-          acc.parcel += toInt(row.parcel);
-          acc.returnCount += toInt(row.return_count);
-          acc.total += totalCount(row);
-          acc.amount += Number(amountValue(row) || 0);
+          const parcel = toInt(row.parcel);
+          const returnCount = toInt(row.return_count);
+          const total = totalCount(row);
+          const amount = Number(amountValue(row) || 0);
+
+          acc.parcel += parcel;
+          acc.returnCount += returnCount;
+          acc.total += total;
+          acc.amount += amount;
+
+          if (row.payment_confirm) {
+            acc.paidAmount += amount;
+          } else if (total > 0) {
+            acc.unpaidAmount += amount;
+          }
+
           return acc;
-        }, { parcel: 0, returnCount: 0, total: 0, amount: 0 });
+        }, { parcel: 0, returnCount: 0, total: 0, amount: 0, paidAmount: 0, unpaidAmount: 0 });
       }
 
       function renderSummary(rows) {
         const summary = computeSummary(rows || []);
         summaryAmount.textContent = formatCurrency(summary.amount);
+        summaryPaidAmount.textContent = formatCurrency(summary.paidAmount);
+        summaryUnpaidAmount.textContent = formatCurrency(summary.unpaidAmount);
         summaryParcel.textContent = formatNumber(summary.parcel) || "0";
         summaryReturn.textContent = formatNumber(summary.returnCount) || "0";
         summaryTotal.textContent = formatNumber(summary.total) || "0";
@@ -2601,7 +2634,7 @@
           const amountClass = hasManualAmount(row) ? "manualAmount" : "autoAmount";
 
           return `
-            <tr data-row="${rowIndex}">
+            <tr data-row="${rowIndex}" class="${row.payment_confirm ? "paidRow" : ""}">
               <td>${renderDateCell(row, rowIndex)}</td>
               <td>${renderVendorCell(row, rowIndex)}</td>
               <td><input class="cellInput" data-row="${rowIndex}" data-field="order_name" value="${esc(row.order_name || "")}"></td>

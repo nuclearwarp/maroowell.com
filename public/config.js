@@ -11,6 +11,7 @@ window.MARUWELL_CONFIG = {
     login: "/login.html",
     index: "/index.html",
     route: "/coupangRouteMap.html",
-    dragon_car_index : "/dragon_car_index.html"
+    dragon_car_index : "/dragon_car_index.html",
+    maroowell_info : "/maroowell_info.html"
   }
 };

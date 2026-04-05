@@ -1643,11 +1643,9 @@
       }
 
       function getSelectedSettlementMonthInfo() {
-        const parsed = parseSettlementMonthInput(toolbarMonthFilter.value);
-        if (parsed) return parsed;
-        const fallback = getDefaultSettlementMonthInfo();
-        toolbarMonthFilter.value = fallback.monthKey;
-        return fallback;
+        const raw = String(toolbarMonthFilter.value ?? "").trim();
+        if (!raw) return null;
+        return parseSettlementMonthInput(raw);
       }
 
       function applyDefaultSettlementMonth() {
@@ -2821,12 +2819,20 @@
       async function loadRows() {
         const monthInfo = getSelectedSettlementMonthInfo();
         try {
-          setStatus(`${monthInfo.label} 불러오는 중...`, "warn");
-          const { data, error } = await supabase
+          let query = supabase
             .from(TABLE)
-            .select("*")
-            .gte("order_date", monthInfo.cycleStartIso)
-            .lte("order_date", monthInfo.cycleEndIso)
+            .select("*");
+
+          if (monthInfo) {
+            setStatus(`${monthInfo.label} 불러오는 중...`, "warn");
+            query = query
+              .gte("order_date", monthInfo.cycleStartIso)
+              .lte("order_date", monthInfo.cycleEndIso);
+          } else {
+            setStatus("전체 기간 불러오는 중...", "warn");
+          }
+
+          const { data, error } = await query
             .order("order_date", { ascending: false, nullsFirst: false })
             .order("id", { ascending: false });
 
@@ -2842,10 +2848,18 @@
           }));
 
           render();
-          setStatus(`${monthInfo.label} 불러오기 완료 (${monthInfo.cycleStartIso} ~ ${monthInfo.cycleEndIso})`, "ok");
+          if (monthInfo) {
+            setStatus(`${monthInfo.label} 불러오기 완료 (${monthInfo.cycleStartIso} ~ ${monthInfo.cycleEndIso})`, "ok");
+          } else {
+            setStatus(`전체 기간 불러오기 완료 (${state.rows.length}건)`, "ok");
+          }
         } catch (e) {
           console.error(e);
-          setStatus(`${monthInfo.label} 불러오기 실패: ` + formatDbError(e), "err");
+          if (monthInfo) {
+            setStatus(`${monthInfo.label} 불러오기 실패: ` + formatDbError(e), "err");
+          } else {
+            setStatus(`전체 기간 불러오기 실패: ` + formatDbError(e), "err");
+          }
         }
       }
 
@@ -2900,12 +2914,12 @@
       async function clearFilters() {
         quickSearch.value = "";
         toolbarVendorFilter.value = "";
+        toolbarMonthFilter.value = "";
         toolbarDateFrom.value = "";
         toolbarDateTo.value = "";
         document.querySelectorAll(".filterInput, .filterSelect").forEach(el => {
           el.value = "";
         });
-        applyDefaultSettlementMonth();
         syncExternalDateDisplays();
         syncVendorDisplays();
         setVendorFilterOptions();
@@ -3119,14 +3133,18 @@
         }
       });
       toolbarMonthFilter.addEventListener("change", () => {
-        const parsed = parseSettlementMonthInput(toolbarMonthFilter.value);
+        const raw = String(toolbarMonthFilter.value ?? "").trim();
+        if (!raw) {
+          toolbarMonthFilter.value = "";
+          loadRows();
+          return;
+        }
+        const parsed = parseSettlementMonthInput(raw);
         if (parsed) {
           toolbarMonthFilter.value = parsed.monthKey;
           loadRows();
           return;
         }
-        const fallback = getSelectedSettlementMonthInfo();
-        toolbarMonthFilter.value = fallback.monthKey;
         setStatus("정산월은 YYYY-MM 형식으로 입력하세요. 예: 2026-04", "warn");
       });
       toolbarDateFrom.addEventListener("change", render);

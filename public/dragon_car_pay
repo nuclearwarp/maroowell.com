@@ -609,7 +609,7 @@
     <div class="toolbar">
       <div class="toolGroup">
         <label for="monthInput">정산월</label>
-        <input id="monthInput" type="text" placeholder="예: 2026-04" />
+        <input id="monthInput" type="text" placeholder="예: 2026-04 / 26년 4월" />
       </div>
 
       <div class="toolGroup">
@@ -720,7 +720,7 @@
                 <table class="paperTable">
                   <colgroup>
                     <col style="width:110px" />
-                    <col style="width:130px" />
+                    <col style="width:160px" />
                     <col style="width:130px" />
                     <col style="width:90px" />
                     <col style="width:170px" />
@@ -849,7 +849,7 @@
         viewerEmail: "",
         viewerUserId: "",
         month: defaultMonth(),
-        mode: "vendor", // vendor | driver
+        mode: "vendor",
         allRows: [],
         monthRows: [],
         groups: [],
@@ -919,10 +919,18 @@
         const s = normalizeText(v);
         if (!s) return "";
         if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-        if (/^\d{4}\.\d{1,2}\.\d{1,2}$/.test(s)) {
-          const [y, m, d] = s.split(".");
-          return `${y.padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+        const m1 = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m1) {
+          return `${m1[1]}-${String(Number(m1[2])).padStart(2, "0")}-${String(Number(m1[3])).padStart(2, "0")}`;
         }
+
+        const m2 = s.match(/^(\d{2})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m2) {
+          const year = toFullYear(m2[1]);
+          return `${year}-${String(Number(m2[2])).padStart(2, "0")}-${String(Number(m2[3])).padStart(2, "0")}`;
+        }
+
         const d = new Date(s);
         if (!Number.isNaN(d.getTime())) {
           const yy = d.getFullYear();
@@ -930,14 +938,63 @@
           const dd = String(d.getDate()).padStart(2, "0");
           return `${yy}-${mm}-${dd}`;
         }
+
+        return s;
+      }
+
+      function toFullYear(yearText) {
+        const s = normalizeText(yearText);
+        if (!s) return "";
+        if (s.length === 4) return s;
+        if (s.length === 2) return String(2000 + Number(s));
         return s;
       }
 
       function normalizeMonth(v) {
-        const s = normalizeText(v).replaceAll(".", "-").replaceAll("/", "-");
-        const m = s.match(/^(\d{4})-(\d{1,2})$/);
-        if (!m) return "";
-        return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+        const s = normalizeText(v);
+        if (!s) return "";
+
+        const cleaned = s.replaceAll(".", "-").replaceAll("/", "-");
+        let m = cleaned.match(/^(\d{4})-(\d{1,2})$/);
+        if (m) return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        m = cleaned.match(/^(\d{2})-(\d{1,2})$/);
+        if (m) return `${toFullYear(m[1])}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        m = s.match(/^(\d{4})\s*년\s*(\d{1,2})\s*월$/);
+        if (m) return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        m = s.match(/^(\d{2})\s*년\s*(\d{1,2})\s*월$/);
+        if (m) return `${toFullYear(m[1])}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        return "";
+      }
+
+      function monthFromDateText(v) {
+        const s = normalizeText(v);
+        if (!s) return "";
+
+        let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m) return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        m = s.match(/^(\d{2})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m) return `${toFullYear(m[1])}-${String(Number(m[2])).padStart(2, "0")}`;
+
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) {
+          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        }
+
+        return "";
+      }
+
+      function resolveRowMonth(row) {
+        return (
+          normalizeMonth(row.settlement_month) ||
+          monthFromDateText(row.order_date) ||
+          monthFromDateText(row.settlement_day) ||
+          ""
+        );
       }
 
       function normalizeBool(v) {
@@ -1055,9 +1112,7 @@
           const { data, error } = await supabase
             .from(DATA_TABLE)
             .select("*")
-            .order("settlement_month", { ascending: false })
-            .order("order_date", { ascending: true })
-            .order("id", { ascending: true });
+            .order("id", { ascending: false });
 
           if (error) throw error;
 
@@ -1074,7 +1129,8 @@
       function buildGroups() {
         const targetMonth = normalizeMonth(state.month);
         const q = normalizeLower(dom.searchInput.value);
-        const rows = state.allRows.filter(row => normalizeMonth(row.settlement_month) === targetMonth);
+
+        const rows = state.allRows.filter(row => resolveRowMonth(row) === targetMonth);
         state.monthRows = rows;
 
         const map = new Map();
@@ -1092,14 +1148,11 @@
             name = `${vendor}\n${target}`;
           } else {
             target = normalizeText(row.delivery_driver) || "미지정 기사";
-            vendor = normalizeText(row.vendor_id) || "";
             key = target;
             name = target;
           }
 
           const searchBag = [
-            vendor,
-            target,
             row.vendor_id,
             row.order_name,
             row.delivery_driver,
@@ -1123,28 +1176,44 @@
               unpaidAmount: 0,
               parcel: 0,
               returnCount: 0,
-              noteSet: new Set()
+              noteSet: new Set(),
+              vendorSet: new Set(),
+              orderSet: new Set(),
+              driverSet: new Set()
             });
           }
 
           const g = map.get(key);
           const amt = effectiveAmount(row);
+
           g.rows.push(row);
           g.amount += amt;
           g.parcel += toNumber(row.parcel);
           g.returnCount += toNumber(row.return_count);
+
           if (isPaid(row)) g.paidAmount += amt;
           else g.unpaidAmount += amt;
 
           const note = normalizeText(row.dragon_car_note);
           if (note) g.noteSet.add(note);
+
+          const v = normalizeText(row.vendor_id);
+          const o = normalizeText(row.order_name);
+          const d = normalizeText(row.delivery_driver);
+
+          if (v) g.vendorSet.add(v);
+          if (o) g.orderSet.add(o);
+          if (d) g.driverSet.add(d);
         }
 
         state.groups = Array.from(map.values())
           .map(group => ({
             ...group,
             noteText: Array.from(group.noteSet).join("\n• "),
-            rowCount: group.rows.length
+            rowCount: group.rows.length,
+            vendorText: Array.from(group.vendorSet).join("\n"),
+            orderText: Array.from(group.orderSet).join("\n"),
+            driverText: Array.from(group.driverSet).join("\n")
           }))
           .sort((a, b) => {
             if (b.amount !== a.amount) return b.amount - a.amount;
@@ -1161,7 +1230,8 @@
       }
 
       function renderSidebar() {
-        dom.sideMonth.textContent = normalizeMonth(state.month) || "-";
+        const targetMonth = normalizeMonth(state.month);
+        dom.sideMonth.textContent = targetMonth || "-";
         dom.sideGroupCount.textContent = String(state.groups.length);
 
         const totalAmount = state.groups.reduce((acc, g) => acc + g.amount, 0);
@@ -1215,8 +1285,14 @@
         dom.statementTitle.textContent = state.mode === "vendor" ? "업체 용차 정산서" : "기사 용차 정산서";
         dom.infoMonth.textContent = normalizeMonth(state.month);
         dom.infoMode.textContent = state.mode === "vendor" ? "업체 기준" : "기사 기준";
-        dom.infoVendor.textContent = state.mode === "vendor" ? (group.vendor || "-") : (group.vendor || "혼합");
-        dom.infoTarget.textContent = group.target || "-";
+        dom.infoVendor.textContent =
+          state.mode === "vendor"
+            ? (group.vendorText || "-")
+            : (group.vendorText || "혼합");
+        dom.infoTarget.textContent =
+          state.mode === "vendor"
+            ? (group.orderText || "-")
+            : (group.driverText || "-");
 
         dom.sumAmount.textContent = formatCurrency(group.amount);
         dom.sumPaid.textContent = formatCurrency(group.paidAmount);
@@ -1247,6 +1323,8 @@
       }
 
       function rebuildView() {
+        state.month = normalizeMonth(state.month) || defaultMonth();
+        dom.monthInput.value = state.month;
         buildGroups();
         renderSidebar();
         renderStatement();
@@ -1268,8 +1346,11 @@
             cacheBust: true
           });
 
+          const safeVendor = (group.vendorText || "").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+          const safeTarget = (state.mode === "vendor" ? group.orderText : group.driverText).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+          const safeName = `${normalizeMonth(state.month)}_${state.mode === "vendor" ? "업체" : "기사"}_${safeVendor}_${safeTarget}`;
+
           const a = document.createElement("a");
-          const safeName = `${normalizeMonth(state.month)}_${state.mode === "vendor" ? "업체" : "기사"}_${(group.vendor || "").replace(/[\\/:*?"<>|]/g, "_")}_${(group.target || "").replace(/[\\/:*?"<>|]/g, "_")}`.replace(/\s+/g, "_");
           a.href = dataUrl;
           a.download = `${safeName}.png`;
           document.body.appendChild(a);
@@ -1284,13 +1365,13 @@
       }
 
       function bindEvents() {
-        dom.btnReload.addEventListener("click", () => {
-          state.month = normalizeMonth(dom.monthInput.value) || defaultMonth();
+        dom.btnReload.addEventListener("click", async () => {
+          state.month = normalizeMonth(dom.monthInput.value) || state.month || defaultMonth();
           dom.monthInput.value = state.month;
-          rebuildView();
+          await fetchRows();
         });
 
-        dom.monthInput.addEventListener("keydown", (e) => {
+        dom.monthInput.addEventListener("keydown", async (e) => {
           if (e.key !== "Enter") return;
           e.preventDefault();
           dom.btnReload.click();

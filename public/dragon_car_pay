@@ -5,9 +5,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
-  <title>용차 정산</title>
+  <title>용차 정산서</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
 
   <style>
     html { visibility: hidden; }
@@ -18,7 +19,6 @@
       --panel:#0f1a2d;
       --panel2:#0c1524;
       --line:rgba(255,255,255,.08);
-      --line2:#d4dbe5;
       --txt:#e6eefc;
       --muted:#93a4c7;
 
@@ -28,42 +28,33 @@
       --warn:#6a4b13;
       --danger:#6b1b1b;
 
-      --sheetBg:#eef3f8;
-      --headBg:#dde7f3;
-      --cellBg:#ffffff;
-      --cellAlt:#f8fbff;
-      --cellTxt:#0f172a;
+      --paper:#ffffff;
+      --paperLine:#d7deea;
+      --paperHead:#eef3f8;
+      --paperTxt:#0f172a;
+      --paperMuted:#64748b;
 
-      --dirtyBg:#e0eeff;
-      --dirtyBorder:#60a5fa;
-
-      --warnBg:#fff1a8;
-      --warnBorder:#e2c44d;
-
-      --paidRow:#dbeafe;
-      --paidRowAlt:#d3e8fb;
-
-      --topbarH:56px;
+      --headerH:56px;
       --toolbarH:58px;
       --statusH:44px;
     }
 
-    * { box-sizing: border-box; }
+    * { box-sizing:border-box; }
 
-    html, body {
-      margin: 0;
-      height: 100%;
-      font-family: system-ui, -apple-system, "Noto Sans KR", Segoe UI, Roboto, Arial, sans-serif;
-      background: #0a0f1a;
-      color: var(--txt);
+    html, body{
+      margin:0;
+      height:100%;
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+      background:#0a0f1a;
+      color:var(--txt);
     }
 
-    body { overflow: hidden; }
+    body{ overflow:hidden; }
 
     .app{
       height:100%;
       display:grid;
-      grid-template-rows:var(--topbarH) var(--toolbarH) 1fr var(--statusH);
+      grid-template-rows:var(--headerH) var(--toolbarH) 1fr var(--statusH);
     }
 
     .topbar{
@@ -173,18 +164,41 @@
       border-color:rgba(96,165,250,.55);
     }
 
+    .modeTabs{
+      display:flex;
+      gap:8px;
+    }
+
+    .modeBtn{
+      height:38px;
+      min-width:92px;
+      padding:0 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.04);
+      color:#dce8ff;
+      font-weight:900;
+      cursor:pointer;
+    }
+
+    .modeBtn.active{
+      background:rgba(59,130,246,.18);
+      border-color:rgba(96,165,250,.5);
+      color:#fff;
+    }
+
     .main{
       min-height:0;
       display:grid;
-      grid-template-columns:300px 1fr;
+      grid-template-columns:320px 1fr;
     }
 
     .sidebar{
+      min-height:0;
       border-right:1px solid var(--line);
       background:linear-gradient(180deg,var(--panel),#0b1321);
       display:flex;
       flex-direction:column;
-      min-height:0;
     }
 
     .sideSection{
@@ -199,49 +213,44 @@
       margin-bottom:10px;
     }
 
-    .monthCard, .statCard{
+    .summaryGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+
+    .summaryCard{
       border:1px solid rgba(255,255,255,.10);
       background:rgba(255,255,255,.04);
       border-radius:14px;
       padding:12px;
     }
 
-    .monthValue{
-      font-size:24px;
-      font-weight:900;
-      line-height:1.05;
-    }
-
-    .statGrid{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-    }
-
-    .statLabel{
-      color:var(--muted);
+    .summaryLabel{
       font-size:11px;
+      color:var(--muted);
       font-weight:900;
       margin-bottom:4px;
     }
 
-    .statValue{
-      font-size:18px;
+    .summaryValue{
+      font-size:20px;
+      line-height:1.05;
       font-weight:900;
       color:#fff;
     }
 
-    .statValue.blue{ color:#bfdbfe; }
-    .statValue.red{ color:#fecaca; }
-    .statValue.green{ color:#bbf7d0; }
+    .summaryValue.blue{ color:#bfdbfe; }
+    .summaryValue.red{ color:#fecaca; }
+    .summaryValue.green{ color:#bbf7d0; }
 
-    .orderList{
+    .groupList{
       min-height:0;
       overflow:auto;
       padding:10px;
     }
 
-    .orderItem{
+    .groupItem{
       border:1px solid rgba(255,255,255,.10);
       background:rgba(255,255,255,.04);
       border-radius:16px;
@@ -251,34 +260,35 @@
       transition:.14s ease;
     }
 
-    .orderItem:hover{
+    .groupItem:hover{
       border-color:rgba(255,255,255,.18);
       background:rgba(255,255,255,.07);
     }
 
-    .orderItem.active{
+    .groupItem.active{
       border-color:rgba(96,165,250,.55);
       background:rgba(59,130,246,.12);
       box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
     }
 
-    .orderName{
+    .groupName{
       font-weight:900;
       color:#fff;
-      line-height:1.25;
+      line-height:1.3;
       margin-bottom:8px;
       word-break:break-word;
+      white-space:pre-line;
     }
 
-    .orderMeta{
+    .groupMeta{
       display:grid;
       grid-template-columns:1fr 1fr;
-      gap:6px 12px;
+      gap:6px 10px;
       font-size:12px;
-      color:#c9d7f2;
+      color:#d3def5;
     }
 
-    .orderMeta b{
+    .groupMeta b{
       color:#fff;
       font-weight:900;
     }
@@ -286,263 +296,186 @@
     .content{
       min-width:0;
       min-height:0;
-      display:grid;
-      grid-template-rows:auto auto 1fr;
-      background:#0f1726;
+      overflow:auto;
+      background:#0d1523;
+      padding:18px;
     }
 
-    .summaryWrap{
-      padding:12px;
-      border-bottom:1px solid var(--line);
-      background:linear-gradient(180deg,#10192b,#0e1625);
+    .statementPage{
+      width:min(1100px, 100%);
+      margin:0 auto;
+      background:var(--paper);
+      color:var(--paperTxt);
+      border-radius:20px;
+      box-shadow:0 20px 60px rgba(0,0,0,.26);
+      overflow:hidden;
     }
 
-    .hero{
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.04);
-      border-radius:18px;
-      padding:14px;
+    .statementTop{
+      padding:22px 26px 14px;
+      border-bottom:1px solid var(--paperLine);
+      background:linear-gradient(180deg,#ffffff,#f8fbff);
     }
 
-    .heroTitle{
-      font-size:22px;
+    .statementTitle{
+      font-size:30px;
+      line-height:1.1;
       font-weight:900;
-      line-height:1.15;
-      margin-bottom:6px;
+      letter-spacing:-.02em;
+      margin-bottom:14px;
     }
 
-    .heroSub{
-      font-size:12px;
-      color:#c8d6f1;
-      line-height:1.5;
+    .infoGrid{
+      display:grid;
+      grid-template-columns:repeat(4, minmax(120px,1fr));
+      gap:10px;
+    }
+
+    .infoBox{
+      border:1px solid var(--paperLine);
+      border-radius:14px;
+      padding:12px 14px;
+      background:#fff;
+    }
+
+    .infoLabel{
+      font-size:11px;
+      color:var(--paperMuted);
+      font-weight:900;
+      margin-bottom:5px;
+    }
+
+    .infoValue{
+      font-size:18px;
+      line-height:1.1;
+      font-weight:900;
+      color:var(--paperTxt);
+      word-break:break-word;
       white-space:pre-line;
     }
 
-    .kpiRow{
+    .statementBody{
+      padding:18px 26px 26px;
+      display:grid;
+      gap:16px;
+    }
+
+    .summaryRow{
       display:grid;
       grid-template-columns:repeat(6, minmax(120px,1fr));
       gap:10px;
-      margin-top:12px;
     }
 
-    .kpi{
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(0,0,0,.16);
+    .sumCard{
+      border:1px solid var(--paperLine);
       border-radius:14px;
-      padding:12px;
+      padding:12px 14px;
+      background:#fbfdff;
     }
 
-    .kpiLabel{
-      color:var(--muted);
+    .sumLabel{
       font-size:11px;
+      color:var(--paperMuted);
       font-weight:900;
-      margin-bottom:6px;
+      margin-bottom:5px;
     }
 
-    .kpiValue{
+    .sumValue{
       font-size:20px;
-      font-weight:900;
       line-height:1.05;
-    }
-
-    .kpiValue.blue{ color:#bfdbfe; }
-    .kpiValue.red{ color:#fecaca; }
-    .kpiValue.green{ color:#bbf7d0; }
-
-    .statementWrap{
-      padding:12px;
-      border-bottom:1px solid var(--line);
-      background:#0d1523;
-    }
-
-    .sectionTitle{
-      font-size:13px;
       font-weight:900;
-      color:#dbe7ff;
-      margin-bottom:10px;
+      color:var(--paperTxt);
+      font-variant-numeric:tabular-nums;
     }
 
-    .tableWrap{
+    .sumValue.blue{ color:#1d4ed8; }
+    .sumValue.red{ color:#b91c1c; }
+    .sumValue.green{ color:#166534; }
+
+    .blockTitle{
+      font-size:14px;
+      font-weight:900;
+      color:#0f172a;
+      margin-bottom:8px;
+    }
+
+    .paperTableWrap{
       overflow:auto;
-      background:var(--sheetBg);
+      border:1px solid var(--paperLine);
       border-radius:16px;
-      border:1px solid rgba(255,255,255,.08);
     }
 
-    table.sheet{
+    table.paperTable{
       width:100%;
       border-collapse:separate;
       border-spacing:0;
       table-layout:fixed;
-      color:var(--cellTxt);
-      min-width:1900px;
+      min-width:1050px;
     }
 
-    .sheet th, .sheet td{
-      border-right:1px solid var(--line2);
-      border-bottom:1px solid var(--line2);
+    .paperTable th,
+    .paperTable td{
+      border-right:1px solid var(--paperLine);
+      border-bottom:1px solid var(--paperLine);
     }
 
-    .sheet th:first-child, .sheet td:first-child{
-      border-left:1px solid var(--line2);
+    .paperTable th:first-child,
+    .paperTable td:first-child{
+      border-left:none;
     }
 
-    .sheet thead th{
-      position:sticky;
-      top:0;
-      z-index:2;
-      background:var(--headBg);
+    .paperTable th{
+      background:var(--paperHead);
       padding:10px 8px;
       text-align:center;
       font-size:12px;
       font-weight:900;
+      color:#0f172a;
       white-space:nowrap;
     }
 
-    .sheet tbody td{
-      background:var(--cellBg);
-      padding:0;
-      vertical-align:middle;
-    }
-
-    .sheet tbody tr:nth-child(even) td{
-      background:var(--cellAlt);
-    }
-
-    .sheet tbody tr.paidRow td{
-      background:var(--paidRow);
-    }
-
-    .sheet tbody tr.paidRow:nth-child(even) td{
-      background:var(--paidRowAlt);
-    }
-
-    .sheet td.dirty{
-      background:var(--dirtyBg) !important;
-      box-shadow:inset 0 0 0 2px var(--dirtyBorder);
-    }
-
-    .sheet td.warn{
-      background:var(--warnBg) !important;
-      box-shadow:inset 0 0 0 1px var(--warnBorder);
-    }
-
-    .cellView{
-      min-height:42px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:0 10px;
-      font-size:13px;
-      line-height:1.35;
+    .paperTable td{
+      background:#fff;
+      padding:10px 8px;
+      font-size:12px;
+      color:#0f172a;
+      line-height:1.4;
       word-break:break-word;
       overflow-wrap:anywhere;
     }
 
-    .cellView.left{ justify-content:flex-start; text-align:left; }
-    .cellView.center{ justify-content:center; text-align:center; }
-    .cellView.right{ justify-content:flex-end; text-align:right; font-variant-numeric:tabular-nums; }
-    .code{
-      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-      font-size:12px;
+    .paperTable tbody tr:nth-child(even) td{
+      background:#fbfdff;
     }
 
-    .cellInput,
-    .cellSelect,
-    .cellTextarea{
-      width:100%;
-      border:none;
-      outline:none;
-      background:transparent;
-      color:var(--cellTxt);
-      font:inherit;
-      border-radius:0;
+    .paperTable td.center{ text-align:center; }
+    .paperTable td.right{
+      text-align:right;
+      font-variant-numeric:tabular-nums;
     }
 
-    .cellInput,
-    .cellSelect{
-      height:42px;
-      padding:0 10px;
+    .noteBox{
+      border:1px solid var(--paperLine);
+      border-radius:14px;
+      padding:14px;
+      background:#fbfdff;
+      min-height:80px;
+      line-height:1.6;
       font-size:13px;
+      color:#334155;
+      white-space:pre-line;
     }
 
-    .cellTextarea{
-      min-height:42px;
-      padding:10px;
-      resize:vertical;
-      line-height:1.4;
-      font-size:13px;
-    }
-
-    .cellInput.center, .cellSelect.center{ text-align:center; }
-    .cellInput.right{ text-align:right; font-variant-numeric:tabular-nums; }
-    .cellInput.code{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
-
-    .rowActions{
-      display:flex;
-      gap:6px;
-      justify-content:center;
-      align-items:center;
-      padding:6px;
-      min-height:42px;
-    }
-
-    .miniBtn{
-      height:30px;
-      min-width:30px;
-      padding:0 8px;
-      border-radius:10px;
-      border:1px solid #c7d2e2;
-      background:#fff;
-      color:#0f172a;
-      cursor:pointer;
-      font-size:12px;
-      font-weight:800;
-    }
-
-    .miniBtn:hover{ background:#f5f7fb; }
-
-    .miniBtn.del{
-      background:#fff1f2;
-      color:#b91c1c;
-      border-color:#fecdd3;
-    }
-
-    .editorWrap{
-      min-height:0;
-      overflow:auto;
-      padding:12px;
-      background:#0b1320;
-    }
-
-    .editorCard{
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.04);
-      border-radius:18px;
-      overflow:hidden;
-    }
-
-    .editorHead{
-      padding:12px 14px;
-      border-bottom:1px solid rgba(255,255,255,.08);
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      background:rgba(255,255,255,.03);
-    }
-
-    .editorTableWrap{
-      overflow:auto;
-      background:var(--sheetBg);
-    }
-
-    .empty{
-      padding:18px 14px;
+    .emptyState{
+      width:min(1100px, 100%);
+      margin:0 auto;
+      padding:28px;
+      border:1px dashed rgba(255,255,255,.14);
+      border-radius:20px;
       text-align:center;
-      color:#64748b;
+      color:#c1d0ea;
+      background:rgba(255,255,255,.03);
       font-weight:900;
-      background:#f8fbff;
     }
 
     .statusbar{
@@ -632,18 +565,25 @@
     }
 
     @media (max-width:1280px){
-      .kpiRow{
-        grid-template-columns:repeat(3, minmax(120px,1fr));
+      .summaryRow,
+      .infoGrid{
+        grid-template-columns:repeat(2, minmax(120px,1fr));
       }
     }
 
     @media (max-width:900px){
       .main{ grid-template-columns:1fr; }
-      .sidebar{ max-height:280px; }
+      .sidebar{ max-height:300px; }
       .btn{ padding:0 10px; font-size:12px; }
       .toolbar{ padding:8px; gap:8px; }
-      .kpiRow{
-        grid-template-columns:repeat(2, minmax(120px,1fr));
+      .summaryRow,
+      .infoGrid{
+        grid-template-columns:1fr;
+      }
+      .statementTop,
+      .statementBody{
+        padding-left:16px;
+        padding-right:16px;
       }
     }
   </style>
@@ -655,15 +595,14 @@
         <img src="/favicon.ico" alt="Maroowell" />
       </a>
       <div class="titleBox">
-        <b>용차 정산</b>
-        <small>dragon_car 기반 · 최고관리자 전용</small>
+        <b>용차 정산서</b>
+        <small>월별 업체 / 기사 정산서 생성기</small>
       </div>
 
       <div class="spacer"></div>
 
       <button id="btnReload" class="btn" type="button">불러오기</button>
-      <button id="btnSaveAll" class="btn ok" type="button">전체 저장</button>
-      <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
+      <button id="btnDownloadPng" class="btn ok" type="button">PNG 저장</button>
       <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </div>
 
@@ -674,13 +613,20 @@
       </div>
 
       <div class="toolGroup">
-        <label for="orderSearch">Order 검색</label>
-        <input id="orderSearch" type="text" placeholder="Order / 기사 / 라우트 / 비고" />
+        <label>정산서 종류</label>
+        <div class="modeTabs">
+          <button id="btnModeVendor" class="modeBtn active" type="button">업체 정산서</button>
+          <button id="btnModeDriver" class="modeBtn" type="button">기사 정산서</button>
+        </div>
+      </div>
+
+      <div class="toolGroup">
+        <label for="searchInput">검색</label>
+        <input id="searchInput" type="text" placeholder="업체 / Order / 기사 / 캠프 / 라우트" />
       </div>
 
       <div class="toolGroup">
         <button id="btnClearSearch" class="btn" type="button">검색 초기화</button>
-        <button id="btnAddRow" class="btn warn" type="button">행 추가</button>
       </div>
     </div>
 
@@ -688,178 +634,134 @@
       <aside class="sidebar">
         <div class="sideSection">
           <div class="sideTitle">현재 조회</div>
-          <div class="monthCard">
-            <div class="statLabel">정산월</div>
-            <div id="monthValue" class="monthValue">-</div>
-          </div>
-        </div>
-
-        <div class="sideSection">
-          <div class="sideTitle">월 요약</div>
-          <div class="statGrid">
-            <div class="statCard">
-              <div class="statLabel">Order 수</div>
-              <div id="sideOrderCount" class="statValue">0</div>
+          <div class="summaryGrid">
+            <div class="summaryCard">
+              <div class="summaryLabel">정산월</div>
+              <div id="sideMonth" class="summaryValue">-</div>
             </div>
-            <div class="statCard">
-              <div class="statLabel">행 수</div>
-              <div id="sideRowCount" class="statValue blue">0</div>
+            <div class="summaryCard">
+              <div class="summaryLabel">정산서 수</div>
+              <div id="sideGroupCount" class="summaryValue blue">0</div>
             </div>
-            <div class="statCard">
-              <div class="statLabel">월 총금액</div>
-              <div id="sideMonthAmount" class="statValue">₩0</div>
+            <div class="summaryCard">
+              <div class="summaryLabel">월 총금액</div>
+              <div id="sideAmount" class="summaryValue">₩0</div>
             </div>
-            <div class="statCard">
-              <div class="statLabel">미입금</div>
-              <div id="sideMonthUnpaid" class="statValue red">₩0</div>
+            <div class="summaryCard">
+              <div class="summaryLabel">미입금</div>
+              <div id="sideUnpaid" class="summaryValue red">₩0</div>
             </div>
           </div>
         </div>
 
         <div class="sideSection">
-          <div class="sideTitle">Order 목록</div>
+          <div class="sideTitle">정산서 목록</div>
         </div>
 
-        <div id="orderList" class="orderList"></div>
+        <div id="groupList" class="groupList"></div>
       </aside>
 
       <main class="content">
-        <div class="summaryWrap">
-          <div class="hero">
-            <div id="heroTitle" class="heroTitle">Order를 선택해줘</div>
-            <div id="heroSub" class="heroSub">왼쪽에서 Order를 고르면 정산 요약과 편집 테이블이 같이 뜬다.</div>
+        <div id="statementCapture" class="statementPage" style="display:none">
+          <div class="statementTop">
+            <div id="statementTitle" class="statementTitle">용차 정산서</div>
 
-            <div class="kpiRow">
-              <div class="kpi">
-                <div class="kpiLabel">총금액</div>
-                <div id="kpiAmount" class="kpiValue">₩0</div>
+            <div class="infoGrid">
+              <div class="infoBox">
+                <div class="infoLabel">정산월</div>
+                <div id="infoMonth" class="infoValue">-</div>
               </div>
-              <div class="kpi">
-                <div class="kpiLabel">입금금액</div>
-                <div id="kpiPaidAmount" class="kpiValue blue">₩0</div>
+              <div class="infoBox">
+                <div class="infoLabel">구분</div>
+                <div id="infoMode" class="infoValue">-</div>
               </div>
-              <div class="kpi">
-                <div class="kpiLabel">미입금금액</div>
-                <div id="kpiUnpaidAmount" class="kpiValue red">₩0</div>
+              <div class="infoBox">
+                <div class="infoLabel">업체</div>
+                <div id="infoVendor" class="infoValue">-</div>
               </div>
-              <div class="kpi">
-                <div class="kpiLabel">배송</div>
-                <div id="kpiParcel" class="kpiValue">0</div>
+              <div class="infoBox">
+                <div class="infoLabel">Order / 기사</div>
+                <div id="infoTarget" class="infoValue">-</div>
               </div>
-              <div class="kpi">
-                <div class="kpiLabel">반품</div>
-                <div id="kpiReturn" class="kpiValue">0</div>
+            </div>
+          </div>
+
+          <div class="statementBody">
+            <div class="summaryRow">
+              <div class="sumCard">
+                <div class="sumLabel">총금액</div>
+                <div id="sumAmount" class="sumValue">₩0</div>
               </div>
-              <div class="kpi">
-                <div class="kpiLabel">행 수</div>
-                <div id="kpiRows" class="kpiValue green">0</div>
+              <div class="sumCard">
+                <div class="sumLabel">입금금액</div>
+                <div id="sumPaid" class="sumValue blue">₩0</div>
               </div>
+              <div class="sumCard">
+                <div class="sumLabel">미입금금액</div>
+                <div id="sumUnpaid" class="sumValue red">₩0</div>
+              </div>
+              <div class="sumCard">
+                <div class="sumLabel">배송 수량</div>
+                <div id="sumParcel" class="sumValue">0</div>
+              </div>
+              <div class="sumCard">
+                <div class="sumLabel">반품 수량</div>
+                <div id="sumReturn" class="sumValue">0</div>
+              </div>
+              <div class="sumCard">
+                <div class="sumLabel">행 수</div>
+                <div id="sumRows" class="sumValue green">0</div>
+              </div>
+            </div>
+
+            <div>
+              <div class="blockTitle">정산 상세</div>
+              <div class="paperTableWrap">
+                <table class="paperTable">
+                  <colgroup>
+                    <col style="width:110px" />
+                    <col style="width:130px" />
+                    <col style="width:130px" />
+                    <col style="width:90px" />
+                    <col style="width:170px" />
+                    <col style="width:90px" />
+                    <col style="width:90px" />
+                    <col style="width:90px" />
+                    <col style="width:120px" />
+                    <col style="width:120px" />
+                    <col style="width:110px" />
+                    <col style="width:170px" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>연결 벤더</th>
+                      <th>Order</th>
+                      <th>캠프</th>
+                      <th>라우트</th>
+                      <th>주/야</th>
+                      <th>배송</th>
+                      <th>반품</th>
+                      <th>단가</th>
+                      <th>금액</th>
+                      <th>입금여부</th>
+                      <th>비고</th>
+                    </tr>
+                  </thead>
+                  <tbody id="statementTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <div class="blockTitle">메모</div>
+              <div id="statementNotes" class="noteBox">-</div>
             </div>
           </div>
         </div>
 
-        <div class="statementWrap">
-          <div class="sectionTitle">선택 Order 정산서</div>
-          <div class="tableWrap">
-            <table class="sheet">
-              <colgroup>
-                <col style="width:110px" />
-                <col style="width:140px" />
-                <col style="width:110px" />
-                <col style="width:80px" />
-                <col style="width:140px" />
-                <col style="width:90px" />
-                <col style="width:90px" />
-                <col style="width:90px" />
-                <col style="width:120px" />
-                <col style="width:120px" />
-                <col style="width:110px" />
-                <col style="width:110px" />
-                <col style="width:180px" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>연결 벤더</th>
-                  <th>캠프</th>
-                  <th>주/야</th>
-                  <th>라우트</th>
-                  <th>단가</th>
-                  <th>배송</th>
-                  <th>반품</th>
-                  <th>합계</th>
-                  <th>금액</th>
-                  <th>정산일자</th>
-                  <th>입금여부</th>
-                  <th>비고</th>
-                </tr>
-              </thead>
-              <tbody id="statementBody"></tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="editorWrap">
-          <div class="editorCard">
-            <div class="editorHead">
-              <div class="sectionTitle" style="margin:0">dragon_car 편집</div>
-            </div>
-
-            <div class="editorTableWrap">
-              <table class="sheet">
-                <colgroup>
-                  <col style="width:80px" />
-                  <col style="width:120px" />
-                  <col style="width:140px" />
-                  <col style="width:120px" />
-                  <col style="width:90px" />
-                  <col style="width:80px" />
-                  <col style="width:180px" />
-                  <col style="width:100px" />
-                  <col style="width:90px" />
-                  <col style="width:120px" />
-                  <col style="width:90px" />
-                  <col style="width:90px" />
-                  <col style="width:90px" />
-                  <col style="width:120px" />
-                  <col style="width:100px" />
-                  <col style="width:80px" />
-                  <col style="width:100px" />
-                  <col style="width:100px" />
-                  <col style="width:104px" />
-                  <col style="width:104px" />
-                  <col style="width:180px" />
-                  <col style="width:72px" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>순번</th>
-                    <th>Date</th>
-                    <th>연결 벤더</th>
-                    <th>Order</th>
-                    <th>캠프</th>
-                    <th>주/야</th>
-                    <th>라우트</th>
-                    <th>단가</th>
-                    <th>정산일자</th>
-                    <th>투입 기사</th>
-                    <th>배송</th>
-                    <th>반품</th>
-                    <th>합계</th>
-                    <th>금액</th>
-                    <th>정산월</th>
-                    <th>ID</th>
-                    <th>PW</th>
-                    <th>세금계산서</th>
-                    <th>입금여부</th>
-                    <th>비고</th>
-                    <th>삭제</th>
-                  </tr>
-                </thead>
-                <tbody id="editorBody"></tbody>
-              </table>
-            </div>
-          </div>
+        <div id="emptyState" class="emptyState">
+          월을 선택하고, 좌측에서 업체 또는 기사를 선택하면 정산서가 생성됩니다.
         </div>
       </main>
     </div>
@@ -867,8 +769,8 @@
     <div class="statusbar">
       <span id="pillState" class="pill ok">READY</span>
       <span id="pillRows" class="pill">행 0</span>
-      <span id="pillDirty" class="pill warn">변경 0</span>
-      <span id="statusText" class="statusText">dragon_car 기반 정산 페이지</span>
+      <span id="pillGroups" class="pill">정산서 0</span>
+      <span id="statusText" class="statusText">업체는 vendor_id + order_name 기준, 기사는 delivery_driver 기준입니다.</span>
     </div>
   </div>
 
@@ -895,85 +797,44 @@
       const ACCESS_TABLE = "user_access";
       const DATA_TABLE = "dragon_car";
 
-      const DATA_COLUMNS = [
-        "order_date",
-        "vendor_id",
-        "order_name",
-        "camp",
-        "wave",
-        "route",
-        "price",
-        "settlement_day",
-        "delivery_driver",
-        "parcel",
-        "return_count",
-        "total_count",
-        "amount",
-        "settlement_month",
-        "dragon_car_id",
-        "dragon_car_pw",
-        "tax_invoice",
-        "payment_confirm",
-        "dragon_car_note"
-      ];
-
-      const COLUMN_CONFIG = [
-        { key: "id", type: "readonly", className: "right code center" },
-        { key: "order_date", type: "date", className: "center code" },
-        { key: "vendor_id" },
-        { key: "order_name" },
-        { key: "camp", className: "center" },
-        { key: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center" },
-        { key: "route", type: "textarea" },
-        { key: "price", className: "right code" },
-        { key: "settlement_day", className: "center" },
-        { key: "delivery_driver", className: "center" },
-        { key: "parcel", className: "right code" },
-        { key: "return_count", className: "right code" },
-        { key: "total_count", type: "readonly", className: "right code center" },
-        { key: "amount", className: "right code" },
-        { key: "settlement_month", className: "center code" },
-        { key: "dragon_car_id", className: "center code" },
-        { key: "dragon_car_pw", className: "center code" },
-        { key: "tax_invoice", type: "bool", className: "center" },
-        { key: "payment_confirm", type: "bool", className: "center" },
-        { key: "dragon_car_note", type: "textarea" }
-      ];
-
       const $ = (sel) => document.querySelector(sel);
 
       const dom = {
         monthInput: $("#monthInput"),
-        orderSearch: $("#orderSearch"),
-        btnClearSearch: $("#btnClearSearch"),
+        searchInput: $("#searchInput"),
+
         btnReload: $("#btnReload"),
-        btnSaveAll: $("#btnSaveAll"),
-        btnExportCsv: $("#btnExportCsv"),
+        btnDownloadPng: $("#btnDownloadPng"),
         btnLogout: $("#btnLogout"),
-        btnAddRow: $("#btnAddRow"),
+        btnClearSearch: $("#btnClearSearch"),
+        btnModeVendor: $("#btnModeVendor"),
+        btnModeDriver: $("#btnModeDriver"),
 
-        monthValue: $("#monthValue"),
-        sideOrderCount: $("#sideOrderCount"),
-        sideRowCount: $("#sideRowCount"),
-        sideMonthAmount: $("#sideMonthAmount"),
-        sideMonthUnpaid: $("#sideMonthUnpaid"),
-        orderList: $("#orderList"),
+        sideMonth: $("#sideMonth"),
+        sideGroupCount: $("#sideGroupCount"),
+        sideAmount: $("#sideAmount"),
+        sideUnpaid: $("#sideUnpaid"),
+        groupList: $("#groupList"),
 
-        heroTitle: $("#heroTitle"),
-        heroSub: $("#heroSub"),
-        kpiAmount: $("#kpiAmount"),
-        kpiPaidAmount: $("#kpiPaidAmount"),
-        kpiUnpaidAmount: $("#kpiUnpaidAmount"),
-        kpiParcel: $("#kpiParcel"),
-        kpiReturn: $("#kpiReturn"),
-        kpiRows: $("#kpiRows"),
-
-        statementBody: $("#statementBody"),
-        editorBody: $("#editorBody"),
+        statementCapture: $("#statementCapture"),
+        emptyState: $("#emptyState"),
+        statementTitle: $("#statementTitle"),
+        infoMonth: $("#infoMonth"),
+        infoMode: $("#infoMode"),
+        infoVendor: $("#infoVendor"),
+        infoTarget: $("#infoTarget"),
+        sumAmount: $("#sumAmount"),
+        sumPaid: $("#sumPaid"),
+        sumUnpaid: $("#sumUnpaid"),
+        sumParcel: $("#sumParcel"),
+        sumReturn: $("#sumReturn"),
+        sumRows: $("#sumRows"),
+        statementTableBody: $("#statementTableBody"),
+        statementNotes: $("#statementNotes"),
 
         pillState: $("#pillState"),
         pillRows: $("#pillRows"),
-        pillDirty: $("#pillDirty"),
+        pillGroups: $("#pillGroups"),
         statusText: $("#statusText"),
 
         accessDenied: $("#accessDenied"),
@@ -984,16 +845,15 @@
       };
 
       const state = {
-        rows: [],
-        selectedOrder: "",
-        month: defaultMonth(),
-        loading: false,
+        session: null,
         viewerEmail: "",
         viewerUserId: "",
-        accessRow: null,
-        session: null,
-        deletedIds: new Set(),
-        tempSeq: 0
+        month: defaultMonth(),
+        mode: "vendor", // vendor | driver
+        allRows: [],
+        monthRows: [],
+        groups: [],
+        selectedGroupKey: ""
       };
 
       const authStorage = (() => {
@@ -1014,7 +874,7 @@
 
       function defaultMonth() {
         const now = new Date();
-        return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       }
 
       function safeNextPath(p) {
@@ -1073,6 +933,13 @@
         return s;
       }
 
+      function normalizeMonth(v) {
+        const s = normalizeText(v).replaceAll(".", "-").replaceAll("/", "-");
+        const m = s.match(/^(\d{4})-(\d{1,2})$/);
+        if (!m) return "";
+        return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}`;
+      }
+
       function normalizeBool(v) {
         if (v === true || v === "true" || v === "TRUE" || v === "t" || v === "1" || v === 1) return true;
         if (v === false || v === "false" || v === "FALSE" || v === "f" || v === "0" || v === 0) return false;
@@ -1086,89 +953,14 @@
         return "-";
       }
 
-      function valueForSave(key, value, row) {
-        if (key === "order_date") return normalizeText(value) || null;
-        if (key === "settlement_month") return normalizeText(value) || null;
-
-        if (key === "price" || key === "parcel" || key === "return_count" || key === "total_count" || key === "amount") {
-          const raw = normalizeText(value);
-          if (!raw) {
-            if (key === "total_count") return calcTotal(row);
-            if (key === "amount") return effectiveAmount(row);
-            return null;
-          }
-          return toNumber(raw);
-        }
-
-        if (key === "tax_invoice" || key === "payment_confirm") {
-          const b = normalizeBool(value);
-          if (b === null) return null;
-          return b;
-        }
-
-        return normalizeText(value) || null;
-      }
-
-      function rowId(row) {
-        return row.id ?? row.__temp_id;
-      }
-
-      function calcTotal(row) {
-        return toNumber(row.parcel) + toNumber(row.return_count);
-      }
-
-      function calcAmount(row) {
-        return calcTotal(row) * toNumber(row.price);
-      }
-
       function effectiveAmount(row) {
         const raw = normalizeText(row.amount);
         if (raw) return toNumber(raw);
-        return calcAmount(row);
-      }
-
-      function isAmountMismatch(row) {
-        const raw = normalizeText(row.amount);
-        if (!raw) return false;
-        return effectiveAmount(row) !== calcAmount(row);
+        return (toNumber(row.parcel) + toNumber(row.return_count)) * toNumber(row.price);
       }
 
       function isPaid(row) {
         return normalizeBool(row.payment_confirm) === true;
-      }
-
-      function normalizeLoadedRow(row) {
-        const out = { ...(row || {}) };
-        for (const key of DATA_COLUMNS) {
-          out[key] = out[key] == null ? "" : String(out[key]);
-        }
-        out.order_date = formatDate(out.order_date);
-        out.__dirty = false;
-        out.__dirtyFields = {};
-        out.__isNew = false;
-        return out;
-      }
-
-      function blankRow() {
-        const row = {
-          __temp_id: "new_" + (++state.tempSeq),
-          __isNew: true,
-          __dirty: true,
-          __dirtyFields: {},
-          id: null
-        };
-
-        for (const key of DATA_COLUMNS) row[key] = "";
-        row.order_name = state.selectedOrder || "";
-        row.settlement_month = state.month;
-        row.wave = "주간";
-        row.tax_invoice = "";
-        row.payment_confirm = "";
-        return row;
-      }
-
-      function hasAnyValue(row) {
-        return DATA_COLUMNS.some(key => normalizeText(row[key]));
       }
 
       function setStatus(text, tone) {
@@ -1183,20 +975,10 @@
           tone === "warn" ? "WAIT" : "READY";
       }
 
-      function setLoading(on, text) {
-        state.loading = !!on;
-        dom.btnReload.disabled = !!on;
-        dom.btnSaveAll.disabled = !!on;
-        dom.btnExportCsv.disabled = !!on;
-        dom.btnAddRow.disabled = !!on;
-        if (on) setStatus(text || "처리 중...", "warn");
-      }
-
-      function updatePills() {
-        const visibleRows = getVisibleRows();
-        const dirtyCount = state.rows.filter(row => row.__dirty).length + state.deletedIds.size;
-        dom.pillRows.textContent = "행 " + visibleRows.length;
-        dom.pillDirty.textContent = "변경 " + dirtyCount;
+      function setMode(mode) {
+        state.mode = mode;
+        dom.btnModeVendor.classList.toggle("active", mode === "vendor");
+        dom.btnModeDriver.classList.toggle("active", mode === "driver");
       }
 
       function showAccessDenied(email, detail) {
@@ -1251,8 +1033,6 @@
             return false;
           }
 
-          state.accessRow = accessRow || null;
-
           if (!accessRow?.is_admin) {
             showAccessDenied(state.viewerEmail, "이 페이지는 최고관리자만 접근할 수 있습니다.");
             return false;
@@ -1268,455 +1048,246 @@
         }
       }
 
-      function getVisibleRows() {
-        return state.rows.filter(row => !(row.id && state.deletedIds.has(row.id)));
+      async function fetchRows() {
+        try {
+          setStatus("데이터 불러오는 중...", "warn");
+
+          const { data, error } = await supabase
+            .from(DATA_TABLE)
+            .select("*")
+            .order("settlement_month", { ascending: false })
+            .order("order_date", { ascending: true })
+            .order("id", { ascending: true });
+
+          if (error) throw error;
+
+          state.allRows = Array.isArray(data) ? data : [];
+          rebuildView();
+        } catch (e) {
+          console.error(e);
+          state.allRows = [];
+          rebuildView();
+          setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
+        }
       }
 
-      function getMonthRows() {
-        const target = normalizeText(state.month);
-        return getVisibleRows().filter(row => normalizeText(row.settlement_month) === target);
-      }
-
-      function getOrderStats() {
-        const rows = getMonthRows();
-        const q = normalizeLower(dom.orderSearch.value);
+      function buildGroups() {
+        const targetMonth = normalizeMonth(state.month);
+        const q = normalizeLower(dom.searchInput.value);
+        const rows = state.allRows.filter(row => normalizeMonth(row.settlement_month) === targetMonth);
+        state.monthRows = rows;
 
         const map = new Map();
 
         for (const row of rows) {
-          const orderName = normalizeText(row.order_name);
-          if (!orderName) continue;
+          let key = "";
+          let name = "";
+          let vendor = "";
+          let target = "";
 
-          const bag = [
+          if (state.mode === "vendor") {
+            vendor = normalizeText(row.vendor_id) || "미지정 업체";
+            target = normalizeText(row.order_name) || "미지정 Order";
+            key = `${vendor}||${target}`;
+            name = `${vendor}\n${target}`;
+          } else {
+            target = normalizeText(row.delivery_driver) || "미지정 기사";
+            vendor = normalizeText(row.vendor_id) || "";
+            key = target;
+            name = target;
+          }
+
+          const searchBag = [
+            vendor,
+            target,
+            row.vendor_id,
             row.order_name,
             row.delivery_driver,
+            row.camp,
             row.route,
-            row.dragon_car_note,
-            row.vendor_id,
-            row.camp
+            row.dragon_car_note
           ].map(normalizeLower).join(" | ");
 
-          if (q && !bag.includes(q)) continue;
+          if (q && !searchBag.includes(q)) continue;
 
-          if (!map.has(orderName)) {
-            map.set(orderName, {
-              orderName,
-              rows: 0,
+          if (!map.has(key)) {
+            map.set(key, {
+              key,
+              mode: state.mode,
+              name,
+              vendor,
+              target,
+              rows: [],
               amount: 0,
               paidAmount: 0,
               unpaidAmount: 0,
               parcel: 0,
-              returnCount: 0
+              returnCount: 0,
+              noteSet: new Set()
             });
           }
 
-          const s = map.get(orderName);
+          const g = map.get(key);
           const amt = effectiveAmount(row);
-          s.rows += 1;
-          s.amount += amt;
-          s.parcel += toNumber(row.parcel);
-          s.returnCount += toNumber(row.return_count);
-          if (isPaid(row)) s.paidAmount += amt;
-          else s.unpaidAmount += amt;
+          g.rows.push(row);
+          g.amount += amt;
+          g.parcel += toNumber(row.parcel);
+          g.returnCount += toNumber(row.return_count);
+          if (isPaid(row)) g.paidAmount += amt;
+          else g.unpaidAmount += amt;
+
+          const note = normalizeText(row.dragon_car_note);
+          if (note) g.noteSet.add(note);
         }
 
-        return Array.from(map.values()).sort((a, b) => {
-          if (b.amount !== a.amount) return b.amount - a.amount;
-          return a.orderName.localeCompare(b.orderName, "ko");
-        });
-      }
-
-      function ensureSelectedOrder(orderStats) {
-        if (state.selectedOrder && orderStats.some(x => x.orderName === state.selectedOrder)) return;
-        state.selectedOrder = orderStats[0]?.orderName || "";
-      }
-
-      function getSelectedRows() {
-        const order = normalizeText(state.selectedOrder);
-        return getMonthRows()
-          .filter(row => normalizeText(row.order_name) === order)
+        state.groups = Array.from(map.values())
+          .map(group => ({
+            ...group,
+            noteText: Array.from(group.noteSet).join("\n• "),
+            rowCount: group.rows.length
+          }))
           .sort((a, b) => {
-            const da = formatDate(a.order_date);
-            const db = formatDate(b.order_date);
-            return da.localeCompare(db) || String(a.id ?? "").localeCompare(String(b.id ?? ""));
+            if (b.amount !== a.amount) return b.amount - a.amount;
+            return a.name.localeCompare(b.name, "ko");
           });
+
+        if (!state.selectedGroupKey || !state.groups.some(g => g.key === state.selectedGroupKey)) {
+          state.selectedGroupKey = state.groups[0]?.key || "";
+        }
       }
 
-      function renderSidebar(orderStats) {
-        dom.monthValue.textContent = state.month || "-";
+      function getSelectedGroup() {
+        return state.groups.find(g => g.key === state.selectedGroupKey) || null;
+      }
 
-        const monthRows = getMonthRows();
-        const monthAmount = monthRows.reduce((acc, row) => acc + effectiveAmount(row), 0);
-        const monthUnpaid = monthRows.filter(row => !isPaid(row)).reduce((acc, row) => acc + effectiveAmount(row), 0);
+      function renderSidebar() {
+        dom.sideMonth.textContent = normalizeMonth(state.month) || "-";
+        dom.sideGroupCount.textContent = String(state.groups.length);
 
-        dom.sideOrderCount.textContent = String(orderStats.length);
-        dom.sideRowCount.textContent = String(monthRows.length);
-        dom.sideMonthAmount.textContent = formatCurrency(monthAmount);
-        dom.sideMonthUnpaid.textContent = formatCurrency(monthUnpaid);
+        const totalAmount = state.groups.reduce((acc, g) => acc + g.amount, 0);
+        const totalUnpaid = state.groups.reduce((acc, g) => acc + g.unpaidAmount, 0);
 
-        if (!orderStats.length) {
-          dom.orderList.innerHTML = `<div class="empty">해당 월 데이터가 없습니다.</div>`;
+        dom.sideAmount.textContent = formatCurrency(totalAmount);
+        dom.sideUnpaid.textContent = formatCurrency(totalUnpaid);
+
+        if (!state.groups.length) {
+          dom.groupList.innerHTML = `<div class="emptyState" style="width:auto;margin:0;padding:18px;">해당 월 데이터가 없습니다.</div>`;
           return;
         }
 
-        dom.orderList.innerHTML = orderStats.map(item => {
-          const active = item.orderName === state.selectedOrder ? "active" : "";
+        dom.groupList.innerHTML = state.groups.map(group => {
+          const active = group.key === state.selectedGroupKey ? "active" : "";
           return `
-            <div class="orderItem ${active}" data-order-pick="${escapeHtml(item.orderName)}">
-              <div class="orderName">${escapeHtml(item.orderName)}</div>
-              <div class="orderMeta">
-                <div>총금액 <b>${escapeHtml(formatCurrency(item.amount))}</b></div>
-                <div>미입금 <b>${escapeHtml(formatCurrency(item.unpaidAmount))}</b></div>
-                <div>배송 <b>${escapeHtml(formatNumber(item.parcel))}</b></div>
-                <div>반품 <b>${escapeHtml(formatNumber(item.returnCount))}</b></div>
+            <div class="groupItem ${active}" data-group-key="${escapeHtml(group.key)}">
+              <div class="groupName">${escapeHtml(group.name)}</div>
+              <div class="groupMeta">
+                <div>총금액 <b>${escapeHtml(formatCurrency(group.amount))}</b></div>
+                <div>미입금 <b>${escapeHtml(formatCurrency(group.unpaidAmount))}</b></div>
+                <div>배송 <b>${escapeHtml(formatNumber(group.parcel))}</b></div>
+                <div>반품 <b>${escapeHtml(formatNumber(group.returnCount))}</b></div>
               </div>
             </div>
           `;
         }).join("");
       }
 
-      function renderSummary() {
-        if (!state.selectedOrder) {
-          dom.heroTitle.textContent = "Order를 선택해줘";
-          dom.heroSub.textContent = "왼쪽에서 Order를 고르면 정산 요약과 편집 테이블이 같이 뜬다.";
-          dom.kpiAmount.textContent = formatCurrency(0);
-          dom.kpiPaidAmount.textContent = formatCurrency(0);
-          dom.kpiUnpaidAmount.textContent = formatCurrency(0);
-          dom.kpiParcel.textContent = "0";
-          dom.kpiReturn.textContent = "0";
-          dom.kpiRows.textContent = "0";
-          return;
-        }
-
-        const rows = getSelectedRows();
-        const totalAmount = rows.reduce((acc, row) => acc + effectiveAmount(row), 0);
-        const paidAmount = rows.filter(isPaid).reduce((acc, row) => acc + effectiveAmount(row), 0);
-        const unpaidAmount = rows.filter(row => !isPaid(row)).reduce((acc, row) => acc + effectiveAmount(row), 0);
-        const parcel = rows.reduce((acc, row) => acc + toNumber(row.parcel), 0);
-        const returnCount = rows.reduce((acc, row) => acc + toNumber(row.return_count), 0);
-
-        dom.heroTitle.textContent = `${state.selectedOrder} · ${state.month}`;
-        dom.heroSub.textContent = `행 ${rows.length}건 · 배송 ${formatNumber(parcel)} · 반품 ${formatNumber(returnCount)}`;
-        dom.kpiAmount.textContent = formatCurrency(totalAmount);
-        dom.kpiPaidAmount.textContent = formatCurrency(paidAmount);
-        dom.kpiUnpaidAmount.textContent = formatCurrency(unpaidAmount);
-        dom.kpiParcel.textContent = formatNumber(parcel);
-        dom.kpiReturn.textContent = formatNumber(returnCount);
-        dom.kpiRows.textContent = String(rows.length);
-      }
-
       function renderStatement() {
-        const rows = getSelectedRows();
+        const group = getSelectedGroup();
 
-        if (!rows.length) {
-          dom.statementBody.innerHTML = `<tr><td colspan="13" class="empty">선택된 Order 데이터가 없습니다.</td></tr>`;
+        dom.pillRows.textContent = "행 " + state.monthRows.length;
+        dom.pillGroups.textContent = "정산서 " + state.groups.length;
+
+        if (!group) {
+          dom.statementCapture.style.display = "none";
+          dom.emptyState.style.display = "block";
+          setStatus("정산서를 선택해줘.", "warn");
           return;
         }
 
-        dom.statementBody.innerHTML = rows.map(row => {
-          const paidCls = isPaid(row) ? "paidRow" : "";
-          const warnAmountCls = isAmountMismatch(row) ? "warn" : "";
-          return `
-            <tr class="${paidCls}">
-              <td><div class="cellView center code">${escapeHtml(formatDate(row.order_date))}</div></td>
-              <td><div class="cellView left">${escapeHtml(normalizeText(row.vendor_id))}</div></td>
-              <td><div class="cellView center">${escapeHtml(normalizeText(row.camp))}</div></td>
-              <td><div class="cellView center">${escapeHtml(normalizeText(row.wave))}</div></td>
-              <td><div class="cellView left">${escapeHtml(normalizeText(row.route))}</div></td>
-              <td><div class="cellView right code">${escapeHtml(formatCurrency(row.price))}</div></td>
-              <td><div class="cellView right code">${escapeHtml(formatNumber(row.parcel))}</div></td>
-              <td><div class="cellView right code">${escapeHtml(formatNumber(row.return_count))}</div></td>
-              <td><div class="cellView right code">${escapeHtml(formatNumber(calcTotal(row)))}</div></td>
-              <td class="${warnAmountCls}"><div class="cellView right code">${escapeHtml(formatCurrency(effectiveAmount(row)))}</div></td>
-              <td><div class="cellView center">${escapeHtml(normalizeText(row.settlement_day))}</div></td>
-              <td><div class="cellView center">${escapeHtml(boolText(row.payment_confirm, "입금", "미입금"))}</div></td>
-              <td><div class="cellView left">${escapeHtml(normalizeText(row.dragon_car_note))}</div></td>
-            </tr>
-          `;
-        }).join("");
+        dom.statementCapture.style.display = "block";
+        dom.emptyState.style.display = "none";
+
+        const sortedRows = [...group.rows].sort((a, b) => {
+          return formatDate(a.order_date).localeCompare(formatDate(b.order_date))
+            || String(a.id ?? "").localeCompare(String(b.id ?? ""));
+        });
+
+        dom.statementTitle.textContent = state.mode === "vendor" ? "업체 용차 정산서" : "기사 용차 정산서";
+        dom.infoMonth.textContent = normalizeMonth(state.month);
+        dom.infoMode.textContent = state.mode === "vendor" ? "업체 기준" : "기사 기준";
+        dom.infoVendor.textContent = state.mode === "vendor" ? (group.vendor || "-") : (group.vendor || "혼합");
+        dom.infoTarget.textContent = group.target || "-";
+
+        dom.sumAmount.textContent = formatCurrency(group.amount);
+        dom.sumPaid.textContent = formatCurrency(group.paidAmount);
+        dom.sumUnpaid.textContent = formatCurrency(group.unpaidAmount);
+        dom.sumParcel.textContent = formatNumber(group.parcel);
+        dom.sumReturn.textContent = formatNumber(group.returnCount);
+        dom.sumRows.textContent = String(group.rowCount);
+
+        dom.statementTableBody.innerHTML = sortedRows.map(row => `
+          <tr>
+            <td class="center">${escapeHtml(formatDate(row.order_date))}</td>
+            <td>${escapeHtml(normalizeText(row.vendor_id))}</td>
+            <td>${escapeHtml(normalizeText(row.order_name))}</td>
+            <td class="center">${escapeHtml(normalizeText(row.camp))}</td>
+            <td>${escapeHtml(normalizeText(row.route))}</td>
+            <td class="center">${escapeHtml(normalizeText(row.wave))}</td>
+            <td class="right">${escapeHtml(formatNumber(row.parcel))}</td>
+            <td class="right">${escapeHtml(formatNumber(row.return_count))}</td>
+            <td class="right">${escapeHtml(formatCurrency(row.price))}</td>
+            <td class="right">${escapeHtml(formatCurrency(effectiveAmount(row)))}</td>
+            <td class="center">${escapeHtml(boolText(row.payment_confirm, "입금", "미입금"))}</td>
+            <td>${escapeHtml(normalizeText(row.dragon_car_note))}</td>
+          </tr>
+        `).join("");
+
+        dom.statementNotes.textContent = group.noteText ? "• " + group.noteText : "-";
+        setStatus("정산서 생성 완료", "ok");
       }
 
-      function buildBoolSelect(current, dataAttrs) {
-        const value = normalizeBool(current);
-        const currentVal = value === true ? "true" : value === false ? "false" : "";
-        return `
-          <select class="cellSelect center" ${dataAttrs}>
-            <option value="" ${currentVal === "" ? "selected" : ""}>-</option>
-            <option value="true" ${currentVal === "true" ? "selected" : ""}>예</option>
-            <option value="false" ${currentVal === "false" ? "selected" : ""}>아니오</option>
-          </select>
-        `;
-      }
-
-      function buildCell(row, col) {
-        const rid = rowId(row);
-        const dirty = row.__dirtyFields?.[col.key] ? "dirty" : "";
-        const warn = ((col.key === "amount" && isAmountMismatch(row)) || (col.key === "total_count" && isAmountMismatch(row))) ? "warn" : "";
-        const cls = [dirty, warn].filter(Boolean).join(" ");
-
-        if (col.type === "readonly") {
-          const val = col.key === "id" ? (row.id ?? "NEW") : calcTotal(row);
-          return `<td class="${cls}"><div class="cellView ${col.className || ""}">${escapeHtml(String(val))}</div></td>`;
-        }
-
-        if (col.type === "bool") {
-          return `<td class="${cls}">${buildBoolSelect(row[col.key], `data-row-id="${escapeHtml(rid)}" data-key="${escapeHtml(col.key)}"` )}</td>`;
-        }
-
-        if (col.type === "select") {
-          const current = normalizeText(row[col.key]);
-          const options = (col.options || []).map(opt => {
-            const selected = String(opt) === String(current) ? "selected" : "";
-            const label = opt || "-";
-            return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(label)}</option>`;
-          }).join("");
-
-          return `
-            <td class="${cls}">
-              <select class="cellSelect ${col.className || ""}" data-row-id="${escapeHtml(rid)}" data-key="${escapeHtml(col.key)}">
-                ${options}
-              </select>
-            </td>
-          `;
-        }
-
-        if (col.type === "textarea") {
-          return `
-            <td class="${cls}">
-              <textarea class="cellTextarea" data-row-id="${escapeHtml(rid)}" data-key="${escapeHtml(col.key)}">${escapeHtml(normalizeText(row[col.key]))}</textarea>
-            </td>
-          `;
-        }
-
-        const inputType = col.type === "date" ? "date" : "text";
-        return `
-          <td class="${cls}">
-            <input
-              class="cellInput ${col.className || ""}"
-              type="${inputType}"
-              value="${escapeHtml(col.type === "date" ? formatDate(row[col.key]) : normalizeText(row[col.key]))}"
-              data-row-id="${escapeHtml(rid)}"
-              data-key="${escapeHtml(col.key)}"
-              autocomplete="off"
-            />
-          </td>
-        `;
-      }
-
-      function renderEditor() {
-        const rows = getSelectedRows();
-
-        if (!rows.length) {
-          dom.editorBody.innerHTML = `<tr><td colspan="22" class="empty">선택된 Order 편집 대상이 없습니다.</td></tr>`;
-          return;
-        }
-
-        dom.editorBody.innerHTML = rows.map(row => {
-          const paidRow = isPaid(row) ? "paidRow" : "";
-          const cells = COLUMN_CONFIG.map(col => buildCell(row, col)).join("");
-          return `
-            <tr class="${paidRow}" data-row="${escapeHtml(rowId(row))}">
-              ${cells}
-              <td class="${row.__dirty ? "dirty" : ""}">
-                <div class="rowActions">
-                  <button class="miniBtn del" type="button" data-delete-row="${escapeHtml(rowId(row))}">✕</button>
-                </div>
-              </td>
-            </tr>
-          `;
-        }).join("");
-      }
-
-      function renderAll() {
-        const orderStats = getOrderStats();
-        ensureSelectedOrder(orderStats);
-        renderSidebar(orderStats);
-        renderSummary();
+      function rebuildView() {
+        buildGroups();
+        renderSidebar();
         renderStatement();
-        renderEditor();
-        updatePills();
-
-        if (!state.rows.length) setStatus("데이터가 없습니다.", "warn");
-        else setStatus(`dragon_car ${getMonthRows().length}건 로드 완료`, "ok");
       }
 
-      function findRowById(id) {
-        return state.rows.find(row => String(rowId(row)) === String(id)) || null;
-      }
-
-      function markRowDirty(row, key, value) {
-        if (!row) return;
-        row[key] = value;
-        row.__dirty = true;
-        row.__dirtyFields = row.__dirtyFields || {};
-        row.__dirtyFields[key] = true;
-
-        if (key === "parcel" || key === "return_count") {
-          row.total_count = String(calcTotal(row));
-          row.__dirtyFields.total_count = true;
-        }
-      }
-
-      async function fetchRows() {
-        try {
-          setLoading(true, "데이터 불러오는 중...");
-          state.deletedIds.clear();
-
-          const { data, error } = await supabase
-            .from(DATA_TABLE)
-            .select("*")
-            .eq("settlement_month", normalizeText(state.month))
-            .order("order_name", { ascending: true })
-            .order("order_date", { ascending: true })
-            .order("id", { ascending: true });
-
-          if (error) throw error;
-
-          state.rows = Array.isArray(data) ? data.map(normalizeLoadedRow) : [];
-          renderAll();
-        } catch (e) {
-          console.error(e);
-          state.rows = [];
-          renderAll();
-          setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
-        } finally {
-          setLoading(false);
-        }
-      }
-
-      async function saveAll() {
-        try {
-          setLoading(true, "저장 중...");
-
-          const deleteIds = Array.from(state.deletedIds).filter(Boolean);
-          const dirtyRows = state.rows.filter(row => row.__dirty && !(row.id && state.deletedIds.has(row.id)));
-          const updateRows = dirtyRows.filter(row => !row.__isNew && row.id != null);
-          const insertRows = dirtyRows.filter(row => row.__isNew && hasAnyValue(row));
-
-          if (!deleteIds.length && !updateRows.length && !insertRows.length) {
-            setStatus("저장할 변경사항이 없습니다.", "warn");
-            return;
-          }
-
-          if (deleteIds.length) {
-            const { error } = await supabase
-              .from(DATA_TABLE)
-              .delete()
-              .in("id", deleteIds);
-            if (error) throw error;
-          }
-
-          if (updateRows.length) {
-            const payload = updateRows.map(row => {
-              const obj = { id: row.id };
-              for (const key of DATA_COLUMNS) {
-                obj[key] = valueForSave(key, row[key], row);
-              }
-              return obj;
-            });
-
-            const { error } = await supabase
-              .from(DATA_TABLE)
-              .upsert(payload, { onConflict: "id" });
-            if (error) throw error;
-          }
-
-          if (insertRows.length) {
-            const payload = insertRows.map(row => {
-              const obj = {};
-              for (const key of DATA_COLUMNS) {
-                obj[key] = valueForSave(key, row[key], row);
-              }
-              return obj;
-            });
-
-            const { error } = await supabase
-              .from(DATA_TABLE)
-              .insert(payload);
-            if (error) throw error;
-          }
-
-          await fetchRows();
-          setStatus("저장 완료", "ok");
-        } catch (e) {
-          console.error(e);
-          setStatus("저장 실패: " + (e?.message || String(e)), "err");
-        } finally {
-          setLoading(false);
-        }
-      }
-
-      function deleteRow(rowIdValue) {
-        const row = findRowById(rowIdValue);
-        if (!row) return;
-
-        const label = normalizeText(row.order_name) || String(rowIdValue);
-        if (!confirm(`삭제 대상으로 표시할까?\n저장해야 실제 반영됨.\n\n대상: ${label}`)) return;
-
-        if (row.__isNew) {
-          state.rows = state.rows.filter(r => String(rowId(r)) !== String(rowIdValue));
-        } else if (row.id) {
-          state.deletedIds.add(row.id);
-          row.__dirty = true;
-        }
-
-        renderAll();
-        setStatus("삭제 대상으로 표시했습니다. 저장하면 반영됩니다.", "warn");
-      }
-
-      function addRow() {
-        state.rows.push(blankRow());
-        renderAll();
-        setStatus("새 행이 추가되었습니다.", "ok");
-      }
-
-      function exportCsv() {
-        const rows = getSelectedRows();
-        if (!rows.length) {
-          alert("내보낼 데이터가 없습니다.");
+      async function downloadCurrentStatementPng() {
+        const group = getSelectedGroup();
+        if (!group) {
+          alert("저장할 정산서가 없습니다.");
           return;
         }
 
-        const headers = ["id", ...DATA_COLUMNS, "calc_total", "calc_amount", "effective_amount"];
-        const lines = [
-          headers.join(","),
-          ...rows.map(row => {
-            const values = [
-              row.id ?? "",
-              ...DATA_COLUMNS.map(key => {
-                if (key === "tax_invoice" || key === "payment_confirm") {
-                  const b = normalizeBool(row[key]);
-                  return b === null ? "" : String(b);
-                }
-                if (key === "order_date") return formatDate(row[key]);
-                return normalizeText(row[key]);
-              }),
-              calcTotal(row),
-              calcAmount(row),
-              effectiveAmount(row)
-            ];
-            return values.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",");
-          })
-        ];
+        try {
+          setStatus("PNG 생성 중...", "warn");
 
-        const csv = "\uFEFF" + lines.join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
+          const dataUrl = await window.htmlToImage.toPng(dom.statementCapture, {
+            pixelRatio: 2,
+            backgroundColor: "#ffffff",
+            cacheBust: true
+          });
 
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `dragon_car_pay_${state.month}_${state.selectedOrder || "all"}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+          const a = document.createElement("a");
+          const safeName = `${normalizeMonth(state.month)}_${state.mode === "vendor" ? "업체" : "기사"}_${(group.vendor || "").replace(/[\\/:*?"<>|]/g, "_")}_${(group.target || "").replace(/[\\/:*?"<>|]/g, "_")}`.replace(/\s+/g, "_");
+          a.href = dataUrl;
+          a.download = `${safeName}.png`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+
+          setStatus("PNG 저장 완료", "ok");
+        } catch (e) {
+          console.error(e);
+          setStatus("PNG 저장 실패: " + (e?.message || String(e)), "err");
+        }
       }
 
       function bindEvents() {
         dom.btnReload.addEventListener("click", () => {
-          state.month = normalizeText(dom.monthInput.value) || defaultMonth();
+          state.month = normalizeMonth(dom.monthInput.value) || defaultMonth();
           dom.monthInput.value = state.month;
-          fetchRows();
+          rebuildView();
         });
 
         dom.monthInput.addEventListener("keydown", (e) => {
@@ -1725,16 +1296,24 @@
           dom.btnReload.click();
         });
 
-        dom.orderSearch.addEventListener("input", renderAll);
-
-        dom.btnClearSearch.addEventListener("click", () => {
-          dom.orderSearch.value = "";
-          renderAll();
+        dom.btnModeVendor.addEventListener("click", () => {
+          setMode("vendor");
+          rebuildView();
         });
 
-        dom.btnAddRow.addEventListener("click", addRow);
-        dom.btnSaveAll.addEventListener("click", saveAll);
-        dom.btnExportCsv.addEventListener("click", exportCsv);
+        dom.btnModeDriver.addEventListener("click", () => {
+          setMode("driver");
+          rebuildView();
+        });
+
+        dom.searchInput.addEventListener("input", rebuildView);
+
+        dom.btnClearSearch.addEventListener("click", () => {
+          dom.searchInput.value = "";
+          rebuildView();
+        });
+
+        dom.btnDownloadPng.addEventListener("click", downloadCurrentStatementPng);
         dom.btnLogout.addEventListener("click", signOutAndMove);
 
         dom.btnDeniedHome.addEventListener("click", () => location.replace(INDEX_PATH));
@@ -1744,53 +1323,18 @@
           const target = e.target;
           if (!(target instanceof HTMLElement)) return;
 
-          const orderPick = target.closest("[data-order-pick]");
-          if (orderPick) {
-            state.selectedOrder = orderPick.getAttribute("data-order-pick") || "";
-            renderAll();
-            return;
+          const item = target.closest("[data-group-key]");
+          if (item) {
+            state.selectedGroupKey = item.getAttribute("data-group-key") || "";
+            renderSidebar();
+            renderStatement();
           }
-
-          const deleteBtn = target.closest("[data-delete-row]");
-          if (deleteBtn) {
-            deleteRow(deleteBtn.getAttribute("data-delete-row"));
-          }
-        });
-
-        document.body.addEventListener("input", (e) => {
-          const target = e.target;
-          if (!(target instanceof HTMLElement)) return;
-
-          const rowIdValue = target.getAttribute("data-row-id");
-          const key = target.getAttribute("data-key");
-          if (!rowIdValue || !key) return;
-
-          const row = findRowById(rowIdValue);
-          if (!row) return;
-
-          markRowDirty(row, key, target.value);
-          renderAll();
-        });
-
-        document.body.addEventListener("change", (e) => {
-          const target = e.target;
-          if (!(target instanceof HTMLElement)) return;
-
-          const rowIdValue = target.getAttribute("data-row-id");
-          const key = target.getAttribute("data-key");
-          if (!rowIdValue || !key) return;
-
-          const row = findRowById(rowIdValue);
-          if (!row) return;
-
-          markRowDirty(row, key, target.value);
-          renderAll();
         });
       }
 
       bindEvents();
-
       dom.monthInput.value = state.month;
+      setMode("vendor");
 
       if (!(await requireAdmin())) return;
       await fetchRows();

@@ -1,1 +1,2088 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>용차 정산</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+  <style>
+    html { visibility: hidden; }
+
+    :root{
+      --bg:#0b1220;
+      --bg2:#08111f;
+      --panel:#0f1a2d;
+      --panel2:#0c1524;
+      --line:rgba(255,255,255,.08);
+      --line2:#d4dbe5;
+      --txt:#e6eefc;
+      --muted:#93a4c7;
+
+      --btn:#162744;
+      --btn2:#1a2f55;
+      --ok:#1a5a3a;
+      --warn:#6a4b13;
+      --danger:#6b1b1b;
+
+      --card:#121d33;
+      --card2:#16233b;
+
+      --sheetBg:#eef3f8;
+      --headBg:#dde7f3;
+      --filterBg:#edf3fb;
+      --cellBg:#ffffff;
+      --cellAlt:#f8fbff;
+      --cellTxt:#0f172a;
+
+      --dirtyBg:#e0eeff;
+      --dirtyBorder:#60a5fa;
+
+      --warnBg:#fff1a8;
+      --warnBorder:#e2c44d;
+
+      --dangerBg:#ffd9d6;
+      --dangerBorder:#f1b7b0;
+
+      --topbarH:56px;
+      --toolbarH:58px;
+      --statusH:44px;
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+      background:#0a0f1a;
+      color:var(--txt);
+    }
+    body{ overflow:hidden; }
+
+    .app{
+      height:100%;
+      display:grid;
+      grid-template-rows:var(--topbarH) var(--toolbarH) 1fr var(--statusH);
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,var(--bg),var(--bg2));
+    }
+    .topbar a{
+      display:flex;
+      align-items:center;
+      text-decoration:none;
+      color:inherit;
+    }
+    .topbar img{
+      width:24px;
+      height:24px;
+      display:block;
+    }
+    .titleBox{
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+    }
+    .titleBox b{
+      font-size:18px;
+      line-height:1.1;
+      letter-spacing:.1px;
+    }
+    .titleBox small{
+      margin-top:3px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+    }
+    .spacer{ flex:1; }
+
+    .btn{
+      height:40px;
+      padding:0 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:var(--btn);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      white-space:nowrap;
+    }
+    .btn:hover{ background:var(--btn2); }
+    .btn.ok{ background:rgba(26,90,58,.35); border-color:rgba(0,255,140,.18); }
+    .btn.warn{ background:rgba(106,75,19,.35); border-color:rgba(255,180,0,.18); }
+    .btn.danger{ background:rgba(107,27,27,.35); border-color:rgba(255,60,60,.22); color:#ffccd3; }
+    .btn:disabled{ opacity:.55; cursor:not-allowed; }
+
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:9px 12px;
+      background:var(--panel2);
+      border-bottom:1px solid var(--line);
+      overflow:auto hidden;
+    }
+    .group{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding-right:12px;
+      border-right:1px solid var(--line);
+      flex:0 0 auto;
+    }
+    .group:last-child{
+      border-right:none;
+      padding-right:0;
+    }
+    .group label{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      white-space:nowrap;
+    }
+    .toolbar input,
+    .toolbar select{
+      height:38px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(0,0,0,.22);
+      color:#fff;
+      outline:none;
+      padding:0 12px;
+      font-size:13px;
+    }
+    .toolbar input:focus,
+    .toolbar select:focus{
+      border-color:rgba(96,165,250,.65);
+    }
+
+    .main{
+      min-height:0;
+      display:grid;
+      grid-template-columns:320px 1fr;
+    }
+
+    .sidebar{
+      min-width:0;
+      border-right:1px solid var(--line);
+      background:linear-gradient(180deg,var(--panel),#0b1321);
+      display:flex;
+      flex-direction:column;
+      min-height:0;
+    }
+
+    .sidebarSection{
+      padding:12px;
+      border-bottom:1px solid var(--line);
+    }
+
+    .sideTitle{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      margin-bottom:10px;
+      letter-spacing:.2px;
+    }
+
+    .monthCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:14px;
+      padding:12px;
+    }
+
+    .monthLabel{
+      font-size:12px;
+      color:#cfe0ff;
+      font-weight:900;
+      margin-bottom:6px;
+    }
+
+    .monthValue{
+      font-size:24px;
+      font-weight:900;
+      line-height:1.05;
+    }
+
+    .statGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:10px;
+    }
+
+    .statCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:14px;
+      padding:10px 12px;
+    }
+
+    .statLabel{
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+      margin-bottom:4px;
+    }
+    .statValue{
+      font-size:18px;
+      font-weight:900;
+      line-height:1.1;
+      color:#fff;
+    }
+    .statValue.green{ color:#bbf7d0; }
+    .statValue.red{ color:#fecaca; }
+    .statValue.blue{ color:#bfdbfe; }
+
+    .orderList{
+      min-height:0;
+      overflow:auto;
+      padding:10px;
+    }
+
+    .orderItem{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:16px;
+      padding:12px;
+      margin-bottom:10px;
+      cursor:pointer;
+      transition:.14s ease;
+    }
+    .orderItem:hover{
+      border-color:rgba(255,255,255,.18);
+      background:rgba(255,255,255,.07);
+    }
+    .orderItem.active{
+      border-color:rgba(96,165,250,.55);
+      background:rgba(59,130,246,.12);
+      box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
+    }
+    .orderTop{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:8px;
+    }
+    .orderName{
+      font-weight:900;
+      color:#fff;
+      line-height:1.25;
+      word-break:keep-all;
+    }
+    .orderTag{
+      flex:0 0 auto;
+      border-radius:999px;
+      padding:4px 8px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.06);
+      font-size:11px;
+      font-weight:900;
+      color:#dbe7ff;
+      white-space:nowrap;
+    }
+    .orderSub{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:6px 12px;
+      font-size:12px;
+      color:#c9d7f2;
+    }
+    .orderSub b{
+      color:#fff;
+      font-weight:900;
+    }
+
+    .content{
+      min-width:0;
+      min-height:0;
+      display:grid;
+      grid-template-rows:auto auto 1fr;
+      background:#0f1726;
+    }
+
+    .summaryWrap{
+      padding:12px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,#10192b,#0e1625);
+    }
+
+    .hero{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:18px;
+      padding:14px;
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+      flex-wrap:wrap;
+    }
+
+    .heroTitle{
+      font-size:22px;
+      font-weight:900;
+      line-height:1.15;
+      margin-bottom:6px;
+      color:#fff;
+    }
+    .heroSub{
+      font-size:12px;
+      color:#c8d6f1;
+      line-height:1.5;
+      white-space:pre-line;
+    }
+
+    .kpiRow{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(120px,1fr));
+      gap:10px;
+      margin-top:12px;
+    }
+
+    .kpi{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(0,0,0,.16);
+      border-radius:14px;
+      padding:12px;
+    }
+    .kpiLabel{
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+      margin-bottom:6px;
+    }
+    .kpiValue{
+      font-size:20px;
+      line-height:1.05;
+      font-weight:900;
+      color:#fff;
+    }
+    .kpiValue.green{ color:#bbf7d0; }
+    .kpiValue.red{ color:#fecaca; }
+    .kpiValue.blue{ color:#bfdbfe; }
+
+    .statementWrap{
+      padding:12px;
+      border-bottom:1px solid var(--line);
+      background:#0d1523;
+    }
+
+    .sectionTitle{
+      font-size:13px;
+      font-weight:900;
+      color:#dbe7ff;
+      margin-bottom:10px;
+      letter-spacing:.2px;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      background:var(--sheetBg);
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+    }
+
+    table.sheet{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      color:var(--cellTxt);
+      min-width:1200px;
+    }
+
+    .sheet th, .sheet td{
+      border-right:1px solid var(--line2);
+      border-bottom:1px solid var(--line2);
+    }
+    .sheet th:first-child, .sheet td:first-child{
+      border-left:1px solid var(--line2);
+    }
+
+    .sheet thead th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:var(--headBg);
+      padding:10px 8px;
+      text-align:center;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .sheet tbody td{
+      background:var(--cellBg);
+      padding:0;
+      vertical-align:middle;
+    }
+    .sheet tbody tr:nth-child(even) td{
+      background:var(--cellAlt);
+    }
+
+    .sheet td.dirty{
+      background:var(--dirtyBg) !important;
+      box-shadow:inset 0 0 0 2px var(--dirtyBorder);
+    }
+
+    .sheet td.warn{
+      background:var(--warnBg) !important;
+      box-shadow:inset 0 0 0 1px var(--warnBorder);
+    }
+
+    .sheet td.bad{
+      background:var(--dangerBg) !important;
+      box-shadow:inset 0 0 0 1px var(--dangerBorder);
+    }
+
+    .cellView{
+      min-height:42px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:0 10px;
+      font-size:13px;
+      line-height:1.35;
+      word-break:break-word;
+      overflow-wrap:anywhere;
+    }
+    .cellView.left{ justify-content:flex-start; text-align:left; }
+    .cellView.center{ justify-content:center; text-align:center; }
+    .cellView.right{ justify-content:flex-end; text-align:right; font-variant-numeric:tabular-nums; }
+    .code{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;
+    }
+
+    .editorWrap{
+      min-height:0;
+      overflow:auto;
+      padding:12px;
+      background:#0b1320;
+    }
+
+    .editorGrid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:14px;
+    }
+
+    .editorCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:18px;
+      overflow:hidden;
+      min-height:0;
+    }
+
+    .editorHead{
+      padding:12px 14px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .editorActions{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    .editorTableWrap{
+      overflow:auto;
+      background:var(--sheetBg);
+    }
+
+    .cellInput,
+    .cellSelect{
+      width:100%;
+      min-height:42px;
+      border:none;
+      outline:none;
+      background:transparent;
+      color:var(--cellTxt);
+      padding:10px;
+      font:inherit;
+      border-radius:0;
+    }
+    .cellInput{ font-size:13px; }
+    .cellInput.center, .cellSelect.center{ text-align:center; }
+    .cellInput.right{ text-align:right; font-variant-numeric:tabular-nums; }
+    .cellInput.code{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; }
+    .cellSelect{ cursor:pointer; }
+
+    .tinyBtn{
+      width:34px;
+      height:34px;
+      border-radius:10px;
+      border:1px solid #d4dbe5;
+      background:#fff;
+      color:#64748b;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:15px;
+      font-weight:900;
+    }
+    .tinyBtn:hover{ background:#f8fafc; }
+    .tinyBtn.delete{
+      color:#b91c1c;
+      border-color:#fecaca;
+      background:#fff5f5;
+    }
+
+    .empty{
+      padding:18px 14px;
+      text-align:center;
+      color:#64748b;
+      font-weight:900;
+      background:#f8fbff;
+    }
+
+    .statusbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 12px;
+      border-top:1px solid var(--line);
+      background:#0a1320;
+      font-size:12px;
+    }
+    .pill{
+      padding:5px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.05);
+      font-weight:900;
+      white-space:nowrap;
+    }
+    .pill.ok{ color:#bbf7d0; }
+    .pill.warn{ color:#fde68a; }
+    .pill.err{ color:#fecaca; }
+    .statusText{
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:9999;
+    }
+    .accessDenied.show{ display:flex; }
+    .accessCard{
+      width:min(520px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+    }
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media (max-width: 1220px){
+      .main{ grid-template-columns:280px 1fr; }
+      .kpiRow{ grid-template-columns:repeat(2,minmax(120px,1fr)); }
+    }
+
+    @media (max-width: 880px){
+      .main{ grid-template-columns:1fr; }
+      .sidebar{
+        max-height:260px;
+      }
+      .topbar{
+        gap:8px;
+        padding:0 10px;
+      }
+      .btn{
+        padding:0 10px;
+        font-size:12px;
+      }
+      .toolbar{
+        padding:8px;
+        gap:8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <a href="/index.html" title="홈">
+        <img src="/favicon.ico" alt="Maroowell" />
+      </a>
+      <div class="titleBox">
+        <b>용차 정산</b>
+        <small>최고관리자 전용 · 용차 정산 / 차감 관리</small>
+      </div>
+
+      <div class="spacer"></div>
+
+      <button id="btnReload" class="btn" type="button">불러오기</button>
+      <button id="btnSaveAll" class="btn ok" type="button">전체 저장</button>
+      <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="group">
+        <label for="yearSelect">정산 연도</label>
+        <select id="yearSelect"></select>
+      </div>
+
+      <div class="group">
+        <label for="monthSelect">정산 월</label>
+        <select id="monthSelect"></select>
+      </div>
+
+      <div class="group">
+        <label for="orderSearchInput">벤더 검색</label>
+        <input id="orderSearchInput" type="text" placeholder="Order / 기사명 / 캠프" />
+      </div>
+
+      <div class="group">
+        <button id="btnClearSearch" class="btn" type="button">검색 초기화</button>
+      </div>
+    </div>
+
+    <div class="main">
+      <aside class="sidebar">
+        <div class="sidebarSection">
+          <div class="sideTitle">선택 월</div>
+          <div class="monthCard">
+            <div class="monthLabel">현재 조회</div>
+            <div id="monthLabelValue" class="monthValue">-</div>
+          </div>
+        </div>
+
+        <div class="sidebarSection">
+          <div class="sideTitle">월 요약</div>
+          <div class="statGrid">
+            <div class="statCard">
+              <div class="statLabel">벤더 수</div>
+              <div id="sideVendorCount" class="statValue">0</div>
+            </div>
+            <div class="statCard">
+              <div class="statLabel">정산 건수</div>
+              <div id="sideRowCount" class="statValue blue">0</div>
+            </div>
+            <div class="statCard">
+              <div class="statLabel">월 정산합</div>
+              <div id="sideMonthGross" class="statValue">₩0</div>
+            </div>
+            <div class="statCard">
+              <div class="statLabel">월 차감합</div>
+              <div id="sideMonthDeduction" class="statValue red">₩0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebarSection">
+          <div class="sideTitle">벤더 목록</div>
+        </div>
+        <div id="orderList" class="orderList"></div>
+      </aside>
+
+      <main class="content">
+        <div class="summaryWrap">
+          <div class="hero">
+            <div>
+              <div id="heroTitle" class="heroTitle">벤더를 선택해줘</div>
+              <div id="heroSub" class="heroSub">좌측에서 Order를 선택하면 월 정산서와 원장 편집이 같이 보인다.</div>
+            </div>
+          </div>
+
+          <div class="kpiRow">
+            <div class="kpi">
+              <div class="kpiLabel">총 정산금액</div>
+              <div id="kpiGross" class="kpiValue">₩0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpiLabel">총 차감금액</div>
+              <div id="kpiDeduction" class="kpiValue red">₩0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpiLabel">실정산금액</div>
+              <div id="kpiNet" class="kpiValue green">₩0</div>
+            </div>
+            <div class="kpi">
+              <div class="kpiLabel">미입금 행</div>
+              <div id="kpiUnpaidCount" class="kpiValue blue">0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="statementWrap">
+          <div class="sectionTitle">선택 벤더 정산서</div>
+          <div class="tableWrap">
+            <table class="sheet">
+              <colgroup>
+                <col style="width:110px" />
+                <col style="width:110px" />
+                <col style="width:90px" />
+                <col style="width:180px" />
+                <col style="width:100px" />
+                <col style="width:100px" />
+                <col style="width:100px" />
+                <col style="width:130px" />
+                <col style="width:110px" />
+                <col style="width:110px" />
+                <col style="width:120px" />
+                <col style="width:220px" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>배송 일자</th>
+                  <th>캠프</th>
+                  <th>주/야</th>
+                  <th>라우트</th>
+                  <th>단가</th>
+                  <th>배송 수량</th>
+                  <th>반품 수량</th>
+                  <th>정산 금액</th>
+                  <th>입금 여부</th>
+                  <th>세금계산서</th>
+                  <th>투입 기사</th>
+                  <th>비고</th>
+                </tr>
+              </thead>
+              <tbody id="statementBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="editorWrap">
+          <div class="editorGrid">
+            <div class="editorCard">
+              <div class="editorHead">
+                <div class="sectionTitle" style="margin:0">용차 원장 편집</div>
+                <div class="editorActions">
+                  <button id="btnAddPayRow" class="btn warn" type="button">원장 행 추가</button>
+                </div>
+              </div>
+              <div class="editorTableWrap">
+                <table class="sheet">
+                  <colgroup>
+                    <col style="width:80px" />
+                    <col style="width:120px" />
+                    <col style="width:180px" />
+                    <col style="width:110px" />
+                    <col style="width:90px" />
+                    <col style="width:180px" />
+                    <col style="width:100px" />
+                    <col style="width:120px" />
+                    <col style="width:90px" />
+                    <col style="width:90px" />
+                    <col style="width:110px" />
+                    <col style="width:120px" />
+                    <col style="width:110px" />
+                    <col style="width:120px" />
+                    <col style="width:180px" />
+                    <col style="width:70px" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>순번</th>
+                      <th>일자</th>
+                      <th>Order</th>
+                      <th>캠프</th>
+                      <th>주/야</th>
+                      <th>라우트</th>
+                      <th>단가</th>
+                      <th>투입 기사</th>
+                      <th>배송</th>
+                      <th>반품</th>
+                      <th>정산월</th>
+                      <th>정산일자</th>
+                      <th>세금계산서</th>
+                      <th>입금 여부</th>
+                      <th>비고</th>
+                      <th>삭제</th>
+                    </tr>
+                  </thead>
+                  <tbody id="payEditorBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="editorCard">
+              <div class="editorHead">
+                <div class="sectionTitle" style="margin:0">차감내역 편집</div>
+                <div class="editorActions">
+                  <button id="btnAddDeductionRow" class="btn warn" type="button">차감 행 추가</button>
+                </div>
+              </div>
+              <div class="editorTableWrap">
+                <table class="sheet">
+                  <colgroup>
+                    <col style="width:80px" />
+                    <col style="width:120px" />
+                    <col style="width:180px" />
+                    <col style="width:110px" />
+                    <col style="width:120px" />
+                    <col style="width:130px" />
+                    <col style="width:120px" />
+                    <col style="width:220px" />
+                    <col style="width:70px" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>순번</th>
+                      <th>날짜</th>
+                      <th>이름</th>
+                      <th>캠프</th>
+                      <th>배송기사</th>
+                      <th>차감 금액</th>
+                      <th>차감 여부</th>
+                      <th>기타</th>
+                      <th>삭제</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deductionEditorBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="statusbar">
+      <span id="pillState" class="pill ok">READY</span>
+      <span id="pillRows" class="pill">원장 0</span>
+      <span id="pillDeductions" class="pill">차감 0</span>
+      <span id="pillDirty" class="pill warn">변경 0</span>
+      <span id="statusText" class="statusText">최고관리자 전용 페이지</span>
+    </div>
+  </div>
+
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">이 페이지는 최고관리자만 접근할 수 있습니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="btnDeniedHome" class="btn" type="button">홈으로</button>
+        <button id="btnDeniedLogout" class="btn danger" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (async function () {
+      "use strict";
+
+      const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+      const INDEX_PATH = PATHS?.index || "/index.html";
+      const LOGIN_PATH = PATHS?.login || "/login.html";
+
+      const ACCESS_TABLE = "user_access";
+      const PAY_TABLE = "dragon_car_pay";
+      const DEDUCTION_TABLE = "dragon_car_pay_deduction";
+
+      const PAY_COLUMNS = [
+        "work_date",
+        "order_name",
+        "camp_code",
+        "wave",
+        "route_code",
+        "unit_price",
+        "driver_name",
+        "delivery_count",
+        "return_count",
+        "settlement_year",
+        "settlement_month",
+        "settlement_date",
+        "tax_invoice_status",
+        "payment_status",
+        "note"
+      ];
+
+      const DEDUCTION_COLUMNS = [
+        "deduction_date",
+        "order_name",
+        "camp_code",
+        "driver_name",
+        "deduction_amount",
+        "deduction_status",
+        "note",
+        "settlement_year",
+        "settlement_month"
+      ];
+
+      const PAY_COLUMN_CONFIG = [
+        { key: "pk_id", type: "readonly", className: "right code center" },
+        { key: "work_date", type: "date", className: "center code" },
+        { key: "order_name" },
+        { key: "camp_code", className: "center" },
+        { key: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center" },
+        { key: "route_code" },
+        { key: "unit_price", type: "number", className: "right code" },
+        { key: "driver_name", className: "center" },
+        { key: "delivery_count", type: "number", className: "right code" },
+        { key: "return_count", type: "number", className: "right code" },
+        { key: "settlement_month_label", type: "readonly", className: "center code" },
+        { key: "settlement_date", type: "date", className: "center code" },
+        { key: "tax_invoice_status", type: "select", options: ["", "발행", "미발행"], className: "center" },
+        { key: "payment_status", type: "select", options: ["", "입금", "미입금", "대기"], className: "center" },
+        { key: "note" }
+      ];
+
+      const DEDUCTION_COLUMN_CONFIG = [
+        { key: "pk_id", type: "readonly", className: "right code center" },
+        { key: "deduction_date", type: "date", className: "center code" },
+        { key: "order_name" },
+        { key: "camp_code", className: "center" },
+        { key: "driver_name", className: "center" },
+        { key: "deduction_amount", type: "number", className: "right code" },
+        { key: "deduction_status", type: "select", options: ["", "입금O", "차감 확정", "차감취소", "대기"], className: "center" },
+        { key: "note" }
+      ];
+
+      const $ = (sel) => document.querySelector(sel);
+
+      const dom = {
+        yearSelect: $("#yearSelect"),
+        monthSelect: $("#monthSelect"),
+        orderSearchInput: $("#orderSearchInput"),
+        btnClearSearch: $("#btnClearSearch"),
+        btnReload: $("#btnReload"),
+        btnSaveAll: $("#btnSaveAll"),
+        btnExportCsv: $("#btnExportCsv"),
+        btnLogout: $("#btnLogout"),
+
+        monthLabelValue: $("#monthLabelValue"),
+        sideVendorCount: $("#sideVendorCount"),
+        sideRowCount: $("#sideRowCount"),
+        sideMonthGross: $("#sideMonthGross"),
+        sideMonthDeduction: $("#sideMonthDeduction"),
+        orderList: $("#orderList"),
+
+        heroTitle: $("#heroTitle"),
+        heroSub: $("#heroSub"),
+        kpiGross: $("#kpiGross"),
+        kpiDeduction: $("#kpiDeduction"),
+        kpiNet: $("#kpiNet"),
+        kpiUnpaidCount: $("#kpiUnpaidCount"),
+
+        statementBody: $("#statementBody"),
+        payEditorBody: $("#payEditorBody"),
+        deductionEditorBody: $("#deductionEditorBody"),
+
+        btnAddPayRow: $("#btnAddPayRow"),
+        btnAddDeductionRow: $("#btnAddDeductionRow"),
+
+        pillState: $("#pillState"),
+        pillRows: $("#pillRows"),
+        pillDeductions: $("#pillDeductions"),
+        pillDirty: $("#pillDirty"),
+        statusText: $("#statusText"),
+
+        accessDenied: $("#accessDenied"),
+        accessDeniedText: $("#accessDeniedText"),
+        accessDeniedEmail: $("#accessDeniedEmail"),
+        btnDeniedHome: $("#btnDeniedHome"),
+        btnDeniedLogout: $("#btnDeniedLogout")
+      };
+
+      const state = {
+        session: null,
+        viewerEmail: "",
+        viewerUserId: "",
+        accessRow: null,
+
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+
+        payRows: [],
+        deductionRows: [],
+        filteredOrders: [],
+        selectedOrder: "",
+
+        deletedPayIds: new Set(),
+        deletedDeductionIds: new Set(),
+
+        tempSeq: 0,
+        loading: false
+      };
+
+      const authStorage = (() => {
+        try { return window.sessionStorage; } catch {}
+        return null;
+      })();
+
+      const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+              persistSession: !!authStorage,
+              storage: authStorage || undefined,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          })
+        : null;
+
+      function safeNextPath(p) {
+        if (!p) return INDEX_PATH;
+        if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
+        if (!p.startsWith("/")) return INDEX_PATH;
+        return p;
+      }
+
+      function normalizeText(v) {
+        return String(v ?? "").replace(/\s+/g, " ").trim();
+      }
+
+      function normalizeLower(v) {
+        return normalizeText(v).toLowerCase();
+      }
+
+      function escapeHtml(v) {
+        return String(v ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function toNumber(v) {
+        if (v == null || v === "") return 0;
+        const n = Number(String(v).replace(/[^\d.-]/g, ""));
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function formatNumber(v) {
+        return new Intl.NumberFormat("ko-KR").format(toNumber(v));
+      }
+
+      function formatCurrency(v) {
+        return "₩" + formatNumber(v);
+      }
+
+      function formatDate(v) {
+        const s = normalizeText(v);
+        if (!s) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        if (/^\d{4}\.\d{1,2}\.\d{1,2}$/.test(s)) {
+          const [y, m, d] = s.split(".");
+          return `${y.padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) {
+          const yy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, "0");
+          const dd = String(d.getDate()).padStart(2, "0");
+          return `${yy}-${mm}-${dd}`;
+        }
+        return s;
+      }
+
+      function makeMonthLabel(year, month) {
+        return `${year}년 ${month}월`;
+      }
+
+      function rowId(row) {
+        return row.pk_id ?? row.__temp_id;
+      }
+
+      function payAmount(row) {
+        return (toNumber(row.delivery_count) + toNumber(row.return_count)) * toNumber(row.unit_price);
+      }
+
+      function isUnpaid(row) {
+        const s = normalizeText(row.payment_status);
+        return s && !/입금/i.test(s);
+      }
+
+      function setStatus(text, tone) {
+        dom.statusText.textContent = text || "";
+        dom.pillState.className = "pill";
+        if (tone === "err") dom.pillState.classList.add("err");
+        else if (tone === "warn") dom.pillState.classList.add("warn");
+        else dom.pillState.classList.add("ok");
+
+        dom.pillState.textContent =
+          tone === "err" ? "ERROR" :
+          tone === "warn" ? "WAIT" : "READY";
+      }
+
+      function setLoading(on, text) {
+        state.loading = !!on;
+        dom.btnReload.disabled = !!on;
+        dom.btnSaveAll.disabled = !!on;
+        dom.btnExportCsv.disabled = !!on;
+        dom.btnAddPayRow.disabled = !!on;
+        dom.btnAddDeductionRow.disabled = !!on;
+        if (on) setStatus(text || "처리 중...", "warn");
+      }
+
+      function showAccessDenied(email, detail) {
+        dom.accessDenied.classList.add("show");
+        dom.accessDeniedText.textContent = detail || "이 페이지는 최고관리자만 접근할 수 있습니다.";
+        dom.accessDeniedEmail.textContent = email
+          ? "현재 로그인: " + email
+          : "현재 로그인 이메일을 확인할 수 없습니다.";
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function signOutAndMove() {
+        try {
+          await supabase?.auth?.signOut();
+        } catch {}
+        location.replace(LOGIN_PATH);
+      }
+
+      async function requireAdmin() {
+        if (!supabase || !supabase.auth) {
+          alert("Supabase 설정을 확인하세요.");
+          return false;
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+
+          if (!session) {
+            const next = safeNextPath(location.pathname + location.search + location.hash);
+            location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+            return false;
+          }
+
+          state.session = session;
+          state.viewerEmail = normalizeText(session.user?.email || "");
+          state.viewerUserId = normalizeText(session.user?.id || "");
+
+          if (!state.viewerUserId) {
+            showAccessDenied(state.viewerEmail, "로그인 사용자 ID를 확인할 수 없습니다.");
+            return false;
+          }
+
+          const { data: accessRow, error } = await supabase
+            .from(ACCESS_TABLE)
+            .select("user_id, email, is_maroowell, is_admin")
+            .eq("user_id", state.viewerUserId)
+            .maybeSingle();
+
+          if (error) {
+            console.error(error);
+            showAccessDenied(state.viewerEmail, "권한 테이블 조회 실패: " + error.message);
+            return false;
+          }
+
+          state.accessRow = accessRow || null;
+
+          if (!accessRow?.is_admin) {
+            showAccessDenied(state.viewerEmail, "이 페이지는 최고관리자만 접근할 수 있습니다.");
+            return false;
+          }
+
+          document.documentElement.style.visibility = "visible";
+          return true;
+        } catch (e) {
+          console.error(e);
+          const next = safeNextPath(location.pathname + location.search + location.hash);
+          location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+          return false;
+        }
+      }
+
+      function buildYearMonthOptions() {
+        const now = new Date();
+        const years = [];
+        for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 2; y++) years.push(y);
+
+        dom.yearSelect.innerHTML = years.map(y => {
+          const selected = y === state.year ? "selected" : "";
+          return `<option value="${y}" ${selected}>${y}년</option>`;
+        }).join("");
+
+        dom.monthSelect.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+          const selected = m === state.month ? "selected" : "";
+          return `<option value="${m}" ${selected}>${m}월</option>`;
+        }).join("");
+      }
+
+      function normalizePayRow(row) {
+        const out = { ...(row || {}) };
+        for (const key of PAY_COLUMNS) {
+          out[key] = out[key] == null ? "" : String(out[key]);
+        }
+        out.work_date = formatDate(out.work_date);
+        out.settlement_date = formatDate(out.settlement_date);
+        out.settlement_year = out.settlement_year ? String(out.settlement_year) : String(state.year);
+        out.settlement_month = out.settlement_month ? String(out.settlement_month) : String(state.month);
+        out.__dirty = false;
+        out.__dirtyFields = {};
+        out.__isNew = false;
+        return out;
+      }
+
+      function normalizeDeductionRow(row) {
+        const out = { ...(row || {}) };
+        for (const key of DEDUCTION_COLUMNS) {
+          out[key] = out[key] == null ? "" : String(out[key]);
+        }
+        out.deduction_date = formatDate(out.deduction_date);
+        out.settlement_year = out.settlement_year ? String(out.settlement_year) : String(state.year);
+        out.settlement_month = out.settlement_month ? String(out.settlement_month) : String(state.month);
+        out.__dirty = false;
+        out.__dirtyFields = {};
+        out.__isNew = false;
+        return out;
+      }
+
+      function makeBlankPayRow() {
+        return {
+          __temp_id: "pay_new_" + (++state.tempSeq),
+          __isNew: true,
+          __dirty: true,
+          __dirtyFields: {},
+          work_date: "",
+          order_name: state.selectedOrder || "",
+          camp_code: "",
+          wave: "주간",
+          route_code: "",
+          unit_price: "",
+          driver_name: "",
+          delivery_count: "",
+          return_count: "",
+          settlement_year: String(state.year),
+          settlement_month: String(state.month),
+          settlement_date: "",
+          tax_invoice_status: "",
+          payment_status: "",
+          note: ""
+        };
+      }
+
+      function makeBlankDeductionRow() {
+        return {
+          __temp_id: "ded_new_" + (++state.tempSeq),
+          __isNew: true,
+          __dirty: true,
+          __dirtyFields: {},
+          deduction_date: "",
+          order_name: state.selectedOrder || "",
+          camp_code: "",
+          driver_name: "",
+          deduction_amount: "",
+          deduction_status: "",
+          note: "",
+          settlement_year: String(state.year),
+          settlement_month: String(state.month)
+        };
+      }
+
+      function markRowDirty(row, key, value) {
+        row[key] = value;
+        row.__dirty = true;
+        row.__dirtyFields = row.__dirtyFields || {};
+        row.__dirtyFields[key] = true;
+      }
+
+      async function fetchData() {
+        try {
+          setLoading(true, "데이터 불러오는 중...");
+
+          state.deletedPayIds.clear();
+          state.deletedDeductionIds.clear();
+
+          const year = String(state.year);
+          const month = String(state.month);
+
+          const { data: payData, error: payError } = await supabase
+            .from(PAY_TABLE)
+            .select("*")
+            .eq("settlement_year", year)
+            .eq("settlement_month", month)
+            .order("work_date", { ascending: true })
+            .order("pk_id", { ascending: true });
+
+          if (payError) throw payError;
+
+          const { data: deductionData, error: deductionError } = await supabase
+            .from(DEDUCTION_TABLE)
+            .select("*")
+            .eq("settlement_year", year)
+            .eq("settlement_month", month)
+            .order("deduction_date", { ascending: true })
+            .order("pk_id", { ascending: true });
+
+          if (deductionError) throw deductionError;
+
+          state.payRows = Array.isArray(payData) ? payData.map(normalizePayRow) : [];
+          state.deductionRows = Array.isArray(deductionData) ? deductionData.map(normalizeDeductionRow) : [];
+
+          renderAll();
+        } catch (e) {
+          console.error(e);
+          state.payRows = [];
+          state.deductionRows = [];
+          renderAll();
+          setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      function getVisiblePayRows() {
+        return state.payRows.filter(row => !(row.pk_id && state.deletedPayIds.has(row.pk_id)));
+      }
+
+      function getVisibleDeductionRows() {
+        return state.deductionRows.filter(row => !(row.pk_id && state.deletedDeductionIds.has(row.pk_id)));
+      }
+
+      function getOrderStats() {
+        const payRows = getVisiblePayRows();
+        const deductionRows = getVisibleDeductionRows();
+        const q = normalizeLower(dom.orderSearchInput.value);
+
+        const map = new Map();
+
+        for (const row of payRows) {
+          const orderName = normalizeText(row.order_name);
+          if (!orderName) continue;
+
+          const bag = [
+            row.order_name,
+            row.driver_name,
+            row.camp_code,
+            row.route_code
+          ].map(normalizeLower).join(" | ");
+
+          if (q && !bag.includes(q)) continue;
+
+          if (!map.has(orderName)) {
+            map.set(orderName, {
+              orderName,
+              gross: 0,
+              deduction: 0,
+              rowCount: 0,
+              unpaidCount: 0,
+              camps: new Set(),
+              drivers: new Set()
+            });
+          }
+
+          const s = map.get(orderName);
+          s.gross += payAmount(row);
+          s.rowCount += 1;
+          if (isUnpaid(row)) s.unpaidCount += 1;
+          if (normalizeText(row.camp_code)) s.camps.add(normalizeText(row.camp_code));
+          if (normalizeText(row.driver_name)) s.drivers.add(normalizeText(row.driver_name));
+        }
+
+        for (const row of deductionRows) {
+          const orderName = normalizeText(row.order_name);
+          if (!orderName) continue;
+
+          const bag = [
+            row.order_name,
+            row.driver_name,
+            row.camp_code,
+            row.note
+          ].map(normalizeLower).join(" | ");
+
+          if (q && !bag.includes(q)) continue;
+
+          if (!map.has(orderName)) {
+            map.set(orderName, {
+              orderName,
+              gross: 0,
+              deduction: 0,
+              rowCount: 0,
+              unpaidCount: 0,
+              camps: new Set(),
+              drivers: new Set()
+            });
+          }
+
+          const s = map.get(orderName);
+          s.deduction += toNumber(row.deduction_amount);
+          if (normalizeText(row.camp_code)) s.camps.add(normalizeText(row.camp_code));
+          if (normalizeText(row.driver_name)) s.drivers.add(normalizeText(row.driver_name));
+        }
+
+        const list = Array.from(map.values()).map(item => ({
+          ...item,
+          net: item.gross - item.deduction,
+          campCount: item.camps.size,
+          driverCount: item.drivers.size
+        }));
+
+        list.sort((a, b) => {
+          if (b.net !== a.net) return b.net - a.net;
+          return a.orderName.localeCompare(b.orderName, "ko");
+        });
+
+        return list;
+      }
+
+      function ensureSelectedOrder(orderStats) {
+        if (state.selectedOrder && orderStats.some(x => x.orderName === state.selectedOrder)) return;
+        state.selectedOrder = orderStats[0]?.orderName || "";
+      }
+
+      function getSelectedPayRows() {
+        const order = state.selectedOrder;
+        return getVisiblePayRows()
+          .filter(row => normalizeText(row.order_name) === order)
+          .sort((a, b) => {
+            const da = formatDate(a.work_date);
+            const db = formatDate(b.work_date);
+            return da.localeCompare(db) || String(a.pk_id ?? "").localeCompare(String(b.pk_id ?? ""));
+          });
+      }
+
+      function getSelectedDeductionRows() {
+        const order = state.selectedOrder;
+        return getVisibleDeductionRows()
+          .filter(row => normalizeText(row.order_name) === order)
+          .sort((a, b) => {
+            const da = formatDate(a.deduction_date);
+            const db = formatDate(b.deduction_date);
+            return da.localeCompare(db) || String(a.pk_id ?? "").localeCompare(String(b.pk_id ?? ""));
+          });
+      }
+
+      function renderSidebar(orderStats) {
+        dom.monthLabelValue.textContent = makeMonthLabel(state.year, state.month);
+
+        const monthGross = orderStats.reduce((acc, x) => acc + x.gross, 0);
+        const monthDeduction = orderStats.reduce((acc, x) => acc + x.deduction, 0);
+
+        dom.sideVendorCount.textContent = String(orderStats.length);
+        dom.sideRowCount.textContent = String(getVisiblePayRows().length);
+        dom.sideMonthGross.textContent = formatCurrency(monthGross);
+        dom.sideMonthDeduction.textContent = formatCurrency(monthDeduction);
+
+        if (!orderStats.length) {
+          dom.orderList.innerHTML = `<div class="empty">해당 월 데이터가 없습니다.</div>`;
+          return;
+        }
+
+        dom.orderList.innerHTML = orderStats.map(item => {
+          const active = item.orderName === state.selectedOrder ? "active" : "";
+          return `
+            <div class="orderItem ${active}" data-order-pick="${escapeHtml(item.orderName)}">
+              <div class="orderTop">
+                <div class="orderName">${escapeHtml(item.orderName)}</div>
+                <div class="orderTag">${item.rowCount}건</div>
+              </div>
+              <div class="orderSub">
+                <div>정산 <b>${escapeHtml(formatCurrency(item.gross))}</b></div>
+                <div>차감 <b>${escapeHtml(formatCurrency(item.deduction))}</b></div>
+                <div>실정산 <b>${escapeHtml(formatCurrency(item.net))}</b></div>
+                <div>미입금 <b>${item.unpaidCount}</b></div>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function renderSummary() {
+        if (!state.selectedOrder) {
+          dom.heroTitle.textContent = "벤더를 선택해줘";
+          dom.heroSub.textContent = "좌측에서 Order를 선택하면 월 정산서와 편집 테이블이 같이 보인다.";
+          dom.kpiGross.textContent = formatCurrency(0);
+          dom.kpiDeduction.textContent = formatCurrency(0);
+          dom.kpiNet.textContent = formatCurrency(0);
+          dom.kpiUnpaidCount.textContent = "0";
+          return;
+        }
+
+        const payRows = getSelectedPayRows();
+        const deductionRows = getSelectedDeductionRows();
+
+        const gross = payRows.reduce((acc, row) => acc + payAmount(row), 0);
+        const deduction = deductionRows.reduce((acc, row) => acc + toNumber(row.deduction_amount), 0);
+        const unpaidCount = payRows.filter(isUnpaid).length;
+        const net = gross - deduction;
+
+        const campSet = new Set(payRows.map(r => normalizeText(r.camp_code)).filter(Boolean));
+        const driverSet = new Set(payRows.map(r => normalizeText(r.driver_name)).filter(Boolean));
+
+        dom.heroTitle.textContent = `${state.selectedOrder} · ${makeMonthLabel(state.year, state.month)}`;
+        dom.heroSub.textContent =
+          `캠프 ${campSet.size}개 · 기사 ${driverSet.size}명 · 원장 ${payRows.length}건 · 차감 ${deductionRows.length}건`;
+
+        dom.kpiGross.textContent = formatCurrency(gross);
+        dom.kpiDeduction.textContent = formatCurrency(deduction);
+        dom.kpiNet.textContent = formatCurrency(net);
+        dom.kpiUnpaidCount.textContent = String(unpaidCount);
+      }
+
+      function renderStatement() {
+        const rows = getSelectedPayRows();
+
+        if (!rows.length) {
+          dom.statementBody.innerHTML = `<tr><td colspan="12" class="empty">선택된 벤더 원장 데이터가 없습니다.</td></tr>`;
+          return;
+        }
+
+        dom.statementBody.innerHTML = rows.map(row => {
+          const amount = payAmount(row);
+          const bad = isUnpaid(row) ? "bad" : "";
+          return `
+            <tr>
+              <td><div class="cellView center code">${escapeHtml(formatDate(row.work_date))}</div></td>
+              <td><div class="cellView center">${escapeHtml(normalizeText(row.camp_code))}</div></td>
+              <td><div class="cellView center">${escapeHtml(normalizeText(row.wave))}</div></td>
+              <td><div class="cellView left">${escapeHtml(normalizeText(row.route_code))}</div></td>
+              <td><div class="cellView right code">${escapeHtml(formatCurrency(row.unit_price))}</div></td>
+              <td><div class="cellView right code">${escapeHtml(formatNumber(row.delivery_count))}</div></td>
+              <td><div class="cellView right code">${escapeHtml(formatNumber(row.return_count))}</div></td>
+              <td><div class="cellView right code">${escapeHtml(formatCurrency(amount))}</div></td>
+              <td class="${bad}"><div class="cellView center">${escapeHtml(normalizeText(row.payment_status) || "-")}</div></td>
+              <td><div class="cellView center">${escapeHtml(normalizeText(row.tax_invoice_status) || "-")}</div></td>
+              <td><div class="cellView center">${escapeHtml(normalizeText(row.driver_name))}</div></td>
+              <td><div class="cellView left">${escapeHtml(normalizeText(row.note))}</div></td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function buildPayCell(row, col) {
+        const rid = rowId(row);
+        const dirty = row.__dirtyFields?.[col.key] ? "dirty" : "";
+        const warn = col.key === "payment_status" && isUnpaid(row) ? "bad" : "";
+        const cls = [dirty, warn].filter(Boolean).join(" ");
+
+        if (col.type === "readonly") {
+          const val = col.key === "pk_id"
+            ? (row.pk_id ?? "NEW")
+            : makeMonthLabel(Number(row.settlement_year || state.year), Number(row.settlement_month || state.month));
+          return `<td class="${cls}"><div class="cellView ${col.className || ""}">${escapeHtml(val)}</div></td>`;
+        }
+
+        if (col.type === "select") {
+          const current = normalizeText(row[col.key]);
+          const options = (col.options || []).map(opt => {
+            const selected = String(opt) === String(current) ? "selected" : "";
+            const label = opt || "-";
+            return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(label)}</option>`;
+          }).join("");
+
+          return `
+            <td class="${cls}">
+              <select class="cellSelect ${col.className || ""}" data-table="pay" data-row-id="${escapeHtml(rid)}" data-key="${escapeHtml(col.key)}">${options}</select>
+            </td>
+          `;
+        }
+
+        const inputType = col.type === "date" ? "date" : "text";
+        const val = col.key === "settlement_month_label"
+          ? makeMonthLabel(Number(row.settlement_year || state.year), Number(row.settlement_month || state.month))
+          : normalizeText(row[col.key]);
+
+        return `
+          <td class="${cls}">
+            <input
+              class="cellInput ${col.className || ""}"
+              type="${inputType}"
+              value="${escapeHtml(val)}"
+              data-table="pay"
+              data-row-id="${escapeHtml(rid)}"
+              data-key="${escapeHtml(col.key)}"
+              autocomplete="off"
+            />
+          </td>
+        `;
+      }
+
+      function buildDeductionCell(row, col) {
+        const rid = rowId(row);
+        const dirty = row.__dirtyFields?.[col.key] ? "dirty" : "";
+        const cls = dirty;
+
+        if (col.type === "readonly") {
+          const val = row.pk_id ?? "NEW";
+          return `<td class="${cls}"><div class="cellView ${col.className || ""}">${escapeHtml(val)}</div></td>`;
+        }
+
+        if (col.type === "select") {
+          const current = normalizeText(row[col.key]);
+          const options = (col.options || []).map(opt => {
+            const selected = String(opt) === String(current) ? "selected" : "";
+            const label = opt || "-";
+            return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(label)}</option>`;
+          }).join("");
+
+          return `
+            <td class="${cls}">
+              <select class="cellSelect ${col.className || ""}" data-table="deduction" data-row-id="${escapeHtml(rid)}" data-key="${escapeHtml(col.key)}">${options}</select>
+            </td>
+          `;
+        }
+
+        const inputType = col.type === "date" ? "date" : "text";
+        const val = normalizeText(row[col.key]);
+
+        return `
+          <td class="${cls}">
+            <input
+              class="cellInput ${col.className || ""}"
+              type="${inputType}"
+              value="${escapeHtml(val)}"
+              data-table="deduction"
+              data-row-id="${escapeHtml(rid)}"
+              data-key="${escapeHtml(col.key)}"
+              autocomplete="off"
+            />
+          </td>
+        `;
+      }
+
+      function renderEditors() {
+        const payRows = getVisiblePayRows();
+        const deductionRows = getVisibleDeductionRows();
+
+        if (!payRows.length) {
+          dom.payEditorBody.innerHTML = `<tr><td colspan="16" class="empty">원장 데이터가 없습니다.</td></tr>`;
+        } else {
+          dom.payEditorBody.innerHTML = payRows.map(row => {
+            const cells = PAY_COLUMN_CONFIG.map(col => buildPayCell(row, col)).join("");
+            const deleteCls = row.__dirty ? "dirty" : "";
+            return `
+              <tr data-pay-row="${escapeHtml(rowId(row))}">
+                ${cells}
+                <td class="${deleteCls}">
+                  <div class="cellView center">
+                    <button class="tinyBtn delete" type="button" data-delete-table="pay" data-delete-row="${escapeHtml(rowId(row))}">✕</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join("");
+        }
+
+        if (!deductionRows.length) {
+          dom.deductionEditorBody.innerHTML = `<tr><td colspan="9" class="empty">차감 데이터가 없습니다.</td></tr>`;
+        } else {
+          dom.deductionEditorBody.innerHTML = deductionRows.map(row => {
+            const cells = DEDUCTION_COLUMN_CONFIG.map(col => buildDeductionCell(row, col)).join("");
+            const deleteCls = row.__dirty ? "dirty" : "";
+            return `
+              <tr data-deduction-row="${escapeHtml(rowId(row))}">
+                ${cells}
+                <td class="${deleteCls}">
+                  <div class="cellView center">
+                    <button class="tinyBtn delete" type="button" data-delete-table="deduction" data-delete-row="${escapeHtml(rowId(row))}">✕</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join("");
+        }
+      }
+
+      function renderPills() {
+        const dirtyCount =
+          state.payRows.filter(r => r.__dirty).length +
+          state.deductionRows.filter(r => r.__dirty).length +
+          state.deletedPayIds.size +
+          state.deletedDeductionIds.size;
+
+        dom.pillRows.textContent = "원장 " + getVisiblePayRows().length;
+        dom.pillDeductions.textContent = "차감 " + getVisibleDeductionRows().length;
+        dom.pillDirty.textContent = "변경 " + dirtyCount;
+      }
+
+      function renderAll() {
+        const orderStats = getOrderStats();
+        ensureSelectedOrder(orderStats);
+        renderSidebar(orderStats);
+        renderSummary();
+        renderStatement();
+        renderEditors();
+        renderPills();
+
+        if (!state.payRows.length && !state.deductionRows.length) {
+          setStatus("해당 월 데이터가 없습니다.", "warn");
+        } else {
+          setStatus(`원장 ${state.payRows.length}건 · 차감 ${state.deductionRows.length}건 로드 완료`, "ok");
+        }
+      }
+
+      function findPayRow(id) {
+        return state.payRows.find(r => String(rowId(r)) === String(id)) || null;
+      }
+
+      function findDeductionRow(id) {
+        return state.deductionRows.find(r => String(rowId(r)) === String(id)) || null;
+      }
+
+      function addPayRow() {
+        state.payRows.push(makeBlankPayRow());
+        renderAll();
+        setStatus("원장 새 행이 추가되었습니다.", "ok");
+      }
+
+      function addDeductionRow() {
+        state.deductionRows.push(makeBlankDeductionRow());
+        renderAll();
+        setStatus("차감 새 행이 추가되었습니다.", "ok");
+      }
+
+      function deleteRow(tableName, rowIdValue) {
+        const isPay = tableName === "pay";
+        const row = isPay ? findPayRow(rowIdValue) : findDeductionRow(rowIdValue);
+        if (!row) return;
+
+        const label = normalizeText(row.order_name) || String(rowIdValue);
+        if (!confirm(`삭제 대상으로 표시할까?\n저장해야 실제 반영됨.\n\n대상: ${label}`)) return;
+
+        if (row.__isNew) {
+          if (isPay) {
+            state.payRows = state.payRows.filter(r => String(rowId(r)) !== String(rowIdValue));
+          } else {
+            state.deductionRows = state.deductionRows.filter(r => String(rowId(r)) !== String(rowIdValue));
+          }
+        } else if (row.pk_id) {
+          if (isPay) state.deletedPayIds.add(row.pk_id);
+          else state.deletedDeductionIds.add(row.pk_id);
+          row.__dirty = true;
+        }
+
+        renderAll();
+        setStatus("삭제 대상으로 표시했습니다. 전체 저장 시 반영됩니다.", "warn");
+      }
+
+      function hasAnyValue(row, columns) {
+        return columns.some(key => normalizeText(row[key]));
+      }
+
+      function cleanPayPayload(row, includePk) {
+        const obj = {};
+        if (includePk && row.pk_id != null) obj.pk_id = row.pk_id;
+
+        obj.work_date = normalizeText(row.work_date) || null;
+        obj.order_name = normalizeText(row.order_name) || null;
+        obj.camp_code = normalizeText(row.camp_code) || null;
+        obj.wave = normalizeText(row.wave) || null;
+        obj.route_code = normalizeText(row.route_code) || null;
+        obj.unit_price = normalizeText(row.unit_price) ? toNumber(row.unit_price) : null;
+        obj.driver_name = normalizeText(row.driver_name) || null;
+        obj.delivery_count = normalizeText(row.delivery_count) ? toNumber(row.delivery_count) : null;
+        obj.return_count = normalizeText(row.return_count) ? toNumber(row.return_count) : null;
+        obj.settlement_year = String(state.year);
+        obj.settlement_month = String(state.month);
+        obj.settlement_date = normalizeText(row.settlement_date) || null;
+        obj.tax_invoice_status = normalizeText(row.tax_invoice_status) || null;
+        obj.payment_status = normalizeText(row.payment_status) || null;
+        obj.note = normalizeText(row.note) || null;
+
+        return obj;
+      }
+
+      function cleanDeductionPayload(row, includePk) {
+        const obj = {};
+        if (includePk && row.pk_id != null) obj.pk_id = row.pk_id;
+
+        obj.deduction_date = normalizeText(row.deduction_date) || null;
+        obj.order_name = normalizeText(row.order_name) || null;
+        obj.camp_code = normalizeText(row.camp_code) || null;
+        obj.driver_name = normalizeText(row.driver_name) || null;
+        obj.deduction_amount = normalizeText(row.deduction_amount) ? toNumber(row.deduction_amount) : null;
+        obj.deduction_status = normalizeText(row.deduction_status) || null;
+        obj.note = normalizeText(row.note) || null;
+        obj.settlement_year = String(state.year);
+        obj.settlement_month = String(state.month);
+
+        return obj;
+      }
+
+      async function saveAll() {
+        try {
+          setLoading(true, "저장 중...");
+
+          const payDeleteIds = Array.from(state.deletedPayIds).filter(Boolean);
+          const deductionDeleteIds = Array.from(state.deletedDeductionIds).filter(Boolean);
+
+          const dirtyPayRows = state.payRows.filter(row => row.__dirty && !(row.pk_id && state.deletedPayIds.has(row.pk_id)));
+          const dirtyDeductionRows = state.deductionRows.filter(row => row.__dirty && !(row.pk_id && state.deletedDeductionIds.has(row.pk_id)));
+
+          const payUpdateRows = dirtyPayRows.filter(row => !row.__isNew && row.pk_id != null);
+          const payInsertRows = dirtyPayRows.filter(row => row.__isNew && hasAnyValue(row, PAY_COLUMNS));
+
+          const deductionUpdateRows = dirtyDeductionRows.filter(row => !row.__isNew && row.pk_id != null);
+          const deductionInsertRows = dirtyDeductionRows.filter(row => row.__isNew && hasAnyValue(row, DEDUCTION_COLUMNS));
+
+          if (!payDeleteIds.length && !deductionDeleteIds.length && !payUpdateRows.length && !payInsertRows.length && !deductionUpdateRows.length && !deductionInsertRows.length) {
+            setStatus("저장할 변경사항이 없습니다.", "warn");
+            return;
+          }
+
+          if (payDeleteIds.length) {
+            const { error } = await supabase.from(PAY_TABLE).delete().in("pk_id", payDeleteIds);
+            if (error) throw error;
+          }
+
+          if (deductionDeleteIds.length) {
+            const { error } = await supabase.from(DEDUCTION_TABLE).delete().in("pk_id", deductionDeleteIds);
+            if (error) throw error;
+          }
+
+          if (payUpdateRows.length) {
+            const payload = payUpdateRows.map(row => cleanPayPayload(row, true));
+            const { error } = await supabase.from(PAY_TABLE).upsert(payload, { onConflict: "pk_id" });
+            if (error) throw error;
+          }
+
+          if (payInsertRows.length) {
+            const payload = payInsertRows.map(row => cleanPayPayload(row, false));
+            const { error } = await supabase.from(PAY_TABLE).insert(payload);
+            if (error) throw error;
+          }
+
+          if (deductionUpdateRows.length) {
+            const payload = deductionUpdateRows.map(row => cleanDeductionPayload(row, true));
+            const { error } = await supabase.from(DEDUCTION_TABLE).upsert(payload, { onConflict: "pk_id" });
+            if (error) throw error;
+          }
+
+          if (deductionInsertRows.length) {
+            const payload = deductionInsertRows.map(row => cleanDeductionPayload(row, false));
+            const { error } = await supabase.from(DEDUCTION_TABLE).insert(payload);
+            if (error) throw error;
+          }
+
+          await fetchData();
+          setStatus("저장 완료", "ok");
+        } catch (e) {
+          console.error(e);
+          setStatus("저장 실패: " + (e?.message || String(e)), "err");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      function exportCsv() {
+        const payRows = state.selectedOrder ? getSelectedPayRows() : getVisiblePayRows();
+        const deductionRows = state.selectedOrder ? getSelectedDeductionRows() : getVisibleDeductionRows();
+
+        if (!payRows.length && !deductionRows.length) {
+          alert("내보낼 데이터가 없습니다.");
+          return;
+        }
+
+        const lines = [];
+        lines.push(`"${state.selectedOrder || "전체"} · ${makeMonthLabel(state.year, state.month)}"`);
+
+        lines.push("");
+        lines.push('"[용차 원장]"');
+        lines.push([
+          "work_date","order_name","camp_code","wave","route_code","unit_price","driver_name","delivery_count","return_count","amount","settlement_date","tax_invoice_status","payment_status","note"
+        ].map(v => `"${v}"`).join(","));
+
+        for (const row of payRows) {
+          const amount = payAmount(row);
+          const values = [
+            formatDate(row.work_date),
+            normalizeText(row.order_name),
+            normalizeText(row.camp_code),
+            normalizeText(row.wave),
+            normalizeText(row.route_code),
+            toNumber(row.unit_price),
+            normalizeText(row.driver_name),
+            toNumber(row.delivery_count),
+            toNumber(row.return_count),
+            amount,
+            formatDate(row.settlement_date),
+            normalizeText(row.tax_invoice_status),
+            normalizeText(row.payment_status),
+            normalizeText(row.note)
+          ];
+          lines.push(values.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(","));
+        }
+
+        lines.push("");
+        lines.push('"[차감 내역]"');
+        lines.push([
+          "deduction_date","order_name","camp_code","driver_name","deduction_amount","deduction_status","note"
+        ].map(v => `"${v}"`).join(","));
+
+        for (const row of deductionRows) {
+          const values = [
+            formatDate(row.deduction_date),
+            normalizeText(row.order_name),
+            normalizeText(row.camp_code),
+            normalizeText(row.driver_name),
+            toNumber(row.deduction_amount),
+            normalizeText(row.deduction_status),
+            normalizeText(row.note)
+          ];
+          lines.push(values.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(","));
+        }
+
+        const csv = "\uFEFF" + lines.join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `dragon_car_pay_${state.year}_${String(state.month).padStart(2,"0")}${state.selectedOrder ? "_" + state.selectedOrder : ""}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function bindTableEvents() {
+        document.body.addEventListener("input", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const table = target.getAttribute("data-table");
+          const rowIdValue = target.getAttribute("data-row-id");
+          const key = target.getAttribute("data-key");
+          if (!table || !rowIdValue || !key) return;
+
+          if (table === "pay") {
+            const row = findPayRow(rowIdValue);
+            if (!row) return;
+            markRowDirty(row, key, target.value);
+          } else if (table === "deduction") {
+            const row = findDeductionRow(rowIdValue);
+            if (!row) return;
+            markRowDirty(row, key, target.value);
+          }
+
+          renderAll();
+        });
+
+        document.body.addEventListener("change", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const table = target.getAttribute("data-table");
+          const rowIdValue = target.getAttribute("data-row-id");
+          const key = target.getAttribute("data-key");
+          if (!table || !rowIdValue || !key) return;
+
+          if (table === "pay") {
+            const row = findPayRow(rowIdValue);
+            if (!row) return;
+            markRowDirty(row, key, target.value);
+          } else if (table === "deduction") {
+            const row = findDeductionRow(rowIdValue);
+            if (!row) return;
+            markRowDirty(row, key, target.value);
+          }
+
+          renderAll();
+        });
+
+        document.body.addEventListener("click", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const orderPick = target.closest("[data-order-pick]");
+          if (orderPick) {
+            state.selectedOrder = orderPick.getAttribute("data-order-pick") || "";
+            renderAll();
+            return;
+          }
+
+          const deleteBtn = target.closest("[data-delete-table]");
+          if (deleteBtn) {
+            deleteRow(
+              deleteBtn.getAttribute("data-delete-table"),
+              deleteBtn.getAttribute("data-delete-row")
+            );
+          }
+        });
+      }
+
+      function bindEvents() {
+        dom.yearSelect.addEventListener("change", async () => {
+          state.year = Number(dom.yearSelect.value);
+          await fetchData();
+        });
+
+        dom.monthSelect.addEventListener("change", async () => {
+          state.month = Number(dom.monthSelect.value);
+          await fetchData();
+        });
+
+        dom.orderSearchInput.addEventListener("input", renderAll);
+        dom.btnClearSearch.addEventListener("click", () => {
+          dom.orderSearchInput.value = "";
+          renderAll();
+        });
+
+        dom.btnReload.addEventListener("click", fetchData);
+        dom.btnSaveAll.addEventListener("click", saveAll);
+        dom.btnExportCsv.addEventListener("click", exportCsv);
+        dom.btnLogout.addEventListener("click", signOutAndMove);
+
+        dom.btnAddPayRow.addEventListener("click", addPayRow);
+        dom.btnAddDeductionRow.addEventListener("click", addDeductionRow);
+
+        dom.btnDeniedHome.addEventListener("click", () => location.replace(INDEX_PATH));
+        dom.btnDeniedLogout.addEventListener("click", signOutAndMove);
+
+        bindTableEvents();
+      }
+
+      buildYearMonthOptions();
+      bindEvents();
+
+      if (!(await requireAdmin())) return;
+      await fetchData();
+    })();
+  </script>
+</body>
+</html>

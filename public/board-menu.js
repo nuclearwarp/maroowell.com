@@ -231,7 +231,7 @@
       case "/maroowell_info.html":
         return "직원 / 정산 베이스 정보";
       case "/dragon_car_index.html":
-        return "용차 원장 관리";
+        return "용차 관리";
       case "/dragon_car_pay.html":
         return "월별 업체 / 기사 정산서";
       default:

@@ -11,9 +11,9 @@
   const PAGES = [
     { key: "index", label: "우편번호 검색기", path: "/index.html", adminOnly: false },
     { key: "route", label: "라우트 편집기", path: "/coupangRouteMap.html", adminOnly: false },
-    { key: "info", label: "마루웰 정보", path: "/maroowell_info.html", adminOnly: true },
-    { key: "dragon-index", label: "용차", path: "/dragon_car_index.html", adminOnly: true },
-    { key: "dragon-pay", label: "용차 정산", path: "/dragon_car_pay.html", adminOnly: true }
+    { key: "info", label: "마루웰 정보", path: "/maroowell_info", adminOnly: true },
+    { key: "dragon-index", label: "용차", path: "/dragon_car_index", adminOnly: true },
+    { key: "dragon-pay", label: "용차 정산", path: "/dragon_car_pay", adminOnly: true }
   ];
 
   function normalizePath(path) {

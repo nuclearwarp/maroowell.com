@@ -238,6 +238,7 @@
       line-height:1.05;
       font-weight:900;
       color:#fff;
+      word-break:break-word;
     }
 
     .summaryValue.blue{ color:#bfdbfe; }
@@ -796,6 +797,7 @@
 
       const ACCESS_TABLE = "user_access";
       const DATA_TABLE = "dragon_car";
+      const VENDORS_TABLE = "vendors";
 
       const $ = (sel) => document.querySelector(sel);
 
@@ -853,7 +855,8 @@
         allRows: [],
         monthRows: [],
         groups: [],
-        selectedGroupKey: ""
+        selectedGroupKey: "",
+        vendorNameById: new Map()
       };
 
       const authStorage = (() => {
@@ -918,17 +921,18 @@
       function formatDate(v) {
         const s = normalizeText(v);
         if (!s) return "";
+
         if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-        const m1 = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
-        if (m1) {
-          return `${m1[1]}-${String(Number(m1[2])).padStart(2, "0")}-${String(Number(m1[3])).padStart(2, "0")}`;
+        let m = s.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m) {
+          return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
         }
 
-        const m2 = s.match(/^(\d{2})[./-](\d{1,2})[./-](\d{1,2})$/);
-        if (m2) {
-          const year = toFullYear(m2[1]);
-          return `${year}-${String(Number(m2[2])).padStart(2, "0")}-${String(Number(m2[3])).padStart(2, "0")}`;
+        m = s.match(/^(\d{2})[./-](\d{1,2})[./-](\d{1,2})$/);
+        if (m) {
+          const year = toFullYear(m[1]);
+          return `${year}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
         }
 
         const d = new Date(s);
@@ -1018,6 +1022,50 @@
 
       function isPaid(row) {
         return normalizeBool(row.payment_confirm) === true;
+      }
+
+      function vendorDisplayNameById(vendorId) {
+        const key = normalizeText(vendorId);
+        return state.vendorNameById.get(key) || key || "미지정 업체";
+      }
+
+      async function fetchVendorNameMapByIds(rows) {
+        const idSet = new Set();
+
+        for (const row of rows || []) {
+          const id = normalizeText(row?.vendor_id);
+          if (id) idSet.add(id);
+        }
+
+        const ids = Array.from(idSet);
+        const out = new Map();
+
+        if (!ids.length) return out;
+
+        try {
+          const chunkSize = 200;
+
+          for (let i = 0; i < ids.length; i += chunkSize) {
+            const chunk = ids.slice(i, i + chunkSize);
+            const { data, error } = await supabase
+              .from(VENDORS_TABLE)
+              .select("id,name")
+              .in("id", chunk);
+
+            if (error) throw error;
+
+            for (const row of (data || [])) {
+              const id = normalizeText(row?.id);
+              const name = normalizeText(row?.name);
+              if (!id) continue;
+              out.set(id, name || id);
+            }
+          }
+        } catch (e) {
+          console.warn("vendors name lookup 실패:", e?.message || String(e));
+        }
+
+        return out;
       }
 
       function setStatus(text, tone) {
@@ -1117,10 +1165,12 @@
           if (error) throw error;
 
           state.allRows = Array.isArray(data) ? data : [];
+          state.vendorNameById = await fetchVendorNameMapByIds(state.allRows);
           rebuildView();
         } catch (e) {
           console.error(e);
           state.allRows = [];
+          state.vendorNameById = new Map();
           rebuildView();
           setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
         }
@@ -1136,26 +1186,33 @@
         const map = new Map();
 
         for (const row of rows) {
+          const vendorId = normalizeText(row.vendor_id);
+          const vendorName = vendorDisplayNameById(row.vendor_id);
+          const orderName = normalizeText(row.order_name) || "미지정 Order";
+          const driverName = normalizeText(row.delivery_driver) || "미지정 기사";
+
           let key = "";
           let name = "";
           let vendor = "";
           let target = "";
 
           if (state.mode === "vendor") {
-            vendor = normalizeText(row.vendor_id) || "미지정 업체";
-            target = normalizeText(row.order_name) || "미지정 Order";
-            key = `${vendor}||${target}`;
-            name = `${vendor}\n${target}`;
+            vendor = vendorName;
+            target = orderName;
+            key = `${vendorId || vendorName}||${orderName}`;
+            name = `${vendorName}\n${orderName}`;
           } else {
-            target = normalizeText(row.delivery_driver) || "미지정 기사";
-            key = target;
-            name = target;
+            vendor = vendorName;
+            target = driverName;
+            key = driverName;
+            name = driverName;
           }
 
           const searchBag = [
-            row.vendor_id,
-            row.order_name,
-            row.delivery_driver,
+            vendorName,
+            vendorId,
+            orderName,
+            driverName,
             row.camp,
             row.route,
             row.dragon_car_note
@@ -1197,13 +1254,9 @@
           const note = normalizeText(row.dragon_car_note);
           if (note) g.noteSet.add(note);
 
-          const v = normalizeText(row.vendor_id);
-          const o = normalizeText(row.order_name);
-          const d = normalizeText(row.delivery_driver);
-
-          if (v) g.vendorSet.add(v);
-          if (o) g.orderSet.add(o);
-          if (d) g.driverSet.add(d);
+          if (vendorName) g.vendorSet.add(vendorName);
+          if (orderName) g.orderSet.add(orderName);
+          if (driverName) g.driverSet.add(driverName);
         }
 
         state.groups = Array.from(map.values())
@@ -1304,7 +1357,7 @@
         dom.statementTableBody.innerHTML = sortedRows.map(row => `
           <tr>
             <td class="center">${escapeHtml(formatDate(row.order_date))}</td>
-            <td>${escapeHtml(normalizeText(row.vendor_id))}</td>
+            <td>${escapeHtml(vendorDisplayNameById(row.vendor_id))}</td>
             <td>${escapeHtml(normalizeText(row.order_name))}</td>
             <td class="center">${escapeHtml(normalizeText(row.camp))}</td>
             <td>${escapeHtml(normalizeText(row.route))}</td>
@@ -1346,8 +1399,14 @@
             cacheBust: true
           });
 
-          const safeVendor = (group.vendorText || "").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
-          const safeTarget = (state.mode === "vendor" ? group.orderText : group.driverText).replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_");
+          const safeVendor = (group.vendorText || "")
+            .replace(/[\\/:*?"<>|]/g, "_")
+            .replace(/\s+/g, "_");
+
+          const safeTarget = (state.mode === "vendor" ? group.orderText : group.driverText)
+            .replace(/[\\/:*?"<>|]/g, "_")
+            .replace(/\s+/g, "_");
+
           const safeName = `${normalizeMonth(state.month)}_${state.mode === "vendor" ? "업체" : "기사"}_${safeVendor}_${safeTarget}`;
 
           const a = document.createElement("a");

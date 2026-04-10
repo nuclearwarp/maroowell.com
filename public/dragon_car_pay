@@ -399,6 +399,7 @@
       overflow:auto;
       border:1px solid var(--paperLine);
       border-radius:12px;
+      background:#fff;
     }
 
     table.paperTable{
@@ -557,6 +558,41 @@
       gap:10px;
       justify-content:flex-end;
       flex-wrap:wrap;
+    }
+
+    .statementPage.capture-export{
+      overflow:visible !important;
+      width:940px !important;
+      max-width:none !important;
+      height:auto !important;
+      max-height:none !important;
+    }
+
+    .statementPage.capture-export .paperTableWrap{
+      overflow:visible !important;
+      max-height:none !important;
+      height:auto !important;
+    }
+
+    .statementPage.capture-export .paperTable{
+      min-width:0 !important;
+      width:100% !important;
+    }
+
+    .statementPage.capture-export .noteBox{
+      min-height:auto !important;
+    }
+
+    .capture-host{
+      position:fixed;
+      left:-100000px;
+      top:0;
+      z-index:-1;
+      background:#ffffff;
+      padding:24px;
+      width:auto;
+      height:auto;
+      overflow:visible;
     }
 
     @media (max-width:900px){
@@ -1362,13 +1398,37 @@
           return;
         }
 
+        let host = null;
+
         try {
           setStatus("PNG 생성 중...", "warn");
 
-          const dataUrl = await window.htmlToImage.toPng(dom.statementCapture, {
-            pixelRatio: 2,
+          const clone = dom.statementCapture.cloneNode(true);
+          clone.style.display = "block";
+          clone.classList.add("capture-export");
+
+          host = document.createElement("div");
+          host.className = "capture-host";
+          host.appendChild(clone);
+          document.body.appendChild(host);
+
+          await new Promise(resolve => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(resolve);
+            });
+          });
+
+          const width = Math.ceil(clone.scrollWidth);
+          const height = Math.ceil(clone.scrollHeight);
+
+          const dataUrl = await window.htmlToImage.toPng(clone, {
             backgroundColor: "#ffffff",
-            cacheBust: true
+            cacheBust: true,
+            pixelRatio: 2,
+            width,
+            height,
+            canvasWidth: width * 2,
+            canvasHeight: height * 2
           });
 
           const safeVendor = (group.vendorText || "")
@@ -1392,6 +1452,8 @@
         } catch (e) {
           console.error(e);
           setStatus("PNG 저장 실패: " + (e?.message || String(e)), "err");
+        } finally {
+          if (host) host.remove();
         }
       }
 
@@ -1402,7 +1464,7 @@
           await fetchRows();
         });
 
-        dom.monthInput.addEventListener("keydown", async (e) => {
+        dom.monthInput.addEventListener("keydown", (e) => {
           if (e.key !== "Enter") return;
           e.preventDefault();
           dom.btnReload.click();

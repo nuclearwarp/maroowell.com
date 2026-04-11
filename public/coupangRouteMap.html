@@ -2050,16 +2050,38 @@
     return location.origin;
   }
 
-  function generateShareLink(){
+  async function generateShareLink(){
     const camp = campInput.value.trim();
     const code = codeInput.value.trim();
-    if (!camp){ setStatus("캠프를 입력하세요.", "WARN"); return; }
-    const shareUrl = new URL("/share", getShareOrigin());
-    shareUrl.searchParams.set("camp", camp);
-    if (code) shareUrl.searchParams.set("code", code);
-    shareUrl.searchParams.set("v", kstYYYYMMDDHHMM());
-    const url = shareUrl.toString();
-    navigator.clipboard.writeText(url).then(()=>setStatus("공유 링크 복사 완료", "OK")).catch(()=>prompt("공유 링크", url));
+
+    if (!camp){
+      setStatus("캠프를 입력하세요.", "WARN");
+      return;
+    }
+
+    try{
+      setStatus("공유 링크 생성 중...", "OK");
+
+      const url = new URL(`${API_BASE}/share-link`);
+      url.searchParams.set("camp", camp);
+      if (code) url.searchParams.set("code", code);
+
+      const data = await apiGet(url.toString());
+      const shareUrl = String(data?.url || "").trim();
+
+      if (!shareUrl){
+        throw new Error("서명된 공유 링크를 받지 못했습니다.");
+      }
+
+      await navigator.clipboard.writeText(shareUrl);
+      setStatus("공유 링크 복사 완료", "OK");
+    }catch(e){
+      const msg = e?.message || "공유 링크 생성 실패";
+      setStatus(msg, "ERR");
+      try{
+        prompt("공유 링크 생성 실패. 아래 메시지 확인", msg);
+      }catch{}
+    }
   }
 
   let vendorCandidate=null;

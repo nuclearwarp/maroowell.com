@@ -14,6 +14,7 @@ window.MARUWELL_CONFIG = {
     dragon_car_index : "/dragon_car_index.html",
     maroowell_info : "/maroowell_info.html",
     dragon_car_pay : "/dragon_car_pay.html",
-    maroowell_payout : "/maroowell_payout"
+    maroowell_payout : "/maroowell_payout",
+    maroowell_route : "/maroowell_route"
   }
 };

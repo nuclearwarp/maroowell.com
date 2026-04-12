@@ -257,6 +257,27 @@
     .listWrap{
       min-height:0;
       overflow:auto;
+      cursor:grab;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+
+    .listWrap.dragging{
+      cursor:grabbing;
+    }
+
+    .previewWrap{
+      min-height:0;
+      overflow:auto;
+      padding:12px 16px 16px;
+      background:#0b1220;
+      cursor:grab;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+
+    .previewWrap.dragging{
+      cursor:grabbing;
     }
 
     .simpleTable{
@@ -353,13 +374,6 @@
       color:#f8fbff;
     }
 
-    .previewWrap{
-      min-height:0;
-      overflow:auto;
-      padding:12px 16px 16px;
-      background:#0b1220;
-    }
-
     .sheet{
       width:1100px;
       min-height:1520px;
@@ -368,6 +382,8 @@
       color:var(--sheetText);
       border:1px solid var(--sheetLine);
       box-shadow:0 18px 60px rgba(0,0,0,.18);
+      user-select:text;
+      -webkit-user-select:text;
     }
 
     .sheetHeader{
@@ -460,8 +476,6 @@
       font-size:12px;
       line-height:1.6;
     }
-
-    .hidden{display:none !important}
 
     .statusbar{
       display:flex;
@@ -592,7 +606,7 @@
             </div>
           </div>
 
-          <div class="cardBody listWrap">
+          <div class="cardBody listWrap draggable-scroll" id="unmatchedWrap">
             <table class="simpleTable">
               <thead>
                 <tr>
@@ -622,7 +636,7 @@
             </div>
           </div>
 
-          <div class="cardBody listWrap" style="padding-top:0;">
+          <div class="cardBody listWrap draggable-scroll" id="mainListWrap" style="padding-top:0;">
             <table class="simpleTable">
               <thead>
                 <tr>
@@ -661,7 +675,7 @@
             <button class="tabBtn" data-tab="old" type="button">구형 정산</button>
           </div>
 
-          <div class="previewWrap">
+          <div class="previewWrap draggable-scroll" id="previewWrap">
             <div id="captureTarget" class="sheet">
               <div class="sheetHeader">
                 <div id="sheetTitle" class="sheetTitle">마루웰 정산 Main</div>
@@ -888,7 +902,8 @@
         pillRows: $("#pillRows"),
         statusText: $("#statusText"),
 
-        tabButtons: Array.from(document.querySelectorAll(".tabBtn"))
+        tabButtons: Array.from(document.querySelectorAll(".tabBtn")),
+        draggableAreas: Array.from(document.querySelectorAll(".draggable-scroll"))
       };
 
       const state = {
@@ -1117,6 +1132,7 @@
         }
 
         return Array.from(map.values())
+          .filter((item) => item.deliveryCount > 0)
           .map((item) => ({
             ...item,
             campsText: Array.from(item.camps).join(", "),
@@ -1198,6 +1214,7 @@
         }
 
         state.driverAggs = Array.from(aggMap.values())
+          .filter((agg) => agg.deliveryCount > 0)
           .map((agg) => ({
             ...agg,
             finalAmount: agg.amountSum - agg.lossSum,
@@ -1222,13 +1239,13 @@
       }
 
       function renderStats() {
+        const unmatchedCount = state.idSummaries.filter((item) => !state.autoMatchedById[item.id]).length;
+
         dom.statRawRows.textContent = String(state.rawRows.length);
         dom.statLossRows.textContent = String(state.lossRows.length);
         dom.statIds.textContent = String(state.idSummaries.length);
         dom.statMasterRows.textContent = String(state.masterRows.length);
         dom.statAutoMatched.textContent = String(Object.keys(state.autoMatchedById).length);
-
-        const unmatchedCount = state.idSummaries.filter((item) => !state.autoMatchedById[item.id]).length;
         dom.statUnmatched.textContent = String(unmatchedCount);
 
         dom.pillRows.textContent = `데이터 ${state.rawRows.length + state.lossRows.length}`;
@@ -1246,7 +1263,8 @@
 
         dom.helperText.innerHTML = `
           <b>원본 파일:</b> ${escapeHtml(state.workbookName)}<br>
-          <b>자동 매칭 방식:</b> 원본 ID → @df 제거 → 기사정보 coupang_id 와 비교${duplicateText}
+          <b>자동 매칭 방식:</b> 원본 ID → @df 제거 → 기사정보 coupang_id 와 비교<br>
+          <b>출력 기준:</b> 배송건수 0건 ID/기사는 표시 제외${duplicateText}
         `;
       }
 
@@ -1269,7 +1287,7 @@
       }
 
       function renderUnmatched() {
-        const rows = state.idSummaries.filter((item) => !state.autoMatchedById[item.id]);
+        const rows = state.idSummaries.filter((item) => !state.autoMatchedById[item.id] && item.deliveryCount > 0);
 
         if (!rows.length) {
           dom.unmatchedBody.innerHTML = `
@@ -1316,7 +1334,8 @@
         }).join("");
 
         rows.forEach((item) => {
-          const el = dom.unmatchedBody.querySelector(`select[data-unmatched-id="${CSS.escape(item.id)}"]`);
+          const safeId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(item.id) : item.id;
+          const el = dom.unmatchedBody.querySelector(`select[data-unmatched-id="${safeId}"]`);
           if (el) el.value = String(state.aliasAssignments[item.id] || "");
         });
       }
@@ -1617,6 +1636,53 @@
         dom.selectMonth.value = `${yyyy}-${mm}`;
       }
 
+      function bindDragScroll(el) {
+        let isDown = false;
+        let startX = 0;
+        let startY = 0;
+        let scrollLeft = 0;
+        let scrollTop = 0;
+        let moved = false;
+
+        el.addEventListener("mousedown", (e) => {
+          const target = e.target;
+          if (target.closest("select, input, button, option, textarea, a, label")) return;
+
+          isDown = true;
+          moved = false;
+          startX = e.pageX;
+          startY = e.pageY;
+          scrollLeft = el.scrollLeft;
+          scrollTop = el.scrollTop;
+          el.classList.add("dragging");
+        });
+
+        window.addEventListener("mousemove", (e) => {
+          if (!isDown) return;
+          const dx = e.pageX - startX;
+          const dy = e.pageY - startY;
+
+          if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+
+          el.scrollLeft = scrollLeft - dx;
+          el.scrollTop = scrollTop - dy;
+
+          if (moved) e.preventDefault();
+        }, { passive: false });
+
+        window.addEventListener("mouseup", () => {
+          isDown = false;
+          el.classList.remove("dragging");
+        });
+
+        el.addEventListener("mouseleave", () => {
+          isDown = false;
+          el.classList.remove("dragging");
+        });
+
+        el.addEventListener("dragstart", (e) => e.preventDefault());
+      }
+
       function bindEvents() {
         dom.fileWorkbook.addEventListener("change", async () => {
           const file = dom.fileWorkbook.files && dom.fileWorkbook.files[0];
@@ -1654,6 +1720,8 @@
           if (!tr) return;
           setCurrentDriver(tr.getAttribute("data-driver-pk") || "");
         });
+
+        dom.draggableAreas.forEach(bindDragScroll);
       }
 
       async function init() {

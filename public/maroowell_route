@@ -179,7 +179,7 @@
     }
 
     .sheetInner{
-      min-width:2200px;
+      min-width:1700px;
     }
 
     table{
@@ -477,8 +477,1002 @@
         <table>
           <colgroup>
             <col style="width:80px" />
-            <col style="width:110px" />
-            <col style="width:110px" />
+            <col style="width:120px" />
+            <col style="width:140px" />
             <col style="width:90px" />
             <col style="width:130px" />
-            <col style="width:
+            <col style="width:320px" />
+            <col style="width:130px" />
+            <col style="width:130px" />
+            <col style="width:130px" />
+            <col style="width:130px" />
+            <col style="width:130px" />
+            <col style="width:110px" />
+            <col style="width:72px" />
+          </colgroup>
+
+          <thead>
+            <tr>
+              <th>순번</th>
+              <th>camp</th>
+              <th>route</th>
+              <th>wave</th>
+              <th>contract_date</th>
+              <th>address</th>
+              <th>24y_orgin_price</th>
+              <th>25y_orgin_price</th>
+              <th>26y_orgin_price</th>
+              <th>fixed_price</th>
+              <th>backup_price</th>
+              <th>route_tip</th>
+              <th>삭제</th>
+            </tr>
+            <tr class="filterRow">
+              <th></th>
+              <th><input class="filterInput" data-filter="camp" placeholder="camp / !일산2" /></th>
+              <th><input class="filterInput" data-filter="route" placeholder="route" /></th>
+              <th><input class="filterInput" data-filter="wave" placeholder="주간 / 야간 / !주간" /></th>
+              <th><input class="filterInput" data-filter="contract_date" placeholder="2026-01 / !2025" /></th>
+              <th><input class="filterInput" data-filter="address" placeholder="주소 / !익산" /></th>
+              <th><input class="filterInput" data-filter="24y_orgin_price" placeholder="24년 원가" /></th>
+              <th><input class="filterInput" data-filter="25y_orgin_price" placeholder="25년 원가" /></th>
+              <th><input class="filterInput" data-filter="26y_orgin_price" placeholder="26년 원가" /></th>
+              <th><input class="filterInput" data-filter="fixed_price" placeholder="고정 단가" /></th>
+              <th><input class="filterInput" data-filter="backup_price" placeholder="백업 단가" /></th>
+              <th><input class="filterInput" data-filter="route_tip" placeholder="라우트 팁" /></th>
+              <th></th>
+            </tr>
+          </thead>
+
+          <tbody id="sheetBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <span id="pillState" class="pill ok">READY</span>
+      <span id="pillRows" class="pill">행 0</span>
+      <span id="pillDirty" class="pill warn">변경 0</span>
+      <span id="statusText" class="statusText">라우트 단가 테이블 준비 완료</span>
+    </div>
+  </div>
+
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">이 페이지는 마루웰 소속 사용자만 접근할 수 있습니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="btnDeniedHome" class="btn" type="button">홈으로</button>
+        <button id="btnDeniedLogout" class="btn danger" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (async function () {
+      "use strict";
+
+      const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+      const INDEX_PATH = PATHS?.index || "/index.html";
+      const LOGIN_PATH = PATHS?.login || "/login.html";
+
+      const ACCESS_TABLE = "user_access";
+      const DATA_TABLE = "maroowell_route";
+
+      const DATA_COLUMNS = [
+        "camp",
+        "route",
+        "wave",
+        "contract_date",
+        "address",
+        "24y_orgin_price",
+        "25y_orgin_price",
+        "26y_orgin_price",
+        "fixed_price",
+        "backup_price",
+        "route_tip"
+      ];
+
+      const NUMERIC_COLUMNS = new Set([
+        "24y_orgin_price",
+        "25y_orgin_price",
+        "26y_orgin_price",
+        "fixed_price",
+        "backup_price",
+        "route_tip"
+      ]);
+
+      const COLUMN_CONFIG = [
+        { key: "seq", label: "순번", type: "readonly", className: "right code center" },
+        { key: "camp", label: "camp", className: "center" },
+        { key: "route", label: "route", className: "code center" },
+        { key: "wave", label: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center" },
+        { key: "contract_date", label: "contract_date", type: "date", className: "center code" },
+        { key: "address", label: "address" },
+        { key: "24y_orgin_price", label: "24y_orgin_price", className: "right code" },
+        { key: "25y_orgin_price", label: "25y_orgin_price", className: "right code" },
+        { key: "26y_orgin_price", label: "26y_orgin_price", className: "right code" },
+        { key: "fixed_price", label: "fixed_price", className: "right code" },
+        { key: "backup_price", label: "backup_price", className: "right code" },
+        { key: "route_tip", label: "route_tip", className: "right code" }
+      ];
+
+      const $ = (sel) => document.querySelector(sel);
+
+      const dom = {
+        sheetBody: $("#sheetBody"),
+        btnReload: $("#btnReload"),
+        btnAddRow: $("#btnAddRow"),
+        btnSaveAll: $("#btnSaveAll"),
+        btnExportCsv: $("#btnExportCsv"),
+        btnClearFilters: $("#btnClearFilters"),
+        btnLogout: $("#btnLogout"),
+        toggleOnlyChanged: $("#toggleOnlyChanged"),
+        pillState: $("#pillState"),
+        pillRows: $("#pillRows"),
+        pillDirty: $("#pillDirty"),
+        statusText: $("#statusText"),
+        filterInputs: Array.from(document.querySelectorAll(".filterInput")),
+        accessDenied: $("#accessDenied"),
+        accessDeniedText: $("#accessDeniedText"),
+        accessDeniedEmail: $("#accessDeniedEmail"),
+        btnDeniedHome: $("#btnDeniedHome"),
+        btnDeniedLogout: $("#btnDeniedLogout")
+      };
+
+      const state = {
+        rows: [],
+        filteredRows: [],
+        loading: false,
+        viewerEmail: "",
+        viewerUserId: "",
+        session: null,
+        accessRow: null,
+        deletedIds: new Set(),
+        tempSeq: 0
+      };
+
+      function getSupabaseProjectRef(url) {
+        try {
+          const host = new URL(url).hostname || "";
+          return host.split(".")[0] || "";
+        } catch {
+          return "";
+        }
+      }
+
+      function createSupabaseSessionBridge(url) {
+        const projectRef = getSupabaseProjectRef(url);
+        const prefixes = projectRef ? [
+          "sb-" + projectRef + "-auth-token",
+          "sb-" + projectRef + "-auth-token-code-verifier"
+        ] : [];
+        const origin = window.location.origin;
+        const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
+        const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
+        const pending = new Map();
+        let channel = null;
+        let started = false;
+
+        function matchesKey(key) {
+          return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+        }
+
+        function readEntries(storage) {
+          const target = storage || window.sessionStorage;
+          const rows = [];
+          try {
+            for (let i = 0; i < target.length; i++) {
+              const key = target.key(i);
+              if (!matchesKey(key)) continue;
+              rows.push({ key, value: target.getItem(key) });
+            }
+          } catch {}
+          return rows;
+        }
+
+        function hasSession(storage) {
+          return readEntries(storage).some(row =>
+            row.key.includes("-auth-token") &&
+            !row.key.includes("code-verifier") &&
+            !!row.value
+          );
+        }
+
+        function writeEntries(entries, storage) {
+          const target = storage || window.sessionStorage;
+          try {
+            for (const row of entries || []) {
+              if (!row || !matchesKey(row.key)) continue;
+              if (row.value == null) target.removeItem(row.key);
+              else target.setItem(row.key, row.value);
+            }
+          } catch {}
+        }
+
+        function clearSession(storage) {
+          const target = storage || window.sessionStorage;
+          try {
+            const keys = [];
+            for (let i = 0; i < target.length; i++) {
+              const key = target.key(i);
+              if (matchesKey(key)) keys.push(key);
+            }
+            keys.forEach(key => target.removeItem(key));
+          } catch {}
+        }
+
+        function resolvePending(requestId, entries) {
+          const item = pending.get(requestId);
+          if (!item) return;
+          pending.delete(requestId);
+          clearTimeout(item.timer);
+          if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
+          item.resolve(hasSession(window.sessionStorage));
+        }
+
+        function handleSyncState(syncState) {
+          if (syncState === "SIGNED_OUT") {
+            clearSession(window.sessionStorage);
+            return;
+          }
+          if (syncState === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
+            requestSessionCopy(1200).catch(() => {});
+          }
+        }
+
+        function onWindowMessage(event) {
+          if (event.origin !== origin) return;
+          const msg = event.data || {};
+          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+          if (msg.type === "MW_SESSION_REQUEST") {
+            if (!hasSession(window.sessionStorage)) return;
+            try {
+              event.source?.postMessage({
+                type: "MW_SESSION_RESPONSE",
+                projectRef,
+                requestId: msg.requestId,
+                entries: readEntries(window.sessionStorage),
+                fromTabId: tabId
+              }, origin);
+            } catch {}
+            return;
+          }
+
+          if (msg.type === "MW_SESSION_RESPONSE") {
+            resolvePending(msg.requestId, msg.entries);
+            return;
+          }
+
+          if (msg.type === "MW_AUTH_SYNC") {
+            handleSyncState(msg.state);
+          }
+        }
+
+        function onChannelMessage(event) {
+          const msg = event.data || {};
+          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+          if (msg.type === "MW_SESSION_REQUEST") {
+            if (!hasSession(window.sessionStorage)) return;
+            try {
+              channel?.postMessage({
+                type: "MW_SESSION_RESPONSE",
+                projectRef,
+                requestId: msg.requestId,
+                entries: readEntries(window.sessionStorage),
+                fromTabId: tabId
+              });
+            } catch {}
+            return;
+          }
+
+          if (msg.type === "MW_SESSION_RESPONSE") {
+            resolvePending(msg.requestId, msg.entries);
+            return;
+          }
+
+          if (msg.type === "MW_AUTH_SYNC") {
+            handleSyncState(msg.state);
+          }
+        }
+
+        function start() {
+          if (started || !projectRef) return;
+          started = true;
+          window.addEventListener("message", onWindowMessage);
+          try {
+            if ("BroadcastChannel" in window) {
+              channel = new BroadcastChannel(channelName);
+              channel.addEventListener("message", onChannelMessage);
+            }
+          } catch {}
+        }
+
+        function requestSessionCopy(timeoutMs) {
+          start();
+          if (!projectRef) return Promise.resolve(false);
+          if (hasSession(window.sessionStorage)) return Promise.resolve(true);
+
+          const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+          const payload = {
+            type: "MW_SESSION_REQUEST",
+            projectRef,
+            requestId,
+            fromTabId: tabId
+          };
+
+          return new Promise(resolve => {
+            const timer = window.setTimeout(() => {
+              pending.delete(requestId);
+              resolve(hasSession(window.sessionStorage));
+            }, Math.max(300, Number(timeoutMs) || 900));
+
+            pending.set(requestId, { resolve, timer });
+
+            try { channel?.postMessage(payload); } catch {}
+            try {
+              if (window.opener && window.opener !== window) {
+                window.opener.postMessage(payload, origin);
+              }
+            } catch {}
+          });
+        }
+
+        function broadcastAuthState(syncState) {
+          start();
+          const payload = {
+            type: "MW_AUTH_SYNC",
+            projectRef,
+            state: syncState,
+            fromTabId: tabId
+          };
+          try { channel?.postMessage(payload); } catch {}
+          try {
+            if (window.opener && window.opener !== window) {
+              window.opener.postMessage(payload, origin);
+            }
+          } catch {}
+        }
+
+        return {
+          start,
+          requestSessionCopy,
+          broadcastAuthState
+        };
+      }
+
+      const authStorage = (() => {
+        try { return window.sessionStorage; } catch {}
+        return null;
+      })();
+
+      const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
+      sessionBridge.start();
+      await sessionBridge.requestSessionCopy(1200);
+
+      const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+              persistSession: !!authStorage,
+              storage: authStorage || undefined,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          })
+        : null;
+
+      function safeNextPath(p) {
+        if (!p) return INDEX_PATH;
+        if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
+        if (!p.startsWith("/")) return INDEX_PATH;
+        return p;
+      }
+
+      function normalizeText(v) {
+        return String(v ?? "").replace(/\s+/g, " ").trim();
+      }
+
+      function normalizeLower(v) {
+        return normalizeText(v).toLowerCase();
+      }
+
+      function escapeHtml(v) {
+        return String(v ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function setStatus(text, tone) {
+        dom.statusText.textContent = text || "";
+        dom.pillState.className = "pill";
+        if (tone === "err") dom.pillState.classList.add("err");
+        else if (tone === "warn") dom.pillState.classList.add("warn");
+        else dom.pillState.classList.add("ok");
+
+        dom.pillState.textContent =
+          tone === "err" ? "ERROR" :
+          tone === "warn" ? "WAIT" : "READY";
+      }
+
+      function setLoading(on, text) {
+        state.loading = !!on;
+        dom.btnReload.disabled = !!on;
+        dom.btnAddRow.disabled = !!on;
+        dom.btnSaveAll.disabled = !!on;
+        dom.btnExportCsv.disabled = !!on;
+        dom.btnClearFilters.disabled = !!on;
+        if (on) setStatus(text || "처리 중...", "warn");
+      }
+
+      function formatDateForInput(v) {
+        const s = normalizeText(v);
+        if (!s) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+        if (/^\d{4}\.\d{1,2}\.\d{1,2}$/.test(s)) {
+          const [y, m, d] = s.split(".");
+          return `${y.padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+        return s;
+      }
+
+      function formatNumericForInput(v) {
+        if (v == null || v === "") return "";
+        const n = Number(v);
+        if (!Number.isFinite(n)) return String(v);
+        return Number.isInteger(n) ? String(n) : String(n);
+      }
+
+      function normalizeLoadedRow(row) {
+        const out = { ...(row || {}) };
+        for (const key of DATA_COLUMNS) {
+          out[key] = out[key] == null ? "" : String(out[key]);
+        }
+        out.contract_date = formatDateForInput(out.contract_date);
+        for (const key of NUMERIC_COLUMNS) {
+          out[key] = formatNumericForInput(out[key]);
+        }
+        out.__dirty = false;
+        out.__isNew = false;
+        out.__dirtyFields = {};
+        return out;
+      }
+
+      function rowId(row) {
+        return row.seq ?? row.__temp_id;
+      }
+
+      function blankRow() {
+        const row = {
+          __temp_id: "new_" + (++state.tempSeq),
+          __isNew: true,
+          __dirty: true,
+          __dirtyFields: {}
+        };
+        for (const key of DATA_COLUMNS) row[key] = "";
+        row.wave = "";
+        return row;
+      }
+
+      function hasAnyValue(row) {
+        return DATA_COLUMNS.some(key => normalizeText(row[key]));
+      }
+
+      function parseNumericOrNull(value, key) {
+        const s = String(value ?? "").replace(/,/g, "").replace(/원/g, "").trim();
+        if (!s) return null;
+        const n = Number(s);
+        if (!Number.isFinite(n)) {
+          throw new Error(`${key} 값이 숫자가 아닙니다: ${value}`);
+        }
+        return n;
+      }
+
+      function valueForSave(key, value) {
+        const v = normalizeText(value);
+        if (!v) return null;
+        if (key === "contract_date") return v;
+        if (NUMERIC_COLUMNS.has(key)) return parseNumericOrNull(v, key);
+        return v;
+      }
+
+      function updatePills() {
+        const visibleCount = state.filteredRows.length;
+        const dirtyCount = state.rows.filter(row => row.__dirty).length + state.deletedIds.size;
+        dom.pillRows.textContent = "행 " + visibleCount;
+        dom.pillDirty.textContent = "변경 " + dirtyCount;
+      }
+
+      function showAccessDenied(email, detail) {
+        dom.accessDenied.classList.add("show");
+        dom.accessDeniedText.textContent = detail || "이 페이지는 마루웰 소속 사용자만 접근할 수 있습니다.";
+        dom.accessDeniedEmail.textContent = email
+          ? "현재 로그인: " + email
+          : "현재 로그인 이메일을 확인할 수 없습니다.";
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function signOutAndMove() {
+        try {
+          await supabase?.auth?.signOut();
+          sessionBridge.broadcastAuthState("SIGNED_OUT");
+        } catch {}
+        location.replace(LOGIN_PATH);
+      }
+
+      async function requireAuthAndAccess() {
+        if (!supabase || !supabase.auth) {
+          alert("Supabase 설정을 확인하세요.");
+          return false;
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+
+          if (!session) {
+            const next = safeNextPath(location.pathname + location.search + location.hash);
+            location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+            return false;
+          }
+
+          state.session = session;
+          state.viewerEmail = normalizeText(session.user?.email || "");
+          state.viewerUserId = normalizeText(session.user?.id || "");
+
+          supabase.auth.onAuthStateChange((evt, s) => {
+            if (evt === "SIGNED_OUT" || !s) {
+              sessionBridge.broadcastAuthState("SIGNED_OUT");
+              const next = safeNextPath(location.pathname + location.search + location.hash);
+              location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+              return;
+            }
+            if (evt === "SIGNED_IN" || evt === "TOKEN_REFRESHED" || evt === "USER_UPDATED") {
+              sessionBridge.broadcastAuthState("SESSION_UPDATED");
+            }
+          });
+
+          if (!state.viewerUserId) {
+            showAccessDenied(state.viewerEmail, "로그인 사용자 ID를 확인할 수 없습니다.");
+            return false;
+          }
+
+          const { data: accessRow, error: accessError } = await supabase
+            .from(ACCESS_TABLE)
+            .select("user_id, email, is_maroowell, is_admin")
+            .eq("user_id", state.viewerUserId)
+            .maybeSingle();
+
+          if (accessError) {
+            console.error(accessError);
+            showAccessDenied(state.viewerEmail, "권한 테이블 조회 실패: " + accessError.message);
+            return false;
+          }
+
+          state.accessRow = accessRow || null;
+
+          if (!accessRow?.is_maroowell) {
+            showAccessDenied(state.viewerEmail, "이 페이지는 마루웰 소속 사용자만 접근할 수 있습니다.");
+            return false;
+          }
+
+          document.documentElement.style.visibility = "visible";
+          return true;
+        } catch (e) {
+          console.error(e);
+          const next = safeNextPath(location.pathname + location.search + location.hash);
+          location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+          return false;
+        }
+      }
+
+      function parseFilterExpression(raw) {
+        const text = normalizeText(raw);
+        if (!text) return { include: [], exclude: [] };
+
+        const tokens = text.split(/\s+/).filter(Boolean);
+        const include = [];
+        const exclude = [];
+
+        for (const token of tokens) {
+          if (token.startsWith("!") || token.startsWith("-")) {
+            const x = normalizeLower(token.slice(1));
+            if (x) exclude.push(x);
+          } else {
+            include.push(normalizeLower(token));
+          }
+        }
+
+        return { include, exclude };
+      }
+
+      function matchFilter(value, expr) {
+        const actual = normalizeLower(value);
+        const parsed = parseFilterExpression(expr);
+
+        for (const token of parsed.include) {
+          if (!actual.includes(token)) return false;
+        }
+        for (const token of parsed.exclude) {
+          if (actual.includes(token)) return false;
+        }
+        return true;
+      }
+
+      function getRowValue(row, key) {
+        if (key === "contract_date") return formatDateForInput(row.contract_date);
+        return normalizeText(row[key]);
+      }
+
+      function findRowById(id) {
+        return state.rows.find(row => String(rowId(row)) === String(id)) || null;
+      }
+
+      function applyFilters() {
+        state.filteredRows = state.rows.filter(row => {
+          if (row.seq && state.deletedIds.has(row.seq)) return false;
+          if (dom.toggleOnlyChanged.checked && !row.__dirty) return false;
+
+          for (const input of dom.filterInputs) {
+            const key = input.dataset.filter;
+            const expr = input.value || "";
+            if (!normalizeText(expr)) continue;
+            if (!matchFilter(getRowValue(row, key), expr)) return false;
+          }
+
+          return true;
+        });
+
+        renderTable();
+        updatePills();
+
+        if (!state.rows.length) {
+          setStatus("데이터가 없습니다.", "warn");
+        } else if (state.filteredRows.length !== state.rows.length) {
+          setStatus(`필터 결과 ${state.filteredRows.length}건`, "ok");
+        } else {
+          setStatus(`전체 ${state.rows.length}건 로드 완료`, "ok");
+        }
+      }
+
+      function buildDataCell(row, col) {
+        const rid = rowId(row);
+        const value = getRowValue(row, col.key);
+        const classes = [];
+        if (row.__dirtyFields?.[col.key]) classes.push("dirty-cell");
+
+        if (col.type === "readonly") {
+          const displayValue = row.seq ?? "NEW";
+          return `
+            <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
+              <div class="cellView ${col.className || ""}">${escapeHtml(displayValue)}</div>
+            </td>
+          `;
+        }
+
+        if (col.type === "select") {
+          const options = (col.options || []).map(opt => {
+            const selected = String(opt) === String(value) ? "selected" : "";
+            const label = opt || "-";
+            return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(label)}</option>`;
+          }).join("");
+
+          return `
+            <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
+              <select
+                class="cellSelect ${col.className || ""}"
+                data-row-id="${escapeHtml(rid)}"
+                data-key="${escapeHtml(col.key)}"
+              >${options}</select>
+            </td>
+          `;
+        }
+
+        const inputType = col.type === "date" ? "date" : "text";
+
+        return `
+          <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
+            <input
+              class="cellInput ${col.className || ""}"
+              type="${inputType}"
+              value="${escapeHtml(value)}"
+              data-row-id="${escapeHtml(rid)}"
+              data-key="${escapeHtml(col.key)}"
+              autocomplete="off"
+            />
+          </td>
+        `;
+      }
+
+      function renderTable() {
+        if (!state.filteredRows.length) {
+          dom.sheetBody.innerHTML = `
+            <tr class="emptyDataRow">
+              <td colspan="13">조회 결과가 없습니다.</td>
+            </tr>
+          `;
+          return;
+        }
+
+        dom.sheetBody.innerHTML = state.filteredRows.map(row => {
+          const rid = rowId(row);
+          const cells = COLUMN_CONFIG.map(col => buildDataCell(row, col)).join("");
+
+          return `
+            <tr data-row="${escapeHtml(rid)}">
+              ${cells}
+              <td class="${row.__dirty ? "dirty-cell" : ""}">
+                <div class="cellView center">
+                  <button class="rowActionBtn delete" type="button" data-delete-row="${escapeHtml(rid)}">✕</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      function updateRowDom(row) {
+        const rid = rowId(row);
+        const tr = dom.sheetBody.querySelector(`tr[data-row="${CSS.escape(String(rid))}"]`);
+        if (!tr) return;
+
+        for (const col of COLUMN_CONFIG) {
+          const td = tr.querySelector(`td[data-col="${col.key}"]`);
+          if (!td) continue;
+          td.classList.toggle("dirty-cell", !!row.__dirtyFields?.[col.key]);
+        }
+
+        const deleteTd = tr.lastElementChild;
+        if (deleteTd) deleteTd.classList.toggle("dirty-cell", !!row.__dirty);
+        updatePills();
+      }
+
+      function markRowDirty(row, key, value) {
+        if (!row) return;
+        row[key] = value;
+        row.__dirty = true;
+        row.__dirtyFields = row.__dirtyFields || {};
+        row.__dirtyFields[key] = true;
+      }
+
+      function addRow() {
+        state.rows.push(blankRow());
+        applyFilters();
+        setStatus("새 행이 추가되었습니다.", "ok");
+      }
+
+      function deleteRow(rowIdValue) {
+        const row = findRowById(rowIdValue);
+        if (!row) return;
+
+        const label = [
+          normalizeText(row.camp),
+          normalizeText(row.route),
+          normalizeText(row.wave)
+        ].filter(Boolean).join(" / ") || String(rowIdValue);
+
+        const ok = confirm(`삭제 대상으로 표시할까요?\n저장해야 실제 반영됩니다.\n\n대상: ${label}`);
+        if (!ok) return;
+
+        if (row.__isNew) {
+          state.rows = state.rows.filter(r => String(rowId(r)) !== String(rowIdValue));
+        } else if (row.seq) {
+          state.deletedIds.add(row.seq);
+          row.__dirty = true;
+        }
+
+        applyFilters();
+        setStatus("삭제 대상으로 표시했습니다. 전체 저장 시 반영됩니다.", "warn");
+      }
+
+      function cleanPayload(row, includeSeq) {
+        const obj = {};
+        if (includeSeq && row.seq != null) obj.seq = row.seq;
+        for (const key of DATA_COLUMNS) {
+          obj[key] = valueForSave(key, row[key]);
+        }
+        return obj;
+      }
+
+      async function fetchRows() {
+        try {
+          setLoading(true, "데이터 불러오는 중...");
+          state.deletedIds.clear();
+
+          const { data, error } = await supabase
+            .from(DATA_TABLE)
+            .select("*")
+            .order("seq", { ascending: true });
+
+          if (error) throw error;
+
+          state.rows = Array.isArray(data) ? data.map(normalizeLoadedRow) : [];
+          applyFilters();
+        } catch (e) {
+          console.error(e);
+          state.rows = [];
+          state.filteredRows = [];
+          renderTable();
+          updatePills();
+          setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      async function saveAll() {
+        try {
+          setLoading(true, "저장 중...");
+
+          const deleteIds = Array.from(state.deletedIds).filter(Boolean);
+          const dirtyRows = state.rows.filter(row => row.__dirty && !(row.seq && state.deletedIds.has(row.seq)));
+          const updateRows = dirtyRows.filter(row => !row.__isNew && row.seq != null);
+          const newRows = dirtyRows.filter(row => row.__isNew && hasAnyValue(row));
+
+          if (!deleteIds.length && !updateRows.length && !newRows.length) {
+            setStatus("저장할 변경사항이 없습니다.", "warn");
+            return;
+          }
+
+          if (deleteIds.length) {
+            const { error } = await supabase
+              .from(DATA_TABLE)
+              .delete()
+              .in("seq", deleteIds);
+            if (error) throw error;
+          }
+
+          if (updateRows.length) {
+            const payload = updateRows.map(row => cleanPayload(row, true));
+            const { error } = await supabase
+              .from(DATA_TABLE)
+              .upsert(payload, { onConflict: "seq" });
+            if (error) throw error;
+          }
+
+          if (newRows.length) {
+            const payload = newRows.map(row => cleanPayload(row, false));
+            const { error } = await supabase
+              .from(DATA_TABLE)
+              .insert(payload);
+            if (error) throw error;
+          }
+
+          await fetchRows();
+          setStatus("저장 완료", "ok");
+        } catch (e) {
+          console.error(e);
+          setStatus("저장 실패: " + (e?.message || String(e)), "err");
+        } finally {
+          setLoading(false);
+        }
+      }
+
+      function clearFilters() {
+        dom.filterInputs.forEach(el => { el.value = ""; });
+        dom.toggleOnlyChanged.checked = false;
+        applyFilters();
+      }
+
+      function exportCsv() {
+        const rows = state.filteredRows.filter(row => !(row.seq && state.deletedIds.has(row.seq)));
+        if (!rows.length) {
+          alert("내보낼 데이터가 없습니다.");
+          return;
+        }
+
+        const headers = ["seq", ...DATA_COLUMNS];
+        const lines = [
+          headers.join(","),
+          ...rows.map(row => {
+            return headers.map(key => {
+              const raw = key === "seq" ? (row.seq ?? "") : getRowValue(row, key);
+              const escaped = String(raw ?? "").replaceAll('"', '""');
+              return `"${escaped}"`;
+            }).join(",");
+          })
+        ];
+
+        const csv = "\uFEFF" + lines.join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        const now = new Date();
+        const stamp = [
+          now.getFullYear(),
+          String(now.getMonth() + 1).padStart(2, "0"),
+          String(now.getDate()).padStart(2, "0"),
+          "_",
+          String(now.getHours()).padStart(2, "0"),
+          String(now.getMinutes()).padStart(2, "0")
+        ].join("");
+
+        a.href = url;
+        a.download = `maroowell_route_${stamp}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      function bindTableEvents() {
+        dom.sheetBody.addEventListener("input", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const rowIdValue = target.getAttribute("data-row-id");
+          const key = target.getAttribute("data-key");
+          if (!rowIdValue || !key) return;
+
+          const row = findRowById(rowIdValue);
+          if (!row) return;
+
+          markRowDirty(row, key, target.value);
+          updateRowDom(row);
+        });
+
+        dom.sheetBody.addEventListener("change", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const rowIdValue = target.getAttribute("data-row-id");
+          const key = target.getAttribute("data-key");
+          if (!rowIdValue || !key) return;
+
+          const row = findRowById(rowIdValue);
+          if (!row) return;
+
+          markRowDirty(row, key, target.value);
+          updateRowDom(row);
+        });
+
+        dom.sheetBody.addEventListener("click", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLElement)) return;
+
+          const deleteId = target.getAttribute("data-delete-row");
+          if (deleteId) deleteRow(deleteId);
+        });
+      }
+
+      function bindEvents() {
+        dom.btnReload.addEventListener("click", fetchRows);
+        dom.btnAddRow.addEventListener("click", addRow);
+        dom.btnSaveAll.addEventListener("click", saveAll);
+        dom.btnExportCsv.addEventListener("click", exportCsv);
+        dom.btnClearFilters.addEventListener("click", clearFilters);
+        dom.btnLogout.addEventListener("click", signOutAndMove);
+
+        dom.toggleOnlyChanged.addEventListener("change", applyFilters);
+
+        dom.filterInputs.forEach(el => {
+          el.addEventListener("input", applyFilters);
+        });
+
+        dom.btnDeniedHome.addEventListener("click", () => {
+          location.replace(INDEX_PATH);
+        });
+
+        dom.btnDeniedLogout.addEventListener("click", signOutAndMove);
+
+        bindTableEvents();
+      }
+
+      bindEvents();
+
+      if (!(await requireAuthAndAccess())) return;
+      await fetchRows();
+    })();
+  </script>
+
+  <script>
+    window.MW_BOARD_MENU_MODE = "admin";
+  </script>
+  <script src="/board-menu.js"></script>
+</body>
+</html>

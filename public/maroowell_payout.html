@@ -787,6 +787,29 @@
               </div>
 
               <div class="sheetSection">
+                <div class="sheetSectionTitle" id="payoutBreakdownTitle">정산 구성</div>
+                <table class="sheetTable">
+                  <colgroup>
+                    <col style="width:42%">
+                    <col style="width:18%">
+                    <col style="width:40%">
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>항목</th>
+                      <th>값</th>
+                      <th>비고</th>
+                    </tr>
+                  </thead>
+                  <tbody id="payoutRowsBody">
+                    <tr>
+                      <td colspan="3">선택된 기사가 없습니다.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="sheetSection">
                 <div class="sheetSectionTitle">구분별 집계</div>
                 <table class="sheetTable">
                   <thead>
@@ -897,8 +920,7 @@
               </div>
 
               <div class="sheetNote" id="sheetNote">
-                현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 구분별 집계까지 반영된 상태입니다.
-                다음 단계에서 신형/구형 정산의 실제 엑셀 수식을 1:1로 이식하면 됩니다.
+                현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 신형/구형 정산 렌더링까지 반영된 상태입니다.
               </div>
             </div>
           </div>
@@ -958,6 +980,8 @@
         baseDragonComm: $("#baseDragonComm"),
         baseInsurance: $("#baseInsurance"),
 
+        payoutBreakdownTitle: $("#payoutBreakdownTitle"),
+        payoutRowsBody: $("#payoutRowsBody"),
         typeSummaryBody: $("#typeSummaryBody"),
         matchIdsBody: $("#matchIdsBody"),
         detailBody: $("#detailBody"),
@@ -992,7 +1016,9 @@
         autoMatchedById: {},
         aliasAssignments: {},
 
-        driverAggs: [],
+        realAggs: [],
+        pseudoAggs: [],
+        displayAggs: [],
         currentDriverPk: ""
       };
 
@@ -1014,7 +1040,7 @@
 
       function toNumber(v) {
         if (v == null || v === "") return 0;
-        const s = String(v).replace(/,/g, "").trim();
+        const s = String(v).replace(/,/g, "").replace(/원/g, "").trim();
         const n = Number(s);
         return Number.isFinite(n) ? n : 0;
       }
@@ -1035,9 +1061,9 @@
       function setBusy(on) {
         state.busy = !!on;
         dom.fileWorkbook.disabled = !!on;
-        dom.selectDriver.disabled = !!on || !state.driverAggs.length;
+        dom.selectDriver.disabled = !!on || !state.displayAggs.length;
         dom.btnRefreshMaster.disabled = !!on;
-        dom.btnSavePng.disabled = !!on || !state.driverAggs.length;
+        dom.btnSavePng.disabled = !!on || !state.displayAggs.length;
       }
 
       function setStatus(text, tone = "warn") {
@@ -1121,6 +1147,40 @@
           qty: ["개수"],
           amount: ["차감금액"]
         };
+      }
+
+      function parseFixedAmount(v) {
+        return toNumber(v);
+      }
+
+      function parsePercent(v) {
+        const s = String(v ?? "").trim();
+        if (!s) return 0;
+        if (!s.includes("%")) return 0;
+        return toNumber(s.replace("%", ""));
+      }
+
+      function calcDragonDeduction(value, gross) {
+        const percent = parsePercent(value);
+        if (percent > 0) {
+          return Math.round(gross * (percent / 100));
+        }
+        return parseFixedAmount(value);
+      }
+
+      function calcInsuranceDeduction(flag, gross) {
+        const s = normalizeText(flag).toUpperCase();
+        if (!["O", "1", "Y", "YES", "TRUE"].includes(s)) return 0;
+
+        const supply = gross / 1.1;
+        const base = supply * 0.654;
+        return Math.floor((base * 0.008) / 10) * 10;
+      }
+
+      function calcVatSplit(gross) {
+        const supply = Math.round(gross / 1.1);
+        const vat = gross - supply;
+        return { supply, vat };
       }
 
       async function loadMasterRows(force = false) {
@@ -1244,6 +1304,55 @@
         return String(state.aliasAssignments[id] || state.autoMatchedById[id] || "");
       }
 
+      function buildBaseAgg(master, pkId) {
+        return {
+          pk_id: String(pkId),
+          master,
+          isPseudo: false,
+          label: master?.person_name || "-",
+          repId: master?.coupang_id || "-",
+          campCode: master?.camp_code || "-",
+          wave: master?.wave || "-",
+          matchIds: new Set(),
+          rawRows: [],
+          lossRows: [],
+          deliveryCount: 0,
+          returnCount: 0,
+          amountSum: 0,
+          lossSum: 0
+        };
+      }
+
+      function buildPseudoAgg(item) {
+        const rawRows = state.rawRows.filter((row) => normalizeId(row[state.rawCols.id]) === item.id);
+        const lossRows = state.lossRows.filter((row) => normalizeId(row[state.lossCols.id]) === item.id);
+
+        return {
+          pk_id: `id:${item.id}`,
+          master: null,
+          isPseudo: true,
+          label: item.displayId || item.id,
+          repId: item.displayId || item.id,
+          campCode: item.campsText || "-",
+          wave: item.wavesText || "-",
+          matchIds: new Set([item.id]),
+          rawRows,
+          lossRows,
+          deliveryCount: item.deliveryCount,
+          returnCount: item.returnCount,
+          amountSum: item.amountSum,
+          lossSum: item.lossSum
+        };
+      }
+
+      function finalizeAgg(agg) {
+        return {
+          ...agg,
+          finalAmount: agg.amountSum - agg.lossSum,
+          matchIdsArr: Array.from(agg.matchIds).sort((a, b) => a.localeCompare(b, "ko"))
+        };
+      }
+
       function recomputeDriverAggs() {
         const aggMap = new Map();
 
@@ -1252,18 +1361,7 @@
           if (!aggMap.has(key)) {
             const master = state.masterByPk.get(key);
             if (!master) return null;
-
-            aggMap.set(key, {
-              pk_id: key,
-              master,
-              matchIds: new Set(),
-              rawRows: [],
-              lossRows: [],
-              deliveryCount: 0,
-              returnCount: 0,
-              amountSum: 0,
-              lossSum: 0
-            });
+            aggMap.set(key, buildBaseAgg(master, key));
           }
           return aggMap.get(key);
         };
@@ -1271,6 +1369,7 @@
         for (const item of state.idSummaries) {
           const pk = resolveDriverPkForId(item.id);
           if (!pk) continue;
+
           const agg = ensureAgg(pk);
           if (!agg) continue;
           agg.matchIds.add(item.id);
@@ -1302,28 +1401,33 @@
           agg.lossSum += toNumber(row[state.lossCols.amount]);
         }
 
-        state.driverAggs = Array.from(aggMap.values())
+        state.realAggs = Array.from(aggMap.values())
           .filter((agg) => agg.deliveryCount > 0)
-          .map((agg) => ({
-            ...agg,
-            finalAmount: agg.amountSum - agg.lossSum,
-            matchIdsArr: Array.from(agg.matchIds).sort((a, b) => a.localeCompare(b, "ko"))
-          }))
+          .map(finalizeAgg)
           .sort((a, b) => {
-            const ac = normalizeText(a.master.camp_code);
-            const bc = normalizeText(b.master.camp_code);
+            const ac = normalizeText(a.campCode);
+            const bc = normalizeText(b.campCode);
             if (ac !== bc) return ac.localeCompare(bc, "ko");
 
-            const aw = normalizeText(a.master.wave);
-            const bw = normalizeText(b.master.wave);
+            const aw = normalizeText(a.wave);
+            const bw = normalizeText(b.wave);
             if (aw !== bw) return aw.localeCompare(bw, "ko");
 
-            return normalizeText(a.master.person_name).localeCompare(normalizeText(b.master.person_name), "ko");
+            return normalizeText(a.label).localeCompare(normalizeText(b.label), "ko");
           });
 
-        const currentExists = state.driverAggs.some((agg) => String(agg.pk_id) === String(state.currentDriverPk));
+        const pseudoList = state.idSummaries
+          .filter((item) => !state.autoMatchedById[item.id] && !state.aliasAssignments[item.id])
+          .map(buildPseudoAgg)
+          .map(finalizeAgg)
+          .sort((a, b) => normalizeText(a.label).localeCompare(normalizeText(b.label), "ko"));
+
+        state.pseudoAggs = pseudoList;
+        state.displayAggs = [...state.realAggs, ...state.pseudoAggs];
+
+        const currentExists = state.displayAggs.some((agg) => String(agg.pk_id) === String(state.currentDriverPk));
         if (!currentExists) {
-          state.currentDriverPk = state.driverAggs[0]?.pk_id || "";
+          state.currentDriverPk = state.displayAggs[0]?.pk_id || "";
         }
       }
 
@@ -1348,6 +1452,15 @@
         }
 
         return Array.from(map.values()).sort((a, b) => a.type.localeCompare(b.type, "ko"));
+      }
+
+      function buildTypeSummaryMap(rawRows) {
+        const rows = buildTypeSummaryRows(rawRows);
+        const map = {};
+        for (const row of rows) {
+          map[row.type] = row;
+        }
+        return map;
       }
 
       function renderStats() {
@@ -1375,12 +1488,12 @@
         dom.helperText.innerHTML = `
           <b>원본 파일:</b> ${escapeHtml(state.workbookName)}<br>
           <b>자동 매칭 방식:</b> 원본 ID → @df 제거 → 기사정보 coupang_id 와 비교<br>
-          <b>출력 기준:</b> 배송건수 0건 ID/기사는 표시 제외${duplicateText}
+          <b>미매칭 ID 표시:</b> 메인 계정으로 잡히지 않는 경우 아이디 자체로 기사 선택에 표시${duplicateText}
         `;
       }
 
       function renderDriverSelect() {
-        if (!state.driverAggs.length) {
+        if (!state.displayAggs.length) {
           dom.selectDriver.innerHTML = `<option value="">기사 없음</option>`;
           dom.selectDriver.disabled = true;
           return;
@@ -1389,11 +1502,17 @@
         dom.selectDriver.disabled = state.busy;
         dom.selectDriver.innerHTML = `
           <option value="">기사 선택</option>
-          ${state.driverAggs.map((agg) => `
-            <option value="${escapeHtml(agg.pk_id)}" ${String(agg.pk_id) === String(state.currentDriverPk) ? "selected" : ""}>
-              ${escapeHtml(agg.master.person_name || "-")} / ${escapeHtml(agg.master.camp_code || "-")} / ${escapeHtml(agg.master.wave || "-")}
-            </option>
-          `).join("")}
+          ${state.displayAggs.map((agg) => {
+            const label = agg.isPseudo
+              ? escapeHtml(agg.label)
+              : `${escapeHtml(agg.label)} / ${escapeHtml(agg.campCode)} / ${escapeHtml(agg.wave)}`;
+
+            return `
+              <option value="${escapeHtml(agg.pk_id)}" ${String(agg.pk_id) === String(state.currentDriverPk) ? "selected" : ""}>
+                ${label}
+              </option>
+            `;
+          }).join("")}
         `;
       }
 
@@ -1452,7 +1571,7 @@
       }
 
       function renderMainList() {
-        if (!state.driverAggs.length) {
+        if (!state.displayAggs.length) {
           dom.mainListBody.innerHTML = `
             <tr>
               <td colspan="10" style="color:#9fb0cf;">원본 업로드 후 정산 Main 리스트가 생성됩니다.</td>
@@ -1461,12 +1580,12 @@
           return;
         }
 
-        dom.mainListBody.innerHTML = state.driverAggs.map((agg) => `
+        dom.mainListBody.innerHTML = state.displayAggs.map((agg) => `
           <tr class="clickableRow ${String(agg.pk_id) === String(state.currentDriverPk) ? "selected" : ""}" data-driver-pk="${escapeHtml(agg.pk_id)}">
-            <td>${escapeHtml(agg.master.person_name || "-")}</td>
-            <td>${escapeHtml(agg.master.camp_code || "-")}</td>
-            <td>${escapeHtml(agg.master.wave || "-")}</td>
-            <td>${escapeHtml(agg.master.coupang_id || "-")}</td>
+            <td>${escapeHtml(agg.label || "-")}</td>
+            <td>${escapeHtml(agg.campCode || "-")}</td>
+            <td>${escapeHtml(agg.wave || "-")}</td>
+            <td>${escapeHtml(agg.repId || "-")}</td>
             <td class="center">${escapeHtml(String(agg.matchIdsArr.length))}</td>
             <td class="right">${fmt(agg.deliveryCount)}</td>
             <td class="right">${fmt(agg.returnCount)}</td>
@@ -1478,7 +1597,73 @@
       }
 
       function getCurrentAgg() {
-        return state.driverAggs.find((agg) => String(agg.pk_id) === String(state.currentDriverPk)) || null;
+        return state.displayAggs.find((agg) => String(agg.pk_id) === String(state.currentDriverPk)) || null;
+      }
+
+      function buildSettlementModels(agg) {
+        const master = agg.master || {};
+        const gross = agg.amountSum;
+        const loss = agg.lossSum;
+        const deliveryCount = agg.deliveryCount;
+        const returnCount = agg.returnCount;
+        const { supply, vat } = calcVatSplit(gross);
+
+        const fixedCommission = parseFixedAmount(master.fixed_commission_amount);
+        const fixedUnit = parseFixedAmount(master.fixed_unit_price);
+        const dragonDeduction = calcDragonDeduction(master.dragon_car_commission, gross);
+        const insuranceDeduction = calcInsuranceDeduction(master.employment_accident_insurance, gross);
+
+        const typeMap = buildTypeSummaryMap(agg.rawRows);
+        const deliveryAmt =
+          (typeMap["배송"]?.amountSum || 0) +
+          (typeMap["배송(전월소급)"]?.amountSum || 0);
+
+        const returnAmt =
+          (typeMap["반품"]?.amountSum || 0) +
+          (typeMap["반품(전월소급)"]?.amountSum || 0);
+
+        const manualAmt = typeMap["수기반영"]?.amountSum || 0;
+        const uncontractedAmt = typeMap["미계약 라우트"]?.amountSum || 0;
+        const freshbackAmt =
+          (typeMap["프레시백 회수 인센티브"]?.amountSum || 0) +
+          (typeMap["프레쉬백 회수 인센티브"]?.amountSum || 0);
+
+        const basePayout = gross - loss;
+        const newPayout = gross - loss - fixedCommission - dragonDeduction - insuranceDeduction;
+        const oldPayout = gross - loss - dragonDeduction - insuranceDeduction;
+
+        return {
+          common: { gross, loss, supply, vat, deliveryCount, returnCount },
+          main: [
+            ["총금액", gross, "정산Raw 총금액 합계"],
+            ["분실차감", -loss, "분실파손List 차감금액 합계"],
+            ["예상지급액", basePayout, "총금액 - 분실차감"]
+          ],
+          newer: [
+            ["배송 정산금", deliveryAmt, "구분=배송 합계"],
+            ["반품 정산금", returnAmt, "반품 포함 구분 합계"],
+            ["수기반영", manualAmt, "구분=수기반영"],
+            ["미계약 라우트", uncontractedAmt, "구분=미계약 라우트"],
+            ["프레시백 인센", freshbackAmt, "프레시백 관련 구분 합계"],
+            ["공급가액", supply, "총금액 기준 부가세 제외"],
+            ["부가세", vat, "총금액 - 공급가액"],
+            ["고정 수수료", -fixedCommission, "기사정보 fixed_commission_amount"],
+            ["용차 수수료", -dragonDeduction, "기사정보 dragon_car_commission"],
+            ["고용산재", -insuranceDeduction, "기사정보 employment_accident_insurance"],
+            ["분실차감", -loss, "분실파손List 차감금액"],
+            ["신형 예상지급", newPayout, "총금액 - 각종 공제"]
+          ],
+          older: [
+            ["총 배송건수", deliveryCount, "정산Raw 배송건수 합계"],
+            ["총 반품건수", returnCount, "정산Raw 반품건수 합계"],
+            ["총금액", gross, "정산Raw 총금액 합계"],
+            ["고정 단가", fixedUnit, "기사정보 fixed_unit_price"],
+            ["용차 수수료", -dragonDeduction, "기사정보 dragon_car_commission"],
+            ["고용산재", -insuranceDeduction, "기사정보 employment_accident_insurance"],
+            ["분실차감", -loss, "분실파손List 차감금액"],
+            ["구형 예상지급", oldPayout, "총금액 - 주요 공제"]
+          ]
+        };
       }
 
       function renderPreviewHeader() {
@@ -1490,14 +1675,14 @@
         if (state.currentTab === "old") dom.sheetTitle.textContent = "마루웰 구형 정산";
 
         dom.metaMonth.textContent = dom.selectMonth.value || "-";
-        dom.metaDriver.textContent = master?.person_name || "-";
-        dom.metaId.textContent = master?.coupang_id || "-";
-        dom.metaCampWave.textContent = `${master?.camp_code || "-"} / ${master?.wave || "-"}`;
+        dom.metaDriver.textContent = agg?.label || "-";
+        dom.metaId.textContent = agg?.repId || "-";
+        dom.metaCampWave.textContent = `${agg?.campCode || "-"} / ${agg?.wave || "-"}`;
 
-        const payroll = [master?.payroll_bank_name, master?.payroll_account_number].filter(Boolean).join(" / ");
+        const payroll = master ? [master.payroll_bank_name, master.payroll_account_number].filter(Boolean).join(" / ") : "";
         dom.metaPayroll.textContent = payroll || "-";
 
-        const business = [master?.business_name, master?.business_registration_number].filter(Boolean).join(" / ");
+        const business = master ? [master.business_name, master.business_registration_number].filter(Boolean).join(" / ") : "";
         dom.metaBusiness.textContent = business || "-";
 
         dom.baseFixedComm.textContent = master?.fixed_commission_amount || "-";
@@ -1516,12 +1701,14 @@
           dom.sumLoss.textContent = "0";
           dom.sumFinal.textContent = "0";
 
+          dom.payoutBreakdownTitle.textContent = "정산 구성";
+          dom.payoutRowsBody.innerHTML = `<tr><td colspan="3">선택된 기사가 없습니다.</td></tr>`;
           dom.typeSummaryBody.innerHTML = `<tr><td colspan="4">선택된 기사가 없습니다.</td></tr>`;
           dom.matchIdsBody.innerHTML = `<tr><td>선택된 기사가 없습니다.</td></tr>`;
           dom.detailBody.innerHTML = `<tr><td colspan="9">선택된 기사가 없습니다.</td></tr>`;
           dom.lossDetailBody.innerHTML = `<tr><td colspan="8">선택된 기사가 없습니다.</td></tr>`;
 
-          dom.sheetNote.textContent = "현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 구분별 집계까지 반영된 상태입니다. 다음 단계에서 신형/구형 정산의 실제 엑셀 수식을 1:1로 이식하면 됩니다.";
+          dom.sheetNote.textContent = "현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 신형/구형 정산 렌더링까지 반영된 상태입니다.";
           return;
         }
 
@@ -1530,6 +1717,30 @@
         dom.sumAmount.textContent = fmt(agg.amountSum);
         dom.sumLoss.textContent = fmt(agg.lossSum);
         dom.sumFinal.textContent = fmt(agg.finalAmount);
+
+        const models = buildSettlementModels(agg);
+        let payoutRows = models.main;
+        let payoutTitle = "정산 구성";
+
+        if (state.currentTab === "main") {
+          payoutRows = models.main;
+          payoutTitle = "정산 구성";
+        } else if (state.currentTab === "new") {
+          payoutRows = models.newer;
+          payoutTitle = "신형 정산 계산";
+        } else {
+          payoutRows = models.older;
+          payoutTitle = "구형 정산 계산";
+        }
+
+        dom.payoutBreakdownTitle.textContent = payoutTitle;
+        dom.payoutRowsBody.innerHTML = payoutRows.map((row) => `
+          <tr>
+            <td class="left">${escapeHtml(row[0])}</td>
+            <td class="num">${fmt(row[1])}</td>
+            <td class="left">${escapeHtml(row[2])}</td>
+          </tr>
+        `).join("");
 
         const typeRows = buildTypeSummaryRows(agg.rawRows);
         dom.typeSummaryBody.innerHTML = typeRows.length
@@ -1579,11 +1790,11 @@
           : `<tr><td colspan="8">표시할 분실파손 데이터가 없습니다.</td></tr>`;
 
         if (state.currentTab === "main") {
-          dom.sheetNote.textContent = "정산 Main 기준 집계 화면입니다. 기사정보 자동 매칭과 현재 페이지에서 지정한 미매칭 ID 임시 귀속, 그리고 구분별 집계가 반영됩니다.";
+          dom.sheetNote.textContent = "정산 Main 기준 화면입니다. 메인 계정으로 인식되지 않는 ID도 love1750 같은 형태로 아이디 자체가 기사 선택과 미리보기에 표시됩니다.";
         } else if (state.currentTab === "new") {
-          dom.sheetNote.textContent = "신형 정산 탭입니다. 현재는 Main 집계 + 구분별 집계까지 반영되어 있으며, 다음 단계에서 신형 정산 수식을 연결하면 됩니다.";
+          dom.sheetNote.textContent = "신형 정산 탭입니다. 현재는 기사정보 기준 공제(고정 수수료, 용차 수수료, 고용산재)와 구분별 집계를 반영합니다.";
         } else {
-          dom.sheetNote.textContent = "구형 정산 탭입니다. 현재는 Main 집계 + 구분별 집계까지 반영되어 있으며, 다음 단계에서 구형 정산 수식을 연결하면 됩니다.";
+          dom.sheetNote.textContent = "구형 정산 탭입니다. 현재는 총금액 기준의 주요 공제와 기본 집계를 반영합니다.";
         }
       }
 
@@ -1595,7 +1806,7 @@
         renderMainList();
         renderPreviewHeader();
         renderPreviewBody();
-        dom.btnSavePng.disabled = !state.driverAggs.length || state.busy;
+        dom.btnSavePng.disabled = !state.displayAggs.length || state.busy;
       }
 
       async function parseWorkbook(file) {
@@ -1707,7 +1918,7 @@
         recomputeDriverAggs();
         renderAll();
 
-        const assignedAgg = state.driverAggs.find((agg) => String(agg.pk_id) === value);
+        const assignedAgg = state.displayAggs.find((agg) => String(agg.pk_id) === value);
         if (assignedAgg) {
           setCurrentDriver(assignedAgg.pk_id);
         }
@@ -1734,7 +1945,7 @@
           const a = document.createElement("a");
           const title = dom.sheetTitle.textContent || "정산서";
           const month = dom.selectMonth.value || "month";
-          const driver = agg.master.person_name || "driver";
+          const driver = agg.label || "driver";
 
           a.href = canvas.toDataURL("image/png");
           a.download = `${month}_${driver}_${title}.png`

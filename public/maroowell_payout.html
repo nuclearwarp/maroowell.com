@@ -31,13 +31,15 @@
 
     html,body{
       margin:0;
-      height:100%;
+      min-height:100%;
       font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
       background:#0a0f1a;
       color:var(--txt);
     }
 
-    body{overflow:hidden}
+    body{
+      overflow:auto;
+    }
 
     html, body,
     input, select, button, textarea {
@@ -45,9 +47,9 @@
     }
 
     .app{
-      height:100%;
-      display:grid;
-      grid-template-rows:56px 64px 1fr 42px;
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
     }
 
     .topbar{
@@ -55,8 +57,10 @@
       align-items:center;
       gap:10px;
       padding:0 14px;
+      min-height:56px;
       border-bottom:1px solid var(--line);
       background:linear-gradient(180deg,var(--bg),var(--bg2));
+      flex:0 0 auto;
     }
 
     .topbar a{
@@ -119,6 +123,7 @@
       background:var(--panel);
       border-bottom:1px solid var(--line);
       overflow:auto hidden;
+      flex:0 0 auto;
     }
 
     .toolbarGroup{
@@ -174,21 +179,20 @@
     }
 
     .main{
-      min-height:0;
       display:grid;
       grid-template-columns:420px 1fr;
       gap:12px;
       padding:12px;
-      overflow:hidden;
-      background:#0a0f1a;
+      align-items:start;
+      flex:1 0 auto;
     }
 
     .sidebar,
     .content{
-      min-height:0;
       display:flex;
       flex-direction:column;
       gap:12px;
+      align-self:start;
     }
 
     .card{
@@ -197,7 +201,6 @@
       border-radius:18px;
       box-shadow:0 14px 40px rgba(0,0,0,.24);
       overflow:hidden;
-      min-height:0;
     }
 
     .cardHead{
@@ -265,8 +268,7 @@
     }
 
     .listWrap{
-      min-height:0;
-      height:100%;
+      max-height:320px;
       overflow-x:auto;
       overflow-y:scroll;
       cursor:grab;
@@ -280,10 +282,8 @@
     }
 
     .previewWrap{
-      min-height:0;
-      height:100%;
       overflow-x:auto;
-      overflow-y:scroll;
+      overflow-y:visible;
       padding:12px 16px 16px;
       background:#0b1220;
       cursor:grab;
@@ -524,9 +524,14 @@
       align-items:center;
       gap:10px;
       padding:0 12px;
+      min-height:42px;
       border-top:1px solid var(--line);
       background:#0a1320;
       font-size:12px;
+      flex:0 0 auto;
+      position:sticky;
+      bottom:0;
+      z-index:20;
     }
 
     .statusText{
@@ -640,7 +645,7 @@
           </div>
         </section>
 
-        <section class="card" style="min-height:0;flex:1;">
+        <section class="card">
           <div class="cardHead">
             <div>
               <div class="cardTitle">미매칭 / 서브 계정 후보</div>
@@ -670,7 +675,7 @@
       </div>
 
       <div class="content">
-        <section class="card" style="height:280px;min-height:280px;">
+        <section class="card">
           <div class="cardHead">
             <div>
               <div class="cardTitle">정산 Main 리스트</div>
@@ -703,7 +708,7 @@
           </div>
         </section>
 
-        <section class="card" style="min-height:0;flex:1;">
+        <section class="card">
           <div class="cardHead">
             <div>
               <div class="cardTitle">정산서 미리보기</div>
@@ -776,6 +781,25 @@
                       <td id="sumAmount" class="num">0</td>
                       <td id="sumLoss" class="num">0</td>
                       <td id="sumFinal" class="num">0</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="sheetSection">
+                <div class="sheetSectionTitle">구분별 집계</div>
+                <table class="sheetTable">
+                  <thead>
+                    <tr>
+                      <th>구분</th>
+                      <th>배송건수</th>
+                      <th>반품건수</th>
+                      <th>총금액</th>
+                    </tr>
+                  </thead>
+                  <tbody id="typeSummaryBody">
+                    <tr>
+                      <td colspan="4">선택된 기사가 없습니다.</td>
                     </tr>
                   </tbody>
                 </table>
@@ -873,7 +897,7 @@
               </div>
 
               <div class="sheetNote" id="sheetNote">
-                현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속까지 반영된 상태입니다.
+                현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 구분별 집계까지 반영된 상태입니다.
                 다음 단계에서 신형/구형 정산의 실제 엑셀 수식을 1:1로 이식하면 됩니다.
               </div>
             </div>
@@ -934,6 +958,7 @@
         baseDragonComm: $("#baseDragonComm"),
         baseInsurance: $("#baseInsurance"),
 
+        typeSummaryBody: $("#typeSummaryBody"),
         matchIdsBody: $("#matchIdsBody"),
         detailBody: $("#detailBody"),
         lossDetailBody: $("#lossDetailBody"),
@@ -1302,6 +1327,29 @@
         }
       }
 
+      function buildTypeSummaryRows(rawRows) {
+        const map = new Map();
+
+        for (const row of rawRows) {
+          const type = normalizeText(row[state.rawCols.type]) || "기타";
+          if (!map.has(type)) {
+            map.set(type, {
+              type,
+              deliveryCount: 0,
+              returnCount: 0,
+              amountSum: 0
+            });
+          }
+
+          const item = map.get(type);
+          item.deliveryCount += toNumber(row[state.rawCols.delivery]);
+          item.returnCount += toNumber(row[state.rawCols.return]);
+          item.amountSum += toNumber(row[state.rawCols.amount]);
+        }
+
+        return Array.from(map.values()).sort((a, b) => a.type.localeCompare(b.type, "ko"));
+      }
+
       function renderStats() {
         const unmatchedCount = state.idSummaries.filter((item) => !state.autoMatchedById[item.id]).length;
 
@@ -1468,11 +1516,12 @@
           dom.sumLoss.textContent = "0";
           dom.sumFinal.textContent = "0";
 
+          dom.typeSummaryBody.innerHTML = `<tr><td colspan="4">선택된 기사가 없습니다.</td></tr>`;
           dom.matchIdsBody.innerHTML = `<tr><td>선택된 기사가 없습니다.</td></tr>`;
           dom.detailBody.innerHTML = `<tr><td colspan="9">선택된 기사가 없습니다.</td></tr>`;
           dom.lossDetailBody.innerHTML = `<tr><td colspan="8">선택된 기사가 없습니다.</td></tr>`;
 
-          dom.sheetNote.textContent = "현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속까지 반영된 상태입니다. 다음 단계에서 신형/구형 정산의 실제 엑셀 수식을 1:1로 이식하면 됩니다.";
+          dom.sheetNote.textContent = "현재 단계는 기사정보 연동 + 자동 매칭 + 미매칭 ID 임시 귀속 + 구분별 집계까지 반영된 상태입니다. 다음 단계에서 신형/구형 정산의 실제 엑셀 수식을 1:1로 이식하면 됩니다.";
           return;
         }
 
@@ -1481,6 +1530,18 @@
         dom.sumAmount.textContent = fmt(agg.amountSum);
         dom.sumLoss.textContent = fmt(agg.lossSum);
         dom.sumFinal.textContent = fmt(agg.finalAmount);
+
+        const typeRows = buildTypeSummaryRows(agg.rawRows);
+        dom.typeSummaryBody.innerHTML = typeRows.length
+          ? typeRows.map((item) => `
+              <tr>
+                <td class="left">${escapeHtml(item.type)}</td>
+                <td class="num">${fmt(item.deliveryCount)}</td>
+                <td class="num">${fmt(item.returnCount)}</td>
+                <td class="num">${fmt(item.amountSum)}</td>
+              </tr>
+            `).join("")
+          : `<tr><td colspan="4">구분별 집계 데이터가 없습니다.</td></tr>`;
 
         dom.matchIdsBody.innerHTML = agg.matchIdsArr.length
           ? agg.matchIdsArr.map((id) => `<tr><td class="left">${escapeHtml(id)}</td></tr>`).join("")
@@ -1518,11 +1579,11 @@
           : `<tr><td colspan="8">표시할 분실파손 데이터가 없습니다.</td></tr>`;
 
         if (state.currentTab === "main") {
-          dom.sheetNote.textContent = "정산 Main 기준 집계 화면입니다. 기사정보 자동 매칭과 현재 페이지에서 지정한 미매칭 ID 임시 귀속이 반영됩니다.";
+          dom.sheetNote.textContent = "정산 Main 기준 집계 화면입니다. 기사정보 자동 매칭과 현재 페이지에서 지정한 미매칭 ID 임시 귀속, 그리고 구분별 집계가 반영됩니다.";
         } else if (state.currentTab === "new") {
-          dom.sheetNote.textContent = "신형 정산 탭입니다. 현재는 기사별 집계와 기사정보 기준값만 반영되어 있으며, 다음 단계에서 신형 정산 수식을 1:1로 연결하면 됩니다.";
+          dom.sheetNote.textContent = "신형 정산 탭입니다. 현재는 Main 집계 + 구분별 집계까지 반영되어 있으며, 다음 단계에서 신형 정산 수식을 연결하면 됩니다.";
         } else {
-          dom.sheetNote.textContent = "구형 정산 탭입니다. 현재는 기사별 집계와 기사정보 기준값만 반영되어 있으며, 다음 단계에서 구형 정산 수식을 1:1로 연결하면 됩니다.";
+          dom.sheetNote.textContent = "구형 정산 탭입니다. 현재는 Main 집계 + 구분별 집계까지 반영되어 있으며, 다음 단계에서 구형 정산 수식을 연결하면 됩니다.";
         }
       }
 

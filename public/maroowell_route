@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>마루웰 라우트 단가</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+
+  <style>
+    html{visibility:hidden}
+
+    :root{
+      --bg:#0b1220;
+      --bg2:#08111f;
+      --panel:#0c1524;
+      --line:rgba(255,255,255,.08);
+      --line2:#d4dbe5;
+      --txt:#e6eefc;
+      --muted:#93a4c7;
+
+      --btn:#162744;
+      --btn2:#1a2f55;
+      --ok:#1a5a3a;
+      --warn:#6a4b13;
+      --danger:#6b1b1b;
+
+      --sheetBg:#eef3f8;
+      --headBg:#dde7f3;
+      --filterBg:#edf3fb;
+      --cellBg:#ffffff;
+      --cellAlt:#f8fbff;
+      --cellTxt:#0f172a;
+
+      --dirtyBg:#e0eeff;
+      --dirtyBorder:#60a5fa;
+
+      --topbarH:56px;
+      --toolbarH:58px;
+      --statusH:44px;
+    }
+
+    *{box-sizing:border-box}
+
+    html,body{
+      margin:0;
+      height:100%;
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+      background:#0a0f1a;
+      color:var(--txt);
+    }
+
+    body{overflow:hidden}
+
+    .app{
+      height:100%;
+      display:grid;
+      grid-template-rows:var(--topbarH) var(--toolbarH) 1fr var(--statusH);
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,var(--bg),var(--bg2));
+    }
+
+    .topbar a{
+      display:flex;
+      align-items:center;
+      text-decoration:none;
+      color:inherit;
+    }
+
+    .topbar img{
+      width:24px;
+      height:24px;
+      display:block;
+    }
+
+    .titleBox{
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+    }
+
+    .titleBox b{
+      font-size:18px;
+      line-height:1.1;
+      letter-spacing:.1px;
+    }
+
+    .titleBox small{
+      margin-top:3px;
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+    }
+
+    .spacer{flex:1}
+
+    .btn{
+      height:40px;
+      padding:0 14px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:var(--btn);
+      color:var(--txt);
+      cursor:pointer;
+      font-weight:900;
+      font-size:13px;
+      white-space:nowrap;
+    }
+
+    .btn:hover{background:var(--btn2)}
+    .btn.ok{background:rgba(26,90,58,.35);border-color:rgba(0,255,140,.18)}
+    .btn.warn{background:rgba(106,75,19,.35);border-color:rgba(255,180,0,.18)}
+    .btn.danger{background:rgba(107,27,27,.35);border-color:rgba(255,60,60,.22);color:#ffccd3}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:9px 12px;
+      background:var(--panel);
+      border-bottom:1px solid var(--line);
+      overflow:auto hidden;
+    }
+
+    .group{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding-right:12px;
+      border-right:1px solid var(--line);
+      flex:0 0 auto;
+    }
+
+    .group:last-child{
+      border-right:none;
+      padding-right:0;
+    }
+
+    .toggle{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      font-size:12px;
+      font-weight:900;
+      color:#d9e5ff;
+      white-space:nowrap;
+    }
+
+    .toggle input{
+      margin:0;
+      width:16px;
+      height:16px;
+      accent-color:#2563eb;
+      cursor:pointer;
+    }
+
+    .helper{
+      color:#c7d3ea;
+      font-size:12px;
+      white-space:nowrap;
+    }
+
+    .sheetWrap{
+      overflow:auto;
+      background:var(--sheetBg);
+    }
+
+    .sheetInner{
+      min-width:2200px;
+    }
+
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      color:var(--cellTxt);
+    }
+
+    th,td{
+      border-right:1px solid var(--line2);
+      border-bottom:1px solid var(--line2);
+    }
+
+    th:first-child,td:first-child{
+      border-left:1px solid var(--line2);
+    }
+
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:4;
+      background:var(--headBg);
+      padding:10px 8px;
+      text-align:center;
+      font-size:13px;
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    thead tr.filterRow th{
+      top:43px;
+      z-index:3;
+      background:var(--filterBg);
+      padding:6px;
+    }
+
+    tbody td{
+      background:var(--cellBg);
+      padding:0;
+      vertical-align:middle;
+    }
+
+    tbody tr:nth-child(even) td{
+      background:var(--cellAlt);
+    }
+
+    td.dirty-cell{
+      box-shadow:inset 0 0 0 2px var(--dirtyBorder);
+      background:var(--dirtyBg) !important;
+    }
+
+    .cellView{
+      min-height:44px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:0 10px;
+      font-size:13px;
+      line-height:1.35;
+      word-break:break-word;
+      overflow-wrap:anywhere;
+    }
+
+    .cellView.center{justify-content:center;text-align:center}
+    .cellView.right{justify-content:flex-end;text-align:right;font-variant-numeric:tabular-nums}
+    .cellView.code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+
+    .cellInput,
+    .cellSelect{
+      width:100%;
+      min-height:44px;
+      border:none;
+      outline:none;
+      background:transparent;
+      color:var(--cellTxt);
+      padding:10px 10px;
+      font:inherit;
+      border-radius:0;
+    }
+
+    .cellInput{
+      font-size:13px;
+      line-height:1.35;
+    }
+
+    .cellInput.code{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;
+    }
+
+    .cellInput.center,
+    .cellSelect.center{
+      text-align:center;
+    }
+
+    .cellInput.right{
+      text-align:right;
+      font-variant-numeric:tabular-nums;
+    }
+
+    .cellInput::placeholder{
+      color:#94a3b8;
+    }
+
+    .cellSelect{
+      cursor:pointer;
+      text-align:center;
+    }
+
+    .filterInput{
+      width:100%;
+      height:34px;
+      border-radius:10px;
+      border:1px solid #c7d2e2;
+      background:#fff;
+      color:#0f172a;
+      padding:0 10px;
+      font-size:12px;
+      outline:none;
+    }
+
+    .filterInput:focus{
+      border-color:#60a5fa;
+    }
+
+    .rowActionBtn{
+      width:34px;
+      height:34px;
+      border-radius:10px;
+      border:1px solid #d4dbe5;
+      background:#fff;
+      color:#64748b;
+      cursor:pointer;
+      font-size:16px;
+      font-weight:900;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .rowActionBtn:hover{
+      background:#f8fafc;
+      border-color:#cbd5e1;
+    }
+
+    .rowActionBtn.delete{
+      color:#b91c1c;
+      border-color:#fecaca;
+      background:#fff5f5;
+    }
+
+    .emptyDataRow td{
+      padding:20px 14px;
+      text-align:center;
+      color:#64748b;
+      font-weight:800;
+      background:#f8fbff !important;
+    }
+
+    .statusbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 12px;
+      border-top:1px solid var(--line);
+      background:#0a1320;
+      font-size:12px;
+    }
+
+    .pill{
+      padding:5px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.05);
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .pill.ok{color:#bbf7d0}
+    .pill.warn{color:#fde68a}
+    .pill.err{color:#fecaca}
+
+    .statusText{
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:9999;
+    }
+
+    .accessDenied.show{display:flex}
+
+    .accessCard{
+      width:min(520px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media (max-width:980px){
+      .toolbar{padding:8px}
+      .btn{padding:0 10px;font-size:12px}
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <a id="mwBoardMenuToggle" href="/index.html" title="홈">
+        <img src="/favicon.ico" alt="Maroowell" />
+      </a>
+      <div class="titleBox">
+        <b>마루웰 라우트 단가</b>
+        <small>라우트별 계약단가 / 고정단가 / 백업단가 / 팁 관리</small>
+      </div>
+
+      <div class="spacer"></div>
+
+      <button id="btnReload" class="btn" type="button">불러오기</button>
+      <button id="btnAddRow" class="btn warn" type="button">행 추가</button>
+      <button id="btnSaveAll" class="btn ok" type="button">전체 저장</button>
+      <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </div>
+
+    <div class="toolbar">
+      <div class="group">
+        <label class="toggle" for="toggleOnlyChanged">
+          <input id="toggleOnlyChanged" type="checkbox" />
+          <span>변경 행만 보기</span>
+        </label>
+      </div>
+
+      <div class="group">
+        <button id="btnClearFilters" class="btn" type="button">필터 초기화</button>
+      </div>
+
+      <div class="group">
+        <span class="helper">필터칸에서 <b>!키워드</b> 또는 <b>-키워드</b> 입력 시 제외 검색</span>
+      </div>
+    </div>
+
+    <div class="sheetWrap">
+      <div class="sheetInner">
+        <table>
+          <colgroup>
+            <col style="width:80px" />
+            <col style="width:110px" />
+            <col style="width:110px" />
+            <col style="width:90px" />
+            <col style="width:130px" />
+            <col style="width:

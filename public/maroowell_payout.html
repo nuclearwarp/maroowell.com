@@ -15,25 +15,16 @@
       --bg2:#08111f;
       --panel:#0c1524;
       --line:rgba(255,255,255,.08);
-      --line2:rgba(255,255,255,.12);
       --txt:#e6eefc;
       --muted:#93a4c7;
 
       --btn:#162744;
       --btn2:#1a2f55;
-      --ok:#1a5a3a;
-      --warn:#6a4b13;
-      --danger:#6b1b1b;
 
       --sheet:#ffffff;
       --sheetLine:#d8dee8;
       --sheetHead:#eef3f8;
       --sheetText:#111827;
-
-      --accent:#60a5fa;
-      --green:#22c55e;
-      --amber:#f59e0b;
-      --red:#ef4444;
     }
 
     *{box-sizing:border-box}
@@ -560,7 +551,7 @@
           <div class="cardHead">
             <div>
               <div class="cardTitle">원본 / 기사정보 현황</div>
-              <div class="cardSub">원본 업로드 후 `/master` 기사정보와 비교해서 자동 매칭합니다.</div>
+              <div class="cardSub">원본 업로드 후 /master 기사정보와 비교해서 자동 매칭합니다.</div>
             </div>
           </div>
 
@@ -606,7 +597,7 @@
             </div>
           </div>
 
-          <div class="cardBody listWrap draggable-scroll" id="unmatchedWrap">
+          <div class="cardBody listWrap" id="unmatchedWrap">
             <table class="simpleTable">
               <thead>
                 <tr>
@@ -636,7 +627,7 @@
             </div>
           </div>
 
-          <div class="cardBody listWrap draggable-scroll" id="mainListWrap" style="padding-top:0;">
+          <div class="cardBody listWrap" id="mainListWrap" style="padding-top:0;">
             <table class="simpleTable">
               <thead>
                 <tr>
@@ -675,7 +666,7 @@
             <button class="tabBtn" data-tab="old" type="button">구형 정산</button>
           </div>
 
-          <div class="previewWrap draggable-scroll" id="previewWrap">
+          <div class="previewWrap" id="previewWrap">
             <div id="captureTarget" class="sheet">
               <div class="sheetHeader">
                 <div id="sheetTitle" class="sheetTitle">마루웰 정산 Main</div>
@@ -903,7 +894,7 @@
         statusText: $("#statusText"),
 
         tabButtons: Array.from(document.querySelectorAll(".tabBtn")),
-        draggableAreas: Array.from(document.querySelectorAll(".draggable-scroll"))
+        scrollAreas: [$("#unmatchedWrap"), $("#mainListWrap"), $("#previewWrap")].filter(Boolean)
       };
 
       const state = {
@@ -968,7 +959,7 @@
       function setBusy(on) {
         state.busy = !!on;
         dom.fileWorkbook.disabled = !!on;
-        dom.selectDriver.disabled = !!on;
+        dom.selectDriver.disabled = !!on || !state.driverAggs.length;
         dom.btnRefreshMaster.disabled = !!on;
         dom.btnSavePng.disabled = !!on || !state.driverAggs.length;
       }
@@ -997,14 +988,28 @@
 
       function buildColumnMap(sampleRow, defs) {
         const keys = Object.keys(sampleRow || {});
+        const normalizedKeys = keys.map((key) => ({
+          raw: key,
+          norm: normalizeHeader(key)
+        }));
+
         const out = {};
 
         for (const [field, candidates] of Object.entries(defs)) {
           out[field] = "";
+
           for (const candidate of candidates) {
-            const found = keys.find((k) => normalizeHeader(k) === normalizeHeader(candidate));
+            const normCandidate = normalizeHeader(candidate);
+
+            let found = normalizedKeys.find((item) => item.norm === normCandidate);
+            if (!found) {
+              found = normalizedKeys.find((item) =>
+                item.norm.includes(normCandidate) || normCandidate.includes(item.norm)
+              );
+            }
+
             if (found) {
-              out[field] = found;
+              out[field] = found.raw;
               break;
             }
           }
@@ -1022,10 +1027,10 @@
           date: ["배송일자"],
           camp: ["캠프명"],
           wave: ["배송유형(주간/심야)", "배송유형"],
-          delivery: ["배송건수"],
-          return: ["반품"],
+          delivery: ["배송건수(파슬)", "배송건수", "배송건수파슬"],
+          return: ["반품(운송장)", "반품", "반품운송장"],
           amount: ["총금액"],
-          incentive: ["프레시백 회수 인센티브"]
+          incentive: ["프레시백회수인센티브", "프레시백 회수 인센티브"]
         };
       }
 
@@ -1054,7 +1059,8 @@
         state.duplicateMasterIds = [];
 
         for (const row of state.masterRows) {
-          state.masterByPk.set(String(row.pk_id), row);
+          const pk = String(row.pk_id);
+          state.masterByPk.set(pk, row);
 
           const normId = normalizeId(row.coupang_id_norm || row.coupang_id);
           if (!normId) continue;
@@ -1063,7 +1069,7 @@
             state.duplicateMasterIds.push(normId);
             continue;
           }
-          state.masterByNormId.set(normId, String(row.pk_id));
+          state.masterByNormId.set(normId, pk);
         }
 
         return state.masterRows;
@@ -1098,9 +1104,13 @@
           s.returnCount += toNumber(row[state.rawCols.return]);
           s.amountSum += toNumber(row[state.rawCols.amount]);
 
-          if (normalizeText(row[state.rawCols.camp])) s.camps.add(normalizeText(row[state.rawCols.camp]));
-          if (normalizeText(row[state.rawCols.wave])) s.waves.add(normalizeText(row[state.rawCols.wave]));
-          if (normalizeText(row[state.rawCols.name])) s.names.add(normalizeText(row[state.rawCols.name]));
+          const camp = normalizeText(row[state.rawCols.camp]);
+          const wave = normalizeText(row[state.rawCols.wave]);
+          const name = normalizeText(row[state.rawCols.name]);
+
+          if (camp) s.camps.add(camp);
+          if (wave) s.waves.add(wave);
+          if (name) s.names.add(name);
         }
 
         for (const row of state.lossRows) {
@@ -1127,8 +1137,11 @@
           s.lossCount += 1;
           s.lossSum += toNumber(row[state.lossCols.amount]);
 
-          if (normalizeText(row[state.lossCols.camp])) s.camps.add(normalizeText(row[state.lossCols.camp]));
-          if (normalizeText(row[state.lossCols.name])) s.names.add(normalizeText(row[state.lossCols.name]));
+          const camp = normalizeText(row[state.lossCols.camp]);
+          const name = normalizeText(row[state.lossCols.name]);
+
+          if (camp) s.camps.add(camp);
+          if (name) s.names.add(name);
         }
 
         return Array.from(map.values())
@@ -1247,7 +1260,6 @@
         dom.statMasterRows.textContent = String(state.masterRows.length);
         dom.statAutoMatched.textContent = String(Object.keys(state.autoMatchedById).length);
         dom.statUnmatched.textContent = String(unmatchedCount);
-
         dom.pillRows.textContent = `데이터 ${state.rawRows.length + state.lossRows.length}`;
       }
 
@@ -1275,7 +1287,7 @@
           return;
         }
 
-        dom.selectDriver.disabled = false;
+        dom.selectDriver.disabled = state.busy;
         dom.selectDriver.innerHTML = `
           <option value="">기사 선택</option>
           ${state.driverAggs.map((agg) => `
@@ -1334,7 +1346,7 @@
         }).join("");
 
         rows.forEach((item) => {
-          const safeId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(item.id) : item.id;
+          const safeId = (typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(item.id) : item.id;
           const el = dom.unmatchedBody.querySelector(`select[data-unmatched-id="${safeId}"]`);
           if (el) el.value = String(state.aliasAssignments[item.id] || "");
         });
@@ -1397,6 +1409,7 @@
 
       function renderPreviewBody() {
         const agg = getCurrentAgg();
+
         if (!agg) {
           dom.sumDelivery.textContent = "0";
           dom.sumReturn.textContent = "0";
@@ -1470,7 +1483,6 @@
         renderMainList();
         renderPreviewHeader();
         renderPreviewBody();
-
         dom.btnSavePng.disabled = !state.driverAggs.length || state.busy;
       }
 
@@ -1500,8 +1512,17 @@
           state.rawCols = buildColumnMap(state.rawRows[0] || {}, getRawColDefs());
           state.lossCols = buildColumnMap(state.lossRows[0] || {}, getLossColDefs());
 
-          if (!state.rawCols.id || !state.lossCols.id) {
-            throw new Error("원본 시트의 필수 ID 컬럼을 찾지 못했습니다.");
+          if (
+            !state.rawCols.id ||
+            !state.rawCols.delivery ||
+            !state.rawCols.return ||
+            !state.rawCols.amount ||
+            !state.lossCols.id ||
+            !state.lossCols.amount
+          ) {
+            console.log("rawCols", state.rawCols);
+            console.log("lossCols", state.lossCols);
+            throw new Error("원본 시트의 필수 컬럼(ID/배송건수/반품/총금액/차감금액)을 찾지 못했습니다.");
           }
 
           state.idSummaries = buildIdSummaries();
@@ -1563,7 +1584,6 @@
       function handleUnmatchedAssign(id, pk) {
         const key = String(id || "");
         const value = String(pk || "");
-
         if (!key) return;
 
         if (!value) {
@@ -1659,6 +1679,7 @@
 
         window.addEventListener("mousemove", (e) => {
           if (!isDown) return;
+
           const dx = e.pageX - startX;
           const dy = e.pageY - startY;
 
@@ -1721,7 +1742,7 @@
           setCurrentDriver(tr.getAttribute("data-driver-pk") || "");
         });
 
-        dom.draggableAreas.forEach(bindDragScroll);
+        dom.scrollAreas.forEach(bindDragScroll);
       }
 
       async function init() {

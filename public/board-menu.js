@@ -25,7 +25,7 @@
       key: "coupang-camps",
       label: "쿠팡 캠프 조회",
       path : "/coupang_camps",
-      aliases : ["/coupang_camps", "/coupang_camps.html"],
+      aliases : ["/coupang_camp", "/coupang_camp.html"],
       adminOnly : false
     },
 
@@ -326,8 +326,8 @@
       case "/coupangRouteMap":
       case "/coupangRouteMap.html":
         return "라우트 / 벤더 / 입차지 편집";
-      case "/coupang_camps":
-      case "/coupang_camps.html":
+      case "/coupang_camp":
+      case "/coupang_camp.html":
         return "쿠팡 캠프 / 주소조회";
       case "/maroowell_info":
       case "/maroowell_info.html":

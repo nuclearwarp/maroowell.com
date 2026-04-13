@@ -4,16 +4,17 @@
   if (window.__MW_BOARD_MENU_INIT__) return;
   window.__MW_BOARD_MENU_INIT__ = true;
 
-  const MENU_MODE = window.MW_BOARD_MENU_MODE || "public"; 
-  // "public"  -> index, coupangRouteMap
-  // "admin"   -> maroowell_info, dragon_car_index, dragon_car_pay
+  const MENU_MODE = window.MW_BOARD_MENU_MODE || "public";
 
   const PAGES = [
     { key: "index", label: "우편번호 검색기", path: "/index.html", adminOnly: false },
     { key: "route", label: "라우트 편집기", path: "/coupangRouteMap.html", adminOnly: false },
+
     { key: "info", label: "마루웰 정보", path: "/maroowell_info", adminOnly: true },
-    { key: "dragon-index", label: "용차", path: "/dragon_car_index", adminOnly: true },
-    { key: "dragon-pay", label: "용차 정산", path: "/dragon_car_pay", adminOnly: true }
+    { key: "dragon-index", label: "용차 원장", path: "/dragon_car_index", adminOnly: true },
+    { key: "dragon-pay", label: "용차 정산서", path: "/dragon_car_pay", adminOnly: true },
+    { key: "mw-payout", label: "마루웰 정산", path: "/maroowell_payout", adminOnly: true },
+    { key: "mw-route", label: "마루웰 라우트 단가", path: "/maroowell_route", adminOnly: true }
   ];
 
   function normalizePath(path) {
@@ -228,12 +229,16 @@
         return "우편번호 / 지도 조회";
       case "/coupangRouteMap.html":
         return "라우트 / 벤더 / 입차지 편집";
-      case "/maroowell_info.html":
+      case "/maroowell_info":
         return "직원 / 정산 베이스 정보";
-      case "/dragon_car_index.html":
-        return "용차 관리";
-      case "/dragon_car_pay.html":
+      case "/dragon_car_index":
+        return "용차 원장 관리";
+      case "/dragon_car_pay":
         return "월별 업체 / 기사 정산서";
+      case "/maroowell_payout":
+        return "마루웰 정산 관리";
+      case "/maroowell_route":
+        return "라우트 단가 / 주소 / 원청 관리";
       default:
         return "";
     }

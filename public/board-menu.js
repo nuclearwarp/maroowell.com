@@ -11,7 +11,7 @@
     { key: "route", label: "라우트 편집기", path: "/coupangRouteMap.html", adminOnly: false },
 
     { key: "info", label: "마루웰 정보", path: "/maroowell_info", adminOnly: true },
-    { key: "dragon-index", label: "용차 원장", path: "/dragon_car_index", adminOnly: true },
+    { key: "dragon-index", label: "용차", path: "/dragon_car_index", adminOnly: true },
     { key: "dragon-pay", label: "용차 정산서", path: "/dragon_car_pay", adminOnly: true },
     { key: "mw-payout", label: "마루웰 정산", path: "/maroowell_payout", adminOnly: true },
     { key: "mw-route", label: "마루웰 라우트 단가", path: "/maroowell_route", adminOnly: true }
@@ -232,7 +232,7 @@
       case "/maroowell_info":
         return "직원 / 정산 베이스 정보";
       case "/dragon_car_index":
-        return "용차 원장 관리";
+        return "용차 관리";
       case "/dragon_car_pay":
         return "월별 업체 / 기사 정산서";
       case "/maroowell_payout":

@@ -24,7 +24,7 @@
     {
       key: "coupang-camps",
       label: "쿠팡 캠프 조회",
-      path : "/coupang_camps",
+      path : "/coupang_camp",
       aliases : ["/coupang_camp", "/coupang_camp.html"],
       adminOnly : false
     },

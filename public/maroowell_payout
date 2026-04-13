@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <script src="/config.js"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
@@ -541,6 +542,64 @@
       text-overflow:ellipsis;
     }
 
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:9999;
+    }
+
+    .accessDenied.show{
+      display:flex;
+    }
+
+    .accessCard{
+      width:min(520px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
     @media (max-width:1400px){
       .main{grid-template-columns:390px 1fr}
       .sheet{
@@ -561,13 +620,14 @@
     }
   </style>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
   <div class="app">
     <div class="topbar">
-      <a href="/index.html" title="홈">
+      <a id="mwBoardMenuToggle" href="/index.html" title="홈">
         <img src="/favicon.ico" alt="Maroowell" />
       </a>
 
@@ -935,13 +995,122 @@
     </div>
   </div>
 
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">이 페이지는 마루웰 소속 최고관리자만 접근할 수 있습니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="btnDeniedHome" class="btn" type="button">홈으로</button>
+        <button id="btnDeniedLogout" class="btn warn" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    (() => {
+    (async () => {
       "use strict";
+
+      const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+      const LOGIN_PATH = PATHS?.login || "/login.html";
+      const INDEX_PATH = PATHS?.index || "/index.html";
+      const ACCESS_TABLE = "user_access";
 
       const PAYOUT_API_BASE = "https://payout.maroowell.com";
 
       const $ = (sel) => document.querySelector(sel);
+
+      const authStorage = (() => {
+        try { return window.sessionStorage; } catch {}
+        return null;
+      })();
+
+      const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+              persistSession: !!authStorage,
+              storage: authStorage || undefined,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          })
+        : null;
+
+      function safeNextPath(p) {
+        if (!p) return INDEX_PATH;
+        if (p.startsWith("http://") || p.startsWith("https://")) return INDEX_PATH;
+        if (!p.startsWith("/")) return INDEX_PATH;
+        return p;
+      }
+
+      function showAccessDenied(email, detail) {
+        const denied = $("#accessDenied");
+        const deniedText = $("#accessDeniedText");
+        const deniedEmail = $("#accessDeniedEmail");
+
+        denied.classList.add("show");
+        deniedText.textContent = detail || "이 페이지는 마루웰 소속 최고관리자만 접근할 수 있습니다.";
+        deniedEmail.textContent = email
+          ? "현재 로그인: " + email
+          : "현재 로그인 이메일을 확인할 수 없습니다.";
+
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function signOutAndMove() {
+        try {
+          await supabase?.auth?.signOut();
+        } catch {}
+        location.replace(LOGIN_PATH);
+      }
+
+      async function requireAdmin() {
+        if (!supabase || !supabase.auth) {
+          alert("Supabase 설정을 확인하세요.");
+          return false;
+        }
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+
+          if (!session) {
+            const next = safeNextPath(location.pathname + location.search + location.hash);
+            location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+            return false;
+          }
+
+          const viewerEmail = String(session.user?.email || "").trim();
+          const viewerUserId = String(session.user?.id || "").trim();
+
+          if (!viewerUserId) {
+            showAccessDenied(viewerEmail, "로그인 사용자 ID를 확인할 수 없습니다.");
+            return false;
+          }
+
+          const { data: accessRow, error } = await supabase
+            .from(ACCESS_TABLE)
+            .select("user_id, email, is_maroowell, is_admin")
+            .eq("user_id", viewerUserId)
+            .maybeSingle();
+
+          if (error) {
+            showAccessDenied(viewerEmail, "권한 테이블 조회 실패: " + error.message);
+            return false;
+          }
+
+          if (!accessRow?.is_maroowell || !accessRow?.is_admin) {
+            showAccessDenied(viewerEmail, "이 페이지는 마루웰 소속 최고관리자만 접근할 수 있습니다.");
+            return false;
+          }
+
+          document.documentElement.style.visibility = "visible";
+          return true;
+        } catch (e) {
+          const next = safeNextPath(location.pathname + location.search + location.hash);
+          location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+          return false;
+        }
+      }
 
       const dom = {
         fileWorkbook: $("#fileWorkbook"),
@@ -994,7 +1163,13 @@
         statusText: $("#statusText"),
 
         tabButtons: Array.from(document.querySelectorAll(".tabBtn")),
-        scrollAreas: [$("#unmatchedWrap"), $("#mainListWrap"), $("#previewWrap")].filter(Boolean)
+        scrollAreas: [$("#unmatchedWrap"), $("#mainListWrap"), $("#previewWrap")].filter(Boolean),
+
+        accessDenied: $("#accessDenied"),
+        accessDeniedText: $("#accessDeniedText"),
+        accessDeniedEmail: $("#accessDeniedEmail"),
+        btnDeniedHome: $("#btnDeniedHome"),
+        btnDeniedLogout: $("#btnDeniedLogout")
       };
 
       const state = {
@@ -2066,9 +2241,17 @@
         });
 
         dom.scrollAreas.forEach(bindDragScroll);
+
+        dom.btnDeniedHome?.addEventListener("click", () => {
+          location.replace(INDEX_PATH);
+        });
+
+        dom.btnDeniedLogout?.addEventListener("click", signOutAndMove);
       }
 
       async function init() {
+        if (!(await requireAdmin())) return;
+
         initDefaultMonth();
         bindEvents();
 
@@ -2083,5 +2266,10 @@
       init();
     })();
   </script>
+
+  <script>
+    window.MW_BOARD_MENU_MODE = "admin";
+  </script>
+  <script src="/board-menu.js"></script>
 </body>
 </html>

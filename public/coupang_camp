@@ -179,7 +179,7 @@
     }
 
     .sheetInner{
-      min-width:1850px;
+      min-width:1490px;
     }
 
     table{
@@ -234,32 +234,18 @@
     }
 
     .cellInput,
-    .cellSelect,
-    .cellTextarea{
+    .cellSelect{
       width:100%;
+      min-height:44px;
       border:none;
       outline:none;
       background:transparent;
       color:var(--cellTxt);
-      padding:10px 10px;
+      padding:10px 8px;
       font:inherit;
-      border-radius:0;
-    }
-
-    .cellInput,
-    .cellSelect{
-      min-height:44px;
       font-size:13px;
       line-height:1.35;
-    }
-
-    .cellTextarea{
-      min-height:72px;
-      resize:vertical;
-      font-size:13px;
-      line-height:1.45;
-      white-space:pre-wrap;
-      overflow-wrap:anywhere;
+      border-radius:0;
     }
 
     .cellInput.center,
@@ -267,13 +253,17 @@
       text-align:center;
     }
 
+    .cellInput.left,
+    .cellSelect.left{
+      text-align:left;
+    }
+
     .cellInput.right{
       text-align:right;
       font-variant-numeric:tabular-nums;
     }
 
-    .cellInput::placeholder,
-    .cellTextarea::placeholder{
+    .cellInput::placeholder{
       color:#94a3b8;
     }
 
@@ -282,7 +272,8 @@
       text-align:center;
     }
 
-    .filterInput{
+    .filterInput,
+    .filterSelect{
       width:100%;
       height:34px;
       border-radius:10px;
@@ -294,7 +285,8 @@
       outline:none;
     }
 
-    .filterInput:focus{
+    .filterInput:focus,
+    .filterSelect:focus{
       border-color:#60a5fa;
     }
 
@@ -467,16 +459,16 @@
       <div class="sheetInner">
         <table>
           <colgroup>
+            <col style="width:96px" />
+            <col style="width:128px" />
+            <col style="width:128px" />
+            <col style="width:300px" />
+            <col style="width:96px" />
             <col style="width:110px" />
-            <col style="width:140px" />
-            <col style="width:140px" />
-            <col style="width:360px" />
-            <col style="width:150px" />
-            <col style="width:120px" />
-            <col style="width:150px" />
-            <col style="width:150px" />
-            <col style="width:520px" />
-            <col style="width:72px" />
+            <col style="width:132px" />
+            <col style="width:132px" />
+            <col style="width:300px" />
+            <col style="width:68px" />
           </colgroup>
 
           <thead>
@@ -497,7 +489,14 @@
               <th><input class="filterInput" data-filter="camp" placeholder="캠프명 / !일산2" /></th>
               <th><input class="filterInput" data-filter="mb_camp" placeholder="MB캠프 / !M_익산1" /></th>
               <th><input class="filterInput" data-filter="address" placeholder="주소 / !군산" /></th>
-              <th><input class="filterInput" data-filter="region" placeholder="지역 / !경기" /></th>
+              <th>
+                <select class="filterSelect" data-filter="region">
+                  <option value="">지역 전체</option>
+                  <option value="East">East</option>
+                  <option value="South">South</option>
+                  <option value="West">West</option>
+                </select>
+              </th>
               <th><input class="filterInput" data-filter="code" placeholder="코드 / !WC03" /></th>
               <th><input class="filterInput" data-filter="latitude" placeholder="위도" /></th>
               <th><input class="filterInput" data-filter="longitude" placeholder="경도" /></th>
@@ -542,6 +541,8 @@
       const ACCESS_TABLE = "user_access";
       const DATA_TABLE = "camps";
 
+      const REGION_OPTIONS = ["East", "South", "West"];
+
       const DATA_COLUMNS = [
         "camp_type",
         "camp",
@@ -560,12 +561,12 @@
         { key: "camp_type", className: "center", type: "text" },
         { key: "camp", className: "center", type: "text" },
         { key: "mb_camp", className: "center", type: "text" },
-        { key: "address", className: "", type: "textarea" },
-        { key: "region", className: "center", type: "text" },
+        { key: "address", className: "left", type: "text" },
+        { key: "region", className: "center", type: "select", options: REGION_OPTIONS },
         { key: "code", className: "center", type: "text" },
         { key: "latitude", className: "right", type: "text" },
         { key: "longitude", className: "right", type: "text" },
-        { key: "description", className: "", type: "textarea" }
+        { key: "description", className: "left", type: "text" }
       ];
 
       const $ = (sel) => document.querySelector(sel);
@@ -583,7 +584,7 @@
         pillRows: $("#pillRows"),
         pillDirty: $("#pillDirty"),
         statusText: $("#statusText"),
-        filterInputs: Array.from(document.querySelectorAll(".filterInput")),
+        filterInputs: Array.from(document.querySelectorAll(".filterInput, .filterSelect")),
         accessDenied: $("#accessDenied"),
         accessDeniedText: $("#accessDeniedText"),
         accessDeniedEmail: $("#accessDeniedEmail"),
@@ -849,6 +850,15 @@
         return normalizeText(v).toLowerCase();
       }
 
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
       function setStatus(text, tone) {
         dom.statusText.textContent = text || "";
         dom.pillState.className = "pill";
@@ -1096,32 +1106,43 @@
         }
       }
 
+      function buildSelectOptions(options, selectedValue, emptyLabel) {
+        const items = [`<option value="">${escapeHtml(emptyLabel || "선택")}</option>`];
+        for (const option of options || []) {
+          const value = String(option ?? "");
+          const selected = value === String(selectedValue ?? "") ? " selected" : "";
+          items.push(`<option value="${escapeHtml(value)}"${selected}>${escapeHtml(value)}</option>`);
+        }
+        return items.join("");
+      }
+
       function buildCell(row, col) {
         const rid = rowId(row);
         const classes = [];
         if (row.__dirtyFields?.[col.key]) classes.push("dirty-cell");
 
-        if (col.type === "textarea") {
+        if (col.type === "select") {
           return `
-            <td data-col="${col.key}" class="${classes.join(" ")}">
-              <textarea
-                class="cellTextarea ${col.className || ""}"
-                data-row-id="${rid}"
-                data-key="${col.key}"
-                autocomplete="off"
-              >${String(row[col.key] ?? "")}</textarea>
+            <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
+              <select
+                class="cellSelect ${col.className || ""}"
+                data-row-id="${escapeHtml(rid)}"
+                data-key="${escapeHtml(col.key)}"
+              >
+                ${buildSelectOptions(col.options || [], row[col.key], "선택")}
+              </select>
             </td>
           `;
         }
 
         return `
-          <td data-col="${col.key}" class="${classes.join(" ")}">
+          <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
             <input
               class="cellInput ${col.className || ""}"
               type="text"
-              value="${String(getRowValue(row, col.key) ?? "")}"
-              data-row-id="${rid}"
-              data-key="${col.key}"
+              value="${escapeHtml(getRowValue(row, col.key) ?? "")}"
+              data-row-id="${escapeHtml(rid)}"
+              data-key="${escapeHtml(col.key)}"
               autocomplete="off"
             />
           </td>
@@ -1143,11 +1164,11 @@
           const cells = COLUMN_CONFIG.map(col => buildCell(row, col)).join("");
 
           return `
-            <tr data-row="${rid}">
+            <tr data-row="${escapeHtml(rid)}">
               ${cells}
               <td class="${row.__dirty ? "dirty-cell" : ""}">
                 <div style="min-height:44px;display:flex;align-items:center;justify-content:center;">
-                  <button class="rowActionBtn delete" type="button" data-delete-row="${rid}">✕</button>
+                  <button class="rowActionBtn delete" type="button" data-delete-row="${escapeHtml(rid)}">✕</button>
                 </div>
               </td>
             </tr>
@@ -1161,7 +1182,7 @@
         if (!tr) return;
 
         for (const col of COLUMN_CONFIG) {
-          const td = tr.querySelector(`td[data-col="${col.key}"]`);
+          const td = tr.querySelector(`td[data-col="${CSS.escape(col.key)}"]`);
           if (!td) continue;
           td.classList.toggle("dirty-cell", !!row.__dirtyFields?.[col.key]);
         }
@@ -1337,12 +1358,6 @@
         URL.revokeObjectURL(url);
       }
 
-      function autoGrowTextarea(el) {
-        if (!(el instanceof HTMLTextAreaElement)) return;
-        el.style.height = "auto";
-        el.style.height = Math.max(72, el.scrollHeight) + "px";
-      }
-
       function bindTableEvents() {
         dom.sheetBody.addEventListener("input", (e) => {
           const target = e.target;
@@ -1360,10 +1375,6 @@
 
           markRowDirty(row, key, nextValue);
           updateRowDom(row);
-
-          if (target instanceof HTMLTextAreaElement) {
-            autoGrowTextarea(target);
-          }
         });
 
         dom.sheetBody.addEventListener("change", (e) => {
@@ -1394,13 +1405,6 @@
           const deleteId = target.getAttribute("data-delete-row");
           if (deleteId) deleteRow(deleteId);
         });
-
-        dom.sheetBody.addEventListener("focusin", (e) => {
-          const target = e.target;
-          if (target instanceof HTMLTextAreaElement) {
-            autoGrowTextarea(target);
-          }
-        });
       }
 
       function bindEvents() {
@@ -1415,6 +1419,7 @@
 
         dom.filterInputs.forEach(el => {
           el.addEventListener("input", applyFilters);
+          el.addEventListener("change", applyFilters);
         });
 
         dom.btnDeniedHome.addEventListener("click", () => {

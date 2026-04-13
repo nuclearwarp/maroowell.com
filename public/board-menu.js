@@ -7,24 +7,112 @@
   const MENU_MODE = window.MW_BOARD_MENU_MODE || "public";
 
   const PAGES = [
-    { key: "index", label: "우편번호 검색기", path: "/index.html", adminOnly: false },
-    { key: "route", label: "라우트 편집기", path: "/coupangRouteMap.html", adminOnly: false },
+    {
+      key: "index",
+      label: "우편번호 검색기",
+      path: "/index.html",
+      aliases: ["/", "/index", "/index.html"],
+      adminOnly: false
+    },
+    {
+      key: "route",
+      label: "라우트 편집기",
+      path: "/coupangRouteMap.html",
+      aliases: ["/coupangRouteMap", "/coupangRouteMap.html"],
+      adminOnly: false
+    },
 
-    { key: "info", label: "마루웰 정보", path: "/maroowell_info", adminOnly: true },
-    { key: "dragon-index", label: "용차", path: "/dragon_car_index", adminOnly: true },
-    { key: "dragon-pay", label: "용차 정산서", path: "/dragon_car_pay", adminOnly: true },
-    { key: "mw-payout", label: "마루웰 정산", path: "/maroowell_payout", adminOnly: true },
-    { key: "mw-route", label: "마루웰 라우트 단가", path: "/maroowell_route", adminOnly: true }
+    {
+      key: "info",
+      label: "마루웰 정보",
+      path: "/maroowell_info",
+      aliases: ["/maroowell_info", "/maroowell_info.html"],
+      adminOnly: true
+    },
+    {
+      key: "dragon-index",
+      label: "용차",
+      path: "/dragon_car_index",
+      aliases: ["/dragon_car_index", "/dragon_car_index.html"],
+      adminOnly: true
+    },
+    {
+      key: "dragon-pay",
+      label: "용차 정산서",
+      path: "/dragon_car_pay",
+      aliases: ["/dragon_car_pay", "/dragon_car_pay.html"],
+      adminOnly: true
+    },
+    {
+      key: "mw-payout",
+      label: "마루웰 정산",
+      path: "/maroowell_payout",
+      aliases: ["/maroowell_payout", "/maroowell_payout.html"],
+      adminOnly: true
+    },
+    {
+      key: "mw-route",
+      label: "마루웰 라우트 단가",
+      path: "/maroowell_route",
+      aliases: ["/maroowell_route", "/maroowell_route.html"],
+      adminOnly: true
+    }
   ];
 
   function normalizePath(path) {
-    const p = String(path || "").trim();
+    let p = String(path || "").trim();
     if (!p) return "/";
-    return p.endsWith("/") ? p.slice(0, -1) : p;
+
+    if (p.startsWith("http://") || p.startsWith("https://")) {
+      try {
+        p = new URL(p).pathname || "/";
+      } catch {
+        return "/";
+      }
+    }
+
+    p = p.replace(/[?#].*$/, "");
+    if (!p.startsWith("/")) p = "/" + p;
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+
+    return p || "/";
   }
 
   function getCurrentPath() {
     return normalizePath(location.pathname || "/");
+  }
+
+  function pathVariants(path) {
+    const p = normalizePath(path);
+    const set = new Set([p]);
+
+    if (p === "/") {
+      set.add("/index");
+      set.add("/index.html");
+    } else if (p === "/index" || p === "/index.html") {
+      set.add("/");
+      set.add("/index");
+      set.add("/index.html");
+    } else if (p.endsWith(".html")) {
+      set.add(p.slice(0, -5));
+    } else if (p !== "/" && !p.endsWith(".html")) {
+      set.add(p + ".html");
+    }
+
+    return Array.from(set);
+  }
+
+  function isCurrentPage(page) {
+    const current = getCurrentPath();
+    const currentVariants = new Set(pathVariants(current));
+    const pagePaths = [page.path, ...(page.aliases || [])];
+
+    for (const item of pagePaths) {
+      for (const variant of pathVariants(item)) {
+        if (currentVariants.has(variant)) return true;
+      }
+    }
+    return false;
   }
 
   function escapeHtml(v) {
@@ -224,20 +312,27 @@
   }
 
   function pageSubtext(path) {
-    switch (path) {
+    switch (normalizePath(path)) {
       case "/index.html":
+      case "/":
         return "우편번호 / 지도 조회";
+      case "/coupangRouteMap":
       case "/coupangRouteMap.html":
         return "라우트 / 벤더 / 입차지 편집";
       case "/maroowell_info":
+      case "/maroowell_info.html":
         return "직원 / 정산 베이스 정보";
       case "/dragon_car_index":
-        return "용차 관리";
+      case "/dragon_car_index.html":
+        return "용차";
       case "/dragon_car_pay":
+      case "/dragon_car_pay.html":
         return "월별 업체 / 기사 정산서";
       case "/maroowell_payout":
+      case "/maroowell_payout.html":
         return "마루웰 정산 관리";
       case "/maroowell_route":
+      case "/maroowell_route.html":
         return "라우트 단가 / 주소 / 원청 관리";
       default:
         return "";
@@ -289,20 +384,19 @@
   }
 
   function buildMenuHtml(canSeeAdmin) {
-    const currentPath = getCurrentPath();
-
     const items = PAGES.filter(page => {
       if (!page.adminOnly) return true;
       return canSeeAdmin;
     });
 
     return items.map(page => {
-      const isCurrent = normalizePath(page.path) === currentPath;
+      const current = isCurrentPage(page);
       const badge = page.adminOnly ? `<span class="mw-board-badge">관리자</span>` : "";
+
       return `
         <button
           type="button"
-          class="mw-board-item ${isCurrent ? "current" : ""}"
+          class="mw-board-item ${current ? "current" : ""}"
           data-path="${escapeHtml(page.path)}"
         >
           <div class="mw-board-item-title">
@@ -363,9 +457,9 @@
       if (!btn) return;
 
       const path = btn.getAttribute("data-path") || "/";
-      const currentPath = getCurrentPath();
+      const page = PAGES.find(item => item.path === path);
 
-      if (normalizePath(path) === currentPath) {
+      if (page && isCurrentPage(page)) {
         closeMenu();
         return;
       }

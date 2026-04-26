@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>마루웰 권한 관리</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --card:#111827;
+      --card2:#0b1220;
+      --line:rgba(148,163,184,.25);
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --accent:#38bdf8;
+      --danger:#fb7185;
+      --ok:#4ade80;
+      --warn:#facc15;
+      --btn:#2563eb;
+      --btnHover:#1d4ed8;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;}
+    body{padding:20px;}
+    .wrap{max-width:1280px;margin:0 auto;}
+    .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;}
+    h1{margin:0 0 8px;font-size:26px;line-height:1.25;letter-spacing:-.4px;}
+    .desc{margin:0;color:var(--muted);font-size:14px;line-height:1.55;}
+    .card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 16px 50px rgba(0,0,0,.22);}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+    button{border:none;border-radius:12px;background:var(--btn);color:white;padding:11px 14px;font-size:14px;font-weight:800;cursor:pointer;}
+    button:hover{background:var(--btnHover)}
+    button.secondary{background:rgba(255,255,255,.08);border:1px solid var(--line);}
+    button.secondary:hover{background:rgba(255,255,255,.12)}
+    button:disabled{opacity:.6;cursor:not-allowed;}
+    .status{min-height:24px;color:var(--muted);font-size:13px;line-height:1.55;white-space:pre-wrap;}
+    .status.ok{color:var(--ok)}
+    .status.err{color:var(--danger)}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start;}
+    .summary{display:grid;gap:10px;}
+    .summary-item{border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(255,255,255,.04);}
+    .summary-label{font-size:12px;color:var(--muted);margin-bottom:6px;}
+    .summary-value{font-size:22px;font-weight:900;}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 12px;}
+    .tab{background:rgba(255,255,255,.06);border:1px solid var(--line);color:var(--text);padding:9px 11px;border-radius:999px;font-size:13px;font-weight:800;cursor:pointer;}
+    .tab.active{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.45);color:#e0f2fe;}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px;max-height:640px;background:rgba(2,6,23,.36);}
+    table{width:100%;border-collapse:collapse;min-width:760px;}
+    th,td{border-bottom:1px solid rgba(148,163,184,.16);padding:10px 12px;text-align:left;vertical-align:top;font-size:13px;line-height:1.45;}
+    th{position:sticky;top:0;background:#111827;color:#cbd5e1;z-index:1;}
+    tr:hover td{background:rgba(255,255,255,.03);}
+    code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;}
+    pre{margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.55;color:#dbeafe;}
+    .badge{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:900;border:1px solid var(--line);}
+    .badge.ok{color:#bbf7d0;background:rgba(34,197,94,.12);border-color:rgba(34,197,94,.28);}
+    .badge.err{color:#fecdd3;background:rgba(244,63,94,.12);border-color:rgba(244,63,94,.28);}
+    .badge.warn{color:#fef3c7;background:rgba(250,204,21,.12);border-color:rgba(250,204,21,.28);}
+    .search{width:100%;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.06);color:var(--text);padding:11px 12px;font-size:14px;outline:none;margin-bottom:12px;}
+    .search:focus{border-color:rgba(56,189,248,.55);box-shadow:0 0 0 3px rgba(56,189,248,.12);}
+    .hidden{display:none!important;}
+    @media(max-width:900px){body{padding:12px}.top{display:block}.grid{grid-template-columns:1fr}.summary{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>마루웰 권한 관리 / DB RLS 스캔</h1>
+      <p class="desc">현재 페이지는 권한을 변경하지 않습니다. Cloudflare Worker를 통해 로그인 토큰을 검증하고, Supabase의 <code>mw_admin_dump_schema()</code> 결과를 조회합니다.</p>
+    </div>
+    <button class="secondary" id="btnBack" type="button">메인으로</button>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <button id="btnMe" type="button">관리자 확인</button>
+      <button id="btnScan" type="button">DB/RLS 스캔</button>
+      <button class="secondary" id="btnCopyJson" type="button" disabled>JSON 복사</button>
+      <button class="secondary" id="btnDownloadJson" type="button" disabled>JSON 다운로드</button>
+    </div>
+    <div class="status" id="status">대기 중</div>
+  </div>
+
+  <div style="height:16px"></div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="summary">
+        <div class="summary-item"><div class="summary-label">테이블</div><div class="summary-value" id="sumTables">-</div></div>
+        <div class="summary-item"><div class="summary-label">RLS ON</div><div class="summary-value" id="sumRlsOn">-</div></div>
+        <div class="summary-item"><div class="summary-label">RLS OFF</div><div class="summary-value" id="sumRlsOff">-</div></div>
+        <div class="summary-item"><div class="summary-label">정책 수</div><div class="summary-value" id="sumPolicies">-</div></div>
+        <div class="summary-item"><div class="summary-label">함수 수</div><div class="summary-value" id="sumFunctions">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <input class="search" id="filter" type="search" placeholder="테이블명 / 컬럼명 / 정책명 검색" />
+      <div class="tabs">
+        <button class="tab active" data-tab="tables" type="button">테이블</button>
+        <button class="tab" data-tab="policies" type="button">RLS 정책</button>
+        <button class="tab" data-tab="columns" type="button">컬럼</button>
+        <button class="tab" data-tab="raw" type="button">원본 JSON</button>
+      </div>
+
+      <div id="viewTables" class="table-wrap"></div>
+      <div id="viewPolicies" class="table-wrap hidden"></div>
+      <div id="viewColumns" class="table-wrap hidden"></div>
+      <div id="viewRaw" class="table-wrap hidden"><pre id="rawJson">아직 조회 전입니다.</pre></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const cfg = window.MARUWELL_CONFIG || {};
+  const API_BASE = (cfg.ADMIN_API_BASE || cfg.WORKER_API_BASE || "").replace(/\/$/, "");
+  const HOME = cfg.PATHS?.index || "/index.html";
+  const LOGIN = cfg.PATHS?.login || "/login.html";
+
+  const el = (id) => document.getElementById(id);
+  const status = el("status");
+  const filter = el("filter");
+  const rawJson = el("rawJson");
+  const btnMe = el("btnMe");
+  const btnScan = el("btnScan");
+  const btnCopyJson = el("btnCopyJson");
+  const btnDownloadJson = el("btnDownloadJson");
+
+  let schema = null;
+  let activeTab = "tables";
+
+  const authStorage = (() => { try { return window.sessionStorage; } catch { return null; } })();
+  const supabase = (cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && window.supabase?.createClient)
+    ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+        auth: {
+          persistSession: !!authStorage,
+          storage: authStorage || undefined,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      })
+    : null;
+
+  function setStatus(msg, type) {
+    status.textContent = msg || "";
+    status.className = "status" + (type ? " " + type : "");
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function includesFilter(...values) {
+    const q = filter.value.trim().toLowerCase();
+    if (!q) return true;
+    return values.some(v => String(v ?? "").toLowerCase().includes(q));
+  }
+
+  async function getToken() {
+    if (!supabase) throw new Error("Supabase 설정을 찾을 수 없습니다.");
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      location.href = LOGIN + "?next=" + encodeURIComponent(location.pathname);
+      throw new Error("로그인이 필요합니다.");
+    }
+    return token;
+  }
+
+  async function adminFetch(path) {
+    const token = await getToken();
+    const res = await fetch(API_BASE + path, {
+      method: "GET",
+      headers: { Authorization: "Bearer " + token }
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.error || data?.message || text || "요청 실패");
+    }
+    return data;
+  }
+
+  function tableHtml(headers, rows) {
+    return `<table><thead><tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${headers.length}">데이터 없음</td></tr>`}</tbody></table>`;
+  }
+
+  function summarize() {
+    const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+    const functions = Array.isArray(schema?.functions) ? schema.functions : [];
+    const rlsOn = tables.filter(t => t.rls_enabled).length;
+    const policies = tables.reduce((acc, t) => acc + (Array.isArray(t.policies) ? t.policies.length : 0), 0);
+    el("sumTables").textContent = tables.length;
+    el("sumRlsOn").textContent = rlsOn;
+    el("sumRlsOff").textContent = tables.length - rlsOn;
+    el("sumPolicies").textContent = policies;
+    el("sumFunctions").textContent = functions.length;
+  }
+
+  function renderTables() {
+    const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+    const rows = tables.filter(t => includesFilter(t.table, JSON.stringify(t.columns || []), JSON.stringify(t.policies || []))).map(t => {
+      const colCount = Array.isArray(t.columns) ? t.columns.length : 0;
+      const polCount = Array.isArray(t.policies) ? t.policies.length : 0;
+      const conCount = Array.isArray(t.constraints) ? t.constraints.length : 0;
+      const rlsBadge = t.rls_enabled ? `<span class="badge ok">RLS ON</span>` : `<span class="badge err">RLS OFF</span>`;
+      const policyBadge = polCount ? `<span class="badge ok">${polCount} policies</span>` : `<span class="badge warn">정책 없음</span>`;
+      return `<tr><td><b>${esc(t.table)}</b></td><td>${rlsBadge}</td><td>${policyBadge}</td><td>${colCount}</td><td>${conCount}</td><td><pre>${esc((t.constraints || []).map(c => c.definition).join("\n"))}</pre></td></tr>`;
+    });
+    el("viewTables").innerHTML = tableHtml(["테이블", "RLS", "정책", "컬럼", "제약", "제약 정의"], rows);
+  }
+
+  function renderPolicies() {
+    const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+    const rows = [];
+    for (const t of tables) {
+      for (const p of (t.policies || [])) {
+        if (!includesFilter(t.table, p.policy_name, p.command, p.using, p.with_check)) continue;
+        rows.push(`<tr><td><b>${esc(t.table)}</b></td><td>${esc(p.policy_name)}</td><td>${esc(p.command)}</td><td>${esc(Array.isArray(p.roles) ? p.roles.join(", ") : p.roles)}</td><td><pre>${esc(p.using || "")}</pre></td><td><pre>${esc(p.with_check || "")}</pre></td></tr>`);
+      }
+    }
+    el("viewPolicies").innerHTML = tableHtml(["테이블", "정책명", "명령", "역할", "USING", "WITH CHECK"], rows);
+  }
+
+  function renderColumns() {
+    const tables = Array.isArray(schema?.tables) ? schema.tables : [];
+    const rows = [];
+    for (const t of tables) {
+      for (const c of (t.columns || [])) {
+        if (!includesFilter(t.table, c.column_name, c.data_type, c.column_default)) continue;
+        rows.push(`<tr><td><b>${esc(t.table)}</b></td><td>${esc(c.ordinal_position)}</td><td>${esc(c.column_name)}</td><td>${esc(c.data_type)} <span style="color:#64748b">${esc(c.udt_name || "")}</span></td><td>${esc(c.is_nullable)}</td><td><pre>${esc(c.column_default || "")}</pre></td></tr>`);
+      }
+    }
+    el("viewColumns").innerHTML = tableHtml(["테이블", "순서", "컬럼", "타입", "NULL", "기본값"], rows);
+  }
+
+  function renderRaw() {
+    rawJson.textContent = schema ? JSON.stringify(schema, null, 2) : "아직 조회 전입니다.";
+  }
+
+  function render() {
+    summarize();
+    renderTables();
+    renderPolicies();
+    renderColumns();
+    renderRaw();
+  }
+
+  function setActiveTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll(".tab").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tab));
+    el("viewTables").classList.toggle("hidden", tab !== "tables");
+    el("viewPolicies").classList.toggle("hidden", tab !== "policies");
+    el("viewColumns").classList.toggle("hidden", tab !== "columns");
+    el("viewRaw").classList.toggle("hidden", tab !== "raw");
+  }
+
+  async function checkMe() {
+    try {
+      btnMe.disabled = true;
+      setStatus("관리자 권한 확인 중...");
+      const data = await adminFetch("/admin/me");
+      setStatus(`관리자 확인 완료\n${data.user?.email || data.user?.id}\nis_maroowell=${data.access?.is_maroowell}, is_admin=${data.access?.is_admin}`, "ok");
+    } catch (e) {
+      setStatus(e.message || String(e), "err");
+    } finally {
+      btnMe.disabled = false;
+    }
+  }
+
+  async function scanDb() {
+    try {
+      btnScan.disabled = true;
+      setStatus("DB 구조/RLS 스캔 중...");
+      const data = await adminFetch("/admin/db-introspect");
+      schema = data.schema;
+      render();
+      btnCopyJson.disabled = false;
+      btnDownloadJson.disabled = false;
+      setStatus(`스캔 완료\n생성시각: ${schema?.generated_at || "-"}`, "ok");
+    } catch (e) {
+      setStatus(e.message || String(e), "err");
+    } finally {
+      btnScan.disabled = false;
+    }
+  }
+
+  document.querySelectorAll(".tab").forEach(btn => btn.addEventListener("click", () => setActiveTab(btn.dataset.tab)));
+  filter.addEventListener("input", render);
+  btnMe.addEventListener("click", checkMe);
+  btnScan.addEventListener("click", scanDb);
+  el("btnBack").addEventListener("click", () => { location.href = HOME; });
+
+  btnCopyJson.addEventListener("click", async () => {
+    if (!schema) return;
+    await navigator.clipboard.writeText(JSON.stringify(schema, null, 2));
+    setStatus("JSON 복사 완료", "ok");
+  });
+
+  btnDownloadJson.addEventListener("click", () => {
+    if (!schema) return;
+    const blob = new Blob([JSON.stringify(schema, null, 2)], { type: "application/json;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "maroowell-db-rls-schema.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  setActiveTab(activeTab);
+  if (!API_BASE) {
+    setStatus("주의: config.js에 ADMIN_API_BASE 또는 WORKER_API_BASE가 없습니다. 같은 도메인 프록시가 아니면 API 호출이 실패할 수 있습니다.");
+  }
+})();
+</script>
+</body>
+</html>

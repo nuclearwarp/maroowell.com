@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>마루웰 권한 관리</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --card:#121a2d;
+      --line:rgba(255,255,255,.11);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#3b82f6;
+      --red:#ef4444;
+      --green:#22c55e;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      background:linear-gradient(180deg,#0b1220,#070b13);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .wrap{max-width:1280px;margin:0 auto;padding:22px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px}
+    .brand{display:flex;align-items:center;gap:10px;min-width:0}
+    .brand img{width:28px;height:28px}
+    .title{font-size:22px;font-weight:950;letter-spacing:-.4px}
+    .sub{color:var(--muted);font-size:13px;margin-top:4px;line-height:1.45}
+    .card{
+      background:rgba(18,26,45,.88);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+      margin-bottom:14px;
+    }
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    button{
+      height:40px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(59,130,246,.22);
+      color:#fff;
+      font-weight:900;
+      padding:0 16px;
+      cursor:pointer;
+    }
+    button:hover{background:rgba(59,130,246,.34)}
+    button.secondary{background:rgba(255,255,255,.06)}
+    button.danger{background:rgba(239,68,68,.18);border-color:rgba(239,68,68,.32)}
+    input{
+      height:40px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.22);
+      color:var(--txt);
+      padding:0 12px;
+      min-width:280px;
+      outline:none;
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      height:30px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      padding:0 10px;
+      color:var(--muted);
+      font-size:12px;
+      font-weight:900;
+      background:rgba(255,255,255,.05);
+    }
+    .ok{color:#bbf7d0}
+    .bad{color:#fecaca}
+    .grid{display:grid;grid-template-columns:340px 1fr;gap:14px}
+    .list{display:grid;gap:8px;margin-top:12px}
+    .tableBtn{
+      text-align:left;
+      height:auto;
+      min-height:42px;
+      border-radius:12px;
+      background:rgba(255,255,255,.045);
+      padding:10px 12px;
+    }
+    .tableBtn.active{border-color:rgba(59,130,246,.6);background:rgba(59,130,246,.17)}
+    .tableName{font-weight:950}
+    .mini{font-size:12px;color:var(--muted);margin-top:4px}
+    pre{
+      white-space:pre-wrap;
+      word-break:break-word;
+      background:rgba(0,0,0,.28);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px;
+      max-height:560px;
+      overflow:auto;
+      font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      color:#dbeafe;
+    }
+    .sectionTitle{font-size:15px;font-weight:950;margin:0 0 10px}
+    .muted{color:var(--muted)}
+    .statGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+    .stat{border:1px solid var(--line);border-radius:14px;padding:12px;background:rgba(255,255,255,.04)}
+    .statNum{font-size:24px;font-weight:950}
+    .statLab{font-size:12px;color:var(--muted);margin-top:4px}
+    @media(max-width:900px){
+      .grid{grid-template-columns:1fr}
+      .statGrid{grid-template-columns:repeat(2,1fr)}
+      .top{align-items:flex-start;flex-direction:column}
+      input{min-width:0;width:100%}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
+        <div>
+          <div class="title">마루웰 권한 관리</div>
+          <div class="sub">DB 구조와 RLS 정책을 먼저 스캔한 뒤 권한 부여 로직을 확정합니다.</div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="pill" id="loginPill">세션 확인 전</span>
+        <button class="secondary" id="logoutBtn">로그아웃</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">관리자 API</div>
+      <div class="row">
+        <input id="apiBaseInput" placeholder="https://route.maroowell.com" />
+        <button id="saveApiBtn" class="secondary">API 저장</button>
+        <button id="checkMeBtn">관리자 확인</button>
+        <button id="scanBtn">DB/RLS 스캔</button>
+        <button id="copyBtn" class="secondary">JSON 복사</button>
+      </div>
+      <div class="sub" id="statusText">대기 중</div>
+    </div>
+
+    <div class="card" id="summaryCard" style="display:none">
+      <div class="statGrid">
+        <div class="stat"><div class="statNum" id="statTables">0</div><div class="statLab">테이블</div></div>
+        <div class="stat"><div class="statNum" id="statRlsOn">0</div><div class="statLab">RLS ON</div></div>
+        <div class="stat"><div class="statNum" id="statPolicies">0</div><div class="statLab">정책</div></div>
+        <div class="stat"><div class="statNum" id="statFuncs">0</div><div class="statLab">함수</div></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="sectionTitle">테이블 목록</div>
+        <div class="muted">테이블을 누르면 컬럼/제약/RLS 정책을 확인합니다.</div>
+        <div class="list" id="tableList"></div>
+      </div>
+      <div class="card">
+        <div class="sectionTitle" id="detailTitle">결과</div>
+        <pre id="output">아직 스캔 결과가 없습니다.</pre>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.MARUWELL_CONFIG || {};
+  const API_STORAGE_KEY = "mw_admin_api_base";
+  const defaultApiBase = localStorage.getItem(API_STORAGE_KEY) || cfg.ADMIN_API_BASE || "https://route.maroowell.com";
+
+  let supabaseClient = null;
+  let lastSchema = null;
+  let selectedTable = "";
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg;
+    $("statusText").className = type === "bad" ? "sub bad" : type === "ok" ? "sub ok" : "sub";
+  }
+
+  function setOutput(obj) {
+    $("output").textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  }
+
+  function apiBase() {
+    return $("apiBaseInput").value.trim().replace(/\/$/, "");
+  }
+
+  function initSupabase() {
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = cfg;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  async function getToken() {
+    if (!supabaseClient) initSupabase();
+
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+
+    const token = data?.session?.access_token;
+    if (!token) throw new Error("로그인이 필요합니다. 먼저 login.html에서 로그인하세요.");
+
+    return token;
+  }
+
+  async function adminFetch(path) {
+    const token = await getToken();
+
+    const res = await fetch(apiBase() + path, {
+      headers: {
+        Authorization: "Bearer " + token
+      }
+    });
+
+    const text = await res.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.error || data?.message || text || "요청 실패");
+    }
+
+    return data;
+  }
+
+  async function checkMe() {
+    setStatus("관리자 세션 확인 중...");
+    const data = await adminFetch("/admin/me");
+
+    $("loginPill").textContent = data?.user?.email || data?.user?.id || "관리자 확인됨";
+    $("loginPill").className = "pill ok";
+
+    setOutput(data);
+    setStatus("관리자 확인 완료", "ok");
+  }
+
+  async function scan() {
+    setStatus("DB 구조/RLS 스캔 중...");
+    const data = await adminFetch("/admin/db-introspect");
+
+    lastSchema = data.schema || data;
+    selectedTable = "";
+
+    renderSummary();
+    renderTableList();
+
+    setOutput(lastSchema);
+    setStatus("스캔 완료. 테이블을 눌러 상세 확인하세요.", "ok");
+  }
+
+  function renderSummary() {
+    const tables = Array.isArray(lastSchema?.tables) ? lastSchema.tables : [];
+    const funcs = Array.isArray(lastSchema?.functions) ? lastSchema.functions : [];
+    const policies = tables.reduce((sum, t) => sum + (Array.isArray(t.policies) ? t.policies.length : 0), 0);
+    const rlsOn = tables.filter(t => t.rls_enabled === true).length;
+
+    $("summaryCard").style.display = "block";
+    $("statTables").textContent = tables.length;
+    $("statRlsOn").textContent = rlsOn;
+    $("statPolicies").textContent = policies;
+    $("statFuncs").textContent = funcs.length;
+  }
+
+  function renderTableList() {
+    const tables = Array.isArray(lastSchema?.tables) ? lastSchema.tables : [];
+
+    $("tableList").innerHTML = tables.map(t => {
+      const name = `${t.schema || "public"}.${t.table}`;
+      const cls = selectedTable === name ? "tableBtn active" : "tableBtn";
+      const policies = Array.isArray(t.policies) ? t.policies.length : 0;
+      const cols = Array.isArray(t.columns) ? t.columns.length : 0;
+
+      return `
+        <button class="${cls}" data-table="${escapeHtml(name)}">
+          <div class="tableName">${escapeHtml(name)}</div>
+          <div class="mini">RLS ${t.rls_enabled ? "ON" : "OFF"} · 정책 ${policies} · 컬럼 ${cols}</div>
+        </button>
+      `;
+    }).join("");
+  }
+
+  function showTable(name) {
+    const tables = Array.isArray(lastSchema?.tables) ? lastSchema.tables : [];
+    const found = tables.find(t => `${t.schema || "public"}.${t.table}` === name);
+
+    selectedTable = name;
+    renderTableList();
+
+    $("detailTitle").textContent = name;
+    setOutput(found || "테이블을 찾지 못했습니다.");
+  }
+
+  function escapeHtml(v) {
+    return String(v ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  $("apiBaseInput").value = defaultApiBase;
+
+  $("saveApiBtn").addEventListener("click", () => {
+    localStorage.setItem(API_STORAGE_KEY, apiBase());
+    setStatus("API 주소 저장됨", "ok");
+  });
+
+  $("checkMeBtn").addEventListener("click", () => {
+    checkMe().catch(e => {
+      setStatus(e.message, "bad");
+      setOutput({ ok:false, error:e.message });
+    });
+  });
+
+  $("scanBtn").addEventListener("click", () => {
+    scan().catch(e => {
+      setStatus(e.message, "bad");
+      setOutput({ ok:false, error:e.message });
+    });
+  });
+
+  $("copyBtn").addEventListener("click", async () => {
+    await navigator.clipboard.writeText($("output").textContent || "");
+    setStatus("복사 완료", "ok");
+  });
+
+  $("logoutBtn").addEventListener("click", async () => {
+    if (!supabaseClient) initSupabase();
+    await supabaseClient.auth.signOut();
+    location.href = "/login.html";
+  });
+
+  $("tableList").addEventListener("click", e => {
+    const btn = e.target.closest("[data-table]");
+    if (btn) showTable(btn.dataset.table);
+  });
+
+  try {
+    initSupabase();
+  } catch (e) {
+    setStatus(e.message, "bad");
+  }
+})();
+</script>
+<script src="/board-menu.js"></script>
+</body>
+</html>

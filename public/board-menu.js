@@ -36,6 +36,20 @@
       requireRoleLevel: 30
     },
     {
+      key: "mw-route-info",
+      label: "마루웰 라우트정보",
+      path: "/maroowell_route_info",
+      aliases: ["/maroowell_route_info", "/maroowell_route_info.html"],
+      requireMaroowell: true
+    },
+    {
+      key: "mw-schedule",
+      label: "마루웰 입차 스케줄",
+      path: "/maroowell_schedule",
+      aliases: ["/maroowell_schedule", "/maroowell_schedule.html"],
+      requireRoleLevel: 30
+    },
+    {
       key: "mw-route",
       label: "마루웰 라우트 단가",
       path: "/maroowell_route",
@@ -171,6 +185,10 @@
       return isDragonCarAdmin;
     }
 
+    if (page.requireMaroowell) {
+      return isMaroowell;
+    }
+
     if (page.requireRoleLevel) {
       return isMaroowell && roleLevel >= Number(page.requireRoleLevel);
     }
@@ -187,6 +205,10 @@
 
     if (page.requireDragonCarAdmin) {
       return "용차관리자";
+    }
+
+    if (page.requireMaroowell) {
+      return "마루웰";
     }
 
     if (Number(page.requireRoleLevel) >= 60) {
@@ -211,6 +233,10 @@
       return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
     }
 
+    if (page.requireMaroowell) {
+      return "마루웰 소속 권한이 필요합니다.\n조건: user_access.is_maroowell = true";
+    }
+
     if (Number(page.requireRoleLevel) >= 60) {
       return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
     }
@@ -227,30 +253,47 @@
       case "/index.html":
       case "/":
         return "우편번호 / 지도 조회";
+
       case "/coupangRouteMap":
       case "/coupangRouteMap.html":
         return "라우트 / 벤더 / 입차지 편집";
+
       case "/coupang_camp":
       case "/coupang_camp.html":
         return "쿠팡 캠프 / 주소조회";
+
       case "/maroowell_info":
       case "/maroowell_info.html":
         return "마루웰 기본 정보";
+
+      case "/maroowell_route_info":
+      case "/maroowell_route_info.html":
+        return "마루웰 라우트 정보 조회";
+
+      case "/maroowell_schedule":
+      case "/maroowell_schedule.html":
+        return "마루웰 입차 스케줄";
+
       case "/maroowell_route":
       case "/maroowell_route.html":
         return "라우트 단가 / 주소 / 원청 관리";
+
       case "/maroowell_payout":
       case "/maroowell_payout.html":
         return "마루웰 정산 관리";
+
       case "/dragon_car_index":
       case "/dragon_car_index.html":
         return "용차 관리";
+
       case "/dragon_car_pay":
       case "/dragon_car_pay.html":
         return "용차 정산서";
+
       case "/admin_access":
       case "/admin_access.html":
         return "사용자 / 관리자 권한 관리";
+
       default:
         return "";
     }

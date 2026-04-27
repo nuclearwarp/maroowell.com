@@ -67,7 +67,7 @@
     {
       key: "admin-access",
       label: "관리자 권한 관리",
-      path: "public/admin_access.html",
+      path: "/admin_access.html",
       aliases : ["/admin_access.html", "/maroowell_access"],
       adminOnly: true
     }

@@ -165,7 +165,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">🤖 마루웰 권한 관리</div>
-          <div class="sub">role_level / 마루웰 관리자 / 용차 관리자 권한을 통합 관리합니다.</div>
+          <div class="sub">팀장 / 관리자 / 최고관리자 / 용차 관리자 권한을 통합 관리합니다.</div>
         </div>
       </div>
       <div class="topRight">
@@ -193,7 +193,7 @@
           <div class="sectionTitle">권한 부여 / 회수</div>
           <div class="muted">
             대상 이메일은 Supabase Auth에 가입되어 있어야 합니다.
-            role_level 90은 마루웰 관리자 권한까지 같이 부여됩니다.
+            최고관리자는 마루웰 관리자 권한까지 같이 부여됩니다.
           </div>
 
           <div class="formGrid">
@@ -203,16 +203,16 @@
             </div>
             <div class="field">
               <label>메모</label>
-              <input id="memoInput" type="text" placeholder="예: 마루웰 기본 / 라우트 단가 / 최고관리자" autocomplete="off" />
+              <input id="memoInput" type="text" placeholder="예: 팀장 / 관리자 / 최고관리자 / 권한 해제" autocomplete="off" />
             </div>
             <div class="field">
-              <label>role_level 직접 선택</label>
+              <label>권한 등급 직접 선택</label>
               <select id="roleLevelSelect">
                 <option value="">변경 안 함</option>
                 <option value="0">0 / 마루웰 게시판 권한 해제</option>
-                <option value="30">30 / 마루웰 정보</option>
-                <option value="60">60 / 마루웰 정보 + 라우트 단가</option>
-                <option value="90">90 / 최고관리자 기준</option>
+                <option value="30">30 / 팀장</option>
+                <option value="60">60 / 관리자</option>
+                <option value="90">90 / 최고관리자</option>
               </select>
             </div>
             <div class="field">
@@ -227,12 +227,12 @@
 
           <div class="btnGrid">
             <button id="applyCustomBtn">선택값 적용</button>
-            <button id="grant30Btn" class="ok">Lv.30 마루웰 정보</button>
-            <button id="grant60Btn" class="ok">Lv.60 라우트 단가</button>
-            <button id="grant90Btn">Lv.90 최고관리자</button>
+            <button id="grant30Btn" class="ok">팀장 권한 부여</button>
+            <button id="grant60Btn" class="ok">관리자 권한 부여</button>
+            <button id="grant90Btn">최고관리자 권한 부여</button>
             <button id="dragonOnBtn" class="warn">용차 관리자 ON</button>
             <button id="dragonOffBtn" class="warn">용차 관리자 OFF</button>
-            <button id="revokeAdminBtn" class="warn">관리자만 해제</button>
+            <button id="revokeAdminBtn" class="warn">최고관리자만 해제</button>
             <button id="revokeAllBtn" class="danger">마루웰 권한 해제</button>
           </div>
         </div>
@@ -290,6 +290,7 @@
   let supabaseClient = null;
   let lastSchema = null;
   let selectedTable = "";
+  let lastUsers = [];
 
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
@@ -382,6 +383,24 @@
     return data;
   }
 
+  function findUserByEmail(email) {
+    const target = String(email || "").trim().toLowerCase();
+    return lastUsers.find(row => String(row.email || "").trim().toLowerCase() === target) || null;
+  }
+
+  function basePayload(email, memo) {
+    const row = findUserByEmail(email);
+
+    return {
+      email,
+      is_maroowell: row?.is_maroowell === true,
+      is_admin: row?.is_admin === true,
+      role_level: Number(row?.max_role_level || 0),
+      is_dragon_car_admin: row?.is_dragon_car_admin === true,
+      memo
+    };
+  }
+
   async function checkMe() {
     showRawOnly();
     setStatus("관리자 세션 확인 중...");
@@ -400,10 +419,11 @@
     setStatus("권한 목록 불러오는 중...");
 
     const data = await adminFetch("/admin/access/users");
+    lastUsers = Array.isArray(data.rows) ? data.rows : [];
 
-    renderUserList(data.rows || []);
+    renderUserList(lastUsers);
     setRaw(data);
-    setStatus(`권한 목록 ${data.rows?.length || 0}건 불러옴`, "ok");
+    setStatus(`권한 목록 ${lastUsers.length}건 불러옴`, "ok");
   }
 
   async function setAccess(payload) {
@@ -436,27 +456,21 @@
     const roleRaw = $("roleLevelSelect").value;
     const dragonRaw = $("dragonSelect").value;
 
-    const payload = {
-      email,
-      is_maroowell: false,
-      is_admin: false,
-      memo: getMemo("선택값 적용")
-    };
+    if (roleRaw === "" && dragonRaw === "") {
+      throw new Error("권한 등급 또는 용차 관리자 값을 선택하세요.");
+    }
+
+    const payload = basePayload(email, getMemo("선택값 적용"));
 
     if (roleRaw !== "") {
       const roleLevel = Number(roleRaw);
       payload.role_level = roleLevel;
-
-      if (roleLevel >= 30) payload.is_maroowell = true;
-      if (roleLevel >= 90) payload.is_admin = true;
+      payload.is_maroowell = roleLevel >= 30;
+      payload.is_admin = roleLevel >= 90;
     }
 
     if (dragonRaw !== "") {
       payload.is_dragon_car_admin = dragonRaw === "true";
-    }
-
-    if (roleRaw === "" && dragonRaw === "") {
-      throw new Error("role_level 또는 용차 관리자 값을 선택하세요.");
     }
 
     setStatus("선택값 적용 중...");
@@ -466,80 +480,70 @@
 
   async function grant30() {
     const email = getTargetEmail();
-    setStatus("Lv.30 권한 부여 중...");
-    await setAccess({
-      email,
-      is_maroowell: true,
-      is_admin: false,
-      role_level: 30,
-      memo: getMemo("Lv.30 마루웰 정보")
-    });
-    setStatus("Lv.30 권한 부여 완료", "ok");
+    const payload = basePayload(email, getMemo("팀장 권한"));
+    payload.is_maroowell = true;
+    payload.is_admin = false;
+    payload.role_level = 30;
+
+    setStatus("팀장 권한 부여 중...");
+    await setAccess(payload);
+    setStatus("팀장 권한 부여 완료", "ok");
   }
 
   async function grant60() {
     const email = getTargetEmail();
-    setStatus("Lv.60 권한 부여 중...");
-    await setAccess({
-      email,
-      is_maroowell: true,
-      is_admin: false,
-      role_level: 60,
-      memo: getMemo("Lv.60 라우트 단가")
-    });
-    setStatus("Lv.60 권한 부여 완료", "ok");
+    const payload = basePayload(email, getMemo("관리자 권한"));
+    payload.is_maroowell = true;
+    payload.is_admin = false;
+    payload.role_level = 60;
+
+    setStatus("관리자 권한 부여 중...");
+    await setAccess(payload);
+    setStatus("관리자 권한 부여 완료", "ok");
   }
 
   async function grant90() {
     const email = getTargetEmail();
-    setStatus("Lv.90 최고관리자 권한 부여 중...");
-    await setAccess({
-      email,
-      is_maroowell: true,
-      is_admin: true,
-      role_level: 90,
-      memo: getMemo("Lv.90 최고관리자")
-    });
-    setStatus("Lv.90 최고관리자 권한 부여 완료", "ok");
+    const payload = basePayload(email, getMemo("최고관리자 권한"));
+    payload.is_maroowell = true;
+    payload.is_admin = true;
+    payload.role_level = 90;
+
+    setStatus("최고관리자 권한 부여 중...");
+    await setAccess(payload);
+    setStatus("최고관리자 권한 부여 완료", "ok");
   }
 
   async function dragonOn() {
     const email = getTargetEmail();
+    const payload = basePayload(email, getMemo("용차 관리자 ON"));
+    payload.is_dragon_car_admin = true;
+
     setStatus("용차 관리자 ON 처리 중...");
-    await setAccess({
-      email,
-      is_maroowell: false,
-      is_admin: false,
-      is_dragon_car_admin: true,
-      memo: getMemo("용차 관리자 ON")
-    });
+    await setAccess(payload);
     setStatus("용차 관리자 ON 완료", "ok");
   }
 
   async function dragonOff() {
     const email = getTargetEmail();
+    const payload = basePayload(email, getMemo("용차 관리자 OFF"));
+    payload.is_dragon_car_admin = false;
+
     setStatus("용차 관리자 OFF 처리 중...");
-    await setAccess({
-      email,
-      is_maroowell: false,
-      is_admin: false,
-      is_dragon_car_admin: false,
-      memo: getMemo("용차 관리자 OFF")
-    });
+    await setAccess(payload);
     setStatus("용차 관리자 OFF 완료", "ok");
   }
 
   async function revokeAdmin() {
     const email = getTargetEmail();
-    setStatus("관리자 권한 해제 중...");
-    await setAccess({
-      email,
-      is_maroowell: true,
-      is_admin: false,
-      role_level: 60,
-      memo: getMemo("관리자 권한 해제 / Lv.60 유지")
-    });
-    setStatus("관리자 권한 해제 완료", "ok");
+    const payload = basePayload(email, getMemo("최고관리자 해제 / 관리자 유지"));
+    payload.is_maroowell = true;
+    payload.is_admin = false;
+    payload.role_level = 60;
+
+    setStatus("최고관리자 권한 해제 중...");
+    await setAccess(payload);
+    setStatus("최고관리자 권한 해제 완료", "ok");
   }
 
   async function revokeAll() {
@@ -548,14 +552,13 @@
     const ok = confirm(`${email}\n\n이 사용자의 마루웰 게시판 권한을 해제할까요?\n용차 관리자 권한은 별도 버튼으로 관리됩니다.`);
     if (!ok) return;
 
+    const payload = basePayload(email, getMemo("마루웰 권한 해제"));
+    payload.is_maroowell = false;
+    payload.is_admin = false;
+    payload.role_level = 0;
+
     setStatus("마루웰 권한 해제 중...");
-    await setAccess({
-      email,
-      is_maroowell: false,
-      is_admin: false,
-      role_level: 0,
-      memo: getMemo("마루웰 권한 해제")
-    });
+    await setAccess(payload);
     setStatus("마루웰 권한 해제 완료", "ok");
   }
 
@@ -575,6 +578,14 @@
     setStatus("스캔 완료. 테이블을 눌러 상세 확인하세요.", "ok");
   }
 
+  function roleLabel(level) {
+    const n = Number(level || 0);
+    if (n >= 90) return "최고관리자";
+    if (n >= 60) return "관리자";
+    if (n >= 30) return "팀장";
+    return "권한 없음";
+  }
+
   function renderUserList(rows) {
     const list = $("userList");
 
@@ -587,10 +598,10 @@
       const email = row.email || "";
       const level = Number(row.max_role_level || 0);
       const cls = row.is_admin ? "userCard admin" : row.is_maroowell ? "userCard maroowell" : "userCard";
-      const adminBadge = row.is_admin ? `<span class="badge admin">관리자</span>` : `<span class="badge">관리자 아님</span>`;
+      const adminBadge = row.is_admin ? `<span class="badge admin">마루웰 관리자</span>` : `<span class="badge">관리자 아님</span>`;
       const mwBadge = row.is_maroowell ? `<span class="badge maroowell">마루웰</span>` : `<span class="badge">마루웰 아님</span>`;
       const dragonBadge = row.is_dragon_car_admin ? `<span class="badge dragon">용차관리자</span>` : `<span class="badge">용차 X</span>`;
-      const roleBadge = `<span class="badge role">Lv.${level}</span>`;
+      const roleBadge = `<span class="badge role">${escapeHtml(roleLabel(level))} · ${level}</span>`;
       const memo = row.memo ? escapeHtml(row.memo) : "-";
       const updated = row.updated_at ? escapeHtml(row.updated_at) : "-";
 
@@ -611,9 +622,9 @@
           <div class="meta">memo: ${memo}</div>
           <div class="meta">updated_at: ${updated}</div>
           <div class="userActions">
-            <button class="small ok" data-action="lv30" data-email="${escapeHtml(email)}">Lv.30</button>
-            <button class="small ok" data-action="lv60" data-email="${escapeHtml(email)}">Lv.60</button>
-            <button class="small" data-action="lv90" data-email="${escapeHtml(email)}">Lv.90</button>
+            <button class="small ok" data-action="team" data-email="${escapeHtml(email)}">팀장</button>
+            <button class="small ok" data-action="manager" data-email="${escapeHtml(email)}">관리자</button>
+            <button class="small" data-action="super" data-email="${escapeHtml(email)}">최고관리자</button>
             <button class="small warn" data-action="dragon-on" data-email="${escapeHtml(email)}">용차 ON</button>
             <button class="small warn" data-action="dragon-off" data-email="${escapeHtml(email)}">용차 OFF</button>
             <button class="small danger" data-action="revoke" data-email="${escapeHtml(email)}">마루웰 해제</button>
@@ -731,41 +742,63 @@
 
     const action = btn.dataset.action;
 
-    if (action === "lv30") run(async () => {
-      setStatus("Lv.30 권한 부여 중...");
-      await setAccess({ email, is_maroowell: true, is_admin: false, role_level: 30, memo: getMemo("Lv.30 마루웰 정보") });
-      setStatus("Lv.30 권한 부여 완료", "ok");
+    if (action === "team") run(async () => {
+      const payload = basePayload(email, getMemo("팀장 권한"));
+      payload.is_maroowell = true;
+      payload.is_admin = false;
+      payload.role_level = 30;
+      setStatus("팀장 권한 부여 중...");
+      await setAccess(payload);
+      setStatus("팀장 권한 부여 완료", "ok");
     });
 
-    if (action === "lv60") run(async () => {
-      setStatus("Lv.60 권한 부여 중...");
-      await setAccess({ email, is_maroowell: true, is_admin: false, role_level: 60, memo: getMemo("Lv.60 라우트 단가") });
-      setStatus("Lv.60 권한 부여 완료", "ok");
+    if (action === "manager") run(async () => {
+      const payload = basePayload(email, getMemo("관리자 권한"));
+      payload.is_maroowell = true;
+      payload.is_admin = false;
+      payload.role_level = 60;
+      setStatus("관리자 권한 부여 중...");
+      await setAccess(payload);
+      setStatus("관리자 권한 부여 완료", "ok");
     });
 
-    if (action === "lv90") run(async () => {
-      setStatus("Lv.90 최고관리자 권한 부여 중...");
-      await setAccess({ email, is_maroowell: true, is_admin: true, role_level: 90, memo: getMemo("Lv.90 최고관리자") });
-      setStatus("Lv.90 최고관리자 권한 부여 완료", "ok");
+    if (action === "super") run(async () => {
+      const payload = basePayload(email, getMemo("최고관리자 권한"));
+      payload.is_maroowell = true;
+      payload.is_admin = true;
+      payload.role_level = 90;
+      setStatus("최고관리자 권한 부여 중...");
+      await setAccess(payload);
+      setStatus("최고관리자 권한 부여 완료", "ok");
     });
 
     if (action === "dragon-on") run(async () => {
+      const payload = basePayload(email, getMemo("용차 관리자 ON"));
+      payload.is_dragon_car_admin = true;
       setStatus("용차 관리자 ON 처리 중...");
-      await setAccess({ email, is_maroowell: false, is_admin: false, is_dragon_car_admin: true, memo: getMemo("용차 관리자 ON") });
+      await setAccess(payload);
       setStatus("용차 관리자 ON 완료", "ok");
     });
 
     if (action === "dragon-off") run(async () => {
+      const payload = basePayload(email, getMemo("용차 관리자 OFF"));
+      payload.is_dragon_car_admin = false;
       setStatus("용차 관리자 OFF 처리 중...");
-      await setAccess({ email, is_maroowell: false, is_admin: false, is_dragon_car_admin: false, memo: getMemo("용차 관리자 OFF") });
+      await setAccess(payload);
       setStatus("용차 관리자 OFF 완료", "ok");
     });
 
     if (action === "revoke") run(async () => {
       const ok = confirm(`${email}\n\n이 사용자의 마루웰 게시판 권한을 해제할까요?`);
       if (!ok) return;
+
+      const payload = basePayload(email, getMemo("마루웰 권한 해제"));
+      payload.is_maroowell = false;
+      payload.is_admin = false;
+      payload.role_level = 0;
+
       setStatus("마루웰 권한 해제 중...");
-      await setAccess({ email, is_maroowell: false, is_admin: false, role_level: 0, memo: getMemo("마루웰 권한 해제") });
+      await setAccess(payload);
       setStatus("마루웰 권한 해제 완료", "ok");
     });
   });
@@ -773,6 +806,7 @@
   try {
     initSupabase();
     checkMe().catch(() => {});
+    loadUsers().catch(() => {});
   } catch (e) {
     setStatus(e.message, "bad");
   }

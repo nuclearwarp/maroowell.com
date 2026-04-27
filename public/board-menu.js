@@ -178,26 +178,26 @@
   }
 
   function requirementText(page) {
-    if (!page) return "접근 권한이 없습니다.";
+  if (!page) return "접근 권한이 없습니다.";
 
-    if (page.requireSuperAdmin) {
-      return "마루웰 최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
-    }
-
-    if (page.requireDragonCarAdmin) {
-      return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
-    }
-
-    if (page.requireRoleLevel >= 60) {
-      return "마루웰 라우트 단가 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
-    }
-
-    if (page.requireRoleLevel >= 30) {
-      return "마루웰 기본 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
-    }
-
-    return "접근 권한이 없습니다.";
+  if (page.requireSuperAdmin) {
+    return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
   }
+
+  if (page.requireDragonCarAdmin) {
+    return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
+  }
+
+  if (Number(page.requireRoleLevel) >= 60) {
+    return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
+  }
+
+  if (Number(page.requireRoleLevel) >= 30) {
+    return "팀장 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
+  }
+
+  return "접근 권한이 없습니다.";
+}
 
   function pageBadge(page) {
   if (page.public) return "";

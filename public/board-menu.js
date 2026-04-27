@@ -200,12 +200,26 @@
   }
 
   function pageBadge(page) {
-    if (page.public) return "";
-    if (page.requireSuperAdmin) return "최고관리자";
-    if (page.requireDragonCarAdmin) return "용차관리자";
-    if (page.requireRoleLevel) return `Lv.${page.requireRoleLevel}+`;
-    return "권한";
+  if (page.public) return "";
+
+  if (page.requireSuperAdmin) {
+    return "최고관리자";
   }
+
+  if (page.requireDragonCarAdmin) {
+    return "용차관리자";
+  }
+
+  if (Number(page.requireRoleLevel) >= 60) {
+    return "관리자";
+  }
+
+  if (Number(page.requireRoleLevel) >= 30) {
+    return "팀장";
+  }
+
+  return "권한";
+}
 
   function pageSubtext(path) {
     switch (normalizePath(path)) {

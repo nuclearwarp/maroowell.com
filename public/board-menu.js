@@ -125,6 +125,7 @@
         if (currentVariants.has(variant)) return true;
       }
     }
+
     return false;
   }
 
@@ -177,49 +178,49 @@
     return true;
   }
 
-  function requirementText(page) {
-  if (!page) return "접근 권한이 없습니다.";
-
-  if (page.requireSuperAdmin) {
-    return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
-  }
-
-  if (page.requireDragonCarAdmin) {
-    return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
-  }
-
-  if (Number(page.requireRoleLevel) >= 60) {
-    return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
-  }
-
-  if (Number(page.requireRoleLevel) >= 30) {
-    return "팀장 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
-  }
-
-  return "접근 권한이 없습니다.";
-}
-
   function pageBadge(page) {
-  if (page.public) return "";
+    if (page.public) return "";
 
-  if (page.requireSuperAdmin) {
-    return "최고관리자";
+    if (page.requireSuperAdmin) {
+      return "최고관리자";
+    }
+
+    if (page.requireDragonCarAdmin) {
+      return "용차관리자";
+    }
+
+    if (Number(page.requireRoleLevel) >= 60) {
+      return "관리자";
+    }
+
+    if (Number(page.requireRoleLevel) >= 30) {
+      return "팀장";
+    }
+
+    return "권한";
   }
 
-  if (page.requireDragonCarAdmin) {
-    return "용차관리자";
-  }
+  function requirementText(page) {
+    if (!page) return "접근 권한이 없습니다.";
 
-  if (Number(page.requireRoleLevel) >= 60) {
-    return "관리자";
-  }
+    if (page.requireSuperAdmin) {
+      return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
+    }
 
-  if (Number(page.requireRoleLevel) >= 30) {
-    return "팀장";
-  }
+    if (page.requireDragonCarAdmin) {
+      return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
+    }
 
-  return "권한";
-}
+    if (Number(page.requireRoleLevel) >= 60) {
+      return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
+    }
+
+    if (Number(page.requireRoleLevel) >= 30) {
+      return "팀장 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
+    }
+
+    return "접근 권한이 없습니다.";
+  }
 
   function pageSubtext(path) {
     switch (normalizePath(path)) {
@@ -256,7 +257,7 @@
   }
 
   async function loadAccess() {
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = (window.MARUWELL_CONFIG || {});
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const out = defaultAccess();
 
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) {
@@ -564,11 +565,13 @@
   function showAccessDenied(page, access) {
     injectStyles();
 
+    document.documentElement.style.visibility = "visible";
+
     const old = document.getElementById("mwDeniedScreen");
     if (old) old.remove();
 
-    const homePath = (window.MARUWELL_CONFIG || {})?.PATHS?.index || "/index.html";
-    const loginPath = (window.MARUWELL_CONFIG || {})?.PATHS?.login || "/login.html";
+    const homePath = window.MARUWELL_CONFIG?.PATHS?.index || "/index.html";
+    const loginPath = window.MARUWELL_CONFIG?.PATHS?.login || "/login.html";
 
     const email = access?.email || "-";
     const roleLevel = Number(access?.max_role_level || 0);
@@ -600,19 +603,21 @@
     document.body.appendChild(screen);
     document.body.style.overflow = "hidden";
 
-    const homeBtn = screen.querySelector("#mwDeniedHomeBtn");
-    const loginBtn = screen.querySelector("#mwDeniedLoginBtn");
-
-    homeBtn?.addEventListener("click", () => {
+    screen.querySelector("#mwDeniedHomeBtn")?.addEventListener("click", () => {
       location.href = homePath;
     });
 
-    loginBtn?.addEventListener("click", async () => {
+    screen.querySelector("#mwDeniedLoginBtn")?.addEventListener("click", async () => {
       try {
-        const { SUPABASE_URL, SUPABASE_ANON_KEY } = (window.MARUWELL_CONFIG || {});
+        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
+
         if (access?.signed_in && SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient) {
           const authStorage = (() => {
-            try { return window.sessionStorage; } catch { return undefined; }
+            try {
+              return window.sessionStorage;
+            } catch {
+              return undefined;
+            }
           })();
 
           const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -695,6 +700,7 @@
       }
 
       closeMenu();
+
       setTimeout(() => {
         location.href = path;
       }, 80);

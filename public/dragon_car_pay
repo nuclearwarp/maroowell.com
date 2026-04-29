@@ -972,6 +972,7 @@
         mode:"vendor",
         allRows:[],
         monthRows:[],
+        currentInfos:[],
         groups:[],
         selectedGroupKey:"",
         vendorRows:[],
@@ -1201,14 +1202,32 @@
           "배송수량","배송 수량","수량"
         ]));
 
-        let amount = toNumber(first(row,[
-          "amount","settlement_amount","settlementAmount",
-          "total_amount","totalAmount",
-          "pay_amount","payment_amount",
-          "정산금액","정산 금액","금액","총금액"
+        const returnQty = toNumber(first(row,[
+          "return_quantity",
+          "return_qty",
+          "return_count",
+          "returnCount",
+          "반품수량",
+          "반품 수량",
+          "반품"
         ]));
 
-        if(!amount && price && parcel) amount = price * parcel;
+        const rawAmount = toNumber(first(row,[
+          "amount",
+          "settlement_amount",
+          "settlementAmount",
+          "total_amount",
+          "totalAmount",
+          "pay_amount",
+          "payment_amount",
+          "정산금액",
+          "정산 금액",
+          "금액",
+          "총금액"
+        ]));
+
+        const computedAmount = price * (parcel + returnQty);
+        const amount = computedAmount > 0 ? computedAmount : rawAmount;
 
         const vendorId = clean(first(row,["vendor_id","vendorId","vendor","vendor_pk","거래처id","벤더id"]));
         const vendorName = clean(first(row,["vendor_name","vendorName","company_name","companyName","업체","업체명","거래처"]))
@@ -1233,7 +1252,8 @@
           route:clean(first(row,["route","route_name","routeName","route_code","라우트"])).replace(/\s+/g," "),
           price,
           parcel,
-          returnQty:toNumber(first(row,["return_quantity","return_qty","return_count","returnCount","반품수량","반품 수량","반품"])),
+          returnQty,
+          totalQty:parcel + returnQty,
           amount:roundWon(amount),
           taxIssued:taxIssued(first(row,[
             "tax_invoice","taxInvoice",
@@ -1364,6 +1384,8 @@
           .map(rowInfo)
           .filter(i => rowSearch(i, q));
 
+        state.currentInfos = rows;
+
         const map = new Map();
 
         for(const info of rows){
@@ -1411,7 +1433,6 @@
           });
 
           groups.sort((a,b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
-
           state.monthlyTeam = monthly;
         } else {
           groups.forEach(g => g.stats = vendorStats(g.infos));
@@ -1427,30 +1448,48 @@
       }
 
       function renderSummary(){
-        const totals = state.groups.reduce((a,g) => {
-          a.total += g.stats.total || 0;
-          a.issued += g.stats.issued || 0;
-          a.unpaid += g.stats.unpaid || 0;
-          a.comm += g.stats.commission || 0;
-          a.ins += g.stats.insurance || 0;
+        const rows = Array.isArray(state.currentInfos) ? state.currentInfos : [];
+
+        const baseTotals = rows.reduce((a,r) => {
+          a.total += r.amount || 0;
+          a.issued += r.taxIssued ? (r.amount || 0) : 0;
+          a.unissued += r.taxIssued ? 0 : (r.amount || 0);
+          a.unpaid += r.paid ? 0 : (r.amount || 0);
+          a.parcel += r.parcel || 0;
+          a.returnQty += r.returnQty || 0;
           return a;
-        }, { total:0, issued:0, unpaid:0, comm:0, ins:0 });
+        }, {
+          total:0,
+          issued:0,
+          unissued:0,
+          unpaid:0,
+          parcel:0,
+          returnQty:0
+        });
+
+        const driverDeductions = state.mode === "driver"
+          ? state.groups.reduce((a,g) => {
+              a.comm += g.stats.commission || 0;
+              a.ins += g.stats.insurance || 0;
+              return a;
+            }, { comm:0, ins:0 })
+          : { comm:0, ins:0 };
 
         if(state.mode === "driver"){
           dom.summaryGrid.innerHTML = `
             <div class="summaryCard"><div class="summaryLabel">정산월</div><div class="summaryValue">${esc(monthShort(state.month))}</div></div>
             <div class="summaryCard"><div class="summaryLabel">정산서 수</div><div class="summaryValue blue">${fmt(state.groups.length)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">월 총금액</div><div class="summaryValue">${money(totals.total)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">세금계산서 발행</div><div class="summaryValue green">${money(totals.issued)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">수수료 공제</div><div class="summaryValue red">${money(totals.comm)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">고용/산재</div><div class="summaryValue yellow">${money(totals.ins)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">월 총금액</div><div class="summaryValue">${money(baseTotals.total)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">세금계산서 발행</div><div class="summaryValue green">${money(baseTotals.issued)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">수수료 공제</div><div class="summaryValue red">${money(driverDeductions.comm)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">고용/산재</div><div class="summaryValue yellow">${money(driverDeductions.ins)}</div></div>
           `;
         } else {
           dom.summaryGrid.innerHTML = `
             <div class="summaryCard"><div class="summaryLabel">정산월</div><div class="summaryValue">${esc(monthShort(state.month))}</div></div>
             <div class="summaryCard"><div class="summaryLabel">정산서 수</div><div class="summaryValue blue">${fmt(state.groups.length)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">월 총금액</div><div class="summaryValue">${money(totals.total)}</div></div>
-            <div class="summaryCard"><div class="summaryLabel">미입금</div><div class="summaryValue red">${money(totals.unpaid)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">월 총금액</div><div class="summaryValue">${money(baseTotals.total)}</div></div>
+            <div class="summaryCard"><div class="summaryLabel">미입금</div><div class="summaryValue red">${money(baseTotals.unpaid)}</div></div>
           `;
         }
 

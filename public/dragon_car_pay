@@ -1,2146 +1,1061 @@
-<!doctype html>
-<html lang="ko">
-<head>
-  <script src="/config.js"></script>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <meta name="referrer" content="origin" />
-  <title>마루웰 용차 정산서</title>
-  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
-
-  <style>
-    html { visibility: hidden; }
-
-    :root{
-      --bg:#0b1220;
-      --bg2:#08111f;
-      --panel:#0f1a2d;
-      --panel2:#0c1524;
-      --line:rgba(255,255,255,.08);
-      --txt:#e6eefc;
-      --muted:#93a4c7;
-
-      --btn:#162744;
-      --btn2:#1a2f55;
-      --ok:#1a5a3a;
-      --danger:#6b1b1b;
-
-      --paper:#ffffff;
-      --paperLine:#1f1f1f;
-      --paperHead:#dce8c4;
-      --paperTitle:#d9edf1;
-      --paperTxt:#111827;
-      --paperBg:#f7f7f7;
-
-      --sumBlue:#8db8e8;
-      --sumPeach:#ffd9b8;
-      --sumPurple:#cbbbd9;
-      --sumGreen:#dce8c4;
-      --finalGreen:#00b857;
-      --finalCyan:#bfe8ef;
-
-      --headerH:56px;
-      --toolbarH:58px;
-      --statusH:44px;
-    }
-
-    * { box-sizing:border-box; }
-
-    html, body{
-      margin:0;
-      height:100%;
-      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
-      background:#0a0f1a;
-      color:var(--txt);
-    }
-
-    body{ overflow:hidden; }
-
-    .app{
-      height:100%;
-      display:grid;
-      grid-template-rows:var(--headerH) var(--toolbarH) 1fr var(--statusH);
-    }
-
-    .topbar{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:0 14px;
-      border-bottom:1px solid var(--line);
-      background:linear-gradient(180deg,var(--bg),var(--bg2));
-    }
-
-    .topbar a{
-      display:flex;
-      align-items:center;
-      text-decoration:none;
-      color:inherit;
-    }
-
-    .topbar img{
-      width:24px;
-      height:24px;
-      display:block;
-    }
-
-    .titleBox{
-      display:flex;
-      flex-direction:column;
-      min-width:0;
-    }
-
-    .titleBox b{
-      font-size:18px;
-      line-height:1.1;
-    }
-
-    .titleBox small{
-      margin-top:3px;
-      color:var(--muted);
-      font-size:11px;
-      font-weight:900;
-    }
-
-    .spacer{ flex:1; }
-
-    .btn{
-      height:40px;
-      padding:0 14px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.14);
-      background:var(--btn);
-      color:var(--txt);
-      cursor:pointer;
-      font-weight:900;
-      font-size:13px;
-      white-space:nowrap;
-    }
-
-    .btn:hover{ background:var(--btn2); }
-    .btn.ok{ background:rgba(26,90,58,.35); border-color:rgba(0,255,140,.18); }
-    .btn.danger{ background:rgba(107,27,27,.35); border-color:rgba(255,60,60,.22); color:#ffccd3; }
-    .btn:disabled{ opacity:.55; cursor:not-allowed; }
-
-    .toolbar{
-      display:flex;
-      align-items:center;
-      gap:12px;
-      padding:9px 12px;
-      background:var(--panel2);
-      border-bottom:1px solid var(--line);
-      overflow:auto hidden;
-    }
-
-    .toolGroup{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding-right:12px;
-      border-right:1px solid var(--line);
-      flex:0 0 auto;
-    }
-
-    .toolGroup:last-child{
-      border-right:none;
-      padding-right:0;
-    }
-
-    .toolGroup label{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:900;
-      white-space:nowrap;
-    }
-
-    .toolbar input{
-      height:38px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.12);
-      background:#0f1728;
-      color:var(--txt);
-      padding:0 12px;
-      font-size:13px;
-      outline:none;
-    }
-
-    .toolbar input:focus{
-      border-color:rgba(96,165,250,.55);
-    }
-
-    .modeTabs{
-      display:flex;
-      gap:8px;
-    }
-
-    .modeBtn{
-      height:38px;
-      min-width:92px;
-      padding:0 14px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.12);
-      background:rgba(255,255,255,.04);
-      color:#dce8ff;
-      font-weight:900;
-      cursor:pointer;
-    }
-
-    .modeBtn.active{
-      background:rgba(59,130,246,.18);
-      border-color:rgba(96,165,250,.5);
-      color:#fff;
-    }
-
-    .main{
-      min-height:0;
-      display:grid;
-      grid-template-columns:360px 1fr;
-    }
-
-    .sidebar{
-      min-height:0;
-      border-right:1px solid var(--line);
-      background:linear-gradient(180deg,var(--panel),#0b1321);
-      display:flex;
-      flex-direction:column;
-    }
-
-    .sideSection{
-      padding:12px;
-      border-bottom:1px solid var(--line);
-    }
-
-    .sideTitle{
-      font-size:12px;
-      color:var(--muted);
-      font-weight:900;
-      margin-bottom:10px;
-    }
-
-    .summaryGrid{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:10px;
-    }
-
-    .summaryCard{
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.04);
-      border-radius:14px;
-      padding:12px;
-      min-width:0;
-    }
-
-    .summaryLabel{
-      font-size:11px;
-      color:var(--muted);
-      font-weight:900;
-      margin-bottom:4px;
-    }
-
-    .summaryValue{
-      font-size:18px;
-      line-height:1.1;
-      font-weight:900;
-      color:#fff;
-      word-break:break-word;
-      font-variant-numeric:tabular-nums;
-    }
-
-    .summaryValue.blue{ color:#bfdbfe; }
-    .summaryValue.red{ color:#fecaca; }
-    .summaryValue.green{ color:#bbf7d0; }
-    .summaryValue.yellow{ color:#fde68a; }
-
-    .groupList{
-      min-height:0;
-      overflow:auto;
-      padding:10px;
-    }
-
-    .groupItem{
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.04);
-      border-radius:16px;
-      padding:12px;
-      margin-bottom:10px;
-      cursor:pointer;
-      transition:.14s ease;
-    }
-
-    .groupItem:hover{
-      border-color:rgba(255,255,255,.18);
-      background:rgba(255,255,255,.07);
-    }
-
-    .groupItem.active{
-      border-color:rgba(96,165,250,.55);
-      background:rgba(59,130,246,.12);
-      box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
-    }
-
-    .groupName{
-      font-weight:900;
-      color:#fff;
-      line-height:1.3;
-      margin-bottom:9px;
-      word-break:break-word;
-      white-space:pre-line;
-    }
-
-    .groupMeta{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:6px 10px;
-      font-size:12px;
-      color:#d3def5;
-    }
-
-    .groupMeta span{
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-
-    .groupMeta b{
-      color:#fff;
-      font-weight:900;
-      font-variant-numeric:tabular-nums;
-    }
-
-    .groupMeta .wide{
-      grid-column:1 / -1;
-    }
-
-    .content{
-      min-width:0;
-      min-height:0;
-      overflow:auto;
-      background:#0d1523;
-      padding:16px;
-    }
-
-    .invoicePage{
-      width:min(1180px, 100%);
-      margin:0 auto;
-      background:#ffffff;
-      color:var(--paperTxt);
-      border-radius:4px;
-      box-shadow:0 16px 42px rgba(0,0,0,.24);
-      overflow:hidden;
-      padding:24px 26px 28px;
-    }
-
-    .statementTopStrip{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin-bottom:12px;
-      font-size:14px;
-      font-weight:900;
-    }
-
-    .topChip{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      min-width:100px;
-      height:30px;
-      padding:0 12px;
-      border:1px solid #cbd5e1;
-      background:#dce8c4;
-      color:#000;
-    }
-
-    .topChip.value{
-      background:#ddd6eb;
-      min-width:150px;
-      font-weight:700;
-    }
-
-    .topChip.moneyA,
-    .topChip.moneyB,
-    .topChip.moneyC{
-      color:#fff;
-      background:#a000ff;
-      min-width:130px;
-    }
-
-    .topChip.moneyB{ background:#498ce8; }
-
-    .mwSheet{
-      width:100%;
-      border-collapse:collapse;
-      table-layout:fixed;
-      font-size:14px;
-      color:#111;
-    }
-
-    .mwSheet th,
-    .mwSheet td{
-      border:1px solid #1f1f1f;
-      padding:6px 7px;
-      text-align:center;
-      vertical-align:middle;
-      line-height:1.25;
-      word-break:break-word;
-      overflow-wrap:anywhere;
-    }
+git checkout eef0a1aea2e1099af4fa8bce504b1473135ef216 -- public/dragon_car_pay
+
+python3 <<'PY'
+from pathlib import Path
+
+path = Path("public/dragon_car_pay")
+text = path.read_text(encoding="utf-8")
+
+start = '<script id="mwDragonDriverSettlementPatch">'
+end = '</script><!-- /mwDragonDriverSettlementPatch -->'
+
+if start in text:
+    a = text.index(start)
+    b = text.index(end, a) + len(end)
+    text = text[:a] + text[b:]
 
-    .mwSheet .title{
-      background:var(--paperTitle);
-      font-size:24px;
-      font-weight:900;
-      padding:10px;
-      letter-spacing:-.02em;
-    }
-
-    .mwSheet .head{
-      background:var(--paperHead);
-      font-size:21px;
-      font-weight:900;
-    }
+patch = r'''
+<script id="mwDragonDriverSettlementPatch">
+(function () {
+  "use strict";
 
-    .mwSheet .subhead{
-      background:var(--paperHead);
-      font-weight:900;
-    }
-
-    .mwSheet .left{
-      text-align:left;
-    }
+  const DATA_TABLE = "dragon_car";
+  const INFO_TABLE = "maroowell_info";
 
-    .mwSheet .right{
-      text-align:right;
-      font-variant-numeric:tabular-nums;
-    }
+  const ZERO_COMMISSION_DRIVERS = new Set(["김용준", "장세인", "이우람"]);
+  const TEAM_LEADER_NAME = "한재봉";
+  const DEFAULT_COMMISSION_RATE = 0.08;
+  const INSURANCE_RATE = 0.0168;
+  const FILLER_ROW_TARGET = 27;
 
-    .mwSheet .money{
-      text-align:right;
-      font-variant-numeric:tabular-nums;
-      padding-right:10px;
-    }
+  let client = null;
+  let loaded = false;
+  let rawRows = [];
+  let infoByName = new Map();
+  let patchTimer = null;
+  let patchRunning = false;
 
-    .mwSheet .red{
-      color:#ff0000;
-      font-weight:900;
-    }
+  function $(sel) {
+    return document.querySelector(sel);
+  }
 
-    .mwSheet .greenText{
-      color:#0ba84f;
-      font-weight:900;
-    }
+  function $all(sel) {
+    return Array.from(document.querySelectorAll(sel));
+  }
 
-    .mwSheet .blueCell{
-      background:var(--sumBlue);
-      font-weight:900;
-    }
+  function clean(value) {
+    return String(value ?? "").trim();
+  }
 
-    .mwSheet .peachCell{
-      background:var(--sumPeach);
-      font-weight:900;
-      color:#ff0000;
-    }
+  function compact(value) {
+    return clean(value).replace(/\s+/g, "");
+  }
 
-    .mwSheet .purpleCell{
-      background:var(--sumPurple);
-      font-weight:900;
-      color:#11395f;
-    }
+  function esc(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
-    .mwSheet .greenCell{
-      background:var(--sumGreen);
-      font-weight:900;
-    }
+  function toNumber(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
 
-    .mwSheet .finalLabel{
-      background:var(--finalCyan);
-      font-size:21px;
-      font-weight:900;
-    }
+    const n = Number(
+      String(value ?? "")
+        .replace(/[₩원,%\s]/g, "")
+        .replace(/,/g, "")
+    );
 
-    .mwSheet .finalAmount{
-      background:var(--finalGreen);
-      color:#8a2be2;
-      font-size:18px;
-      font-weight:900;
-      text-align:right;
-      font-variant-numeric:tabular-nums;
-    }
+    return Number.isFinite(n) ? n : 0;
+  }
 
-    .mwSheet .blankRow td{
-      height:25px;
-      color:transparent;
-    }
+  function roundWon(value) {
+    return Math.round(Number(value) || 0);
+  }
 
-    .mwSheet .lossLabel{
-      color:#ff0000;
-      font-weight:900;
-      text-align:left;
-      padding-left:12px;
-    }
+  function money(value) {
+    return "₩" + roundWon(value).toLocaleString("ko-KR");
+  }
 
-    .mwSheet .note{
-      text-align:center;
-      line-height:1.65;
-      padding:18px 10px;
-    }
+  function qty(value) {
+    return roundWon(value).toLocaleString("ko-KR");
+  }
 
-    .mwSheet .sectionGap td{
-      border-left:none;
-      border-right:none;
-      height:22px;
-      padding:0;
-      background:#fff;
-    }
+  function normalizedKey(key) {
+    return String(key || "").replace(/[^a-zA-Z0-9가-힣]/g, "").toLowerCase();
+  }
 
-    .emptyState{
-      width:min(940px, 100%);
-      margin:0 auto;
-      padding:24px;
-      border:1px dashed rgba(255,255,255,.14);
-      border-radius:16px;
-      text-align:center;
-      color:#c1d0ea;
-      background:rgba(255,255,255,.03);
-      font-weight:900;
-    }
+  function first(row, keys) {
+    if (!row) return "";
 
-    .statusbar{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:0 12px;
-      border-top:1px solid var(--line);
-      background:#0a1320;
-      font-size:12px;
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(row, key) && row[key] != null && clean(row[key]) !== "") {
+        return row[key];
+      }
     }
 
-    .pill{
-      padding:5px 10px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.12);
-      background:rgba(255,255,255,.05);
-      font-weight:900;
-      white-space:nowrap;
-    }
+    const map = new Map();
+    Object.keys(row).forEach(key => map.set(normalizedKey(key), key));
 
-    .pill.ok{ color:#bbf7d0; }
-    .pill.warn{ color:#fde68a; }
-    .pill.err{ color:#fecaca; }
-
-    .statusText{
-      color:var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
+    for (const key of keys) {
+      const realKey = map.get(normalizedKey(key));
+      if (realKey && row[realKey] != null && clean(row[realKey]) !== "") {
+        return row[realKey];
+      }
     }
 
-    .accessDenied{
-      position:fixed;
-      inset:0;
-      display:none;
-      align-items:center;
-      justify-content:center;
-      padding:20px;
-      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
-      z-index:9999;
-    }
+    return "";
+  }
 
-    .accessDenied.show{ display:flex; }
-
-    .accessCard{
-      width:min(520px, calc(100vw - 24px));
-      border:1px solid rgba(255,255,255,.10);
-      border-radius:22px;
-      background:#101827;
-      box-shadow:0 24px 60px rgba(0,0,0,.35);
-      padding:24px;
-    }
+  function parseMonth(value) {
+    const raw = clean(value);
 
-    .accessCard h2{
-      margin:0 0 8px;
-      font-size:24px;
-      line-height:1.2;
-    }
+    let m = raw.match(/(20\d{2})\s*[-./년 ]\s*(\d{1,2})/);
+    if (m) return m[1] + "-" + String(Number(m[2])).padStart(2, "0");
 
-    .accessCard p{
-      margin:0;
-      color:#b8c3d9;
-      line-height:1.6;
-      font-size:14px;
-      white-space:pre-wrap;
-    }
+    m = raw.match(/(^|\D)(\d{2})\s*년\s*(\d{1,2})\s*월/);
+    if (m) return "20" + m[2] + "-" + String(Number(m[3])).padStart(2, "0");
 
-    .accessMeta{
-      margin-top:14px;
-      padding:12px 14px;
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,.10);
-      background:rgba(255,255,255,.04);
-      color:#e6eefc;
-      font-size:13px;
-      font-weight:800;
-      word-break:break-word;
-    }
+    m = raw.match(/^(20\d{2})(\d{2})$/);
+    if (m) return m[1] + "-" + m[2];
 
-    .accessActions{
-      margin-top:18px;
-      display:flex;
-      gap:10px;
-      justify-content:flex-end;
-      flex-wrap:wrap;
-    }
+    return raw;
+  }
 
-    .invoicePage.capture-export{
-      overflow:visible !important;
-      width:1180px !important;
-      max-width:none !important;
-      height:auto !important;
-      max-height:none !important;
-      border-radius:0 !important;
-      box-shadow:none !important;
-    }
+  function currentMonth() {
+    return parseMonth($("#monthInput")?.value || new Date().toISOString().slice(0, 7));
+  }
 
-    .capture-host{
-      position:fixed;
-      left:-100000px;
-      top:0;
-      z-index:-1;
-      background:#ffffff;
-      padding:24px;
-      width:auto;
-      height:auto;
-      overflow:visible;
-    }
+  function monthYear(month) {
+    return String(month || "").slice(0, 4);
+  }
 
-    @media (max-width:1100px){
-      .main{ grid-template-columns:1fr; }
-      .sidebar{ max-height:360px; }
-      .btn{ padding:0 10px; font-size:12px; }
-      .toolbar{ padding:8px; gap:8px; }
-      .invoicePage{
-        padding-left:12px;
+  function monthNumber(month) {
+    return Number(String(month || "").slice(5, 7)) || "";
+  }
+
+  function excelDate(value) {
+    if (typeof value === "number" && value > 20000 && value < 80000) {
+      return new Date(Math.round((value - 25569) * 86400 * 1000));
+    }
+    return null;
+  }
+
+  function parseDate(value, month) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+
+    const excel = excelDate(value);
+    if (excel) return excel;
+
+    const raw = clean(value);
+    if (!raw) return null;
+
+    let m = raw.match(/(20\d{2})\D+(\d{1,2})\D+(\d{1,2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+
+    m = raw.match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})/);
+    if (m) {
+      const year = Number(monthYear(month)) || new Date().getFullYear();
+      return new Date(year, Number(m[1]) - 1, Number(m[2]));
+    }
+
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  function rowMonth(value, fallbackMonth) {
+    const d = parseDate(value, fallbackMonth);
+    if (!d) return "";
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+  }
+
+  function formatDate(value, month) {
+    const d = parseDate(value, month);
+    if (!d) return clean(value) || "-";
+
+    const week = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()];
+    return (d.getMonth() + 1) + "/" + d.getDate() + " " + week;
+  }
+
+  function isSunday(value, month) {
+    const d = parseDate(value, month);
+    return !!d && d.getDay() === 0;
+  }
+
+  function taxIssued(value) {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+
+    const text = compact(value).toLowerCase();
+
+    if (!text) return false;
+    if (["발행", "발행완료", "완료", "o", "y", "yes", "true", "1", "issued"].includes(text)) return true;
+    if (["미발행", "미", "무", "x", "n", "no", "false", "0", "notissued", "미완료"].includes(text)) return false;
+    if (text.includes("미발행")) return false;
+
+    return text.includes("발행");
+  }
+
+  function falseLike(value) {
+    const text = compact(value).toLowerCase();
+    return ["x", "n", "no", "false", "0", "미가입", "없음", "제외", "미적용"].includes(text);
+  }
+
+  function parseRate(value, fallback) {
+    const raw = clean(value);
+    if (!raw) return fallback;
+    if (/^0+(\.0+)?%?$/.test(raw)) return 0;
+
+    let n = toNumber(raw);
+    if (!Number.isFinite(n)) return fallback;
+
+    if (raw.includes("%") || n > 1) n = n / 100;
+    return Math.max(0, n);
+  }
+
+  function normalizeDragonRow(raw, targetMonth) {
+    const dateValue = first(raw, [
+      "order_date",
+      "orderDate",
+      "delivery_date",
+      "deliveryDate",
+      "work_date",
+      "workDate",
+      "date",
+      "배송일자",
+      "배송 일자",
+      "일자"
+    ]);
+
+    const monthValue = parseMonth(first(raw, [
+      "settlement_month",
+      "settlementMonth",
+      "pay_month",
+      "target_month",
+      "month",
+      "정산월"
+    ]));
+
+    const month = /^\d{4}-\d{2}$/.test(monthValue)
+      ? monthValue
+      : rowMonth(dateValue, targetMonth);
+
+    const price = toNumber(first(raw, [
+      "price",
+      "unit_price",
+      "unitPrice",
+      "unit_cost",
+      "delivery_unit_price",
+      "단가"
+    ]));
+
+    const parcel = toNumber(first(raw, [
+      "parcel",
+      "parcel_count",
+      "delivery_count",
+      "deliveryCount",
+      "delivery_quantity",
+      "delivery_qty",
+      "quantity",
+      "qty",
+      "count",
+      "배송수량",
+      "배송 수량",
+      "수량"
+    ]));
+
+    let amount = toNumber(first(raw, [
+      "amount",
+      "settlement_amount",
+      "settlementAmount",
+      "total_amount",
+      "totalAmount",
+      "pay_amount",
+      "payment_amount",
+      "정산금액",
+      "정산 금액",
+      "금액",
+      "총금액"
+    ]));
+
+    if (!amount && price && parcel) amount = price * parcel;
+
+    return {
+      raw,
+      month,
+      date: dateValue,
+      driver: clean(first(raw, [
+        "delivery_driver",
+        "deliveryDriver",
+        "driver_name",
+        "driverName",
+        "driver",
+        "투입 기사",
+        "기사",
+        "기사명",
+        "용차기사"
+      ])),
+      camp: clean(first(raw, [
+        "camp",
+        "camp_code",
+        "campCode",
+        "camp_name",
+        "캠프"
+      ])),
+      wave: clean(first(raw, [
+        "wave",
+        "day_night",
+        "dayNight",
+        "shift",
+        "주야",
+        "주/야",
+        "주간/야간"
+      ])),
+      route: clean(first(raw, [
+        "route",
+        "route_name",
+        "routeName",
+        "route_code",
+        "라우트"
+      ])).replace(/\s+/g, " "),
+      price,
+      parcel,
+      amount: roundWon(amount),
+      taxIssued: taxIssued(first(raw, [
+        "tax_invoice",
+        "taxInvoice",
+        "tax_invoice_status",
+        "tax_status",
+        "invoice_status",
+        "tax_bill",
+        "tax_issued",
+        "is_tax_invoice_issued",
+        "is_tax_issued",
+        "세금계산서",
+        "세금계산서발행",
+        "세금계산서 발행"
+      ]))
+    };
+  }
+
+  function infoName(row) {
+    return clean(first(row, [
+      "person_name",
+      "name",
+      "driver_name",
+      "기사명",
+      "이름"
+    ]));
+  }
+
+  function driverInfo(name) {
+    return infoByName.get(compact(name)) || {};
+  }
+
+  function infoValue(name, keys) {
+    return clean(first(driverInfo(name), keys));
+  }
+
+  function businessName(name) {
+    return infoValue(name, [
+      "business_name",
+      "businessName",
+      "사업자 상호",
+      "사업자상호",
+      "상호"
+    ]) || name || "-";
+  }
+
+  function businessNumber(name) {
+    return infoValue(name, [
+      "business_registration_number",
+      "businessRegistrationNumber",
+      "business_no",
+      "사업자 번호",
+      "사업자번호"
+    ]) || "-";
+  }
+
+  function payrollBank(name) {
+    return infoValue(name, [
+      "payroll_bank_name",
+      "payrollBankName",
+      "bank_name",
+      "급여 은행",
+      "급여은행",
+      "은행"
+    ]) || "-";
+  }
+
+  function payrollAccount(name) {
+    return infoValue(name, [
+      "payroll_account_number",
+      "payrollAccountNumber",
+      "account_number",
+      "급여 계좌",
+      "급여계좌",
+      "계좌 번호",
+      "계좌번호"
+    ]) || "-";
+  }
+
+  function commissionRate(name) {
+    if (ZERO_COMMISSION_DRIVERS.has(compact(name))) return 0;
+
+    return parseRate(
+      infoValue(name, [
+        "dragon_car_commission",
+        "dragonCarCommission",
+        "용차 수수료",
+        "용차수수료"
+      ]),
+      DEFAULT_COMMISSION_RATE
+    );
+  }
+
+  function insuranceEnabled(name) {
+    const raw = infoValue(name, [
+      "employment_accident_insurance",
+      "employmentAccidentInsurance",
+      "고용산재"
+    ]);
+
+    if (!raw) return true;
+    return !falseLike(raw);
+  }
+
+  function taxBreakdown(issuedAmount) {
+    const supply = roundWon(issuedAmount / 1.1);
+    const vat = roundWon(issuedAmount - supply);
+    return { supply, vat };
+  }
+
+  function baseStats(rows, name) {
+    const total = rows.reduce((sum, row) => sum + row.amount, 0);
+    const issued = rows.filter(row => row.taxIssued).reduce((sum, row) => sum + row.amount, 0);
+    const unissued = total - issued;
+    const tax = taxBreakdown(issued);
+    const rate = commissionRate(name);
+    const commission = roundWon(total * rate);
+    const insurance = insuranceEnabled(name) ? roundWon(tax.supply * INSURANCE_RATE) : 0;
+
+    return {
+      total,
+      issued,
+      unissued,
+      supply: tax.supply,
+      vat: tax.vat,
+      rate,
+      commission,
+      insurance,
+      afterCommission: total - commission,
+      afterInsurance: total - commission - insurance,
+      teamBonus: 0,
+      finalPay: total - commission - insurance
+    };
+  }
+
+  function monthlyTeamStats(monthRows) {
+    const byDriver = new Map();
+
+    for (const row of monthRows) {
+      const name = row.driver || "미지정";
+      if (!byDriver.has(name)) byDriver.set(name, []);
+      byDriver.get(name).push(row);
+    }
+
+    let commission = 0;
+    let insurance = 0;
+
+    for (const [name, rows] of byDriver.entries()) {
+      const stats = baseStats(rows, name);
+      commission += stats.commission;
+      insurance += stats.insurance;
+    }
+
+    const insuranceHalf = roundWon(insurance * 0.5);
+    const pool = Math.max(0, commission - insuranceHalf);
+    const bonus = roundWon(pool * 0.5);
+
+    return { commission, insurance, insuranceHalf, pool, bonus };
+  }
+
+  function selectedDriverName() {
+    const activeName = clean($("#groupList .groupItem.active .groupName")?.textContent || "").split("\n")[0];
+    if (activeName) return clean(activeName);
+
+    const targetText = clean($("#infoTarget")?.textContent || "");
+    if (targetText) return clean(targetText.split("\n").pop());
+
+    return "";
+  }
+
+  async function fetchAll(table) {
+    const pageSize = 1000;
+    const out = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await client
+        .from(table)
+        .select("*")
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      out.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return out;
+  }
+
+  async function loadData() {
+    if (loaded) return;
+
+    const cfg = window.MARUWELL_CONFIG || {};
+    if (!window.supabase || !cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) return;
+
+    client = client || window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        storage: window.sessionStorage,
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+
+    const [dragonRows, infoRows] = await Promise.all([
+      fetchAll(DATA_TABLE),
+      fetchAll(INFO_TABLE)
+    ]);
+
+    rawRows = dragonRows || [];
+    infoByName = new Map();
+
+    for (const row of infoRows || []) {
+      const name = infoName(row);
+      if (name) infoByName.set(compact(name), row);
+    }
+
+    loaded = true;
+  }
+
+  function injectCss() {
+    if ($("#mwDragonDriverSettlementPatchCss")) return;
+
+    const style = document.createElement("style");
+    style.id = "mwDragonDriverSettlementPatchCss";
+    style.textContent = `
+      #statementCapture.mwDriverExcelSheet{
+        width:min(1180px,100%);
+        background:#fff;
+        color:#111;
+        padding:28px 34px 26px;
+        border-radius:6px;
+        box-shadow:0 16px 42px rgba(0,0,0,.24);
+        overflow:hidden;
+      }
+      #statementCapture.mwDriverExcelSheet .mwTop{
+        display:flex;
+        align-items:center;
+        gap:10px;
+        margin-bottom:14px;
+        font-weight:900;
+        font-size:15px;
+        min-width:1120px;
+      }
+      #statementCapture.mwDriverExcelSheet .mwTop span{
+        height:31px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:0 14px;
+        border:1px solid #c8c8c8;
+        background:#cfe3bd;
+        white-space:nowrap;
+      }
+      #statementCapture.mwDriverExcelSheet .mwTop .v{
+        background:#d7cfe6;
+        min-width:140px;
+        font-weight:600;
+      }
+      #statementCapture.mwDriverExcelSheet .mwTop .m1{
+        background:#9f00ff;
+        color:#fff;
+        min-width:130px;
+      }
+      #statementCapture.mwDriverExcelSheet .mwTop .m2{
+        background:#4a90e2;
+        color:#fff;
+        min-width:130px;
+      }
+      #statementCapture.mwDriverExcelSheet table{
+        border-collapse:collapse;
+        table-layout:fixed;
+        width:100%;
+        font-size:16px;
+        color:#111;
+        background:#fff;
+      }
+      #statementCapture.mwDriverExcelSheet th,
+      #statementCapture.mwDriverExcelSheet td{
+        border:1px solid #222;
+        padding:6px 7px;
+        text-align:center;
+        vertical-align:middle;
+        line-height:1.25;
+        word-break:break-word;
+        overflow-wrap:anywhere;
+      }
+      #statementCapture.mwDriverExcelSheet .title{
+        background:#dceff3;
+        font-size:29px;
+        font-weight:900;
+        padding:9px 10px;
+        border:2px solid #222;
+      }
+      #statementCapture.mwDriverExcelSheet .head{
+        background:#dce8c3;
+        font-size:24px;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .money{
+        text-align:right;
+        font-variant-numeric:tabular-nums;
         padding-right:12px;
+        white-space:nowrap;
       }
-      .statementTopStrip{
-        flex-wrap:wrap;
+      #statementCapture.mwDriverExcelSheet .red{
+        color:#f00;
+        font-weight:900;
       }
+      #statementCapture.mwDriverExcelSheet .green{
+        color:#0aa64b;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .blue{
+        background:#8eb9e8;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .peach{
+        background:#ffd8b8;
+        color:#f00;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .purple{
+        background:#c8bbd9;
+        color:#13395a;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .memoHead{
+        background:#dce8c3;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .finalLabel{
+        background:#bfe8ef;
+        font-size:22px;
+        font-weight:900;
+      }
+      #statementCapture.mwDriverExcelSheet .finalMoney{
+        background:#04b85f;
+        color:#8432c8;
+        font-size:19px;
+        font-weight:900;
+        text-align:right;
+        white-space:nowrap;
+      }
+      #statementCapture.mwDriverExcelSheet .blank td{
+        height:25px;
+        color:transparent;
+      }
+      #statementCapture.mwDriverExcelSheet .loss{
+        color:#f00;
+        font-weight:900;
+        text-align:left;
+        padding-left:12px;
+      }
+      #statementCapture.mwDriverExcelSheet .note{
+        text-align:center;
+        line-height:1.65;
+        padding:18px 10px;
+        font-size:15px;
+      }
+      #statementCapture.mwDriverExcelSheet .mt{
+        margin-top:20px;
+      }
+      #statementCapture.mwDriverExcelSheet.capture-export{
+        width:1180px!important;
+        max-width:none!important;
+        height:auto!important;
+        max-height:none!important;
+        border-radius:0!important;
+        box-shadow:none!important;
+        overflow:visible!important;
+      }
+      #groupList .groupMeta .wide{
+        grid-column:1 / -1;
+      }
+      #groupList .groupMeta span{
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function renderDetailRows(rows, teamBonus, month) {
+    const sorted = [...rows].sort((a, b) => {
+      const da = parseDate(a.date, month)?.getTime() || 0;
+      const db = parseDate(b.date, month)?.getTime() || 0;
+
+      return da - db
+        || clean(a.camp).localeCompare(clean(b.camp), "ko")
+        || clean(a.route).localeCompare(clean(b.route), "ko");
+    });
+
+    const rowCount = Math.max(FILLER_ROW_TARGET, sorted.length + (teamBonus ? 1 : 0), 1);
+    let html = "";
+
+    sorted.forEach((row, index) => {
+      html += `
+        <tr>
+          ${index === 0 ? `<td rowspan="${rowCount}"><b>전체</b></td>` : ""}
+          <td class="${isSunday(row.date, month) ? "red" : ""}">${esc(formatDate(row.date, month))}</td>
+          <td>${esc(row.camp)}</td>
+          <td>${esc(row.wave)}</td>
+          <td>${esc(row.route)}</td>
+          <td class="money">${money(row.price)}</td>
+          <td>${qty(row.parcel)}</td>
+          <td class="${row.taxIssued ? "green" : "red"}">${row.taxIssued ? "발행" : "미발행"}</td>
+          <td class="money">${money(row.amount)}</td>
+        </tr>
+      `;
+    });
+
+    if (!sorted.length) {
+      html += `<tr><td rowspan="${rowCount}"><b>전체</b></td><td colspan="8">표시할 정산 행이 없습니다.</td></tr>`;
     }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <div class="topbar">
-      <a id="mwBoardMenuToggle" href="/index.html" title="홈">
-        <img src="/favicon.ico" alt="Maroowell" />
-      </a>
-      <div class="titleBox">
-        <b>용차 정산서</b>
-        <small>월별 업체 / 기사 정산서 생성기</small>
+
+    if (teamBonus) {
+      html += `
+        <tr>
+          <td colspan="6">한팀장 용차 수수료</td>
+          <td class="green">발행</td>
+          <td class="money">${money(teamBonus)}</td>
+        </tr>
+      `;
+    }
+
+    const used = Math.max(1, sorted.length) + (teamBonus ? 1 : 0);
+    for (let i = used; i < rowCount; i++) {
+      html += `
+        <tr class="blank">
+          <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+          <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
+        </tr>
+      `;
+    }
+
+    return html;
+  }
+
+  function statsForDriver(monthRows, name, monthly) {
+    const rows = monthRows.filter(row => compact(row.driver) === compact(name));
+    const stats = baseStats(rows, name);
+
+    if (compact(name) === compact(TEAM_LEADER_NAME)) {
+      stats.teamBonus = monthly.bonus;
+      stats.issued += monthly.bonus;
+      stats.total += monthly.bonus;
+
+      const tax = taxBreakdown(stats.issued);
+      stats.supply = tax.supply;
+      stats.vat = tax.vat;
+      stats.finalPay += monthly.bonus;
+      stats.afterInsurance += monthly.bonus;
+      stats.afterCommission += monthly.bonus;
+    }
+
+    return { rows, stats };
+  }
+
+  function patchGroupList(monthRows, monthly) {
+    $all("#groupList .groupItem").forEach(item => {
+      const name = clean(item.querySelector(".groupName")?.textContent || "").split("\n")[0];
+      if (!name) return;
+
+      const meta = item.querySelector(".groupMeta");
+      if (!meta) return;
+
+      const { stats } = statsForDriver(monthRows, name, monthly);
+      const rateText = Math.round(stats.rate * 1000) / 10;
+
+      meta.innerHTML = `
+        <span>벌어온 금액 <b>${money(stats.total)}</b></span>
+        <span>수수료 ${rateText}% <b>${money(stats.commission)}</b></span>
+        <span>공제 후 <b>${money(stats.afterCommission)}</b></span>
+        <span>고용/산재 <b>${money(stats.insurance)}</b></span>
+        <span class="wide">고용산재 공제 후 <b>${money(stats.afterInsurance)}</b></span>
+        <span>발행 <b>${money(stats.issued)}</b></span>
+        <span>미발행 <b>${money(stats.unissued)}</b></span>
+        ${stats.teamBonus ? `<span class="wide">한팀장 수수료 <b>${money(stats.teamBonus)}</b></span>` : ""}
+        <span class="wide">실 지급액 <b>${money(stats.finalPay)}</b></span>
+      `;
+    });
+  }
+
+  function renderDriverSheet(name, rows, stats, monthly, month) {
+    const target = $("#statementCapture");
+    if (!target) return;
+
+    injectCss();
+
+    const year = monthYear(month);
+    const mon = monthNumber(month);
+
+    const note =
+      `※ 세금계산서 발행 금액은 좌측의 합계 금액으로 발행 되지만, 실지급액은 용차 수수료 및 고용/산재보험 공제 후 "실지급액" 으로 지급 됩니다. (고용/산재보험 의무가입에 따른 보험료 공제)` +
+      (stats.teamBonus
+        ? `\n※ 한재봉 팀장 수수료: ${money(stats.teamBonus)} = (용차 전체 수수료 ${money(monthly.commission)} - 고용산재 50% 부담 ${money(monthly.insuranceHalf)}) × 50%`
+        : "");
+
+    target.classList.add("mwDriverExcelSheet");
+    target.innerHTML = `
+      <div class="mwTop">
+        <span>검색 연도</span><span class="v">${esc(year)}</span>
+        <span>검색 월</span><span class="v">${esc(mon)}</span>
+        <span class="m1">${money(stats.total)}</span>
+        <span class="m2">${money(stats.finalPay)}</span>
+        <span>이름 검색</span><span class="v">${esc(name)}</span>
+        <span class="m1">${money(stats.issued)}</span>
       </div>
 
-      <div class="spacer"></div>
-
-      <button id="btnReload" class="btn" type="button">불러오기</button>
-      <button id="btnDownloadPng" class="btn ok" type="button">PNG 저장</button>
-      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
-    </div>
-
-    <div class="toolbar">
-      <div class="toolGroup">
-        <label for="monthInput">정산월</label>
-        <input id="monthInput" type="text" placeholder="예: 2026-04 / 26년 4월" />
-      </div>
-
-      <div class="toolGroup">
-        <label>정산서 종류</label>
-        <div class="modeTabs">
-          <button id="btnModeVendor" class="modeBtn active" type="button">업체 정산서</button>
-          <button id="btnModeDriver" class="modeBtn" type="button">기사 정산서</button>
-        </div>
-      </div>
-
-      <div class="toolGroup">
-        <label for="searchInput">검색</label>
-        <input id="searchInput" type="text" placeholder="업체 / Order / 기사 / 캠프 / 라우트" />
-      </div>
-
-      <div class="toolGroup">
-        <button id="btnClearSearch" class="btn" type="button">검색 초기화</button>
-      </div>
-    </div>
-
-    <div class="main">
-      <aside class="sidebar">
-        <div class="sideSection">
-          <div class="sideTitle">현재 조회</div>
-          <div class="summaryGrid">
-            <div class="summaryCard">
-              <div class="summaryLabel">정산월</div>
-              <div id="sideMonth" class="summaryValue">-</div>
-            </div>
-            <div class="summaryCard">
-              <div class="summaryLabel">정산서 수</div>
-              <div id="sideGroupCount" class="summaryValue blue">0</div>
-            </div>
-            <div class="summaryCard">
-              <div class="summaryLabel">월 총금액</div>
-              <div id="sideAmount" class="summaryValue">₩0</div>
-            </div>
-            <div class="summaryCard">
-              <div class="summaryLabel">세금계산서 발행</div>
-              <div id="sideIssued" class="summaryValue green">₩0</div>
-            </div>
-            <div class="summaryCard">
-              <div class="summaryLabel">수수료 공제</div>
-              <div id="sideCommission" class="summaryValue red">₩0</div>
-            </div>
-            <div class="summaryCard">
-              <div class="summaryLabel">고용/산재</div>
-              <div id="sideInsurance" class="summaryValue yellow">₩0</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="sideSection">
-          <div class="sideTitle">정산서 목록</div>
-        </div>
-
-        <div id="groupList" class="groupList"></div>
-      </aside>
-
-      <main class="content">
-        <div id="statementCapture" class="invoicePage" style="display:none"></div>
-
-        <div id="emptyState" class="emptyState">
-          월을 선택하고, 좌측에서 업체 또는 기사를 선택하면 정산서가 생성됩니다.
-        </div>
-      </main>
-    </div>
-
-    <div class="statusbar">
-      <span id="pillState" class="pill ok">READY</span>
-      <span id="pillRows" class="pill">행 0</span>
-      <span id="pillGroups" class="pill">정산서 0</span>
-      <span id="statusText" class="statusText">세금계산서 발행/미발행, 용차 수수료, 고용/산재 공제를 자동 계산합니다.</span>
-    </div>
-  </div>
-
-  <div id="accessDenied" class="accessDenied">
-    <div class="accessCard">
-      <h2>접근 권한 없음</h2>
-      <p id="accessDeniedText">이 페이지는 최고관리자 또는 용차 관리자만 접근할 수 있습니다.</p>
-      <div id="accessDeniedEmail" class="accessMeta"></div>
-      <div class="accessActions">
-        <button id="btnDeniedHome" class="btn" type="button">홈으로</button>
-        <button id="btnDeniedLogout" class="btn danger" type="button">로그아웃</button>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    (async function () {
-      "use strict";
-
-      const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
-      const LOGIN_PATH = PATHS?.login || "/login.html";
-      const INDEX_PATH = PATHS?.index || "/index.html";
-
-      const ACCESS_TABLE = "user_access";
-      const PROFILES_TABLE = "profiles";
-      const DATA_TABLE = "dragon_car";
-      const VENDORS_TABLE = "vendors";
-      const DRIVER_INFO_TABLE = "maroowell_info";
-
-      const ZERO_COMMISSION_DRIVER_NAMES = new Set(["김용준", "장세인", "이우람"]);
-      const TEAM_LEADER_NAME = "한재봉";
-      const DEFAULT_DRAGON_COMMISSION_RATE = 0.08;
-      const VAT_RATE = 0.10;
-      const EMPLOYMENT_ACCIDENT_RATE = 0.0168;
-      const FILLER_ROW_TARGET = 28;
-
-      const PAYMENT_INFO = {
-        bankName: "국민은행",
-        accountNumber: "293237 - 04 - 011538",
-        depositor: "마루웰",
-        requestNote: "금액 확인 요청 드립니다.\n\n금액 확인 하신 후에 이상 없으시면 세금계산서 발행 하겠습니다.\n\n이후 정산일자에 입금 부탁드립니다."
-      };
-
-      const COLUMN_CANDIDATES = {
-        rowId: ["id", "pk_id", "seq", "no"],
-        month: ["settlement_month", "pay_month", "month", "정산월"],
-        date: ["delivery_date", "work_date", "service_date", "settlement_date", "date", "driving_date", "운행일", "배송일자", "일자"],
-        vendorId: ["vendor_id", "vendorId", "vendor", "vendor_pk", "거래처id", "벤더id"],
-        vendorName: ["vendor_name", "vendorName", "company_name", "companyName", "업체", "업체명", "거래처"],
-        orderName: ["order_name", "orderName", "order", "order_no", "order_number", "오더", "오더명", "Order"],
-        driver: ["delivery_driver", "driver_name", "driverName", "driver", "기사", "기사명", "용차기사"],
-        camp: ["camp", "camp_code", "campCode", "camp_name", "캠프"],
-        wave: ["wave", "work_wave", "day_night", "dayNight", "shift", "주야", "주간야간", "주_야"],
-        route: ["route", "route_name", "routeName", "route_code", "routeCode", "라우트"],
-        unitPrice: ["unit_price", "unitPrice", "price", "delivery_unit_price", "unit_cost", "단가"],
-        quantity: ["delivery_quantity", "delivery_qty", "delivery_count", "parcel_count", "quantity", "qty", "count", "배송수량", "배송_수량", "수량"],
-        returnQuantity: ["return_quantity", "return_qty", "return_count", "returnCount", "반품수량", "반품_수량"],
-        amount: ["amount", "settlement_amount", "total_amount", "pay_amount", "payment_amount", "supply_amount", "정산금액", "금액", "총금액"],
-        tax: ["tax_invoice", "tax_invoice_status", "tax_status", "invoice_status", "tax_bill", "tax_bill_status", "tax_issued", "is_tax_invoice_issued", "is_tax_issued", "세금계산서", "세금계산서발행"],
-        payment: ["payment_status", "paid_status", "is_paid", "deposit_status", "입금여부"],
-        memo: ["memo", "note", "remark", "remarks", "비고"],
-        businessName: ["business_name", "businessName", "사업자상호", "상호"],
-        businessNumber: ["business_registration_number", "businessRegistrationNumber", "business_no", "사업자번호"],
-        payrollBank: ["payroll_bank_name", "payrollBankName", "bank_name", "은행", "급여은행"],
-        payrollAccount: ["payroll_account_number", "payrollAccountNumber", "account_number", "계좌", "급여계좌"],
-        employmentInsurance: ["employment_accident_insurance", "employmentAccidentInsurance", "고용산재", "고용_산재"],
-        dragonCommission: ["dragon_car_commission", "dragonCarCommission", "용차수수료", "용차_수수료"]
-      };
-
-      const $ = (sel) => document.querySelector(sel);
-
-      const dom = {
-        monthInput: $("#monthInput"),
-        searchInput: $("#searchInput"),
-
-        btnReload: $("#btnReload"),
-        btnDownloadPng: $("#btnDownloadPng"),
-        btnLogout: $("#btnLogout"),
-        btnClearSearch: $("#btnClearSearch"),
-        btnModeVendor: $("#btnModeVendor"),
-        btnModeDriver: $("#btnModeDriver"),
-
-        sideMonth: $("#sideMonth"),
-        sideGroupCount: $("#sideGroupCount"),
-        sideAmount: $("#sideAmount"),
-        sideIssued: $("#sideIssued"),
-        sideCommission: $("#sideCommission"),
-        sideInsurance: $("#sideInsurance"),
-        groupList: $("#groupList"),
-
-        statementCapture: $("#statementCapture"),
-        emptyState: $("#emptyState"),
-
-        pillState: $("#pillState"),
-        pillRows: $("#pillRows"),
-        pillGroups: $("#pillGroups"),
-        statusText: $("#statusText"),
-
-        accessDenied: $("#accessDenied"),
-        accessDeniedText: $("#accessDeniedText"),
-        accessDeniedEmail: $("#accessDeniedEmail"),
-        btnDeniedHome: $("#btnDeniedHome"),
-        btnDeniedLogout: $("#btnDeniedLogout")
-      };
-
-      const state = {
-        session: null,
-        viewerEmail: "",
-        viewerUserId: "",
-        month: defaultMonth(),
-        mode: "vendor",
-        allRows: [],
-        monthRows: [],
-        groups: [],
-        selectedGroupKey: "",
-        driverInfoRows: [],
-        driverInfoByName: new Map(),
-        vendorRows: [],
-        vendorById: new Map(),
-        monthDriverTotals: null
-      };
-
-      const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
-        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: {
-              storage: window.sessionStorage,
-              persistSession: true,
-              autoRefreshToken: true,
-              detectSessionInUrl: true
-            }
-          })
-        : null;
-
-      function getSupabaseProjectRef(url) {
-        try {
-          const host = new URL(url).hostname || "";
-          return host.split(".")[0] || "";
-        } catch {
-          return "";
-        }
-      }
-
-      function createSupabaseSessionBridge(url) {
-        const projectRef = getSupabaseProjectRef(url);
-        const prefixes = projectRef ? [
-          "sb-" + projectRef + "-auth-token",
-          "sb-" + projectRef + "-auth-token-code-verifier"
-        ] : [];
-        const origin = window.location.origin;
-        const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
-        const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2);
-        const pending = new Map();
-        let channel = null;
-        let started = false;
-
-        function matchesKey(key) {
-          return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
-        }
-
-        function readEntries(storage) {
-          const target = storage || window.sessionStorage;
-          const rows = [];
-          try {
-            for (let i = 0; i < target.length; i++) {
-              const key = target.key(i);
-              if (!matchesKey(key)) continue;
-              rows.push({ key, value: target.getItem(key) });
-            }
-          } catch {}
-          return rows;
-        }
-
-        function hasSession(storage) {
-          return readEntries(storage).some(row =>
-            row.key.includes("-auth-token") &&
-            !row.key.includes("code-verifier") &&
-            !!row.value
-          );
-        }
-
-        function writeEntries(entries, storage) {
-          const target = storage || window.sessionStorage;
-          try {
-            for (const row of entries || []) {
-              if (!row || !matchesKey(row.key)) continue;
-              if (row.value == null) target.removeItem(row.key);
-              else target.setItem(row.key, row.value);
-            }
-          } catch {}
-        }
-
-        function clearSession(storage) {
-          const target = storage || window.sessionStorage;
-          try {
-            const keys = [];
-            for (let i = 0; i < target.length; i++) {
-              const key = target.key(i);
-              if (matchesKey(key)) keys.push(key);
-            }
-            keys.forEach(key => target.removeItem(key));
-          } catch {}
-        }
-
-        function resolvePending(requestId, entries) {
-          const item = pending.get(requestId);
-          if (!item) return;
-          pending.delete(requestId);
-          clearTimeout(item.timer);
-          if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
-          item.resolve(hasSession(window.sessionStorage));
-        }
-
-        function handleSyncState(syncState) {
-          if (syncState === "SIGNED_OUT") {
-            clearSession(window.sessionStorage);
-            return;
-          }
-          if (syncState === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
-            requestSessionCopy(1200).catch(() => {});
-          }
-        }
-
-        function onWindowMessage(event) {
-          if (event.origin !== origin) return;
-          const msg = event.data || {};
-          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-          if (msg.type === "MW_SESSION_REQUEST") {
-            if (!hasSession(window.sessionStorage)) return;
-            try {
-              event.source?.postMessage({
-                type: "MW_SESSION_RESPONSE",
-                projectRef,
-                requestId: msg.requestId,
-                entries: readEntries(window.sessionStorage),
-                fromTabId: tabId
-              }, origin);
-            } catch {}
-            return;
-          }
-
-          if (msg.type === "MW_SESSION_RESPONSE") {
-            resolvePending(msg.requestId, msg.entries);
-            return;
-          }
-
-          if (msg.type === "MW_AUTH_SYNC") {
-            handleSyncState(msg.state);
-          }
-        }
-
-        function onChannelMessage(event) {
-          const msg = event.data || {};
-          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-          if (msg.type === "MW_SESSION_REQUEST") {
-            if (!hasSession(window.sessionStorage)) return;
-            try {
-              channel?.postMessage({
-                type: "MW_SESSION_RESPONSE",
-                projectRef,
-                requestId: msg.requestId,
-                entries: readEntries(window.sessionStorage),
-                fromTabId: tabId
-              });
-            } catch {}
-            return;
-          }
-
-          if (msg.type === "MW_SESSION_RESPONSE") {
-            resolvePending(msg.requestId, msg.entries);
-            return;
-          }
-
-          if (msg.type === "MW_AUTH_SYNC") {
-            handleSyncState(msg.state);
-          }
-        }
-
-        function start() {
-          if (started || !projectRef) return;
-          started = true;
-          window.addEventListener("message", onWindowMessage);
-          try {
-            if ("BroadcastChannel" in window) {
-              channel = new BroadcastChannel(channelName);
-              channel.onmessage = onChannelMessage;
-            }
-          } catch {}
-        }
-
-        function requestSessionCopy(timeoutMs) {
-          start();
-          if (!projectRef || hasSession(window.sessionStorage)) return Promise.resolve(true);
-          const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
-          return new Promise(resolve => {
-            const timer = setTimeout(() => {
-              pending.delete(requestId);
-              resolve(hasSession(window.sessionStorage));
-            }, timeoutMs || 1000);
-            pending.set(requestId, { resolve, timer });
-            const msg = { type: "MW_SESSION_REQUEST", projectRef, requestId, fromTabId: tabId };
-            try { window.postMessage(msg, origin); } catch {}
-            try { channel?.postMessage(msg); } catch {}
-          });
-        }
-
-        function broadcastAuthState(syncState) {
-          start();
-          const msg = { type: "MW_AUTH_SYNC", projectRef, state: syncState, fromTabId: tabId };
-          try { window.postMessage(msg, origin); } catch {}
-          try { channel?.postMessage(msg); } catch {}
-        }
-
-        return { start, requestSessionCopy, broadcastAuthState, clearSession };
-      }
-
-      const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL || "");
-
-      function normalizeKey(key) {
-        return String(key || "").replace(/[^a-zA-Z0-9가-힣]/g, "").toLowerCase();
-      }
-
-      function valueByCandidates(row, candidates) {
-        if (!row || !candidates) return "";
-        for (const key of candidates) {
-          if (Object.prototype.hasOwnProperty.call(row, key) && row[key] != null) return row[key];
-        }
-        const normalizedMap = new Map();
-        for (const key of Object.keys(row)) normalizedMap.set(normalizeKey(key), key);
-        for (const key of candidates) {
-          const realKey = normalizedMap.get(normalizeKey(key));
-          if (realKey && row[realKey] != null) return row[realKey];
-        }
-        return "";
-      }
-
-      function pick(row, groupKey) {
-        return valueByCandidates(row, COLUMN_CANDIDATES[groupKey] || []);
-      }
-
-      function esc(value) {
-        return String(value ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
-
-      function normalizeText(value) {
-        return String(value ?? "").trim();
-      }
-
-      function compactText(value) {
-        return normalizeText(value).replace(/\s+/g, "");
-      }
-
-      function toNumber(value) {
-        if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-        const text = String(value ?? "").trim();
-        if (!text) return 0;
-        const cleaned = text.replace(/[₩원,%\s]/g, "").replace(/,/g, "");
-        const n = Number(cleaned);
-        return Number.isFinite(n) ? n : 0;
-      }
-
-      function roundWon(value) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) return 0;
-        return Math.round(n);
-      }
-
-      function fmtMoney(value) {
-        return "₩" + roundWon(value).toLocaleString("ko-KR");
-      }
-
-      function fmtSignedMoney(value) {
-        const n = roundWon(value);
-        if (n < 0) return "-" + fmtMoney(Math.abs(n));
-        return fmtMoney(n);
-      }
-
-      function fmtNumber(value) {
-        return roundWon(value).toLocaleString("ko-KR");
-      }
-
-      function parseRate(value, fallback) {
-        const text = String(value ?? "").trim();
-        if (!text) return fallback;
-        if (/^0+(\.0+)?%?$/.test(text)) return 0;
-        let n = toNumber(text);
-        if (!Number.isFinite(n)) return fallback;
-        if (text.includes("%") || n > 1) n = n / 100;
-        if (n < 0) return 0;
-        return n;
-      }
-
-      function defaultMonth() {
-        const now = new Date();
-        return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-      }
-
-      function parseMonthInput(value) {
-        const raw = String(value || "").trim();
-        if (!raw) return defaultMonth();
-        const direct = raw.match(/(20\d{2})\s*[-./년]\s*(\d{1,2})/);
-        if (direct) return direct[1] + "-" + String(Number(direct[2])).padStart(2, "0");
-        const short = raw.match(/(^|\D)(\d{2})\s*년\s*(\d{1,2})\s*월/);
-        if (short) return "20" + short[2] + "-" + String(Number(short[3])).padStart(2, "0");
-        const monthOnly = raw.match(/^(\d{1,2})$/);
-        if (monthOnly) {
-          const year = new Date().getFullYear();
-          return year + "-" + String(Number(monthOnly[1])).padStart(2, "0");
-        }
-        return raw;
-      }
-
-      function formatMonthTitle(month) {
-        const m = String(month || "").match(/^(\d{4})-(\d{2})$/);
-        if (!m) return month || "-";
-        return m[1] + "년 " + Number(m[2]) + "월";
-      }
-
-      function formatMonthShort(month) {
-        const m = String(month || "").match(/^(\d{4})-(\d{2})$/);
-        if (!m) return month || "-";
-        return m[1] + ". " + Number(m[2]) + ".";
-      }
-
-      function isExcelSerialNumber(value) {
-        return typeof value === "number" && value > 20000 && value < 80000;
-      }
-
-      function excelSerialToDate(value) {
-        const utcDays = Math.floor(value - 25569);
-        const utcValue = utcDays * 86400;
-        return new Date(utcValue * 1000);
-      }
-
-      function parseDateValue(value) {
-        if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-        if (isExcelSerialNumber(value)) return excelSerialToDate(value);
-        const raw = String(value ?? "").trim();
-        if (!raw) return null;
-        const iso = raw.match(/(20\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})/);
-        if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
-        const md = raw.match(/^(\d{1,2})\s*[/.-]\s*(\d{1,2})/);
-        if (md) {
-          const year = Number(String(state.month || defaultMonth()).slice(0, 4)) || new Date().getFullYear();
-          return new Date(year, Number(md[1]) - 1, Number(md[2]));
-        }
-        const d = new Date(raw);
-        if (!Number.isNaN(d.getTime())) return d;
-        return null;
-      }
-
-      function rowMonthKey(row) {
-        const monthValue = normalizeText(pick(row, "month"));
-        const parsedMonth = parseMonthInput(monthValue);
-        if (/^\d{4}-\d{2}$/.test(parsedMonth)) return parsedMonth;
-        const date = parseDateValue(pick(row, "date"));
-        if (!date) return "";
-        return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
-      }
-
-      function dayName(date) {
-        if (!date) return "";
-        return ["일", "월", "화", "수", "목", "금", "토"][date.getDay()] || "";
-      }
-
-      function formatDateCell(value) {
-        const d = parseDateValue(value);
-        if (!d) return normalizeText(value) || "-";
-        return (d.getMonth() + 1) + "/" + d.getDate() + " " + dayName(d);
-      }
-
-      function isSunday(value) {
-        const d = parseDateValue(value);
-        return !!d && d.getDay() === 0;
-      }
-
-      function normalizeTaxStatus(value) {
-        if (typeof value === "boolean") return value;
-        const text = compactText(value).toLowerCase();
-        if (!text) return false;
-        if (["발행", "발행완료", "완료", "o", "y", "yes", "true", "1", "issued", "세금계산서발행"].includes(text)) return true;
-        if (["미발행", "미", "무", "x", "n", "no", "false", "0", "notissued", "미완료"].includes(text)) return false;
-        if (text.includes("미발행")) return false;
-        if (text.includes("발행")) return true;
-        return false;
-      }
-
-      function taxIssued(row) {
-        return normalizeTaxStatus(pick(row, "tax"));
-      }
-
-      function taxLabelByBool(value) {
-        return value ? "발행" : "미발행";
-      }
-
-      function yesLike(value) {
-        if (typeof value === "boolean") return value;
-        const text = compactText(value).toLowerCase();
-        if (!text) return false;
-        if (["o", "y", "yes", "true", "1", "가입", "대상", "적용"].includes(text)) return true;
-        if (["x", "n", "no", "false", "0", "미가입", "제외", "미적용"].includes(text)) return false;
-        return text.includes("o") || text.includes("가입") || text.includes("적용");
-      }
-
-      function rowInfo(row) {
-        const unit = toNumber(pick(row, "unitPrice"));
-        const qty = toNumber(pick(row, "quantity"));
-        const returnQty = toNumber(pick(row, "returnQuantity"));
-        let amount = toNumber(pick(row, "amount"));
-        if (!amount && unit && qty) amount = unit * qty;
-        const vendorId = normalizeText(pick(row, "vendorId"));
-        const vendorById = vendorId ? state.vendorById.get(String(vendorId)) : null;
-        const vendorName = normalizeText(pick(row, "vendorName")) || vendorDisplayName(vendorById) || (vendorId ? "업체 " + vendorId : "미지정 업체");
-        const driverName = normalizeText(pick(row, "driver")) || "미지정 기사";
-        return {
-          row,
-          rowId: normalizeText(pick(row, "rowId")),
-          date: pick(row, "date"),
-          camp: normalizeText(pick(row, "camp")),
-          wave: normalizeText(pick(row, "wave")),
-          route: normalizeText(pick(row, "route")),
-          unit,
-          qty,
-          returnQty,
-          amount: roundWon(amount),
-          taxIssued: taxIssued(row),
-          vendorId,
-          vendorName,
-          orderName: normalizeText(pick(row, "orderName")),
-          driverName,
-          memo: normalizeText(pick(row, "memo"))
-        };
-      }
-
-      function vendorDisplayName(vendor) {
-        if (!vendor) return "";
-        return normalizeText(
-          valueByCandidates(vendor, ["vendor_name", "company_name", "business_name", "name", "상호", "업체명"])
-        );
-      }
-
-      function vendorSearchText(vendor) {
-        if (!vendor) return "";
-        return Object.values(vendor).map(v => normalizeText(v)).join(" ");
-      }
-
-      function driverInfoName(info) {
-        return normalizeText(valueByCandidates(info, ["person_name", "name", "이름"]));
-      }
-
-      function getDriverInfo(name) {
-        const key = compactText(name);
-        if (!key) return null;
-        return state.driverInfoByName.get(key) || null;
-      }
-
-      function driverBusinessName(name) {
-        const info = getDriverInfo(name);
-        return normalizeText(valueByCandidates(info, COLUMN_CANDIDATES.businessName)) || name || "-";
-      }
-
-      function driverBusinessNumber(name) {
-        const info = getDriverInfo(name);
-        return normalizeText(valueByCandidates(info, COLUMN_CANDIDATES.businessNumber)) || "-";
-      }
-
-      function driverPayrollBank(name) {
-        const info = getDriverInfo(name);
-        return normalizeText(valueByCandidates(info, COLUMN_CANDIDATES.payrollBank)) || "-";
-      }
-
-      function driverPayrollAccount(name) {
-        const info = getDriverInfo(name);
-        return normalizeText(valueByCandidates(info, COLUMN_CANDIDATES.payrollAccount)) || "-";
-      }
-
-      function getDriverCommissionRate(name) {
-        if (ZERO_COMMISSION_DRIVER_NAMES.has(normalizeText(name))) return 0;
-        const info = getDriverInfo(name);
-        const raw = valueByCandidates(info, COLUMN_CANDIDATES.dragonCommission);
-        return parseRate(raw, DEFAULT_DRAGON_COMMISSION_RATE);
-      }
-
-      function hasEmploymentAccidentInsurance(name) {
-        const info = getDriverInfo(name);
-        const raw = valueByCandidates(info, COLUMN_CANDIDATES.employmentInsurance);
-        return yesLike(raw);
-      }
-
-      function computeTaxDetail(issuedAmount) {
-        const supply = roundWon(issuedAmount / (1 + VAT_RATE));
-        const vat = roundWon(issuedAmount - supply);
-        return { supply, vat, total: roundWon(issuedAmount) };
-      }
-
-      function computeInsurance(issuedAmount, enabled) {
-        if (!enabled) return 0;
-        const detail = computeTaxDetail(issuedAmount);
-        return roundWon(detail.supply * EMPLOYMENT_ACCIDENT_RATE);
-      }
-
-      function computeBaseSettlement(rows, name, mode) {
-        const infos = rows.map(rowInfo);
-        const totalAmount = infos.reduce((sum, item) => sum + item.amount, 0);
-        const issuedAmount = infos.filter(item => item.taxIssued).reduce((sum, item) => sum + item.amount, 0);
-        const unissuedAmount = totalAmount - issuedAmount;
-        const taxDetail = computeTaxDetail(issuedAmount);
-        const rate = mode === "driver" ? getDriverCommissionRate(name) : 0;
-        const commission = mode === "driver" ? roundWon(totalAmount * rate) : 0;
-        const insuranceEnabled = mode === "driver" ? hasEmploymentAccidentInsurance(name) : false;
-        const insurance = mode === "driver" ? computeInsurance(issuedAmount, insuranceEnabled) : 0;
-        const afterCommission = totalAmount - commission;
-        const finalPay = afterCommission - insurance;
-
-        return {
-          rows,
-          infos,
-          totalAmount,
-          issuedAmount,
-          unissuedAmount,
-          taxSupply: taxDetail.supply,
-          taxVat: taxDetail.vat,
-          commissionRate: rate,
-          commission,
-          insuranceEnabled,
-          insurance,
-          afterCommission,
-          teamLeaderBonus: 0,
-          finalPay
-        };
-      }
-
-      function computeMonthDriverTotals(groups) {
-        const driverGroups = groups.filter(group => group.mode === "driver" && group.name !== "미지정 기사");
-        const baseCommission = driverGroups.reduce((sum, group) => sum + group.metrics.commission, 0);
-        const baseInsurance = driverGroups.reduce((sum, group) => sum + group.metrics.insurance, 0);
-        const leaderBonus = Math.max(0, roundWon((baseCommission - (baseInsurance * 0.5)) * 0.5));
-        return { baseCommission, baseInsurance, leaderBonus };
-      }
-
-      function applyTeamLeaderBonus(group, leaderBonus) {
-        if (!group || group.mode !== "driver" || group.name !== TEAM_LEADER_NAME || !leaderBonus) return;
-        const metrics = group.metrics;
-        metrics.teamLeaderBonus = leaderBonus;
-        metrics.issuedAmount += leaderBonus;
-        metrics.totalAmount += leaderBonus;
-        const taxDetail = computeTaxDetail(metrics.issuedAmount);
-        metrics.taxSupply = taxDetail.supply;
-        metrics.taxVat = taxDetail.vat;
-        metrics.afterCommission += leaderBonus;
-        metrics.finalPay += leaderBonus;
-      }
-
-      function groupKeyVendor(info) {
-        return "vendor:" + (info.vendorId || info.vendorName || "none") + ":" + (info.orderName || "");
-      }
-
-      function groupKeyDriver(info) {
-        return "driver:" + (info.driverName || "none");
-      }
-
-      function rowMatchesSearch(info, query) {
-        if (!query) return true;
-        const haystack = [
-          info.vendorId,
-          info.vendorName,
-          info.orderName,
-          info.driverName,
-          info.camp,
-          info.wave,
-          info.route,
-          info.memo
-        ].join(" ").toLowerCase();
-        return haystack.includes(query.toLowerCase());
-      }
-
-      function buildGroups() {
-        const query = normalizeText(dom.searchInput.value);
-        state.monthRows = state.allRows.filter(row => rowMonthKey(row) === state.month);
-        const filteredRows = state.monthRows.filter(row => rowMatchesSearch(rowInfo(row), query));
-        const map = new Map();
-
-        for (const row of filteredRows) {
-          const info = rowInfo(row);
-          const key = state.mode === "driver" ? groupKeyDriver(info) : groupKeyVendor(info);
-          if (!map.has(key)) {
-            map.set(key, {
-              key,
-              mode: state.mode,
-              name: state.mode === "driver" ? info.driverName : info.vendorName,
-              subtitle: state.mode === "driver"
-                ? driverBusinessName(info.driverName)
-                : (info.orderName || "Order 없음"),
-              vendorId: info.vendorId,
-              vendorName: info.vendorName,
-              orderName: info.orderName,
-              rows: []
-            });
-          }
-          map.get(key).rows.push(row);
-        }
-
-        let groups = Array.from(map.values()).map(group => {
-          group.rows.sort((a, b) => {
-            const da = parseDateValue(pick(a, "date"));
-            const db = parseDateValue(pick(b, "date"));
-            return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
-          });
-          group.metrics = computeBaseSettlement(group.rows, group.name, group.mode);
-          return group;
-        });
-
-        groups.sort((a, b) => {
-          if (b.metrics.totalAmount !== a.metrics.totalAmount) return b.metrics.totalAmount - a.metrics.totalAmount;
-          return String(a.name).localeCompare(String(b.name), "ko");
-        });
-
-        if (state.mode === "driver") {
-          const baseDriverGroups = groups.map(group => ({ ...group, metrics: { ...group.metrics } }));
-          state.monthDriverTotals = computeMonthDriverTotals(baseDriverGroups);
-          const leaderGroup = groups.find(group => group.name === TEAM_LEADER_NAME);
-          applyTeamLeaderBonus(leaderGroup, state.monthDriverTotals.leaderBonus);
-        } else {
-          state.monthDriverTotals = null;
-        }
-
-        state.groups = groups;
-        if (!state.groups.some(group => group.key === state.selectedGroupKey)) {
-          state.selectedGroupKey = state.groups[0]?.key || "";
-        }
-      }
-
-      function renderSidebarSummary() {
-        const totals = state.groups.reduce((acc, group) => {
-          acc.amount += group.metrics.totalAmount;
-          acc.issued += group.metrics.issuedAmount;
-          acc.commission += group.metrics.commission;
-          acc.insurance += group.metrics.insurance;
-          return acc;
-        }, { amount: 0, issued: 0, commission: 0, insurance: 0 });
-
-        dom.sideMonth.textContent = formatMonthShort(state.month);
-        dom.sideGroupCount.textContent = fmtNumber(state.groups.length);
-        dom.sideAmount.textContent = fmtMoney(totals.amount);
-        dom.sideIssued.textContent = fmtMoney(totals.issued);
-        dom.sideCommission.textContent = fmtMoney(totals.commission);
-        dom.sideInsurance.textContent = fmtMoney(totals.insurance);
-        dom.pillRows.textContent = "행 " + fmtNumber(state.monthRows.length);
-        dom.pillGroups.textContent = "정산서 " + fmtNumber(state.groups.length);
-      }
-
-      function groupMetaHtml(group) {
-        const m = group.metrics;
-        if (group.mode === "driver") {
-          const ratePct = Math.round((m.commissionRate || 0) * 1000) / 10;
-          const teamBonusLine = m.teamLeaderBonus
-            ? `<span class="wide">한팀장 수수료 <b>${fmtMoney(m.teamLeaderBonus)}</b></span>`
-            : "";
-          return `
-            <span>벌어온 금액 <b>${fmtMoney(m.totalAmount)}</b></span>
-            <span>수수료 ${ratePct}% <b>${fmtMoney(m.commission)}</b></span>
-            <span>공제 후 <b>${fmtMoney(m.afterCommission)}</b></span>
-            <span>고용/산재 <b>${fmtMoney(m.insurance)}</b></span>
-            <span>고용산재 후 <b>${fmtMoney(m.finalPay)}</b></span>
-            <span>발행 <b>${fmtMoney(m.issuedAmount)}</b></span>
-            <span>미발행 <b>${fmtMoney(m.unissuedAmount)}</b></span>
-            <span>건수 <b>${fmtNumber(m.infos.length)}</b></span>
-            ${teamBonusLine}
-          `;
-        }
-
-        return `
-          <span>총금액 <b>${fmtMoney(m.totalAmount)}</b></span>
-          <span>발행 <b>${fmtMoney(m.issuedAmount)}</b></span>
-          <span>미발행 <b>${fmtMoney(m.unissuedAmount)}</b></span>
-          <span>건수 <b>${fmtNumber(m.infos.length)}</b></span>
-        `;
-      }
-
-      function renderGroupList() {
-        if (!state.groups.length) {
-          dom.groupList.innerHTML = `<div class="emptyState" style="padding:16px;">표시할 정산서가 없습니다.</div>`;
-          return;
-        }
-
-        dom.groupList.innerHTML = state.groups.map(group => `
-          <div class="groupItem ${group.key === state.selectedGroupKey ? "active" : ""}" data-key="${esc(group.key)}">
-            <div class="groupName">${esc(group.name || "-")}${group.subtitle ? "\n" + esc(group.subtitle) : ""}</div>
-            <div class="groupMeta">${groupMetaHtml(group)}</div>
-          </div>
-        `).join("");
-
-        dom.groupList.querySelectorAll(".groupItem").forEach(item => {
-          item.addEventListener("click", () => {
-            state.selectedGroupKey = item.dataset.key || "";
-            render();
-          });
-        });
-      }
-
-      function renderStatement() {
-        const group = state.groups.find(item => item.key === state.selectedGroupKey);
-        if (!group) {
-          dom.statementCapture.style.display = "none";
-          dom.emptyState.style.display = "block";
-          dom.statementCapture.innerHTML = "";
-          return;
-        }
-
-        dom.emptyState.style.display = "none";
-        dom.statementCapture.style.display = "block";
-        dom.statementCapture.innerHTML = group.mode === "driver"
-          ? renderDriverStatement(group)
-          : renderVendorStatement(group);
-      }
-
-      function renderTopStrip(group) {
-        const m = group.metrics;
-        return `
-          <div class="statementTopStrip">
-            <span class="topChip">검색 연도</span>
-            <span class="topChip value">${esc(String(state.month).slice(0, 4))}</span>
-            <span class="topChip">검색 월</span>
-            <span class="topChip value">${esc(String(Number(String(state.month).slice(5, 7)) || ""))}</span>
-            <span class="topChip moneyA">${fmtMoney(m.totalAmount)}</span>
-            <span class="topChip moneyB">${fmtMoney(m.finalPay || m.totalAmount)}</span>
-            <span class="topChip">이름 검색</span>
-            <span class="topChip value">${esc(group.name || "-")}</span>
-            <span class="topChip moneyA">${fmtMoney(m.issuedAmount)}</span>
-          </div>
-        `;
-      }
-
-      function renderDriverStatement(group) {
-        const name = group.name || "-";
-        const m = group.metrics;
-        const insuranceCaption = hasEmploymentAccidentInsurance(name) ? "고용보험 + 산재보험" : "고용산재 미적용";
-        const finalPay = m.finalPay;
-        const detailRows = renderDriverDetailRows(group);
-        const title = "마루웰 " + formatMonthTitle(state.month) + " 용차 정산서";
-        const note = "※ 세금계산서 발행 금액은 좌측의 합계 금액으로 발행 되지만, 실지급액은 용차 수수료와 고용/산재보험 공제 후 \"실지급액\" 으로 지급 됩니다. (고용/산재보험 의무가입에 따른 보험료 공제)";
-
-        return `
-          ${renderTopStrip(group)}
-          <table class="mwSheet">
-            <colgroup>
-              <col style="width:9%" />
-              <col style="width:13%" />
-              <col style="width:13%" />
-              <col style="width:21%" />
-              <col style="width:12%" />
-              <col style="width:32%" />
-            </colgroup>
-            <tbody>
-              <tr><td class="title" colspan="6">${esc(title)}</td></tr>
-              <tr>
-                <td class="head">이름</td>
-                <td class="head">상호</td>
-                <td class="head" colspan="2">사업자 번호</td>
-                <td class="head">은행</td>
-                <td class="head">계좌 번호</td>
-              </tr>
-              <tr>
-                <td><b>${esc(name)}</b></td>
-                <td>${esc(driverBusinessName(name))}</td>
-                <td colspan="2">${esc(driverBusinessNumber(name))}</td>
-                <td>${esc(driverPayrollBank(name))}</td>
-                <td>${esc(driverPayrollAccount(name))}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:20px;">
-            <colgroup>
-              <col style="width:9%" />
-              <col style="width:13%" />
-              <col style="width:9%" />
-              <col style="width:12%" />
-              <col style="width:11%" />
-              <col style="width:9%" />
-              <col style="width:11%" />
-              <col style="width:11%" />
-              <col style="width:15%" />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td class="head">구분</td>
-                <td class="head">일자</td>
-                <td class="head">캠프</td>
-                <td class="head">주/야</td>
-                <td class="head">라우트</td>
-                <td class="head">단가</td>
-                <td class="head">수량</td>
-                <td class="head">세금계산서</td>
-                <td class="head">금액</td>
-              </tr>
-              ${detailRows}
-              <tr>
-                <td class="lossLabel" colspan="8">파손 / 분실</td>
-                <td></td>
-              </tr>
-              <tr>
-                <td class="blueCell" colspan="3">세금계산서 발행 금액</td>
-                <td class="money"><b>${fmtMoney(m.issuedAmount)}</b></td>
-                <td class="blueCell" colspan="2">세금계산서 미발행 금액</td>
-                <td class="money"><b>${fmtMoney(m.unissuedAmount)}</b></td>
-                <td class="blueCell">총 합계</td>
-                <td class="money"><b>${fmtMoney(m.totalAmount)}</b></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:22px;">
-            <colgroup>
-              <col style="width:22%" />
-              <col style="width:21%" />
-              <col style="width:21%" />
-              <col style="width:16%" />
-              <col style="width:20%" />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td class="peachCell" colspan="3">세금계산서 발행 상세금액</td>
-                <td class="purpleCell" colspan="2">특고직 고용산재 공제내역</td>
-              </tr>
-              <tr>
-                <td class="peachCell">합 계</td>
-                <td class="peachCell">공급가액</td>
-                <td class="peachCell">부가세</td>
-                <td class="purpleCell" colspan="2">${esc(insuranceCaption)}</td>
-              </tr>
-              <tr>
-                <td><b>${fmtMoney(m.issuedAmount)}</b></td>
-                <td>${fmtMoney(m.taxSupply)}</td>
-                <td>${fmtMoney(m.taxVat)}</td>
-                <td class="red" colspan="2">${fmtMoney(m.insurance)}</td>
-              </tr>
-              <tr class="sectionGap"><td colspan="5"></td></tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:20px;">
-            <colgroup>
-              <col style="width:9%" />
-              <col style="width:67%" />
-              <col style="width:11%" />
-              <col style="width:13%" />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td class="greenCell">참고사항</td>
-                <td class="note">${esc(note)}</td>
-                <td class="finalLabel">실 지급액</td>
-                <td class="finalAmount">${fmtMoney(finalPay)}</td>
-              </tr>
-            </tbody>
-          </table>
-        `;
-      }
-
-      function renderDriverDetailRows(group) {
-        const infos = group.metrics.infos;
-        const bonus = group.metrics.teamLeaderBonus || 0;
-        const rowCount = Math.max(FILLER_ROW_TARGET, infos.length + (bonus ? 1 : 0));
-        let html = "";
-
-        infos.forEach((info, index) => {
-          html += "<tr>";
-          if (index === 0) html += `<td rowspan="${rowCount}"><b>전체</b></td>`;
-          html += `
-            <td class="${isSunday(info.date) ? "red" : ""}">${esc(formatDateCell(info.date))}</td>
-            <td>${esc(info.camp || "-")}</td>
-            <td>${esc(info.wave || "-")}</td>
-            <td>${esc(info.route || "-")}</td>
-            <td class="money">${fmtMoney(info.unit)}</td>
-            <td>${fmtNumber(info.qty)}</td>
-            <td class="${info.taxIssued ? "greenText" : "red"}">${taxLabelByBool(info.taxIssued)}</td>
-            <td class="money">${fmtMoney(info.amount)}</td>
-          </tr>`;
-        });
-
-        if (!infos.length) {
-          html += `<tr><td rowspan="${rowCount}"><b>전체</b></td><td colspan="8">표시할 정산 행이 없습니다.</td></tr>`;
-        }
-
-        if (bonus) {
-          html += `
-            <tr>
-              <td colspan="6">한팀장 용차 수수료</td>
-              <td class="greenText">발행</td>
-              <td class="money">${fmtMoney(bonus)}</td>
-            </tr>
-          `;
-        }
-
-        const usedRows = Math.max(1, infos.length) + (bonus ? 1 : 0);
-        for (let i = usedRows; i < rowCount; i++) {
-          html += `
-            <tr class="blankRow">
-              <td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td>
-            </tr>
-          `;
-        }
-
-        return html;
-      }
-
-      function renderVendorStatement(group) {
-        const m = group.metrics;
-        const title = "마루웰 " + formatMonthTitle(state.month) + " 용차 업체 정산서";
-        const detailRows = renderVendorDetailRows(group);
-        const note = PAYMENT_INFO.requestNote;
-
-        return `
-          ${renderTopStrip(group)}
-          <table class="mwSheet">
-            <colgroup>
-              <col style="width:14%" />
-              <col style="width:22%" />
-              <col style="width:14%" />
-              <col style="width:22%" />
-              <col style="width:14%" />
-              <col style="width:14%" />
-            </colgroup>
-            <tbody>
-              <tr><td class="title" colspan="6">${esc(title)}</td></tr>
-              <tr>
-                <td class="head">업체</td>
-                <td>${esc(group.vendorName || group.name || "-")}</td>
-                <td class="head">Order</td>
-                <td>${esc(group.orderName || "-")}</td>
-                <td class="head">정산월</td>
-                <td>${esc(formatMonthTitle(state.month))}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:20px;">
-            <colgroup>
-              <col style="width:12%" />
-              <col style="width:10%" />
-              <col style="width:13%" />
-              <col style="width:15%" />
-              <col style="width:10%" />
-              <col style="width:10%" />
-              <col style="width:12%" />
-              <col style="width:18%" />
-            </colgroup>
-            <tbody>
-              <tr>
-                <td class="head">배송 일자</td>
-                <td class="head">캠프</td>
-                <td class="head">주간/야간</td>
-                <td class="head">라우트</td>
-                <td class="head">단가</td>
-                <td class="head">배송 수량</td>
-                <td class="head">세금계산서</td>
-                <td class="head">정산 금액</td>
-              </tr>
-              ${detailRows}
-              <tr>
-                <td class="blueCell" colspan="2">세금계산서 발행 금액</td>
-                <td class="money"><b>${fmtMoney(m.issuedAmount)}</b></td>
-                <td class="blueCell" colspan="2">세금계산서 미발행 금액</td>
-                <td class="money"><b>${fmtMoney(m.unissuedAmount)}</b></td>
-                <td class="blueCell">총 합계</td>
-                <td class="money"><b>${fmtMoney(m.totalAmount)}</b></td>
-              </tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:22px;">
-            <colgroup>
-              <col style="width:22%" />
-              <col style="width:21%" />
-              <col style="width:21%" />
-              <col style="width:18%" />
-              <col style="width:18%" />
-            </colgroup>
-            <tbody>
-              <tr><td class="peachCell" colspan="3">세금계산서 발행 상세금액</td><td class="purpleCell" colspan="2">입금 정보</td></tr>
-              <tr><td class="peachCell">합 계</td><td class="peachCell">공급가액</td><td class="peachCell">부가세</td><td class="purpleCell">입금은행</td><td>${esc(PAYMENT_INFO.bankName)}</td></tr>
-              <tr><td><b>${fmtMoney(m.issuedAmount)}</b></td><td>${fmtMoney(m.taxSupply)}</td><td>${fmtMoney(m.taxVat)}</td><td class="purpleCell">계좌번호</td><td>${esc(PAYMENT_INFO.accountNumber)}</td></tr>
-              <tr><td colspan="3"></td><td class="purpleCell">예금주</td><td>${esc(PAYMENT_INFO.depositor)}</td></tr>
-              <tr><td colspan="3"></td><td class="finalLabel">입금 금액</td><td class="finalAmount">${fmtMoney(m.totalAmount)}</td></tr>
-            </tbody>
-          </table>
-
-          <table class="mwSheet" style="margin-top:20px;">
-            <colgroup><col style="width:12%" /><col style="width:88%" /></colgroup>
-            <tbody>
-              <tr><td class="greenCell">참고사항</td><td class="note">${esc(note)}</td></tr>
-            </tbody>
-          </table>
-        `;
-      }
-
-      function renderVendorDetailRows(group) {
-        const infos = group.metrics.infos;
-        const rowCount = Math.max(FILLER_ROW_TARGET, infos.length);
-        let html = infos.map(info => `
+      <table>
+        <colgroup>
+          <col style="width:9%">
+          <col style="width:13%">
+          <col style="width:34%">
+          <col style="width:12%">
+          <col style="width:32%">
+        </colgroup>
+        <tbody>
+          <tr><td colspan="5" class="title">마루웰 ${esc(year)}년 ${esc(mon)}월 용차 정산서</td></tr>
           <tr>
-            <td class="${isSunday(info.date) ? "red" : ""}">${esc(formatDateCell(info.date))}</td>
-            <td>${esc(info.camp || "-")}</td>
-            <td>${esc(info.wave || "-")}</td>
-            <td>${esc(info.route || "-")}</td>
-            <td class="money">${fmtMoney(info.unit)}</td>
-            <td>${fmtNumber(info.qty)}</td>
-            <td class="${info.taxIssued ? "greenText" : "red"}">${taxLabelByBool(info.taxIssued)}</td>
-            <td class="money">${fmtMoney(info.amount)}</td>
+            <td class="head">이름</td>
+            <td class="head">상호</td>
+            <td class="head">사업자 번호</td>
+            <td class="head">은행</td>
+            <td class="head">계좌 번호</td>
           </tr>
-        `).join("");
+          <tr>
+            <td><b>${esc(name)}</b></td>
+            <td>${esc(businessName(name))}</td>
+            <td>${esc(businessNumber(name))}</td>
+            <td>${esc(payrollBank(name))}</td>
+            <td>${esc(payrollAccount(name))}</td>
+          </tr>
+        </tbody>
+      </table>
 
-        if (!infos.length) html += `<tr><td colspan="8">표시할 정산 행이 없습니다.</td></tr>`;
+      <table class="mt">
+        <colgroup>
+          <col style="width:9%">
+          <col style="width:13%">
+          <col style="width:9%">
+          <col style="width:12%">
+          <col style="width:11%">
+          <col style="width:9%">
+          <col style="width:11%">
+          <col style="width:11%">
+          <col style="width:15%">
+        </colgroup>
+        <tbody>
+          <tr>
+            <td class="head">구분</td>
+            <td class="head">일자</td>
+            <td class="head">캠프</td>
+            <td class="head">주/야</td>
+            <td class="head">라우트</td>
+            <td class="head">단가</td>
+            <td class="head">수량</td>
+            <td class="head">세금계<br>산서</td>
+            <td class="head">금액</td>
+          </tr>
 
-        const usedRows = Math.max(1, infos.length);
-        for (let i = usedRows; i < rowCount; i++) {
-          html += `<tr class="blankRow"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`;
-        }
-        return html;
+          ${renderDetailRows(rows, stats.teamBonus, month)}
+
+          <tr>
+            <td colspan="8" class="loss">파손 / 분실</td>
+            <td></td>
+          </tr>
+          <tr>
+            <td colspan="3" class="blue">세금계산서 발행 금액</td>
+            <td class="money"><b>${money(stats.issued)}</b></td>
+            <td colspan="2" class="blue">세금계산서 미발행 금액</td>
+            <td class="money"><b>${money(stats.unissued)}</b></td>
+            <td class="blue">총 합계</td>
+            <td class="money"><b>${money(stats.total)}</b></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table class="mt">
+        <colgroup>
+          <col style="width:22%">
+          <col style="width:21%">
+          <col style="width:21%">
+          <col style="width:36%">
+        </colgroup>
+        <tbody>
+          <tr>
+            <td colspan="3" class="peach">세금계산서 발행 상세금액</td>
+            <td class="purple">특고직 고용산재 공제내역</td>
+          </tr>
+          <tr>
+            <td class="peach">합 계</td>
+            <td class="peach">공급가액</td>
+            <td class="peach">부가세</td>
+            <td class="purple">고용보험 + 산재보험</td>
+          </tr>
+          <tr>
+            <td><b>${money(stats.issued)}</b></td>
+            <td>${money(stats.supply)}</td>
+            <td>${money(stats.vat)}</td>
+            <td class="red">${money(stats.insurance)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <table class="mt">
+        <colgroup>
+          <col style="width:9%">
+          <col style="width:68%">
+          <col style="width:11%">
+          <col style="width:12%">
+        </colgroup>
+        <tbody>
+          <tr>
+            <td class="memoHead">참고사항</td>
+            <td class="note">${esc(note).replace(/\n/g, "<br>")}</td>
+            <td class="finalLabel">실 지급액</td>
+            <td class="finalMoney">${money(stats.finalPay)}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  }
+
+  async function runPatch() {
+    if (patchRunning) return;
+
+    const driverMode = $("#btnModeDriver")?.classList.contains("active");
+    const target = $("#statementCapture");
+
+    if (!driverMode) {
+      target?.classList.remove("mwDriverExcelSheet");
+      return;
+    }
+
+    if (!target || target.style.display === "none") return;
+
+    patchRunning = true;
+
+    try {
+      await loadData();
+
+      const month = currentMonth();
+      const name = selectedDriverName();
+
+      if (!name) return;
+
+      const monthRows = rawRows
+        .map(row => normalizeDragonRow(row, month))
+        .filter(row => row.month === month);
+
+      const monthly = monthlyTeamStats(monthRows);
+
+      patchGroupList(monthRows, monthly);
+
+      const { rows, stats } = statsForDriver(monthRows, name, monthly);
+
+      const patchKey = [
+        month,
+        name,
+        rows.length,
+        rows.reduce((sum, row) => sum + row.amount, 0),
+        stats.total,
+        stats.finalPay,
+        stats.teamBonus
+      ].join("::");
+
+      if (target.dataset.mwDriverSettlementPatchKey === patchKey && target.querySelector(".mwTop")) {
+        return;
       }
 
-      function render() {
-        buildGroups();
-        renderSidebarSummary();
-        renderGroupList();
-        renderStatement();
-      }
+      target.dataset.mwDriverSettlementPatchKey = patchKey;
+      renderDriverSheet(name, rows, stats, monthly, month);
+    } catch (err) {
+      console.error("mw dragon driver settlement patch error", err);
+    } finally {
+      patchRunning = false;
+    }
+  }
 
-      function setStatePill(kind, text) {
-        dom.pillState.className = "pill " + (kind || "ok");
-        dom.pillState.textContent = text || "READY";
-      }
+  function schedulePatch() {
+    clearTimeout(patchTimer);
+    patchTimer = setTimeout(runPatch, 220);
+  }
 
-      function setStatus(text) {
-        dom.statusText.textContent = text || "";
-      }
+  function startPatch() {
+    document.addEventListener("click", schedulePatch, true);
+    document.addEventListener("keyup", schedulePatch, true);
+    document.addEventListener("change", schedulePatch, true);
 
-      async function fetchAllRows(tableName) {
-        const pageSize = 1000;
-        let from = 0;
-        const rows = [];
-        while (true) {
-          const { data, error } = await supabase
-            .from(tableName)
-            .select("*")
-            .range(from, from + pageSize - 1);
-          if (error) throw error;
-          rows.push(...(data || []));
-          if (!data || data.length < pageSize) break;
-          from += pageSize;
-        }
-        return rows;
-      }
-
-      async function loadVendorRows() {
-        try {
-          state.vendorRows = await fetchAllRows(VENDORS_TABLE);
-          state.vendorById.clear();
-          for (const row of state.vendorRows) {
-            const id = normalizeText(valueByCandidates(row, ["id", "vendor_id", "pk_id", "seq"]));
-            if (id) state.vendorById.set(String(id), row);
-          }
-        } catch (err) {
-          console.warn("vendors load skipped", err);
-          state.vendorRows = [];
-          state.vendorById.clear();
-        }
-      }
-
-      async function loadDriverInfoRows() {
-        try {
-          state.driverInfoRows = await fetchAllRows(DRIVER_INFO_TABLE);
-          state.driverInfoByName.clear();
-          for (const row of state.driverInfoRows) {
-            const name = driverInfoName(row);
-            if (name) state.driverInfoByName.set(compactText(name), row);
-          }
-        } catch (err) {
-          console.warn("driver info load skipped", err);
-          state.driverInfoRows = [];
-          state.driverInfoByName.clear();
-        }
-      }
-
-      async function loadRows() {
-        if (!supabase) throw new Error("Supabase 설정이 없습니다.");
-        setStatePill("warn", "LOAD");
-        setStatus("용차 정산 데이터를 불러오는 중입니다.");
-        dom.btnReload.disabled = true;
-
-        await Promise.all([loadVendorRows(), loadDriverInfoRows()]);
-        state.allRows = await fetchAllRows(DATA_TABLE);
-        render();
-
-        setStatePill("ok", "READY");
-        setStatus("불러오기 완료: 원본 " + fmtNumber(state.allRows.length) + "행 / 기사정보 " + fmtNumber(state.driverInfoRows.length) + "행");
-        dom.btnReload.disabled = false;
-      }
-
-      async function ensureAuthenticated() {
-        if (!supabase) {
-          document.documentElement.style.visibility = "visible";
-          showAccessDenied("Supabase 설정이 없어 페이지를 사용할 수 없습니다.", "");
-          return false;
-        }
-
-        sessionBridge.start();
-        await sessionBridge.requestSessionCopy(1200);
-        const { data: sessionData } = await supabase.auth.getSession();
-        state.session = sessionData?.session || null;
-        if (!state.session) {
-          window.location.href = LOGIN_PATH;
-          return false;
-        }
-
-        state.viewerEmail = state.session.user?.email || "";
-        state.viewerUserId = state.session.user?.id || "";
-        return true;
-      }
-
-      async function checkAccess() {
-        const email = state.viewerEmail;
-        const userId = state.viewerUserId;
-        let accessRow = null;
-        let profileRow = null;
-
-        try {
-          const { data } = await supabase
-            .from(ACCESS_TABLE)
-            .select("*")
-            .or("email.eq." + email + ",user_id.eq." + userId)
-            .limit(1)
-            .maybeSingle();
-          accessRow = data || null;
-        } catch (err) {
-          console.warn("access check skipped", err);
-        }
-
-        try {
-          const { data } = await supabase
-            .from(PROFILES_TABLE)
-            .select("*")
-            .eq("id", userId)
-            .limit(1)
-            .maybeSingle();
-          profileRow = data || null;
-        } catch (err) {
-          console.warn("profile check skipped", err);
-        }
-
-        const roleLevel = Number(accessRow?.role_level || accessRow?.roleLevel || 0);
-        const isMaroowell = !!(accessRow?.is_maroowell || accessRow?.isMaroowell);
-        const isSuperAdmin = !!(accessRow?.is_super_admin || accessRow?.is_admin || roleLevel >= 60);
-        const isDragonCarAdmin = !!(profileRow?.is_dragon_car_admin || accessRow?.is_dragon_car_admin);
-        const allowed = isSuperAdmin || isDragonCarAdmin || (isMaroowell && roleLevel >= 30);
-
-        if (!allowed) {
-          showAccessDenied("이 페이지는 최고관리자 또는 용차 관리자만 접근할 수 있습니다.\n조건: role_level 30 이상 또는 profiles.is_dragon_car_admin = true", email);
-          return false;
-        }
-        return true;
-      }
-
-      function showAccessDenied(message, email) {
-        dom.accessDeniedText.textContent = message || "접근 권한이 없습니다.";
-        dom.accessDeniedEmail.textContent = email ? ("로그인 계정: " + email) : "";
-        dom.accessDenied.classList.add("show");
-      }
-
-      async function logout() {
-        try { await supabase?.auth.signOut(); } catch {}
-        try { sessionBridge.broadcastAuthState("SIGNED_OUT"); } catch {}
-        try { sessionBridge.clearSession(window.sessionStorage); } catch {}
-        window.location.href = LOGIN_PATH;
-      }
-
-      async function downloadPng() {
-        const target = dom.statementCapture;
-        if (!target || target.style.display === "none") return;
-        if (!window.htmlToImage) {
-          alert("PNG 저장 라이브러리를 불러오지 못했습니다.");
-          return;
-        }
-
-        const group = state.groups.find(item => item.key === state.selectedGroupKey);
-        const safeName = (group?.name || "정산서").replace(/[\\/:*?"<>|]/g, "_");
-        const fileName = "마루웰_" + state.month + "_용차정산서_" + safeName + ".png";
-
-        setStatePill("warn", "CAPTURE");
-        setStatus("PNG 저장용 이미지를 생성하는 중입니다.");
-        dom.btnDownloadPng.disabled = true;
-
-        const clone = target.cloneNode(true);
-        clone.classList.add("capture-export");
-        clone.style.display = "block";
-        const host = document.createElement("div");
-        host.className = "capture-host";
-        host.appendChild(clone);
-        document.body.appendChild(host);
-
-        try {
-          const dataUrl = await window.htmlToImage.toPng(clone, {
-            cacheBust: true,
-            pixelRatio: 2,
-            backgroundColor: "#ffffff",
-            width: clone.scrollWidth,
-            height: clone.scrollHeight,
-            style: {
-              transform: "none",
-              transformOrigin: "top left"
-            }
-          });
-          const a = document.createElement("a");
-          a.href = dataUrl;
-          a.download = fileName;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setStatePill("ok", "READY");
-          setStatus("PNG 저장 완료: " + fileName);
-        } catch (err) {
-          console.error(err);
-          setStatePill("err", "ERROR");
-          setStatus("PNG 저장 실패: " + (err?.message || err));
-          alert("PNG 저장 실패: " + (err?.message || err));
-        } finally {
-          host.remove();
-          dom.btnDownloadPng.disabled = false;
-        }
-      }
-
-      function bindEvents() {
-        dom.monthInput.value = state.month;
-
-        dom.btnReload.addEventListener("click", () => loadRows().catch(err => {
-          console.error(err);
-          setStatePill("err", "ERROR");
-          setStatus("불러오기 실패: " + (err?.message || err));
-          dom.btnReload.disabled = false;
-        }));
-
-        dom.btnDownloadPng.addEventListener("click", () => downloadPng());
-        dom.btnLogout.addEventListener("click", () => logout());
-        dom.btnDeniedLogout.addEventListener("click", () => logout());
-        dom.btnDeniedHome.addEventListener("click", () => { window.location.href = INDEX_PATH; });
-
-        dom.btnClearSearch.addEventListener("click", () => {
-          dom.searchInput.value = "";
-          render();
-        });
-
-        dom.monthInput.addEventListener("change", () => {
-          state.month = parseMonthInput(dom.monthInput.value);
-          dom.monthInput.value = state.month;
-          state.selectedGroupKey = "";
-          render();
-        });
-
-        dom.monthInput.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") {
-            state.month = parseMonthInput(dom.monthInput.value);
-            dom.monthInput.value = state.month;
-            state.selectedGroupKey = "";
-            render();
-          }
-        });
-
-        dom.searchInput.addEventListener("input", () => {
-          state.selectedGroupKey = "";
-          render();
-        });
-
-        dom.btnModeVendor.addEventListener("click", () => {
-          if (state.mode === "vendor") return;
-          state.mode = "vendor";
-          state.selectedGroupKey = "";
-          dom.btnModeVendor.classList.add("active");
-          dom.btnModeDriver.classList.remove("active");
-          render();
-        });
-
-        dom.btnModeDriver.addEventListener("click", () => {
-          if (state.mode === "driver") return;
-          state.mode = "driver";
-          state.selectedGroupKey = "";
-          dom.btnModeDriver.classList.add("active");
-          dom.btnModeVendor.classList.remove("active");
-          render();
-        });
-      }
-
-      async function boot() {
-        bindEvents();
-        document.documentElement.style.visibility = "visible";
-        if (!(await ensureAuthenticated())) return;
-        if (!(await checkAccess())) return;
-        await loadRows();
-      }
-
-      boot().catch(err => {
-        console.error(err);
-        document.documentElement.style.visibility = "visible";
-        setStatePill("err", "ERROR");
-        setStatus("초기화 실패: " + (err?.message || err));
+    const capture = $("#statementCapture");
+    if (capture) {
+      new MutationObserver(schedulePatch).observe(capture, {
+        childList: true,
+        subtree: false,
+        attributes: true,
+        attributeFilter: ["style", "class"]
       });
-    })();
-  </script>
-  <script src="/board-menu.js"></script>
-</body>
-</html>
+    }
+
+    const list = $("#groupList");
+    if (list) {
+      new MutationObserver(schedulePatch).observe(list, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"]
+      });
+    }
+
+    schedulePatch();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startPatch);
+  } else {
+    startPatch();
+  }
+})();
+</script><!-- /mwDragonDriverSettlementPatch -->
+'''
+
+anchor = '<script>\n    window.MW_BOARD_MENU_MODE = "admin"'
+if anchor not in text:
+    raise SystemExit("삽입 위치를 찾지 못했습니다: window.MW_BOARD_MENU_MODE")
+
+text = text.replace(anchor, patch + "\n\n" + anchor, 1)
+path.write_text(text, encoding="utf-8")
+PY
+
+git diff -- public/dragon_car_pay

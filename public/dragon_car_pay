@@ -1101,6 +1101,22 @@
         return Number.isNaN(d.getTime()) ? null : d;
       }
 
+      function sortInfosByDate(infos){
+        return [...(infos || [])].sort((a,b) => {
+          const at = parseDate(a.date, state.month)?.getTime() || 0;
+          const bt = parseDate(b.date, state.month)?.getTime() || 0;
+          if(at !== bt) return at - bt;
+
+          const campCmp = String(a.camp || "").localeCompare(String(b.camp || ""), "ko");
+          if(campCmp !== 0) return campCmp;
+
+          const routeCmp = String(a.route || "").localeCompare(String(b.route || ""), "ko");
+          if(routeCmp !== 0) return routeCmp;
+
+          return String(a.orderName || "").localeCompare(String(b.orderName || ""), "ko");
+        });
+      }
+
       function dateMonth(v, month){
         const d = parseDate(v, month);
         return d ? d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2,"0") : "";
@@ -1573,21 +1589,27 @@
       }
 
       function vendorRowsHtml(infos){
-        let html = infos.map(i => `
-          <tr>
-            <td>${esc(dateText(i.date, state.month))}</td>
-            <td>${esc(i.camp || "-")}</td>
-            <td>${esc(i.wave || "-")}</td>
-            <td>${esc(i.route || "-")}</td>
-            <td class="right">${money(i.price)}</td>
-            <td>${fmt(i.parcel)}</td>
-            <td>${fmt(i.returnQty)}</td>
-            <td class="right">${money(i.amount)}</td>
-            <td class="${i.paid ? "green" : "red"}">${i.paid ? "입금" : "미입금"}</td>
-          </tr>
-        `).join("");
+        const rows = sortInfosByDate(infos);
+        const rowCount = Math.max(VENDOR_FILL_ROWS, rows.length);
+        let html = "";
 
-        for(let i = infos.length; i < VENDOR_FILL_ROWS; i++){
+        rows.forEach(i => {
+          html += `
+            <tr>
+              <td>${esc(dateText(i.date, state.month))}</td>
+              <td>${esc(i.camp || "-")}</td>
+              <td>${esc(i.wave || "-")}</td>
+              <td>${esc(i.route || "-")}</td>
+              <td class="right">${money(i.price)}</td>
+              <td>${fmt(i.parcel)}</td>
+              <td>${fmt(i.returnQty)}</td>
+              <td class="right">${money(i.amount)}</td>
+              <td class="${i.paid ? "green" : "red"}">${i.paid ? "입금" : "미입금"}</td>
+            </tr>
+          `;
+        });
+
+        for(let i = rows.length; i < rowCount; i++){
           html += `
             <tr>
               <td class="blank">&nbsp;</td><td class="blank">&nbsp;</td><td class="blank">&nbsp;</td>
@@ -1709,10 +1731,7 @@
       }
 
       function driverRowsHtml(g){
-        const rows = [...g.infos].sort((a,b) => {
-          return (parseDate(a.date,state.month)?.getTime() || 0) - (parseDate(b.date,state.month)?.getTime() || 0);
-        });
-
+        const rows = sortInfosByDate(g.infos);
         const count = Math.max(DRIVER_FILL_ROWS, rows.length + (g.stats.teamBonus ? 1 : 0), 1);
         let html = "";
 

@@ -1,14 +1,13 @@
 <!doctype html>
 <html lang="ko">
 <head>
-    <script src="/config.js"></script>
+  <script src="/config.js"></script>
   <script>
-    // false 로 바꾸면 회원가입 버튼이 숨겨집니다.
-    function MAROOWELL_ENABLE_SIGNUP() { return true; }
+    function MAROOWELL_ENABLE_SIGNUP() { return false; }
   </script>
-<meta charset="utf-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Maroowell.com Login</title>
+  <title>마루웰</title>
   <style>
     :root{
       --bg:#f6f7fb;
@@ -18,6 +17,9 @@
       --muted:#475569;
       --btn:#0f172a;
       --btnHover:#1e293b;
+      --danger:#b91c1c;
+      --accent:#2563eb;
+      --accentSoft:#dbeafe;
     }
     *{box-sizing:border-box}
     html,body{
@@ -27,6 +29,7 @@
       color:var(--text);
       font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;
     }
+    body.modal-open{overflow:hidden}
     .wrap{
       min-height:100%;
       display:flex;
@@ -107,6 +110,7 @@
       cursor:pointer;
     }
     .btn:hover{background:var(--btnHover)}
+    .btn:disabled{opacity:.65;cursor:not-allowed}
     .btn.secondary{
       margin-top:8px;
       background:#fff;
@@ -114,11 +118,17 @@
       border:1px solid var(--line);
     }
     .btn.secondary:hover{background:#f1f5f9}
+    .remember-actions{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-top:12px;
+    }
     .remember-row{
       display:flex;
       align-items:center;
       gap:8px;
-      margin-top:12px;
       color:var(--muted);
       font-size:13px;
       user-select:none;
@@ -133,16 +143,108 @@
       box-shadow:none;
       cursor:pointer;
     }
+    .text-btn{
+      border:none;
+      background:transparent;
+      color:var(--accent);
+      font-size:13px;
+      font-weight:700;
+      padding:0;
+      cursor:pointer;
+    }
+    .text-btn[hidden]{display:none}
+    .helper{
+      margin-top:8px;
+      font-size:12px;
+      color:#64748b;
+    }
     .status{
       margin-top:12px;
       min-height:20px;
       font-size:13px;
       color:var(--muted);
       white-space:pre-wrap;
+      line-height:1.45;
+    }
+    .status.error{color:var(--danger)}
+    .status.success{color:#166534}
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:rgba(15,23,42,.42);
+      z-index:1000;
+    }
+    .modal-backdrop[hidden]{display:none}
+    .modal{
+      width:100%;
+      max-width:420px;
+      background:#fff;
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:0 24px 60px rgba(15,23,42,.18);
+      overflow:hidden;
+    }
+    .modal-head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:18px 20px 12px;
+      border-bottom:1px solid #eef2f7;
+    }
+    .modal-title{
+      margin:0;
+      font-size:20px;
+      font-weight:800;
+      line-height:1.3;
+    }
+    .icon-btn{
+      width:36px;
+      height:36px;
+      border:none;
+      border-radius:10px;
+      background:#f8fafc;
+      color:#334155;
+      font-size:20px;
+      cursor:pointer;
+    }
+    .modal-body{
+      padding:18px 20px 20px;
+    }
+    .modal-copy{
+      margin:0 0 14px;
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.6;
+      white-space:pre-wrap;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      padding:6px 10px;
+      border-radius:999px;
+      background:var(--accentSoft);
+      color:#1d4ed8;
+      font-size:12px;
+      font-weight:700;
+      margin-bottom:12px;
+    }
+    .inline-note{
+      margin-top:8px;
+      font-size:12px;
+      color:#64748b;
+      line-height:1.5;
     }
     @media (max-width: 520px){
       .wrap{padding:14px;}
       .logo-panel{margin-bottom:10px;}
+      .card{padding:18px;}
+      .modal-head{padding:16px 16px 10px;}
+      .modal-body{padding:16px;}
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -154,15 +256,27 @@
       <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
     </div>
     <div class="card">
-      <h1 class="title">Maroowell.com Login</h1>
+      <h1 class="title">마루웰</h1>
       <label class="label" for="email">이메일</label>
       <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
       <label class="label" for="password">비밀번호</label>
       <input id="password" type="password" placeholder="********" autocomplete="current-password" />
-      <label class="remember-row" for="rememberEmail">
-        <input id="rememberEmail" type="checkbox" />
-        <span>아이디 저장</span>
-      </label>
+
+      <div class="remember-actions">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <label class="remember-row" for="rememberEmail">
+            <input id="rememberEmail" type="checkbox" />
+            <span>아이디 저장</span>
+          </label>
+          <label class="remember-row" for="rememberPassword">
+            <input id="rememberPassword" type="checkbox" />
+            <span>비밀번호 저장</span>
+          </label>
+        </div>
+        <button class="text-btn" id="btnForgotPassword" type="button" hidden>비밀번호 찾기</button>
+      </div>
+      <div class="helper" id="forgotHint">비밀번호 5회 연속 실패 시 비밀번호 찾기가 활성화됩니다.</div>
+
       <button class="btn" id="btnSignIn" type="button">로그인</button>
       <button class="btn secondary" id="btnSignUp" type="button">회원가입</button>
       <div class="status" id="statusLogin"></div>
@@ -170,18 +284,303 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modalBackdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 class="modal-title" id="modalTitle">안내</h2>
+      <button class="icon-btn" id="modalClose" type="button" aria-label="닫기">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="paneMessage" hidden>
+        <div class="badge" id="messageBadge" hidden></div>
+        <p class="modal-copy" id="messageText"></p>
+        <button class="btn" id="messagePrimary" type="button">확인</button>
+        <button class="btn secondary" id="messageSecondary" type="button" hidden>닫기</button>
+      </div>
+
+      <form id="paneSignup" hidden>
+        <label class="label" for="signupName">이름</label>
+        <input id="signupName" type="text" placeholder="이름" autocomplete="name" />
+        <label class="label" for="signupEmail">이메일</label>
+        <input id="signupEmail" type="email" placeholder="name@company.com" autocomplete="email" />
+        <label class="label" for="signupPassword">비밀번호</label>
+        <input id="signupPassword" type="password" placeholder="8자 이상" autocomplete="new-password" />
+        <label class="label" for="signupPasswordConfirm">비밀번호 확인</label>
+        <input id="signupPasswordConfirm" type="password" placeholder="비밀번호 확인" autocomplete="new-password" />
+        <button class="btn" id="btnCreateAccount" type="submit">가입하기</button>
+      </form>
+
+      <form id="paneRecovery" hidden>
+        <p class="modal-copy">메일에서 비밀번호 재설정 링크를 눌렀습니다.
+새 비밀번호를 입력하면 바로 변경됩니다.</p>
+        <label class="label" for="recoveryPassword">새 비밀번호</label>
+        <input id="recoveryPassword" type="password" placeholder="8자 이상" autocomplete="new-password" />
+        <label class="label" for="recoveryPasswordConfirm">새 비밀번호 확인</label>
+        <input id="recoveryPasswordConfirm" type="password" placeholder="비밀번호 확인" autocomplete="new-password" />
+        <button class="btn" id="btnApplyRecovery" type="submit">비밀번호 변경</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
-(() => {
+(async () => {
   const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
   const DEFAULT_NEXT = (PATHS?.index || "/index.html");
   const LOGIN_PATH = (PATHS?.login || "/login.html");
   const EMAIL_REDIRECT_ORIGIN = "https://maroowell.com";
+  const FLOW_SIGNUP_COMPLETE = "signup-complete";
+  const FLOW_RECOVERY = "recovery";
+  const SAVED_EMAIL_KEY = "mw_saved_login_email";
+  const SAVED_PASSWORD_KEY = "mw_saved_login_password";
+  const FAIL_COUNT_PREFIX = "mw_login_fail_count:";
+
+  const params = new URLSearchParams(location.search);
+  const rawNext = params.get("next") || DEFAULT_NEXT;
+  const currentFlow = params.get("flow") || "";
+
+  function getSupabaseProjectRef(url) {
+    try {
+      const host = new URL(url).hostname || "";
+      return host.split(".")[0] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearLegacySupabaseLocalSession(url) {
+    const projectRef = getSupabaseProjectRef(url);
+    if (!projectRef) return;
+
+    const prefixes = [
+      "sb-" + projectRef + "-auth-token",
+      "sb-" + projectRef + "-auth-token-code-verifier"
+    ];
+
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key && prefixes.some(prefix => key === prefix || key.startsWith(prefix))) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => window.localStorage.removeItem(key));
+    } catch {}
+  }
+
+
+  function createSupabaseSessionBridge(url) {
+    const projectRef = getSupabaseProjectRef(url);
+    const prefixes = projectRef ? [
+      "sb-" + projectRef + "-auth-token",
+      "sb-" + projectRef + "-auth-token-code-verifier"
+    ] : [];
+    const origin = window.location.origin;
+    const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
+    const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    const pending = new Map();
+    let channel = null;
+    let started = false;
+
+    function matchesKey(key) {
+      return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+    }
+
+    function readEntries(storage) {
+      const target = storage || window.sessionStorage;
+      const rows = [];
+      try {
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (!matchesKey(key)) continue;
+          rows.push({ key, value: target.getItem(key) });
+        }
+      } catch {}
+      return rows;
+    }
+
+    function hasSession(storage) {
+      return readEntries(storage).some(row => row.key.includes("-auth-token") && !row.key.includes("code-verifier") && !!row.value);
+    }
+
+    function writeEntries(entries, storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        for (const row of entries || []) {
+          if (!row || !matchesKey(row.key)) continue;
+          if (row.value == null) target.removeItem(row.key);
+          else target.setItem(row.key, row.value);
+        }
+      } catch {}
+    }
+
+    function clearSession(storage) {
+      const target = storage || window.sessionStorage;
+      try {
+        const keys = [];
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+          if (matchesKey(key)) keys.push(key);
+        }
+        keys.forEach(key => target.removeItem(key));
+      } catch {}
+    }
+
+    function resolvePending(requestId, entries) {
+      const item = pending.get(requestId);
+      if (!item) return;
+      pending.delete(requestId);
+      clearTimeout(item.timer);
+      if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
+      item.resolve(hasSession(window.sessionStorage));
+    }
+
+    function handleSyncState(state) {
+      if (state === "SIGNED_OUT") {
+        clearSession(window.sessionStorage);
+        return;
+      }
+      if (state === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
+        requestSessionCopy(1200).catch(() => {});
+      }
+    }
+
+    function onWindowMessage(event) {
+      if (event.origin !== origin) return;
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          event.source?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          }, origin);
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function onChannelMessage(event) {
+      const msg = event.data || {};
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        if (!hasSession(window.sessionStorage)) return;
+        try {
+          channel?.postMessage({
+            type: "MW_SESSION_RESPONSE",
+            projectRef,
+            requestId: msg.requestId,
+            entries: readEntries(window.sessionStorage),
+            fromTabId: tabId
+          });
+        } catch {}
+        return;
+      }
+
+      if (msg.type === "MW_SESSION_RESPONSE") {
+        resolvePending(msg.requestId, msg.entries);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function start() {
+      if (started || !projectRef) return;
+      started = true;
+      window.addEventListener("message", onWindowMessage);
+      try {
+        if ("BroadcastChannel" in window) {
+          channel = new BroadcastChannel(channelName);
+          channel.addEventListener("message", onChannelMessage);
+        }
+      } catch {}
+    }
+
+    function requestSessionCopy(timeoutMs) {
+      start();
+      if (!projectRef) return Promise.resolve(false);
+      if (hasSession(window.sessionStorage)) return Promise.resolve(true);
+
+      const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const payload = {
+        type: "MW_SESSION_REQUEST",
+        projectRef,
+        requestId,
+        fromTabId: tabId
+      };
+
+      return new Promise(resolve => {
+        const timer = window.setTimeout(() => {
+          pending.delete(requestId);
+          resolve(hasSession(window.sessionStorage));
+        }, Math.max(300, Number(timeoutMs) || 900));
+
+        pending.set(requestId, { resolve, timer });
+
+        try { channel?.postMessage(payload); } catch {}
+        try {
+          if (window.opener && window.opener !== window) {
+            window.opener.postMessage(payload, origin);
+          }
+        } catch {}
+      });
+    }
+
+    function broadcastAuthState(state) {
+      start();
+      const payload = {
+        type: "MW_AUTH_SYNC",
+        projectRef,
+        state,
+        fromTabId: tabId
+      };
+      try { channel?.postMessage(payload); } catch {}
+      try {
+        if (window.opener && window.opener !== window) {
+          window.opener.postMessage(payload, origin);
+        }
+      } catch {}
+    }
+
+    return {
+      projectRef,
+      start,
+      hasSession,
+      clearSession,
+      requestSessionCopy,
+      broadcastAuthState
+    };
+  }
+
 
   const authStorage = (() => {
-    try { return window.localStorage; } catch {}
     try { return window.sessionStorage; } catch {}
     return null;
   })();
+  const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
+
+  clearLegacySupabaseLocalSession(SUPABASE_URL);
+  sessionBridge.start();
+  await sessionBridge.requestSessionCopy(1200);
 
   const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -197,17 +596,177 @@
   const email = document.getElementById("email");
   const password = document.getElementById("password");
   const rememberEmail = document.getElementById("rememberEmail");
+  const rememberPassword = document.getElementById("rememberPassword");
   const btnSignIn = document.getElementById("btnSignIn");
   const btnSignUp = document.getElementById("btnSignUp");
+  const btnForgotPassword = document.getElementById("btnForgotPassword");
+  const forgotHint = document.getElementById("forgotHint");
   const statusLogin = document.getElementById("statusLogin");
   const ENABLE_SIGNUP = !!(window.MAROOWELL_ENABLE_SIGNUP?.());
-  const SAVED_EMAIL_KEY = "mw_saved_login_email";
 
-  const params = new URLSearchParams(location.search);
-  const next = params.get("next") || DEFAULT_NEXT;
+  const modalBackdrop = document.getElementById("modalBackdrop");
+  const modalClose = document.getElementById("modalClose");
+  const modalTitle = document.getElementById("modalTitle");
+  const paneMessage = document.getElementById("paneMessage");
+  const paneSignup = document.getElementById("paneSignup");
+  const paneRecovery = document.getElementById("paneRecovery");
+  const messageBadge = document.getElementById("messageBadge");
+  const messageText = document.getElementById("messageText");
+  const messagePrimary = document.getElementById("messagePrimary");
+  const messageSecondary = document.getElementById("messageSecondary");
+  const signupName = document.getElementById("signupName");
+  const signupEmail = document.getElementById("signupEmail");
+  const signupPassword = document.getElementById("signupPassword");
+  const signupPasswordConfirm = document.getElementById("signupPasswordConfirm");
+  const recoveryPassword = document.getElementById("recoveryPassword");
+  const recoveryPasswordConfirm = document.getElementById("recoveryPasswordConfirm");
 
-  function setStatus(msg) {
-    statusLogin.textContent = msg;
+  const SIGNUP_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_SIGNUP_COMPLETE;
+  const RECOVERY_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_RECOVERY;
+
+  let suppressAutoRedirect = false;
+  let handledSignupFlow = false;
+  let handledRecoveryFlow = false;
+
+  function safeNextUrl(u) {
+    if (!u) return DEFAULT_NEXT;
+    if (u.startsWith("http://") || u.startsWith("https://")) return DEFAULT_NEXT;
+    if (!u.startsWith("/")) return DEFAULT_NEXT;
+    return u;
+  }
+
+  const next = safeNextUrl(rawNext);
+
+  function normalizeEmail(v) {
+    return (v || "").trim().toLowerCase();
+  }
+
+  function setStatus(msg, type) {
+    statusLogin.textContent = msg || "";
+    statusLogin.className = "status" + (type ? " " + type : "");
+  }
+
+  function requireSupabase() {
+    if (supabase) return true;
+    setStatus("설정 오류: Supabase 연결 실패", "error");
+    return false;
+  }
+
+  function clearFlowFromUrl() {
+    const url = new URL(location.href);
+    url.searchParams.delete("flow");
+    url.hash = "";
+    const query = url.searchParams.toString();
+    history.replaceState({}, "", url.pathname + (query ? "?" + query : ""));
+  }
+
+  function modalHideAll() {
+    paneMessage.hidden = true;
+    paneSignup.hidden = true;
+    paneRecovery.hidden = true;
+  }
+
+  function openModal(title, paneName) {
+    modalTitle.textContent = title;
+    modalHideAll();
+    if (paneName === "message") paneMessage.hidden = false;
+    if (paneName === "signup") paneSignup.hidden = false;
+    if (paneName === "recovery") paneRecovery.hidden = false;
+    modalBackdrop.hidden = false;
+    document.body.classList.add("modal-open");
+  }
+
+  function closeModal(force) {
+    if (!force && paneRecovery.hidden === false) return;
+    modalBackdrop.hidden = true;
+    document.body.classList.remove("modal-open");
+    modalHideAll();
+    messagePrimary.onclick = null;
+    messageSecondary.onclick = null;
+    messageSecondary.hidden = true;
+  }
+
+  function showMessageModal(title, message, options) {
+    const opts = options || {};
+    modalTitle.textContent = title || "안내";
+    messageText.textContent = message || "";
+
+    if (opts.badge) {
+      messageBadge.hidden = false;
+      messageBadge.textContent = opts.badge;
+    } else {
+      messageBadge.hidden = true;
+      messageBadge.textContent = "";
+    }
+
+    messagePrimary.textContent = opts.primaryText || "확인";
+    messagePrimary.onclick = () => {
+      if (typeof opts.onPrimary === "function") {
+        opts.onPrimary();
+        return;
+      }
+      closeModal(true);
+    };
+
+    if (opts.secondaryText) {
+      messageSecondary.hidden = false;
+      messageSecondary.textContent = opts.secondaryText;
+      messageSecondary.onclick = () => {
+        if (typeof opts.onSecondary === "function") {
+          opts.onSecondary();
+          return;
+        }
+        closeModal(true);
+      };
+    } else {
+      messageSecondary.hidden = true;
+      messageSecondary.onclick = null;
+    }
+
+    openModal(title || "안내", "message");
+  }
+
+  function failKey(em) {
+    return FAIL_COUNT_PREFIX + normalizeEmail(em);
+  }
+
+  function getFailCount(em) {
+    const key = failKey(em);
+    if (!em) return 0;
+    try {
+      return Math.max(0, Number(window.localStorage.getItem(key) || 0));
+    } catch {
+      return 0;
+    }
+  }
+
+  function setFailCount(em, value) {
+    if (!em) return;
+    const key = failKey(em);
+    try {
+      if (value > 0) window.localStorage.setItem(key, String(value));
+      else window.localStorage.removeItem(key);
+    } catch {}
+  }
+
+  function bumpFailCount(em) {
+    const nextValue = getFailCount(em) + 1;
+    setFailCount(em, nextValue);
+    return nextValue;
+  }
+
+  function clearFailCount(em) {
+    setFailCount(em, 0);
+  }
+
+  function refreshForgotPasswordUi() {
+    const em = normalizeEmail(email.value);
+    const count = getFailCount(em);
+    const enabled = !!em && count >= 5;
+    btnForgotPassword.hidden = !enabled;
+    forgotHint.textContent = enabled
+      ? "비밀번호 찾기가 활성화되었습니다. 클릭하면 재설정 메일을 보냅니다."
+      : "비밀번호 5회 연속 실패 시 비밀번호 찾기가 활성화됩니다.";
   }
 
   function loadSavedEmail() {
@@ -218,34 +777,103 @@
     if (rememberEmail) rememberEmail.checked = true;
   }
 
-  function safeNextUrl(u) {
-    if (!u) return DEFAULT_NEXT;
-    if (u.startsWith("http://") || u.startsWith("https://")) return DEFAULT_NEXT;
-    if (!u.startsWith("/")) return DEFAULT_NEXT;
-    return u;
+  function loadSavedPassword() {
+    let raw = "";
+    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
+    if (!raw) return;
+
+    try {
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved !== "object") return;
+
+      const savedEmail = normalizeEmail(saved.email || "");
+      const savedPassword = String(saved.password || "");
+
+      if (!savedEmail || !savedPassword) return;
+
+      if (!email.value) {
+        email.value = savedEmail;
+      }
+
+      if (normalizeEmail(email.value) === savedEmail) {
+        password.value = savedPassword;
+        if (rememberPassword) rememberPassword.checked = true;
+      }
+    } catch {}
   }
 
-  function requireSupabase() {
-    if (supabase) return true;
-    setStatus("설정 오류: Supabase 연결 실패");
-    return false;
+  function syncSavedPasswordByEmail() {
+    let raw = "";
+    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
+    if (!raw) {
+      if (rememberPassword) rememberPassword.checked = false;
+      return;
+    }
+
+    try {
+      const saved = JSON.parse(raw);
+      const savedEmail = normalizeEmail(saved?.email || "");
+      const savedPassword = String(saved?.password || "");
+
+      if (normalizeEmail(email.value) === savedEmail && savedPassword) {
+        password.value = savedPassword;
+        if (rememberPassword) rememberPassword.checked = true;
+      } else {
+        password.value = "";
+        if (rememberPassword) rememberPassword.checked = false;
+      }
+    } catch {
+      password.value = "";
+      if (rememberPassword) rememberPassword.checked = false;
+    }
+  }
+
+  function clearSavedPassword() {
+    try { window.localStorage.removeItem(SAVED_PASSWORD_KEY); } catch {}
+  }
+
+  function shouldCountLoginFailure(err) {
+    const msg = String(err?.message || "").toLowerCase();
+    return msg.includes("invalid login credentials") || msg.includes("invalid_credentials");
+  }
+
+  async function redirectToApp() {
+    location.replace(next);
+  }
+
+  function openSignupModal() {
+    signupName.value = "";
+    signupEmail.value = normalizeEmail(email.value);
+    signupPassword.value = "";
+    signupPasswordConfirm.value = "";
+    openModal("회원가입", "signup");
+    setTimeout(() => signupName.focus(), 20);
+  }
+
+  function openRecoveryModal() {
+    suppressAutoRedirect = true;
+    recoveryPassword.value = "";
+    recoveryPasswordConfirm.value = "";
+    openModal("비밀번호 재설정", "recovery");
+    setTimeout(() => recoveryPassword.focus(), 20);
   }
 
   async function redirectIfLoggedIn() {
-    if (!supabase?.auth) return;
+    if (!supabase?.auth || suppressAutoRedirect) return;
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
+    if (currentFlow === FLOW_SIGNUP_COMPLETE || currentFlow === FLOW_RECOVERY) return;
     if (redirectIfLoggedIn._scheduled) return;
     redirectIfLoggedIn._scheduled = true;
-    location.replace(safeNextUrl(next));
+    location.replace(next);
   }
 
   async function signIn() {
+    const em = normalizeEmail(email.value);
     try {
       if (!requireSupabase()) return;
       setStatus("로그인 중...");
 
-      const em = (email.value || "").trim().toLowerCase();
       const pw = password.value || "";
       if (!em) throw new Error("이메일을 입력하세요.");
       if (!pw) throw new Error("비밀번호를 입력하세요.");
@@ -256,43 +884,167 @@
       try {
         if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
         else window.localStorage.removeItem(SAVED_EMAIL_KEY);
+
+        if (rememberPassword?.checked) {
+          window.localStorage.setItem(SAVED_PASSWORD_KEY, JSON.stringify({
+            email: em,
+            password: pw
+          }));
+        } else {
+          window.localStorage.removeItem(SAVED_PASSWORD_KEY);
+        }
       } catch {}
 
-      setStatus("로그인 성공");
-      location.replace(safeNextUrl(next));
+      clearFailCount(em);
+      refreshForgotPasswordUi();
+      sessionBridge.broadcastAuthState("SESSION_UPDATED");
+      setStatus("로그인 성공", "success");
+      location.replace(next);
     } catch (e) {
-      setStatus("로그인 실패: " + (e?.message || String(e)));
+      let extra = "";
+      if (em && shouldCountLoginFailure(e)) {
+        const count = bumpFailCount(em);
+        refreshForgotPasswordUi();
+        if (count === 4) extra = "\n다음 실패 시 비밀번호 찾기가 활성화됩니다.";
+        if (count >= 5) extra = "\n비밀번호 찾기가 활성화되었습니다.";
+      }
+      setStatus("로그인 실패: " + (e?.message || String(e)) + extra, "error");
     }
   }
 
-  async function signUp() {
+  async function sendPasswordReset() {
     try {
       if (!requireSupabase()) return;
-      setStatus("회원가입 중...");
+      const em = normalizeEmail(email.value);
+      if (!em) throw new Error("이메일을 먼저 입력하세요.");
+      if (getFailCount(em) < 5) throw new Error("비밀번호 5회 실패 후에만 활성화됩니다.");
 
-      const em = (email.value || "").trim().toLowerCase();
-      const pw = password.value || "";
-      if (!em) throw new Error("이메일을 입력하세요.");
-      if (!pw) throw new Error("비밀번호를 입력하세요.");
-      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
-
-      const { data, error } = await supabase.auth.signUp({
-        email: em,
-        password: pw,
-        options: { emailRedirectTo: EMAIL_REDIRECT_ORIGIN + LOGIN_PATH }
+      setStatus("비밀번호 재설정 메일 발송 중...");
+      const { error } = await supabase.auth.resetPasswordForEmail(em, {
+        redirectTo: RECOVERY_REDIRECT_URL
       });
       if (error) throw error;
 
+      setStatus("비밀번호 재설정 메일을 보냈습니다.", "success");
+      showMessageModal("재설정 메일 발송", "메일의 링크를 누르면 다시 Maroowell.com으로 돌아와 새 비밀번호를 입력할 수 있습니다.", {
+        badge: "PASSWORD RESET"
+      });
+    } catch (e) {
+      setStatus("비밀번호 찾기 실패: " + (e?.message || String(e)), "error");
+    }
+  }
+
+  async function signUpFromModal(ev) {
+    ev.preventDefault();
+    try {
+      if (!requireSupabase()) return;
+      const nm = (signupName.value || "").trim();
+      const em = normalizeEmail(signupEmail.value);
+      const pw = signupPassword.value || "";
+      const pw2 = signupPasswordConfirm.value || "";
+
+      if (!nm) throw new Error("이름을 입력하세요.");
+      if (!em) throw new Error("이메일을 입력하세요.");
+      if (!pw) throw new Error("비밀번호를 입력하세요.");
+      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
+      if (pw !== pw2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
+
+      setStatus("회원가입 중...");
+      const { data, error } = await supabase.auth.signUp({
+        email: em,
+        password: pw,
+        options: {
+          emailRedirectTo: SIGNUP_REDIRECT_URL,
+          data: {
+            display_name: nm,
+            full_name: nm,
+            name: nm
+          }
+        }
+      });
+      if (error) throw error;
+
+      email.value = em;
+      password.value = "";
+      clearFailCount(em);
+      refreshForgotPasswordUi();
+      closeModal(true);
+
       if (data?.session) {
-        setStatus("회원가입 완료");
-        location.replace(safeNextUrl(next));
+        sessionBridge.broadcastAuthState("SESSION_UPDATED");
+        setStatus("회원가입 완료", "success");
+        showMessageModal("회원가입 완료", "이메일 인증 없이 바로 가입이 완료되었습니다.", {
+          badge: "SIGNED UP",
+          primaryText: "서비스로 이동",
+          onPrimary: redirectToApp
+        });
         return;
       }
 
-      setStatus("회원가입 완료. 이메일 인증 후 로그인하세요.");
+      setStatus("회원가입 완료. 인증 메일을 확인하세요.", "success");
+      showMessageModal("확인 메일 발송", "확인 메일을 보냈습니다.\n메일의 버튼을 누르면 다시 Maroowell.com으로 돌아와 인증 완료 창이 뜹니다.", {
+        badge: "EMAIL VERIFICATION"
+      });
     } catch (e) {
-      setStatus("회원가입 실패: " + (e?.message || String(e)));
+      setStatus("회원가입 실패: " + (e?.message || String(e)), "error");
     }
+  }
+
+  async function applyRecoveredPassword(ev) {
+    ev.preventDefault();
+    try {
+      if (!requireSupabase()) return;
+      const pw = recoveryPassword.value || "";
+      const pw2 = recoveryPasswordConfirm.value || "";
+
+      if (!pw) throw new Error("새 비밀번호를 입력하세요.");
+      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
+      if (pw !== pw2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
+
+      setStatus("비밀번호 변경 중...");
+      const { error } = await supabase.auth.updateUser({ password: pw });
+      if (error) throw error;
+
+      await supabase.auth.signOut();
+      sessionBridge.broadcastAuthState("SIGNED_OUT");
+      suppressAutoRedirect = false;
+      clearFlowFromUrl();
+      closeModal(true);
+      password.value = "";
+      setStatus("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.", "success");
+      showMessageModal("비밀번호 변경 완료", "비밀번호가 정상적으로 변경되었습니다.\n이제 새 비밀번호로 로그인하면 됩니다.", {
+        badge: "PASSWORD UPDATED"
+      });
+    } catch (e) {
+      setStatus("비밀번호 변경 실패: " + (e?.message || String(e)), "error");
+    }
+  }
+
+  function handleSignupCompletedSession() {
+    if (handledSignupFlow) return;
+    handledSignupFlow = true;
+    suppressAutoRedirect = true;
+    showMessageModal("이메일 인증 완료", "확인 메일 인증이 완료되었습니다.\n계속을 누르면 Maroowell 서비스로 이동합니다.", {
+      badge: "VERIFIED",
+      primaryText: "계속",
+      secondaryText: "로그인 화면에 머물기",
+      onPrimary: () => {
+        clearFlowFromUrl();
+        redirectToApp();
+      },
+      onSecondary: () => {
+        clearFlowFromUrl();
+        suppressAutoRedirect = false;
+        closeModal(true);
+        setStatus("이메일 인증이 완료되었습니다. 로그인 상태입니다.", "success");
+      }
+    });
+  }
+
+  function handleRecoverySession() {
+    if (handledRecoveryFlow) return;
+    handledRecoveryFlow = true;
+    openRecoveryModal();
   }
 
   if (!ENABLE_SIGNUP && btnSignUp) {
@@ -300,24 +1052,83 @@
   }
 
   loadSavedEmail();
+  loadSavedPassword();
+  refreshForgotPasswordUi();
+
+  email.addEventListener("input", () => {
+    refreshForgotPasswordUi();
+    syncSavedPasswordByEmail();
+  });
   btnSignIn.addEventListener("click", signIn);
-  if (btnSignUp && ENABLE_SIGNUP) {
-    btnSignUp.addEventListener("click", signUp);
+  btnForgotPassword.addEventListener("click", sendPasswordReset);
+  if (rememberPassword) {
+    rememberPassword.addEventListener("change", () => {
+      if (!rememberPassword.checked) {
+        clearSavedPassword();
+      }
+    });
   }
+  if (btnSignUp && ENABLE_SIGNUP) {
+    btnSignUp.addEventListener("click", openSignupModal);
+  }
+
   password.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
     signIn();
   });
 
+  paneSignup.addEventListener("submit", signUpFromModal);
+  paneRecovery.addEventListener("submit", applyRecoveredPassword);
+
+  modalClose.addEventListener("click", () => closeModal(false));
+  modalBackdrop.addEventListener("click", (e) => {
+    if (e.target !== modalBackdrop) return;
+    closeModal(false);
+  });
+
   (async () => {
     if (!requireSupabase()) return;
-    supabase.auth.onAuthStateChange((_event, session) => {
+
+    supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        sessionBridge.broadcastAuthState("SIGNED_OUT");
+      } else if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED")) {
+        sessionBridge.broadcastAuthState("SESSION_UPDATED");
+      }
+
+      if (event === "PASSWORD_RECOVERY") {
+        handleRecoverySession();
+        return;
+      }
+
+      if (currentFlow === FLOW_SIGNUP_COMPLETE && session) {
+        handleSignupCompletedSession();
+        return;
+      }
+
       if (!session) return;
-      if (redirectIfLoggedIn._scheduled) return;
+      if (currentFlow === FLOW_RECOVERY) {
+        handleRecoverySession();
+        return;
+      }
+      if (suppressAutoRedirect || redirectIfLoggedIn._scheduled) return;
       redirectIfLoggedIn._scheduled = true;
-      location.replace(safeNextUrl(next));
+      location.replace(next);
     });
+
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (currentFlow === FLOW_RECOVERY && session) {
+      handleRecoverySession();
+      return;
+    }
+
+    if (currentFlow === FLOW_SIGNUP_COMPLETE && session) {
+      handleSignupCompletedSession();
+      return;
+    }
+
     await redirectIfLoggedIn();
   })();
 })();

@@ -64,6 +64,20 @@
       requireRoleLevel: 30
     },
     {
+      key: "mw-freshbag-ratio",
+      label: "마루웰 회수율",
+      path: "/maroowell_freshbag_ratio",
+      aliases: ["/maroowell_freshbag_ratio", "/maroowell_freshbag_ratio.html"],
+      requireMaroowell: true
+    },
+    {
+      key: "mw-freshbag-ratio-upload",
+      label: "마루웰 회수율 업로드",
+      path: "/maroowell_freshbag_ratio_upload",
+      aliases: ["/maroowell_freshbag_ratio_upload", "/maroowell_freshbag_ratio_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
       key: "mw-route",
       label: "마루웰 라우트 단가",
       path: "/maroowell_route",
@@ -278,7 +292,7 @@
 
       case "/coupang_freshbag":
       case "/coupang_freshbag.html":
-        return "프레시백 가중요인 현황 전체 조회";
+        return "프레시백 가중요인 현황 조회";
 
       case "/coupang_freshbag_upload":
       case "/coupang_freshbag_upload.html":
@@ -295,6 +309,14 @@
       case "/maroowell_schedule":
       case "/maroowell_schedule.html":
         return "마루웰 입차 스케줄";
+
+      case "/maroowell_freshbag_ratio":
+      case "/maroowell_freshbag_ratio.html":
+        return "마루웰 프레시백 회수율 조회";
+
+      case "/maroowell_freshbag_ratio_upload":
+      case "/maroowell_freshbag_ratio_upload.html":
+        return "마루웰 회수율 엑셀 업로드";
 
       case "/maroowell_route":
       case "/maroowell_route.html":

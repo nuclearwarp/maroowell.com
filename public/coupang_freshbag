@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>프레시백 현황 조회</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --card:#121a2d;
+      --line:rgba(255,255,255,.12);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#60a5fa;
+      --red:#ef4444;
+      --green:#22c55e;
+      --yellow:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      background:linear-gradient(180deg,#0b1220,#070b13);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+    .wrap{max-width:1600px;margin:0 auto;padding:22px 18px 44px}
+    .top{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:18px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .brand img{width:34px;height:34px}
+    .title{font-size:28px;font-weight:950;letter-spacing:-.6px}
+    .sub{color:var(--muted);font-size:14px;margin-top:4px}
+    .card{
+      background:rgba(18,26,45,.9);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      margin-bottom:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+    }
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    input,select{
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      padding:0 12px;
+      outline:none;
+    }
+    button{
+      min-height:42px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(59,130,246,.24);
+      color:#fff;
+      padding:0 18px;
+      font-weight:900;
+      cursor:pointer;
+    }
+    button:hover{background:rgba(59,130,246,.36)}
+    button.secondary{background:rgba(255,255,255,.07)}
+    .status{font-size:13px;color:var(--muted);margin-top:10px}
+    .status.ok{color:#bbf7d0}
+    .status.bad{color:#fecaca}
+    .tableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:calc(100vh - 240px);
+    }
+    table{
+      border-collapse:separate;
+      border-spacing:0;
+      width:max-content;
+      min-width:100%;
+      font-size:13px;
+    }
+    th,td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      padding:7px 9px;
+      text-align:center;
+      white-space:nowrap;
+      min-width:74px;
+    }
+    th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:#263247;
+      color:#fff;
+      font-weight:950;
+    }
+    th.sticky,td.sticky{
+      position:sticky;
+      left:0;
+      z-index:3;
+      background:#111827;
+    }
+    th.sticky2,td.sticky2{
+      position:sticky;
+      left:74px;
+      z-index:3;
+      background:#111827;
+    }
+    th.sticky3,td.sticky3{
+      position:sticky;
+      left:148px;
+      z-index:3;
+      background:#111827;
+    }
+    th.sticky{z-index:4}
+    th.sticky2{z-index:4}
+    th.sticky3{z-index:4}
+    td.meta{background:#111827;color:#e6eefc;font-weight:800}
+    .yes{background:#7dd3fc;color:#082f49;font-weight:900}
+    .no{background:#fff;color:#ef4444;font-weight:900}
+    .empty{color:#6b7280;background:rgba(255,255,255,.03)}
+    .muted{color:var(--muted)}
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+    }
+    .filterInput{min-width:180px}
+    @media(max-width:800px){
+      .top{align-items:flex-start;flex-direction:column}
+      .row input,.row select,.row button{width:100%}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
+        <div>
+          <div class="title">프레시백 현황 조회</div>
+          <div class="sub">연도별 월별 가중요인 현황을 한 번에 조회합니다. 라우트는 101_A → 101A 기준으로 정규화됩니다.</div>
+        </div>
+      </div>
+      <div class="pill" id="userPill">세션 확인 중</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <label>
+          연도
+          <select id="yearSelect"></select>
+        </label>
+        <input id="campFilter" class="filterInput" placeholder="캠프 필터 예: 일산2" />
+        <input id="routeFilter" class="filterInput" placeholder="라우트 필터 예: 130A" />
+        <button id="loadBtn">조회</button>
+        <button id="clearBtn" class="secondary">필터 초기화</button>
+        <button id="copyBtn" class="secondary">표 복사</button>
+      </div>
+      <div class="status" id="statusText">대기 중</div>
+    </div>
+
+    <div class="card">
+      <div class="tableWrap">
+        <table id="resultTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.MARUWELL_CONFIG || {};
+
+  let supabaseClient = null;
+  let rawRows = [];
+  let aliasRows = [];
+  let renderedMatrix = [];
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg;
+    $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function normalizeRoute(v) {
+    return String(v || "")
+      .toUpperCase()
+      .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function initYears() {
+    const now = new Date().getFullYear();
+    const years = [];
+    for (let y = now + 1; y >= now - 5; y--) years.push(y);
+    $("yearSelect").innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+    $("yearSelect").value = String(now);
+  }
+
+  function initSupabase() {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  async function checkSession() {
+    if (!supabaseClient) initSupabase();
+
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+
+    const user = data?.session?.user;
+    if (!user) throw new Error("로그인이 필요합니다.");
+
+    $("userPill").textContent = user.email || user.id;
+  }
+
+  function aliasMap() {
+    const map = new Map();
+
+    for (const row of aliasRows) {
+      const camp = String(row.camp || "").trim();
+      const alias = normalizeRoute(row.alias_route_norm || row.alias_route_label);
+      const canonical = normalizeRoute(row.route_norm || row.route_label);
+
+      if (!camp || !alias || !canonical) continue;
+
+      map.set(`${camp}||${alias}`, canonical);
+    }
+
+    return map;
+  }
+
+  function canonicalKey(row, map) {
+    const camp = String(row.camp || "").trim();
+    const routeNorm = normalizeRoute(row.route_norm || row.route);
+
+    const mapped = map.get(`${camp}||${routeNorm}`);
+    return mapped || routeNorm;
+  }
+
+  function valueClass(v) {
+    const s = String(v || "").trim();
+    if (!s) return "empty";
+    if (s === "해당") return "yes";
+    if (s === "미해당") return "no";
+    return "";
+  }
+
+  async function loadData() {
+    const year = Number($("yearSelect").value);
+    const campFilter = $("campFilter").value.trim();
+    const routeFilter = normalizeRoute($("routeFilter").value);
+
+    setStatus("조회 중...");
+
+    let q = supabaseClient
+      .from("coupang_freshbag")
+      .select("data_year,month_no,data_month,period_label,wave,camp,route,route_norm,gajoong1,gajoong2")
+      .eq("data_year", year)
+      .order("camp", { ascending: true })
+      .order("wave", { ascending: true })
+      .order("route_norm", { ascending: true })
+      .order("month_no", { ascending: true });
+
+    if (campFilter) {
+      q = q.ilike("camp", `%${campFilter}%`);
+    }
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const { data: aliases, error: aliasError } = await supabaseClient
+      .from("coupang_freshbag_route_alias")
+      .select("camp,route_norm,route_label,alias_route_norm,alias_route_label")
+      .order("camp", { ascending: true });
+
+    if (aliasError) throw aliasError;
+
+    rawRows = Array.isArray(data) ? data : [];
+    aliasRows = Array.isArray(aliases) ? aliases : [];
+
+    renderTable(routeFilter);
+
+    setStatus(`조회 완료: 원본 ${rawRows.length}건`, "ok");
+  }
+
+  function renderTable(routeFilter = "") {
+    const map = aliasMap();
+    const groups = new Map();
+
+    for (const row of rawRows) {
+      const camp = String(row.camp || "").trim();
+      const wave = String(row.wave || "").trim();
+      const routeKey = canonicalKey(row, map);
+      const routeLabel = routeKey || normalizeRoute(row.route);
+
+      if (routeFilter && !routeKey.includes(routeFilter)) continue;
+
+      const key = `${wave}||${camp}||${routeKey}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          wave,
+          camp,
+          route: routeLabel,
+          months: {}
+        });
+      }
+
+      const item = groups.get(key);
+      const m = Number(row.month_no || 0);
+
+      if (m >= 1 && m <= 12) {
+        item.months[m] = {
+          g1: row.gajoong1 || "",
+          g2: row.gajoong2 || ""
+        };
+      }
+    }
+
+    renderedMatrix = Array.from(groups.values()).sort((a, b) => {
+      return (
+        a.camp.localeCompare(b.camp, "ko") ||
+        a.wave.localeCompare(b.wave, "ko") ||
+        a.route.localeCompare(b.route, "ko", { numeric: true })
+      );
+    });
+
+    const thead = $("resultTable").querySelector("thead");
+    const tbody = $("resultTable").querySelector("tbody");
+
+    const monthHeaders = [];
+    for (let m = 1; m <= 12; m++) {
+      monthHeaders.push(`<th>${m}월 가중1</th><th>${m}월 가중2</th>`);
+    }
+
+    thead.innerHTML = `
+      <tr>
+        <th class="sticky">Wave</th>
+        <th class="sticky2">Camp</th>
+        <th class="sticky3">Route</th>
+        ${monthHeaders.join("")}
+      </tr>
+    `;
+
+    if (!renderedMatrix.length) {
+      tbody.innerHTML = `<tr><td colspan="27" class="empty">데이터 없음</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = renderedMatrix.map(item => {
+      const cells = [];
+
+      for (let m = 1; m <= 12; m++) {
+        const v = item.months[m] || {};
+        cells.push(`<td class="${valueClass(v.g1)}">${esc(v.g1 || "데이터 없음")}</td>`);
+        cells.push(`<td class="${valueClass(v.g2)}">${esc(v.g2 || "데이터 없음")}</td>`);
+      }
+
+      return `
+        <tr>
+          <td class="meta sticky">${esc(item.wave)}</td>
+          <td class="meta sticky2">${esc(item.camp)}</td>
+          <td class="meta sticky3">${esc(item.route)}</td>
+          ${cells.join("")}
+        </tr>
+      `;
+    }).join("");
+  }
+
+  async function copyTable() {
+    if (!renderedMatrix.length) {
+      setStatus("복사할 데이터가 없습니다.", "bad");
+      return;
+    }
+
+    const header = ["Wave", "Camp", "Route"];
+    for (let m = 1; m <= 12; m++) {
+      header.push(`${m}월 가중1`, `${m}월 가중2`);
+    }
+
+    const lines = [header.join("\t")];
+
+    for (const item of renderedMatrix) {
+      const row = [item.wave, item.camp, item.route];
+
+      for (let m = 1; m <= 12; m++) {
+        const v = item.months[m] || {};
+        row.push(v.g1 || "데이터 없음", v.g2 || "데이터 없음");
+      }
+
+      lines.push(row.join("\t"));
+    }
+
+    await navigator.clipboard.writeText(lines.join("\n"));
+    setStatus("표 복사 완료", "ok");
+  }
+
+  function run(fn) {
+    fn().catch(e => {
+      console.error(e);
+      setStatus(e.message || String(e), "bad");
+    });
+  }
+
+  initYears();
+
+  $("loadBtn").addEventListener("click", () => run(loadData));
+  $("clearBtn").addEventListener("click", () => {
+    $("campFilter").value = "";
+    $("routeFilter").value = "";
+    renderTable("");
+  });
+  $("copyBtn").addEventListener("click", () => run(copyTable));
+
+  try {
+    initSupabase();
+    run(async () => {
+      await checkSession();
+      await loadData();
+    });
+  } catch (e) {
+    setStatus(e.message, "bad");
+  }
+})();
+</script>
+<script src="/board-menu.js"></script>
+</body>
+</html>

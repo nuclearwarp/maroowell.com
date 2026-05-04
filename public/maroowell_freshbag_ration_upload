@@ -1,0 +1,1230 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>마루웰 회수율 업로드</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --card:#121a2d;
+      --line:rgba(255,255,255,.12);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#60a5fa;
+      --red:#ef4444;
+      --green:#22c55e;
+      --yellow:#f59e0b;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      min-height:100vh;
+      background:linear-gradient(180deg,#0b1220,#070b13);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    .wrap{
+      max-width:1540px;
+      margin:0 auto;
+      padding:22px 18px 44px;
+    }
+
+    .top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      margin-bottom:18px;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      min-width:0;
+    }
+
+    .brand img{
+      width:34px;
+      height:34px;
+    }
+
+    .title{
+      font-size:28px;
+      font-weight:950;
+      letter-spacing:-.6px;
+      line-height:1.15;
+    }
+
+    .sub{
+      color:var(--muted);
+      font-size:14px;
+      margin-top:5px;
+      line-height:1.45;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:430px 1fr;
+      gap:16px;
+    }
+
+    .card{
+      background:rgba(18,26,45,.9);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      margin-bottom:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+    }
+
+    .sectionTitle{
+      font-size:17px;
+      font-weight:950;
+      margin:0 0 12px;
+    }
+
+    .field{
+      margin-bottom:12px;
+    }
+
+    .field label{
+      display:block;
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      margin:0 0 6px 2px;
+    }
+
+    input,select{
+      width:100%;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      padding:0 12px;
+      outline:none;
+    }
+
+    input[type=file]{
+      height:auto;
+      padding:11px;
+    }
+
+    select option{
+      background:#111827;
+      color:#fff;
+    }
+
+    input:focus,select:focus{
+      border-color:rgba(96,165,250,.55);
+      box-shadow:0 0 0 2px rgba(96,165,250,.12);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    button{
+      min-height:42px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(59,130,246,.24);
+      color:#fff;
+      padding:0 18px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+
+    button:hover{
+      background:rgba(59,130,246,.36);
+    }
+
+    button.secondary{
+      background:rgba(255,255,255,.07);
+    }
+
+    button.secondary:hover{
+      background:rgba(255,255,255,.12);
+    }
+
+    button.ok{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.32);
+    }
+
+    button.ok:hover{
+      background:rgba(34,197,94,.28);
+    }
+
+    button.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.32);
+    }
+
+    button.danger:hover{
+      background:rgba(239,68,68,.28);
+    }
+
+    .status{
+      font-size:13px;
+      color:var(--muted);
+      margin-top:10px;
+      line-height:1.55;
+    }
+
+    .status.ok{color:#bbf7d0}
+    .status.bad{color:#fecaca}
+    .status.warn{color:#fde68a}
+
+    .muted{
+      color:var(--muted);
+      line-height:1.55;
+      font-size:13px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .summary{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-top:12px;
+    }
+
+    .summary .pill strong{
+      color:#fff;
+      margin-left:5px;
+    }
+
+    pre{
+      white-space:pre-wrap;
+      word-break:break-word;
+      background:rgba(0,0,0,.28);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px;
+      max-height:420px;
+      overflow:auto;
+      font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      color:#dbeafe;
+      margin:0;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:620px;
+    }
+
+    table{
+      border-collapse:separate;
+      border-spacing:0;
+      width:100%;
+      min-width:880px;
+      font-size:13px;
+    }
+
+    th,td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      padding:7px 9px;
+      text-align:center;
+      white-space:nowrap;
+    }
+
+    th{
+      position:sticky;
+      top:0;
+      background:#263247;
+      color:#fff;
+      font-weight:950;
+      z-index:2;
+    }
+
+    td{
+      background:rgba(255,255,255,.025);
+    }
+
+    .percent{
+      color:#7dd3fc;
+      font-weight:950;
+    }
+
+    .badCell{
+      color:#fecaca;
+      font-weight:950;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:9999;
+    }
+
+    .accessDenied.show{
+      display:flex;
+    }
+
+    .accessCard{
+      width:min(520px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+      line-height:1.6;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media(max-width:980px){
+      .grid{
+        grid-template-columns:1fr;
+      }
+
+      .top{
+        align-items:flex-start;
+        flex-direction:column;
+      }
+
+      .row button{
+        width:100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
+        <div>
+          <div class="title">마루웰 회수율 업로드</div>
+          <div class="sub">엑셀/CSV에서 날짜별 프레시백 회수율을 추출해 DB에 저장합니다. 최고관리자만 접근 가능합니다.</div>
+        </div>
+      </div>
+      <div class="pill" id="userPill">세션 확인 중</div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <div class="sectionTitle">엑셀 업로드</div>
+
+          <div class="field">
+            <label>기본 연도</label>
+            <select id="yearSelect"></select>
+          </div>
+
+          <div class="field">
+            <label>파일</label>
+            <input id="fileInput" type="file" accept=".xlsx,.xls,.csv" />
+          </div>
+
+          <div class="row">
+            <button id="parseBtn">파일 분석</button>
+            <button id="uploadBtn" class="ok">DB 업로드</button>
+            <button id="clearBtn" class="secondary">초기화</button>
+          </div>
+
+          <div class="status" id="statusText">대기 중</div>
+
+          <div class="summary">
+            <span class="pill">추출 <strong id="countExtracted">0</strong></span>
+            <span class="pill">날짜 <strong id="countDates">0</strong></span>
+            <span class="pill">캠프 <strong id="countCamps">0</strong></span>
+            <span class="pill">라우트 <strong id="countRoutes">0</strong></span>
+          </div>
+
+          <div class="muted" style="margin-top:12px">
+            지원 형식:<br>
+            1) <b>date / wave / camp / route / gajoong1 / gajoong2</b> 컬럼이 있는 일반 표<br>
+            2) <b>Wave / Camp / Route</b> 뒤로 날짜별 <b>가중1 / 가중2</b>가 옆으로 이어지는 표<br><br>
+            퍼센트는 <b>92%</b>, <b>92.1</b>, <b>0.921</b> 모두 인식합니다. DB에는 <b>92.10</b>처럼 숫자로 저장됩니다.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sectionTitle">주의사항</div>
+          <div class="muted">
+            업로드는 <b>date + wave + camp + route</b> 기준으로 덮어쓰기됩니다.<br>
+            같은 날짜/웨이브/캠프/라우트가 이미 있으면 기존 회수율이 새 값으로 교체됩니다.<br><br>
+            Route는 저장 시 자동으로 <b>126_A → 126A</b>처럼 정규화됩니다.
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="sectionTitle">추출 결과 미리보기</div>
+          <div class="tableWrap">
+            <table id="previewTable">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sectionTitle">로그</div>
+          <pre id="logOutput">아직 분석 결과가 없습니다.</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">최고관리자 권한이 필요합니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="deniedHomeBtn" class="secondary" type="button">홈으로</button>
+        <button id="deniedLogoutBtn" class="danger" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.MARUWELL_CONFIG || {};
+  const TABLE_NAME = "maroowell_freshbag_ration";
+
+  let supabaseClient = null;
+  let currentUser = null;
+  let parsedRows = [];
+  let fileName = "";
+  let canUpload = false;
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg;
+    $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function log(value) {
+    $("logOutput").textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  }
+
+  function clean(v) {
+    return String(v ?? "").trim();
+  }
+
+  function normalizeRoute(v) {
+    return String(v || "")
+      .toUpperCase()
+      .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function headerKey(v) {
+    return clean(v)
+      .replace(/\s+/g, "")
+      .replace(/_/g, "")
+      .replace(/[()（）\[\]{}]/g, "")
+      .toLowerCase();
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function uniqueCount(arr) {
+    return new Set(arr.filter(Boolean)).size;
+  }
+
+  function initYears() {
+    const now = new Date().getFullYear();
+    const years = [];
+
+    for (let y = now + 1; y >= now - 8; y--) {
+      years.push(y);
+    }
+
+    $("yearSelect").innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+    $("yearSelect").value = String(now);
+  }
+
+  function initSupabase() {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  function showAccessDenied(detail = "") {
+    $("accessDenied").classList.add("show");
+    $("accessDeniedText").textContent = detail || "최고관리자 권한이 필요합니다.";
+    $("accessDeniedEmail").textContent = currentUser?.email
+      ? `현재 로그인: ${currentUser.email}`
+      : "현재 로그인 이메일을 확인할 수 없습니다.";
+    document.documentElement.style.visibility = "visible";
+  }
+
+  async function checkSuperAdmin() {
+    if (!supabaseClient) initSupabase();
+
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    currentUser = sessionData?.session?.user;
+
+    if (!currentUser) {
+      const loginPath = cfg.PATHS?.login || "/login.html";
+      location.href = loginPath + "?next=" + encodeURIComponent(location.pathname);
+      return false;
+    }
+
+    $("userPill").textContent = currentUser.email || currentUser.id;
+
+    const { data: access, error: accessError } = await supabaseClient
+      .rpc("mw_my_access")
+      .maybeSingle();
+
+    if (accessError) {
+      showAccessDenied(accessError.message);
+      return false;
+    }
+
+    canUpload =
+      access?.is_maroowell === true &&
+      access?.is_admin === true &&
+      Number(access?.max_role_level || 0) >= 90;
+
+    if (!canUpload) {
+      showAccessDenied(
+        "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상"
+      );
+      return false;
+    }
+
+    document.documentElement.style.visibility = "visible";
+    return true;
+  }
+
+  function excelSerialToDate(serial) {
+    const n = Number(serial);
+    if (!Number.isFinite(n)) return null;
+
+    const utcDays = Math.floor(n - 25569);
+    const utcValue = utcDays * 86400;
+    const dateInfo = new Date(utcValue * 1000);
+
+    if (Number.isNaN(dateInfo.getTime())) return null;
+
+    const yyyy = dateInfo.getUTCFullYear();
+    const mm = String(dateInfo.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(dateInfo.getUTCDate()).padStart(2, "0");
+
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function parseDateValue(v, defaultYear = null) {
+    if (v instanceof Date && !Number.isNaN(v.getTime())) {
+      const yyyy = v.getFullYear();
+      const mm = String(v.getMonth() + 1).padStart(2, "0");
+      const dd = String(v.getDate()).padStart(2, "0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    if (typeof v === "number") {
+      return excelSerialToDate(v);
+    }
+
+    let s = clean(v);
+
+    if (!s) return null;
+
+    s = s
+      .replace(/^date\s*[:：]?\s*/i, "")
+      .replace(/^날짜\s*[:：]?\s*/i, "")
+      .replace(/\([^)]*\)/g, "")
+      .trim();
+
+    let m = s.match(/(20\d{2})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/);
+    if (m) {
+      return `${m[1]}-${String(Number(m[2])).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
+    }
+
+    m = s.match(/(\d{1,2})[.\-/월\s]+(\d{1,2})/);
+    if (m && defaultYear) {
+      return `${defaultYear}-${String(Number(m[1])).padStart(2, "0")}-${String(Number(m[2])).padStart(2, "0")}`;
+    }
+
+    if (/^\d{5}(\.\d+)?$/.test(s)) {
+      return excelSerialToDate(Number(s));
+    }
+
+    return null;
+  }
+
+  function parsePercentValue(v) {
+    if (v === null || v === undefined || v === "") return null;
+
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) return null;
+      const val = v > 0 && v <= 1 ? v * 100 : v;
+      if (val < 0 || val > 100) throw new Error(`퍼센트 범위를 벗어났습니다: ${v}`);
+      return Math.round(val * 100) / 100;
+    }
+
+    const raw = clean(v);
+    if (!raw) return null;
+
+    const hasPercent = raw.includes("%");
+
+    const normalized = raw
+      .replace(/,/g, "")
+      .replace(/%/g, "")
+      .replace(/[^\d.\-]/g, "");
+
+    if (!normalized || normalized === "." || normalized === "-") return null;
+
+    const n = Number(normalized);
+    if (!Number.isFinite(n)) return null;
+
+    const val = !hasPercent && n > 0 && n <= 1 ? n * 100 : n;
+
+    if (val < 0 || val > 100) {
+      throw new Error(`퍼센트 범위를 벗어났습니다: ${raw}`);
+    }
+
+    return Math.round(val * 100) / 100;
+  }
+
+  function parseWhich(v) {
+    const key = headerKey(v);
+
+    if (!key) return 0;
+
+    if (
+      key.includes("가중요인1") ||
+      key.includes("가중1") ||
+      key.includes("gajoong1") ||
+      key.includes("factor1") ||
+      key.includes("요인1") ||
+      key === "1"
+    ) {
+      return 1;
+    }
+
+    if (
+      key.includes("가중요인2") ||
+      key.includes("가중2") ||
+      key.includes("gajoong2") ||
+      key.includes("factor2") ||
+      key.includes("요인2") ||
+      key === "2"
+    ) {
+      return 2;
+    }
+
+    return 0;
+  }
+
+  function findIndexByCandidates(keys, candidates) {
+    return keys.findIndex(key => candidates.some(c => key === c || key.includes(c)));
+  }
+
+  function findLongHeader(rows) {
+    for (let r = 0; r < Math.min(rows.length, 100); r++) {
+      const row = rows[r] || [];
+      const keys = row.map(headerKey);
+
+      const dateIdx = findIndexByCandidates(keys, ["date", "날짜", "일자"]);
+      const waveIdx = findIndexByCandidates(keys, ["wave", "웨이브", "주야간"]);
+      const campIdx = findIndexByCandidates(keys, ["camp", "캠프"]);
+      const routeIdx = findIndexByCandidates(keys, ["route", "라우트", "노선"]);
+      const g1Idx = findIndexByCandidates(keys, ["gajoong1", "가중요인1", "가중1", "요인1"]);
+      const g2Idx = findIndexByCandidates(keys, ["gajoong2", "가중요인2", "가중2", "요인2"]);
+
+      if (dateIdx >= 0 && waveIdx >= 0 && campIdx >= 0 && routeIdx >= 0 && g1Idx >= 0 && g2Idx >= 0) {
+        return {
+          rowIndex: r,
+          dateIdx,
+          waveIdx,
+          campIdx,
+          routeIdx,
+          g1Idx,
+          g2Idx
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function findBaseHeader(rows) {
+    for (let r = 0; r < Math.min(rows.length, 100); r++) {
+      const row = rows[r] || [];
+      const keys = row.map(headerKey);
+
+      const waveIdx = findIndexByCandidates(keys, ["wave", "웨이브", "주야간"]);
+      const campIdx = findIndexByCandidates(keys, ["camp", "캠프"]);
+      const routeIdx = findIndexByCandidates(keys, ["route", "라우트", "노선"]);
+
+      if (waveIdx >= 0 && campIdx >= 0 && routeIdx >= 0) {
+        return {
+          rowIndex: r,
+          row,
+          keys,
+          waveIdx,
+          campIdx,
+          routeIdx
+        };
+      }
+    }
+
+    return null;
+  }
+
+  function filledRow(row) {
+    const out = [];
+    let last = "";
+
+    for (let i = 0; i < row.length; i++) {
+      const v = clean(row[i]);
+      if (v) last = v;
+      out[i] = v || last;
+    }
+
+    return out;
+  }
+
+  function rowHasManyGajoong(row) {
+    let count = 0;
+
+    for (const cell of row || []) {
+      if (parseWhich(cell)) count++;
+    }
+
+    return count >= 2;
+  }
+
+  function findWideDateColumns(rows, header) {
+    const defaultYear = Number($("yearSelect").value);
+    const dateRows = [];
+
+    for (let r = Math.max(0, header.rowIndex - 3); r <= Math.min(rows.length - 1, header.rowIndex + 1); r++) {
+      dateRows.push({
+        index: r,
+        raw: rows[r] || [],
+        filled: filledRow(rows[r] || [])
+      });
+    }
+
+    const subHeaderRow = rowHasManyGajoong(rows[header.rowIndex + 1] || [])
+      ? rows[header.rowIndex + 1] || []
+      : null;
+
+    const dataStart = subHeaderRow ? header.rowIndex + 2 : header.rowIndex + 1;
+    const maxLen = Math.max(...rows.slice(Math.max(0, header.rowIndex - 3), header.rowIndex + 2).map(row => (row || []).length), 0);
+    const cols = [];
+
+    for (let c = 0; c < maxLen; c++) {
+      if ([header.waveIdx, header.campIdx, header.routeIdx].includes(c)) continue;
+
+      let date = null;
+      let which = 0;
+
+      const directTextList = [
+        rows[header.rowIndex]?.[c],
+        rows[header.rowIndex - 1]?.[c],
+        rows[header.rowIndex - 2]?.[c],
+        rows[header.rowIndex - 3]?.[c]
+      ];
+
+      for (const text of directTextList) {
+        date = parseDateValue(text, defaultYear);
+        if (date) break;
+      }
+
+      if (!date) {
+        for (const rowInfo of dateRows) {
+          date = parseDateValue(rowInfo.filled[c], defaultYear);
+          if (date) break;
+        }
+      }
+
+      which =
+        parseWhich(subHeaderRow?.[c]) ||
+        parseWhich(rows[header.rowIndex]?.[c]) ||
+        parseWhich(rows[header.rowIndex - 1]?.[c]) ||
+        parseWhich(rows[header.rowIndex - 2]?.[c]);
+
+      if (!date || !which) continue;
+
+      cols.push({
+        colIndex: c,
+        date,
+        which
+      });
+    }
+
+    const grouped = new Map();
+
+    for (const col of cols) {
+      const key = col.date;
+
+      if (!grouped.has(key)) {
+        grouped.set(key, { date: col.date, g1Idx: -1, g2Idx: -1 });
+      }
+
+      const item = grouped.get(key);
+
+      if (col.which === 1) item.g1Idx = col.colIndex;
+      if (col.which === 2) item.g2Idx = col.colIndex;
+    }
+
+    return {
+      dataStart,
+      columns: Array.from(grouped.values()).filter(item => item.g1Idx >= 0 || item.g2Idx >= 0)
+    };
+  }
+
+  async function readWorkbook(file) {
+    const buffer = await file.arrayBuffer();
+
+    const wb = XLSX.read(buffer, {
+      type: "array",
+      cellDates: true
+    });
+
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+
+    const rows = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+      defval: ""
+    });
+
+    return {
+      sheetName,
+      rows
+    };
+  }
+
+  function parseLongRows(rows, header) {
+    const out = [];
+    const defaultYear = Number($("yearSelect").value);
+
+    for (let r = header.rowIndex + 1; r < rows.length; r++) {
+      const row = rows[r] || [];
+
+      const date = parseDateValue(row[header.dateIdx], defaultYear);
+      const wave = clean(row[header.waveIdx]);
+      const camp = clean(row[header.campIdx]);
+      const route = clean(row[header.routeIdx]);
+      const routeNorm = normalizeRoute(route);
+
+      if (!date || !wave || !camp || !routeNorm) continue;
+
+      const g1 = parsePercentValue(row[header.g1Idx]);
+      const g2 = parsePercentValue(row[header.g2Idx]);
+
+      if (g1 === null && g2 === null) continue;
+
+      out.push({
+        date,
+        wave,
+        camp,
+        route: routeNorm,
+        gajoong1: g1,
+        gajoong2: g2,
+        source_file_name: fileName
+      });
+    }
+
+    return out;
+  }
+
+  function parseWideRows(rows, header, wideInfo) {
+    const out = [];
+
+    for (let r = wideInfo.dataStart; r < rows.length; r++) {
+      const row = rows[r] || [];
+
+      const wave = clean(row[header.waveIdx]);
+      const camp = clean(row[header.campIdx]);
+      const route = clean(row[header.routeIdx]);
+      const routeNorm = normalizeRoute(route);
+
+      if (!wave || !camp || !routeNorm) continue;
+
+      for (const col of wideInfo.columns) {
+        const rawG1 = col.g1Idx >= 0 ? row[col.g1Idx] : "";
+        const rawG2 = col.g2Idx >= 0 ? row[col.g2Idx] : "";
+
+        const g1 = parsePercentValue(rawG1);
+        const g2 = parsePercentValue(rawG2);
+
+        if (g1 === null && g2 === null) continue;
+
+        out.push({
+          date: col.date,
+          wave,
+          camp,
+          route: routeNorm,
+          gajoong1: g1,
+          gajoong2: g2,
+          source_file_name: fileName
+        });
+      }
+    }
+
+    return out;
+  }
+
+  function dedupeRows(rows) {
+    const map = new Map();
+
+    for (const row of rows) {
+      const key = `${row.date}||${row.wave}||${row.camp}||${normalizeRoute(row.route)}`;
+
+      map.set(key, {
+        ...row,
+        route: normalizeRoute(row.route),
+        gajoong1: row.gajoong1 === undefined ? null : row.gajoong1,
+        gajoong2: row.gajoong2 === undefined ? null : row.gajoong2
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      return (
+        String(a.date).localeCompare(String(b.date)) ||
+        String(a.camp).localeCompare(String(b.camp), "ko", { numeric:true }) ||
+        String(a.wave).localeCompare(String(b.wave), "ko", { numeric:true }) ||
+        String(a.route).localeCompare(String(b.route), "ko", { numeric:true })
+      );
+    });
+  }
+
+  function parseRows(rows) {
+    const longHeader = findLongHeader(rows);
+
+    if (longHeader) {
+      const parsed = parseLongRows(rows, longHeader);
+
+      return {
+        mode: "long",
+        headerRow: longHeader.rowIndex + 1,
+        dateColumns: 0,
+        rows: dedupeRows(parsed)
+      };
+    }
+
+    const baseHeader = findBaseHeader(rows);
+
+    if (!baseHeader) {
+      throw new Error("Wave / Camp / Route 헤더를 찾지 못했습니다.");
+    }
+
+    const wideInfo = findWideDateColumns(rows, baseHeader);
+
+    if (!wideInfo.columns.length) {
+      throw new Error("날짜별 가중1 / 가중2 컬럼을 찾지 못했습니다.");
+    }
+
+    const parsed = parseWideRows(rows, baseHeader, wideInfo);
+
+    return {
+      mode: "wide",
+      headerRow: baseHeader.rowIndex + 1,
+      dataStartRow: wideInfo.dataStart + 1,
+      dateColumns: wideInfo.columns.length,
+      dates: wideInfo.columns.map(item => item.date),
+      rows: dedupeRows(parsed)
+    };
+  }
+
+  function renderSummary() {
+    $("countExtracted").textContent = parsedRows.length.toLocaleString();
+    $("countDates").textContent = uniqueCount(parsedRows.map(row => row.date)).toLocaleString();
+    $("countCamps").textContent = uniqueCount(parsedRows.map(row => row.camp)).toLocaleString();
+    $("countRoutes").textContent = uniqueCount(parsedRows.map(row => row.route)).toLocaleString();
+  }
+
+  function renderPreview(rows) {
+    const thead = $("previewTable").querySelector("thead");
+    const tbody = $("previewTable").querySelector("tbody");
+
+    thead.innerHTML = `
+      <tr>
+        <th>date</th>
+        <th>Wave</th>
+        <th>Camp</th>
+        <th>Route</th>
+        <th>가중1 %</th>
+        <th>가중2 %</th>
+        <th>source</th>
+      </tr>
+    `;
+
+    const sample = rows.slice(0, 500);
+
+    if (!sample.length) {
+      tbody.innerHTML = `<tr><td colspan="7">추출 데이터 없음</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = sample.map(row => `
+      <tr>
+        <td>${esc(row.date)}</td>
+        <td>${esc(row.wave)}</td>
+        <td>${esc(row.camp)}</td>
+        <td>${esc(row.route)}</td>
+        <td class="${row.gajoong1 === null ? "badCell" : "percent"}">${row.gajoong1 === null ? "" : esc(row.gajoong1.toFixed(2) + "%")}</td>
+        <td class="${row.gajoong2 === null ? "badCell" : "percent"}">${row.gajoong2 === null ? "" : esc(row.gajoong2.toFixed(2) + "%")}</td>
+        <td>${esc(row.source_file_name)}</td>
+      </tr>
+    `).join("");
+  }
+
+  async function parseFile() {
+    const file = $("fileInput").files?.[0];
+
+    if (!file) {
+      throw new Error("파일을 선택하세요.");
+    }
+
+    fileName = file.name;
+    parsedRows = [];
+
+    setStatus("파일 분석 중...", "warn");
+
+    const { sheetName, rows } = await readWorkbook(file);
+    const result = parseRows(rows);
+
+    parsedRows = result.rows;
+
+    renderPreview(parsedRows);
+    renderSummary();
+
+    log({
+      file: file.name,
+      sheet: sheetName,
+      mode: result.mode,
+      headerRow: result.headerRow,
+      dataStartRow: result.dataStartRow || result.headerRow + 1,
+      dateColumns: result.dateColumns,
+      extractedRows: parsedRows.length,
+      dates: Array.from(new Set(parsedRows.map(row => row.date))).slice(0, 30),
+      sample: parsedRows.slice(0, 10)
+    });
+
+    setStatus(`분석 완료: ${parsedRows.length.toLocaleString()}건 추출`, "ok");
+  }
+
+  function chunk(arr, size) {
+    const out = [];
+
+    for (let i = 0; i < arr.length; i += size) {
+      out.push(arr.slice(i, i + size));
+    }
+
+    return out;
+  }
+
+  async function uploadRows() {
+    if (!canUpload) {
+      throw new Error("최고관리자만 업로드할 수 있습니다.");
+    }
+
+    if (!parsedRows.length) {
+      throw new Error("먼저 파일 분석을 실행하세요.");
+    }
+
+    const ok = confirm(
+      `총 ${parsedRows.length.toLocaleString()}건을 DB에 업로드할까요?\n\n` +
+      `동일한 date/wave/camp/route 데이터는 새 값으로 덮어쓰기됩니다.`
+    );
+
+    if (!ok) return;
+
+    setStatus(`업로드 중... ${parsedRows.length.toLocaleString()}건`, "warn");
+
+    const batches = chunk(parsedRows, 500);
+    let done = 0;
+
+    for (const batch of batches) {
+      const payload = batch.map(row => ({
+        date: row.date,
+        wave: row.wave,
+        camp: row.camp,
+        route: row.route,
+        gajoong1: row.gajoong1,
+        gajoong2: row.gajoong2,
+        source_file_name: row.source_file_name
+      }));
+
+      const { error } = await supabaseClient
+        .from(TABLE_NAME)
+        .upsert(payload, {
+          onConflict: "date,wave,camp,route_norm"
+        });
+
+      if (error) throw error;
+
+      done += batch.length;
+      setStatus(`업로드 중... ${done.toLocaleString()} / ${parsedRows.length.toLocaleString()}`, "warn");
+    }
+
+    setStatus(`업로드 완료: ${parsedRows.length.toLocaleString()}건`, "ok");
+  }
+
+  function clearAll() {
+    parsedRows = [];
+    fileName = "";
+    $("fileInput").value = "";
+    $("previewTable").querySelector("thead").innerHTML = "";
+    $("previewTable").querySelector("tbody").innerHTML = "";
+    renderSummary();
+    log("초기화 완료");
+    setStatus("대기 중");
+  }
+
+  async function signOut() {
+    try {
+      await supabaseClient?.auth?.signOut();
+    } catch {}
+
+    location.href = cfg.PATHS?.login || "/login.html";
+  }
+
+  function bindEvents() {
+    $("parseBtn").addEventListener("click", () => run(parseFile));
+    $("uploadBtn").addEventListener("click", () => run(uploadRows));
+    $("clearBtn").addEventListener("click", clearAll);
+
+    $("deniedHomeBtn").addEventListener("click", () => {
+      location.href = cfg.PATHS?.index || "/index.html";
+    });
+
+    $("deniedLogoutBtn").addEventListener("click", signOut);
+  }
+
+  function run(fn) {
+    Promise.resolve()
+      .then(fn)
+      .catch(e => {
+        console.error(e);
+        setStatus(e.message || String(e), "bad");
+        log({
+          error: e.message || String(e),
+          stack: e.stack || null
+        });
+      });
+  }
+
+  initYears();
+  bindEvents();
+
+  try {
+    initSupabase();
+
+    run(async () => {
+      const ok = await checkSuperAdmin();
+
+      if (!ok) return;
+
+      renderSummary();
+      setStatus("최고관리자 확인 완료. 파일을 선택하고 분석하세요.", "ok");
+    });
+  } catch (e) {
+    document.documentElement.style.visibility = "visible";
+    setStatus(e.message || String(e), "bad");
+    log(e.message || String(e));
+  }
+})();
+</script>
+
+<script src="/board-menu.js"></script>
+</body>
+</html>

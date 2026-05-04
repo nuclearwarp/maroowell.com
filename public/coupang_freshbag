@@ -125,6 +125,26 @@
     button.secondary:hover{
       background:rgba(255,255,255,.12);
     }
+    button.ok{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.32);
+    }
+    button.ok:hover{
+      background:rgba(34,197,94,.28);
+    }
+    button.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.32);
+    }
+    button.danger:hover{
+      background:rgba(239,68,68,.28);
+    }
+    button.small{
+      min-height:30px;
+      padding:0 10px;
+      font-size:12px;
+      border-radius:999px;
+    }
     .pill{
       display:inline-flex;
       align-items:center;
@@ -150,6 +170,7 @@
     }
     .status.ok{color:#bbf7d0}
     .status.bad{color:#fecaca}
+    .status.warn{color:#fde68a}
     .summary{
       display:flex;
       gap:8px;
@@ -163,22 +184,12 @@
       line-height:1.55;
       margin-top:10px;
     }
-    .routeBox{
-      display:grid;
-      grid-template-columns:repeat(4,minmax(140px,1fr));
-      gap:10px;
-      margin-top:12px;
-    }
-    .routeBox input{
-      width:100%;
-      min-width:0;
-    }
     .tableWrap{
       overflow:auto;
       border:1px solid var(--line);
       border-radius:16px;
       background:rgba(0,0,0,.18);
-      max-height:calc(100vh - 310px);
+      max-height:calc(100vh - 300px);
     }
     table{
       border-collapse:separate;
@@ -193,7 +204,7 @@
       padding:8px 10px;
       text-align:center;
       white-space:nowrap;
-      min-width:74px;
+      min-width:78px;
     }
     th{
       position:sticky;
@@ -203,26 +214,34 @@
       color:#fff;
       font-weight:950;
     }
-    th.monthHead{
-      min-width:88px;
-    }
-    th.sticky,td.sticky{
+    th.actionCol,td.actionCol{
       position:sticky;
       left:0;
       z-index:4;
-      min-width:82px;
+      min-width:76px;
+      background:#111827;
     }
-    th.sticky{z-index:7}
-    td.sticky{
+    th.actionCol{
+      z-index:7;
+      background:#263247;
+    }
+    th.sticky1,td.sticky1{
+      position:sticky;
+      left:76px;
+      z-index:4;
+      min-width:86px;
+    }
+    th.sticky1{z-index:7}
+    td.sticky1{
       background:#111827;
       color:#e6eefc;
       font-weight:900;
     }
     th.sticky2,td.sticky2{
       position:sticky;
-      left:82px;
+      left:162px;
       z-index:4;
-      min-width:90px;
+      min-width:96px;
     }
     th.sticky2{z-index:7}
     td.sticky2{
@@ -232,15 +251,29 @@
     }
     th.sticky3,td.sticky3{
       position:sticky;
-      left:172px;
+      left:258px;
       z-index:4;
-      min-width:100px;
+      min-width:105px;
     }
     th.sticky3{z-index:7}
     td.sticky3{
       background:#111827;
       color:#bfdbfe;
       font-weight:950;
+    }
+    th.monthHead{
+      min-width:88px;
+    }
+    td.editable{
+      cursor:cell;
+    }
+    td.editable:hover{
+      outline:2px solid rgba(96,165,250,.45);
+      outline-offset:-2px;
+      background-color:rgba(96,165,250,.12);
+    }
+    tr.dirty td{
+      box-shadow:inset 0 0 0 1px rgba(245,158,11,.25);
     }
     .yes{
       background:#7dd3fc;
@@ -256,6 +289,18 @@
       color:#6b7280;
       background:rgba(255,255,255,.03);
     }
+    .editorInput,.editorSelect{
+      width:100%;
+      min-width:80px;
+      height:30px;
+      border-radius:8px;
+      padding:0 8px;
+      font-size:13px;
+    }
+    .readonlyMark{
+      color:#fca5a5;
+      font-weight:900;
+    }
     @media(max-width:900px){
       .top{
         flex-direction:column;
@@ -264,9 +309,6 @@
       .row{
         flex-direction:column;
         align-items:stretch;
-      }
-      .routeBox{
-        grid-template-columns:1fr;
       }
       input,select,button{
         width:100%;
@@ -281,7 +323,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">프레시백 현황 조회</div>
-          <div class="sub">연도 / 캠프 / 주야간 / 표시 라우트 기준으로 월별 가중요인 표를 조회합니다.</div>
+          <div class="sub">연도 / 캠프 / 주야간 / 라우트 기준으로 월별 가중요인 표를 조회하고, 최고관리자는 셀을 더블클릭해 수정할 수 있습니다.</div>
         </div>
       </div>
       <div class="pill" id="userPill">세션 확인 중</div>
@@ -309,6 +351,11 @@
         </div>
 
         <div class="field">
+          <label>Route</label>
+          <input id="routeFilter" placeholder="예: 126A / 126_A" />
+        </div>
+
+        <div class="field">
           <label>가중1</label>
           <select id="g1Filter">
             <option value="">전체</option>
@@ -327,42 +374,26 @@
         </div>
 
         <button id="loadBtn">조회</button>
+        <button id="addRowBtn" class="ok">행 추가</button>
+        <button id="saveBtn" class="ok">변경 저장</button>
         <button id="clearBtn" class="secondary">필터 초기화</button>
         <button id="copyBtn" class="secondary">표 복사</button>
       </div>
 
-      <div class="routeBox">
-        <div class="field">
-          <label>표시 라우트 1</label>
-          <input id="routeFilter1" class="routeInput" placeholder="예: 126A" />
-        </div>
-        <div class="field">
-          <label>표시 라우트 2</label>
-          <input id="routeFilter2" class="routeInput" placeholder="예: 126B" />
-        </div>
-        <div class="field">
-          <label>표시 라우트 3</label>
-          <input id="routeFilter3" class="routeInput" placeholder="예: 126C" />
-        </div>
-        <div class="field">
-          <label>표시 라우트 4</label>
-          <input id="routeFilter4" class="routeInput" placeholder="예: 126D" />
-        </div>
-      </div>
-
       <div class="hint">
-        주간은 DB의 <b>W2</b>, 야간은 DB의 <b>W1</b>로 조회합니다.
-        라우트는 <b>130_A</b>로 입력해도 <b>130A</b>로 정규화되어 검색/표시됩니다.
-        표시 라우트에 입력한 값은 데이터가 없어도 표에 먼저 깔립니다.
+        주간은 DB의 <b>W2</b>, 야간은 DB의 <b>W1</b>로 저장/조회합니다.
+        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다.
+        최고관리자는 셀을 더블클릭해서 엑셀처럼 수정한 뒤 <b>변경 저장</b>을 누르면 됩니다.
       </div>
 
       <div class="status" id="statusText">대기 중</div>
 
       <div class="summary">
         <span class="pill">원본 row <strong id="rawCount">0</strong></span>
-        <span class="pill">표시 라우트 <strong id="routeCount">0</strong></span>
+        <span class="pill">표시 행 <strong id="routeCount">0</strong></span>
         <span class="pill">캠프 <strong id="campCount">0</strong></span>
         <span class="pill">월 데이터 <strong id="monthCount">0</strong></span>
+        <span class="pill">미저장 <strong id="dirtyCount">0</strong></span>
       </div>
     </div>
 
@@ -384,8 +415,11 @@
   const cfg = window.MARUWELL_CONFIG || {};
 
   let supabaseClient = null;
+  let currentUser = null;
+  let canEdit = false;
   let rawRows = [];
   let pivotRows = [];
+  let localSeq = 1;
 
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
@@ -401,21 +435,30 @@
       .replaceAll("'","&#39;");
   }
 
+  function clean(v) {
+    return String(v ?? "").trim();
+  }
+
   function normalizeRoute(v) {
     return String(v || "")
       .toUpperCase()
       .replace(/[^0-9A-Z가-힣]/g, "");
   }
 
-  function clean(v) {
-    return String(v ?? "").trim();
-  }
-
   function waveLabel(v) {
     const s = clean(v).toUpperCase();
     if (s === "W2") return "주간";
     if (s === "W1") return "야간";
-    return s || "-";
+    return s || "";
+  }
+
+  function waveValueFromLabel(v) {
+    const s = clean(v).toUpperCase();
+    if (s === "주간") return "W2";
+    if (s === "야간") return "W1";
+    if (s === "W2") return "W2";
+    if (s === "W1") return "W1";
+    return "";
   }
 
   function valueClass(v) {
@@ -426,20 +469,21 @@
     return "";
   }
 
-  function getRouteInputs() {
-    return [1,2,3,4]
-      .map(n => normalizeRoute($(`routeFilter${n}`).value))
-      .filter(Boolean)
-      .filter((v, i, arr) => arr.indexOf(v) === i);
+  function monthKey(m, which) {
+    return `${m}_${which}`;
   }
 
-  function getSelectedWaves() {
-    const selected = clean($("waveFilter").value).toUpperCase();
+  function rowKey(row) {
+    return `${row.wave}||${row.camp}||${row.route}`;
+  }
 
-    if (selected === "W2") return ["W2"];
-    if (selected === "W1") return ["W1"];
+  function originalKey(row) {
+    return `${row.original.wave}||${row.original.camp}||${row.original.route}`;
+  }
 
-    return ["W2", "W1"];
+  function isRowKeyChanged(row) {
+    if (row.isNew) return false;
+    return rowKey(row) !== originalKey(row);
   }
 
   function initYearOptions() {
@@ -475,22 +519,42 @@
     });
   }
 
-  async function checkSession() {
+  async function checkSessionAndAccess() {
     if (!supabaseClient) initSupabase();
 
     const { data, error } = await supabaseClient.auth.getSession();
     if (error) throw error;
 
-    const user = data?.session?.user;
-    if (!user) throw new Error("로그인이 필요합니다.");
+    currentUser = data?.session?.user;
+    if (!currentUser) throw new Error("로그인이 필요합니다.");
 
-    $("userPill").textContent = user.email || user.id;
+    $("userPill").textContent = currentUser.email || currentUser.id;
+
+    try {
+      const { data: access } = await supabaseClient
+        .rpc("mw_my_access")
+        .maybeSingle();
+
+      canEdit =
+        access?.is_maroowell === true &&
+        access?.is_admin === true &&
+        Number(access?.max_role_level || 0) >= 90;
+    } catch {
+      canEdit = false;
+    }
+
+    if (!canEdit) {
+      $("addRowBtn").style.display = "none";
+      $("saveBtn").style.display = "none";
+      setStatus("조회 전용입니다. 수정/추가는 최고관리자만 가능합니다.", "warn");
+    }
   }
 
   function applyFilterToQuery(q) {
     const year = Number($("yearFilter").value);
     const camp = clean($("campFilter").value);
     const selectedWave = clean($("waveFilter").value).toUpperCase();
+    const routeNorm = normalizeRoute($("routeFilter").value);
     const g1 = $("g1Filter").value;
     const g2 = $("g2Filter").value;
 
@@ -498,6 +562,7 @@
 
     if (camp) q = q.ilike("camp", `%${camp}%`);
     if (selectedWave === "W2" || selectedWave === "W1") q = q.eq("wave", selectedWave);
+    if (routeNorm) q = q.ilike("route_norm", `%${routeNorm}%`);
     if (g1) q = q.eq("gajoong1", g1);
     if (g2) q = q.eq("gajoong2", g2);
 
@@ -557,59 +622,48 @@
     rawRows = await fetchAllRows();
     pivotRows = makePivotRows(rawRows);
 
-    renderTable(pivotRows);
+    renderTable();
     renderSummary();
 
-    setStatus(`조회 완료: 원본 ${rawRows.length.toLocaleString()}건 / 표시 ${pivotRows.length.toLocaleString()}개`, "ok");
+    setStatus(`조회 완료: 원본 ${rawRows.length.toLocaleString()}건 / 표시 ${pivotRows.length.toLocaleString()}행`, "ok");
   }
 
   function makePivotRows(rows) {
-    const campFilter = clean($("campFilter").value);
-    const routeInputs = getRouteInputs();
-    const selectedWaves = getSelectedWaves();
     const map = new Map();
-
-    function ensureRow(wave, camp, routeNorm) {
-      const key = `${wave}||${camp}||${routeNorm}`;
-
-      if (!map.has(key)) {
-        map.set(key, {
-          wave,
-          camp,
-          route: routeNorm,
-          months: {}
-        });
-      }
-
-      return map.get(key);
-    }
-
-    if (routeInputs.length > 0) {
-      const baseCamp = campFilter || inferCampFromRows(rows) || "-";
-
-      for (const wave of selectedWaves) {
-        for (const routeNorm of routeInputs) {
-          ensureRow(wave, baseCamp, routeNorm);
-        }
-      }
-    }
 
     for (const row of rows) {
       const wave = clean(row.wave).toUpperCase();
       const camp = clean(row.camp);
-      const routeNorm = normalizeRoute(row.route_norm || row.route);
+      const route = normalizeRoute(row.route_norm || row.route);
       const month = Number(row.month_no || 0);
 
-      if (!wave || !camp || !routeNorm || month < 1 || month > 12) continue;
+      if (!wave || !camp || !route || month < 1 || month > 12) continue;
 
-      if (routeInputs.length > 0 && !routeInputs.includes(routeNorm)) continue;
-      if (!selectedWaves.includes(wave)) continue;
+      const key = `${wave}||${camp}||${route}`;
 
-      const item = ensureRow(wave, camp, routeNorm);
+      if (!map.has(key)) {
+        const localId = `row_${localSeq++}`;
+        map.set(key, {
+          localId,
+          isNew: false,
+          dirty: false,
+          deleted: false,
+          wave,
+          camp,
+          route,
+          original: { wave, camp, route },
+          months: {}
+        });
+      }
+
+      const item = map.get(key);
 
       item.months[month] = {
+        id: row.id || null,
         gajoong1: row.gajoong1 || "",
         gajoong2: row.gajoong2 || "",
+        originalGajoong1: row.gajoong1 || "",
+        originalGajoong2: row.gajoong2 || "",
         period: row.period_label || row.data_month || "",
         source_file_name: row.source_file_name || ""
       };
@@ -625,14 +679,60 @@
     });
   }
 
-  function inferCampFromRows(rows) {
-    const first = rows.find(row => clean(row.camp));
-    return first ? clean(first.camp) : "";
+  function addRow() {
+    if (!canEdit) {
+      setStatus("행 추가는 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    const selectedWave = clean($("waveFilter").value).toUpperCase();
+    const wave = selectedWave === "W1" || selectedWave === "W2" ? selectedWave : "W2";
+    const camp = clean($("campFilter").value);
+    const route = normalizeRoute($("routeFilter").value);
+
+    const row = {
+      localId: `new_${localSeq++}`,
+      isNew: true,
+      dirty: true,
+      deleted: false,
+      wave,
+      camp,
+      route,
+      original: { wave, camp, route },
+      months: {}
+    };
+
+    for (let m = 1; m <= 12; m++) {
+      row.months[m] = {
+        id: null,
+        gajoong1: "",
+        gajoong2: "",
+        originalGajoong1: "",
+        originalGajoong2: "",
+        period: "",
+        source_file_name: ""
+      };
+    }
+
+    pivotRows.push(row);
+    renderTable();
+    renderSummary();
+    setStatus("행이 추가되었습니다. 셀을 더블클릭해 입력 후 변경 저장을 누르세요.", "ok");
+  }
+
+  function markDirty(row) {
+    row.dirty = true;
+    renderSummary();
+  }
+
+  function getRowById(localId) {
+    return pivotRows.find(row => row.localId === localId);
   }
 
   function renderSummary() {
     const campSet = new Set();
     const monthSet = new Set();
+    const dirty = pivotRows.filter(row => row.dirty || row.deleted).length;
 
     for (const row of rawRows) {
       if (row.camp) campSet.add(row.camp);
@@ -640,12 +740,13 @@
     }
 
     $("rawCount").textContent = rawRows.length.toLocaleString();
-    $("routeCount").textContent = pivotRows.length.toLocaleString();
+    $("routeCount").textContent = pivotRows.filter(row => !row.deleted).length.toLocaleString();
     $("campCount").textContent = campSet.size.toLocaleString();
     $("monthCount").textContent = monthSet.size.toLocaleString();
+    $("dirtyCount").textContent = dirty.toLocaleString();
   }
 
-  function renderTable(rows) {
+  function renderTable() {
     const thead = $("resultTable").querySelector("thead");
     const tbody = $("resultTable").querySelector("tbody");
 
@@ -657,43 +758,352 @@
 
     thead.innerHTML = `
       <tr>
-        <th class="sticky">주야간</th>
+        <th class="actionCol">작업</th>
+        <th class="sticky1">주야간</th>
         <th class="sticky2">Camp</th>
         <th class="sticky3">Route</th>
         ${headers.join("")}
       </tr>
     `;
 
-    if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="27" class="empty">데이터 없음</td></tr>`;
+    const visibleRows = pivotRows.filter(row => !row.deleted);
+
+    if (!visibleRows.length) {
+      tbody.innerHTML = `<tr><td colspan="28" class="empty">데이터 없음</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = rows.map(item => {
+    tbody.innerHTML = visibleRows.map(row => {
       const cells = [];
 
       for (let m = 1; m <= 12; m++) {
-        const month = item.months[m] || {};
-        const g1 = month.gajoong1 || "";
-        const g2 = month.gajoong2 || "";
+        const month = row.months[m] || {
+          id: null,
+          gajoong1: "",
+          gajoong2: "",
+          originalGajoong1: "",
+          originalGajoong2: ""
+        };
 
-        cells.push(`<td class="${valueClass(g1)}">${esc(g1 || "데이터 없음")}</td>`);
-        cells.push(`<td class="${valueClass(g2)}">${esc(g2 || "데이터 없음")}</td>`);
+        cells.push(`
+          <td
+            class="editable ${valueClass(month.gajoong1)}"
+            data-row="${esc(row.localId)}"
+            data-month="${m}"
+            data-field="gajoong1"
+          >${esc(month.gajoong1 || "")}</td>
+        `);
+
+        cells.push(`
+          <td
+            class="editable ${valueClass(month.gajoong2)}"
+            data-row="${esc(row.localId)}"
+            data-month="${m}"
+            data-field="gajoong2"
+          >${esc(month.gajoong2 || "")}</td>
+        `);
       }
 
       return `
-        <tr>
-          <td class="sticky">${esc(waveLabel(item.wave))}</td>
-          <td class="sticky2">${esc(item.camp)}</td>
-          <td class="sticky3">${esc(item.route)}</td>
+        <tr class="${row.dirty ? "dirty" : ""}" data-row="${esc(row.localId)}">
+          <td class="actionCol">
+            ${canEdit ? `<button class="small danger" data-action="delete" data-row="${esc(row.localId)}">삭제</button>` : `<span class="readonlyMark">조회</span>`}
+          </td>
+          <td class="sticky1 editable" data-row="${esc(row.localId)}" data-meta="wave">${esc(waveLabel(row.wave))}</td>
+          <td class="sticky2 editable" data-row="${esc(row.localId)}" data-meta="camp">${esc(row.camp)}</td>
+          <td class="sticky3 editable" data-row="${esc(row.localId)}" data-meta="route">${esc(row.route)}</td>
           ${cells.join("")}
         </tr>
       `;
     }).join("");
   }
 
+  function startEditCell(td) {
+    if (!canEdit) {
+      setStatus("수정은 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    if (td.querySelector("input,select")) return;
+
+    const localId = td.dataset.row;
+    const row = getRowById(localId);
+    if (!row) return;
+
+    const meta = td.dataset.meta;
+    const monthNo = Number(td.dataset.month || 0);
+    const field = td.dataset.field;
+
+    if (meta) {
+      editMetaCell(td, row, meta);
+      return;
+    }
+
+    if (monthNo && field) {
+      editMonthCell(td, row, monthNo, field);
+    }
+  }
+
+  function editMetaCell(td, row, meta) {
+    const current = meta === "wave" ? row.wave : row[meta] || "";
+
+    if (meta === "wave") {
+      const select = document.createElement("select");
+      select.className = "editorSelect";
+      select.innerHTML = `
+        <option value="W2">주간</option>
+        <option value="W1">야간</option>
+      `;
+      select.value = row.wave === "W1" ? "W1" : "W2";
+
+      td.textContent = "";
+      td.appendChild(select);
+      select.focus();
+
+      const commit = () => {
+        const next = select.value;
+        if (row.wave !== next) {
+          row.wave = next;
+          markDirty(row);
+        }
+        renderTable();
+      };
+
+      select.addEventListener("blur", commit, { once:true });
+      select.addEventListener("keydown", e => {
+        if (e.key === "Enter") select.blur();
+        if (e.key === "Escape") renderTable();
+      });
+
+      return;
+    }
+
+    const input = document.createElement("input");
+    input.className = "editorInput";
+    input.value = current;
+
+    td.textContent = "";
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    const commit = () => {
+      let next = clean(input.value);
+
+      if (meta === "route") {
+        next = normalizeRoute(next);
+      }
+
+      if (row[meta] !== next) {
+        row[meta] = next;
+        markDirty(row);
+      }
+
+      renderTable();
+    };
+
+    input.addEventListener("blur", commit, { once:true });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") input.blur();
+      if (e.key === "Escape") renderTable();
+    });
+  }
+
+  function editMonthCell(td, row, monthNo, field) {
+    if (!row.months[monthNo]) {
+      row.months[monthNo] = {
+        id: null,
+        gajoong1: "",
+        gajoong2: "",
+        originalGajoong1: "",
+        originalGajoong2: ""
+      };
+    }
+
+    const month = row.months[monthNo];
+
+    const select = document.createElement("select");
+    select.className = "editorSelect";
+    select.innerHTML = `
+      <option value=""></option>
+      <option value="해당">해당</option>
+      <option value="미해당">미해당</option>
+    `;
+    select.value = month[field] || "";
+
+    td.textContent = "";
+    td.appendChild(select);
+    select.focus();
+
+    const commit = () => {
+      const next = select.value;
+
+      if ((month[field] || "") !== next) {
+        month[field] = next;
+        markDirty(row);
+      }
+
+      renderTable();
+    };
+
+    select.addEventListener("blur", commit, { once:true });
+    select.addEventListener("keydown", e => {
+      if (e.key === "Enter") select.blur();
+      if (e.key === "Escape") renderTable();
+    });
+  }
+
+  function deleteRow(localId) {
+    if (!canEdit) {
+      setStatus("삭제는 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    const row = getRowById(localId);
+    if (!row) return;
+
+    const ok = confirm(`${waveLabel(row.wave)} / ${row.camp} / ${row.route}\n\n이 행을 삭제할까요?\n저장 버튼을 눌러야 DB에 반영됩니다.`);
+    if (!ok) return;
+
+    if (row.isNew) {
+      pivotRows = pivotRows.filter(item => item.localId !== localId);
+    } else {
+      row.deleted = true;
+      row.dirty = true;
+    }
+
+    renderTable();
+    renderSummary();
+    setStatus("행 삭제 표시 완료. 변경 저장을 누르면 DB에 반영됩니다.", "warn");
+  }
+
+  function validateRow(row) {
+    row.wave = waveValueFromLabel(row.wave);
+    row.camp = clean(row.camp);
+    row.route = normalizeRoute(row.route);
+
+    if (!row.wave || !["W1","W2"].includes(row.wave)) {
+      throw new Error("주야간 값이 올바르지 않습니다.");
+    }
+
+    if (!row.camp) {
+      throw new Error("Camp가 비어 있습니다.");
+    }
+
+    if (!row.route) {
+      throw new Error("Route가 비어 있습니다.");
+    }
+  }
+
+  function hasAnyMonthValue(row) {
+    for (let m = 1; m <= 12; m++) {
+      const month = row.months[m];
+      if (!month) continue;
+      if (clean(month.gajoong1) || clean(month.gajoong2)) return true;
+    }
+    return false;
+  }
+
+  function rowsToUpsertPayload(row) {
+    const year = Number($("yearFilter").value);
+    const out = [];
+
+    for (let m = 1; m <= 12; m++) {
+      const month = row.months[m];
+      if (!month) continue;
+
+      const g1 = clean(month.gajoong1);
+      const g2 = clean(month.gajoong2);
+      const hadOriginal = Boolean(month.id || month.originalGajoong1 || month.originalGajoong2);
+
+      if (!g1 && !g2 && !hadOriginal) continue;
+
+      out.push({
+        data_year: year,
+        month_no: m,
+        data_month: `${year}-${String(m).padStart(2, "0")}`,
+        period_label: `${year}-${String(m).padStart(2, "0")}`,
+        wave: row.wave,
+        camp: row.camp,
+        route: row.route,
+        route_norm: row.route,
+        gajoong1: g1 || null,
+        gajoong2: g2 || null,
+        source_file_name: "manual-edit"
+      });
+    }
+
+    return out;
+  }
+
+  async function saveChanges() {
+    if (!canEdit) {
+      setStatus("저장은 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    const dirtyRows = pivotRows.filter(row => row.dirty || row.deleted);
+
+    if (!dirtyRows.length) {
+      setStatus("저장할 변경사항이 없습니다.", "ok");
+      return;
+    }
+
+    setStatus(`저장 중... ${dirtyRows.length}행`);
+
+    for (const row of dirtyRows) {
+      if (!row.isNew) {
+        if (row.deleted || isRowKeyChanged(row)) {
+          await deleteOriginalRows(row);
+        }
+      }
+
+      if (row.deleted) continue;
+
+      validateRow(row);
+
+      if (!hasAnyMonthValue(row)) {
+        continue;
+      }
+
+      const payload = rowsToUpsertPayload(row);
+
+      if (!payload.length) continue;
+
+      const { error } = await supabaseClient
+        .from("coupang_freshbag")
+        .upsert(payload, {
+          onConflict: "data_year,month_no,wave,camp,route_norm"
+        });
+
+      if (error) throw error;
+    }
+
+    setStatus("저장 완료. 다시 조회합니다.", "ok");
+    await loadData();
+  }
+
+  async function deleteOriginalRows(row) {
+    const year = Number($("yearFilter").value);
+    const original = row.original || {};
+
+    if (!original.wave || !original.camp || !original.route) return;
+
+    const { error } = await supabaseClient
+      .from("coupang_freshbag")
+      .delete()
+      .eq("data_year", year)
+      .eq("wave", original.wave)
+      .eq("camp", original.camp)
+      .eq("route_norm", original.route);
+
+    if (error) throw error;
+  }
+
   async function copyTable() {
-    if (!pivotRows.length) {
+    const visibleRows = pivotRows.filter(row => !row.deleted);
+
+    if (!visibleRows.length) {
       setStatus("복사할 데이터가 없습니다.", "bad");
       return;
     }
@@ -706,15 +1116,15 @@
 
     const lines = [header.join("\t")];
 
-    for (const item of pivotRows) {
-      const row = [waveLabel(item.wave), item.camp, item.route];
+    for (const row of visibleRows) {
+      const line = [waveLabel(row.wave), row.camp, row.route];
 
       for (let m = 1; m <= 12; m++) {
-        const month = item.months[m] || {};
-        row.push(month.gajoong1 || "데이터 없음", month.gajoong2 || "데이터 없음");
+        const month = row.months[m] || {};
+        line.push(month.gajoong1 || "", month.gajoong2 || "");
       }
 
-      lines.push(row.join("\t"));
+      lines.push(line.join("\t"));
     }
 
     await navigator.clipboard.writeText(lines.join("\n"));
@@ -727,16 +1137,13 @@
     $("yearFilter").value = String(now);
     $("campFilter").value = "";
     $("waveFilter").value = "";
+    $("routeFilter").value = "";
     $("g1Filter").value = "";
     $("g2Filter").value = "";
 
-    [1,2,3,4].forEach(n => {
-      $(`routeFilter${n}`).value = "";
-    });
-
-    renderTable([]);
     rawRows = [];
     pivotRows = [];
+    renderTable();
     renderSummary();
     setStatus("필터 초기화 완료. 조건 입력 후 조회하세요.", "ok");
   }
@@ -753,14 +1160,28 @@
   initYearOptions();
 
   $("loadBtn").addEventListener("click", () => run(loadData));
+  $("addRowBtn").addEventListener("click", addRow);
+  $("saveBtn").addEventListener("click", () => run(saveChanges));
   $("clearBtn").addEventListener("click", clearFilters);
   $("copyBtn").addEventListener("click", () => run(copyTable));
+
+  $("resultTable").addEventListener("dblclick", e => {
+    const td = e.target.closest("td.editable");
+    if (!td) return;
+    startEditCell(td);
+  });
+
+  $("resultTable").addEventListener("click", e => {
+    const btn = e.target.closest("[data-action='delete']");
+    if (!btn) return;
+    deleteRow(btn.dataset.row);
+  });
 
   ["yearFilter", "waveFilter", "g1Filter", "g2Filter"].forEach(id => {
     $(id).addEventListener("change", () => run(loadData));
   });
 
-  ["campFilter", "routeFilter1", "routeFilter2", "routeFilter3", "routeFilter4"].forEach(id => {
+  ["campFilter", "routeFilter"].forEach(id => {
     $(id).addEventListener("keydown", e => {
       if (e.key === "Enter") run(loadData);
     });
@@ -769,10 +1190,13 @@
   try {
     initSupabase();
     run(async () => {
-      await checkSession();
-      renderTable([]);
+      await checkSessionAndAccess();
+      renderTable();
       renderSummary();
-      setStatus("조건 입력 후 조회하세요.", "ok");
+
+      if (canEdit) {
+        setStatus("조건 입력 후 조회하세요. 최고관리자 권한으로 수정 가능합니다.", "ok");
+      }
     });
   } catch (e) {
     handleError(e);

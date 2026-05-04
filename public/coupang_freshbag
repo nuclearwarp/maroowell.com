@@ -87,6 +87,16 @@
       flex-wrap:wrap;
     }
 
+    .presetRow{
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,.08);
+    }
+
     .field{
       display:flex;
       flex-direction:column;
@@ -109,6 +119,14 @@
       padding:0 12px;
       outline:none;
       min-width:150px;
+    }
+
+    .presetNameField input{
+      min-width:240px;
+    }
+
+    .presetSelectField select{
+      min-width:300px;
     }
 
     select option{
@@ -220,7 +238,7 @@
       border:1px solid var(--line);
       border-radius:16px;
       background:rgba(0,0,0,.18);
-      max-height:calc(100vh - 300px);
+      max-height:calc(100vh - 360px);
     }
 
     table{
@@ -379,12 +397,18 @@
         flex-direction:column;
         align-items:flex-start;
       }
-      .row{
+
+      .row,
+      .presetRow{
         flex-direction:column;
         align-items:stretch;
       }
-      input,select,button{
+
+      input,select,button,
+      .presetNameField input,
+      .presetSelectField select{
         width:100%;
+        min-width:0;
       }
     }
   </style>
@@ -396,7 +420,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">프레시백 현황 조회</div>
-          <div class="sub">연도 / 캠프 / 주야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 최고관리자는 셀을 클릭해 수정할 수 있습니다.</div>
+          <div class="sub">연도 / 캠프 / 주야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 조회조건을 프리셋으로 저장할 수 있습니다.</div>
         </div>
       </div>
       <div class="pill" id="userPill">세션 확인 중</div>
@@ -448,9 +472,29 @@
         <button id="copyBtn" class="secondary">이미지 복사</button>
       </div>
 
+      <div class="presetRow">
+        <div class="field presetNameField">
+          <label>프리셋 이름</label>
+          <input id="presetNameInput" placeholder="예: 일산2 주간 126/130" />
+        </div>
+
+        <div class="field presetSelectField">
+          <label>저장된 프리셋</label>
+          <select id="savedPresetSelect">
+            <option value="">저장된 프리셋 없음</option>
+          </select>
+        </div>
+
+        <button id="savePresetBtn" class="secondary" type="button">프리셋 저장</button>
+        <button id="loadPresetBtn" class="secondary" type="button">불러와서 조회</button>
+        <button id="deletePresetBtn" class="danger" type="button">프리셋 삭제</button>
+        <button id="loadLastPresetBtn" class="secondary" type="button">최근 조회</button>
+      </div>
+
       <div class="hint">
         조회는 아래 표에 입력된 행만 가져옵니다. 예: Camp <b>일산2</b>, 주야간 <b>주간</b>, Route 행 <b>126A/126B/126C/126D</b>를 입력하면 해당 4개 라우트만 조회합니다.
-        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다. 셀은 클릭 한 번으로 수정되고, Tab으로 다음 셀로 이동합니다.
+        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다.
+        프리셋은 현재 브라우저의 localStorage에 여러 개 저장됩니다.
       </div>
 
       <div class="status" id="statusText">대기 중</div>
@@ -487,6 +531,9 @@
   let rawRows = [];
   let tableRows = [];
   let localSeq = 1;
+
+  const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v2";
+  const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v2";
 
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
@@ -657,6 +704,300 @@
     setStatus("행이 추가되었습니다. Camp/주야간은 상단값을 기본으로 사용하고, Route는 행에 입력하세요.", "ok");
   }
 
+  function safeLocalStorageGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeLocalStorageSet(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getSavedPresets() {
+    const list = safeLocalStorageGet(PRESET_STORAGE_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  function setSavedPresets(list) {
+    return safeLocalStorageSet(PRESET_STORAGE_KEY, Array.isArray(list) ? list : []);
+  }
+
+  function makePresetId() {
+    return "preset_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function getPresetRowsFromTable() {
+    const rows = tableRows
+      .filter(row => !row.deleted)
+      .map(row => ({
+        wave: effectiveWave(row),
+        camp: effectiveCamp(row),
+        route: effectiveRoute(row)
+      }))
+      .filter(row => row.route);
+
+    const seen = new Set();
+    const out = [];
+
+    for (const row of rows) {
+      const key = `${row.wave}||${row.camp}||${row.route}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+
+    return out;
+  }
+
+  function makeDefaultPresetName(preset) {
+    const year = preset.year || $("yearFilter").value || "";
+    const camp = preset.camp || preset.rows?.[0]?.camp || "Camp";
+    const wave = preset.wave
+      ? waveLabel(preset.wave)
+      : preset.rows?.length
+        ? "주/야"
+        : "";
+    const routes = (preset.rows || [])
+      .map(row => row.route)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join("/");
+
+    return [year, camp, wave, routes].filter(Boolean).join(" / ");
+  }
+
+  function buildCurrentPreset(nameOverride = "") {
+    const rows = getPresetRowsFromTable();
+
+    if (!rows.length) {
+      throw new Error("저장할 Route 행이 없습니다. Route를 먼저 입력하거나 조회 후 저장하세요.");
+    }
+
+    const preset = {
+      id: "",
+      name: clean(nameOverride),
+      updatedAt: new Date().toISOString(),
+      year: $("yearFilter").value || "",
+      camp: clean($("campFilter").value),
+      wave: clean($("waveFilter").value).toUpperCase(),
+      gajoong1: $("g1Filter").value || "",
+      gajoong2: $("g2Filter").value || "",
+      rows
+    };
+
+    if (!preset.name) {
+      preset.name = makeDefaultPresetName(preset);
+    }
+
+    return preset;
+  }
+
+  function renderPresetOptions(selectedId = "") {
+    const select = $("savedPresetSelect");
+    if (!select) return;
+
+    const presets = getSavedPresets()
+      .slice()
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+
+    if (!presets.length) {
+      select.innerHTML = `<option value="">저장된 프리셋 없음</option>`;
+      return;
+    }
+
+    select.innerHTML = [
+      `<option value="">저장된 프리셋 선택</option>`,
+      ...presets.map(preset => {
+        const date = String(preset.updatedAt || "").slice(0, 10);
+        const count = Array.isArray(preset.rows) ? preset.rows.length : 0;
+        const label = `${preset.name || "이름 없음"} · ${count}행 · ${date}`;
+        return `<option value="${esc(preset.id)}">${esc(label)}</option>`;
+      })
+    ].join("");
+
+    if (selectedId) {
+      select.value = selectedId;
+    }
+  }
+
+  function saveCurrentPreset() {
+    const name = clean($("presetNameInput").value);
+
+    if (!name) {
+      throw new Error("프리셋 이름을 입력하세요. 예: 일산2 주간 126/130");
+    }
+
+    const preset = buildCurrentPreset(name);
+    const presets = getSavedPresets();
+
+    const selectedId = $("savedPresetSelect").value;
+    const selectedIndex = presets.findIndex(item => item.id === selectedId);
+    const sameNameIndex = presets.findIndex(item => item.name === preset.name);
+
+    if (selectedIndex >= 0) {
+      const ok = confirm(`선택된 프리셋을 덮어쓸까요?\n\n${presets[selectedIndex].name}`);
+      if (!ok) return;
+
+      preset.id = selectedId;
+      presets[selectedIndex] = {
+        ...presets[selectedIndex],
+        ...preset,
+        updatedAt: new Date().toISOString()
+      };
+    } else if (sameNameIndex >= 0) {
+      const ok = confirm(`같은 이름의 프리셋이 있습니다. 덮어쓸까요?\n\n${preset.name}`);
+      if (!ok) return;
+
+      preset.id = presets[sameNameIndex].id;
+      presets[sameNameIndex] = {
+        ...presets[sameNameIndex],
+        ...preset,
+        updatedAt: new Date().toISOString()
+      };
+    } else {
+      preset.id = makePresetId();
+      presets.unshift(preset);
+    }
+
+    setSavedPresets(presets);
+    renderPresetOptions(preset.id);
+
+    $("presetNameInput").value = preset.name;
+    setStatus(`프리셋 저장 완료: ${preset.name}`, "ok");
+  }
+
+  function makeRowFromPresetItem(item) {
+    const row = createBlankRow();
+
+    row.isNew = false;
+    row.dirty = false;
+    row.deleted = false;
+    row.wave = waveValueFromLabel(item.wave);
+    row.camp = clean(item.camp);
+    row.route = normalizeRoute(item.route);
+    row.original = {
+      wave: row.wave,
+      camp: row.camp,
+      route: row.route
+    };
+    row.months = {};
+
+    return row;
+  }
+
+  function applyPresetToScreen(preset) {
+    if (!preset) throw new Error("불러올 프리셋이 없습니다.");
+
+    if (preset.year) {
+      const exists = Array.from($("yearFilter").options).some(opt => opt.value === String(preset.year));
+
+      if (!exists) {
+        const option = document.createElement("option");
+        option.value = String(preset.year);
+        option.textContent = String(preset.year);
+        $("yearFilter").appendChild(option);
+      }
+
+      $("yearFilter").value = String(preset.year);
+    }
+
+    $("campFilter").value = preset.camp || "";
+    $("waveFilter").value = preset.wave || "";
+    $("g1Filter").value = preset.gajoong1 || "";
+    $("g2Filter").value = preset.gajoong2 || "";
+    $("presetNameInput").value = preset.name || "";
+
+    const rows = Array.isArray(preset.rows) ? preset.rows : [];
+
+    tableRows = rows
+      .map(makeRowFromPresetItem)
+      .filter(row => effectiveRoute(row));
+
+    while (tableRows.length < 4) {
+      tableRows.push(createBlankRow());
+    }
+
+    rawRows = [];
+    renderTable();
+    renderSummary();
+  }
+
+  async function loadSelectedPresetAndQuery() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      throw new Error("불러올 프리셋을 선택하세요.");
+    }
+
+    const preset = getSavedPresets().find(item => item.id === selectedId);
+
+    if (!preset) {
+      throw new Error("저장된 프리셋을 찾을 수 없습니다.");
+    }
+
+    applyPresetToScreen(preset);
+    setStatus(`프리셋 불러오기 완료: ${preset.name}. 조회 중...`, "warn");
+    await loadData();
+  }
+
+  function deleteSelectedPreset() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      setStatus("삭제할 프리셋을 선택하세요.", "bad");
+      return;
+    }
+
+    const presets = getSavedPresets();
+    const preset = presets.find(item => item.id === selectedId);
+
+    if (!preset) {
+      setStatus("삭제할 프리셋을 찾을 수 없습니다.", "bad");
+      return;
+    }
+
+    const ok = confirm(`저장된 프리셋을 삭제할까요?\n\n${preset.name}`);
+
+    if (!ok) return;
+
+    setSavedPresets(presets.filter(item => item.id !== selectedId));
+    renderPresetOptions();
+
+    $("presetNameInput").value = "";
+    setStatus("프리셋 삭제 완료", "ok");
+  }
+
+  function saveLastQueryPreset() {
+    try {
+      const preset = buildCurrentPreset("최근 조회");
+      preset.id = "last_query";
+      preset.updatedAt = new Date().toISOString();
+      safeLocalStorageSet(LAST_QUERY_STORAGE_KEY, preset);
+    } catch {}
+  }
+
+  async function loadLastQueryPresetAndQuery() {
+    const preset = safeLocalStorageGet(LAST_QUERY_STORAGE_KEY, null);
+
+    if (!preset) {
+      throw new Error("최근 조회조건이 없습니다.");
+    }
+
+    applyPresetToScreen(preset);
+    setStatus("최근 조회조건 불러오기 완료. 조회 중...", "warn");
+    await loadData();
+  }
+
   function getCriteriaRows() {
     return tableRows
       .filter(row => !row.deleted)
@@ -755,6 +1096,7 @@
     renderTable();
     renderSummary();
 
+    saveLastQueryPreset();
     setStatus(`조회 완료: DB row ${rawRows.length.toLocaleString()}건 / 표시 행 ${tableRows.filter(r => !r.deleted).length.toLocaleString()}행`, "ok");
   }
 
@@ -984,7 +1326,12 @@
       td.appendChild(select);
       select.focus();
 
+      let committed = false;
+
       const commit = (moveDirection = null) => {
+        if (committed) return;
+        committed = true;
+
         const next = select.value;
 
         if ((row.wave || "") !== next) {
@@ -1012,6 +1359,7 @@
         }
         if (e.key === "Escape") {
           e.preventDefault();
+          committed = true;
           renderTable();
         }
       });
@@ -1030,7 +1378,12 @@
     input.focus();
     input.select();
 
+    let committed = false;
+
     const commit = (moveDirection = null) => {
+      if (committed) return;
+      committed = true;
+
       let next = clean(input.value);
 
       if (meta === "route") {
@@ -1062,6 +1415,7 @@
       }
       if (e.key === "Escape") {
         e.preventDefault();
+        committed = true;
         renderTable();
       }
     });
@@ -1094,7 +1448,12 @@
     td.appendChild(select);
     select.focus();
 
+    let committed = false;
+
     const commit = (moveDirection = null) => {
+      if (committed) return;
+      committed = true;
+
       const next = select.value;
 
       if ((month[field] || "") !== next) {
@@ -1122,6 +1481,7 @@
       }
       if (e.key === "Escape") {
         e.preventDefault();
+        committed = true;
         renderTable();
       }
     });
@@ -1141,6 +1501,7 @@
     const route = effectiveRoute(row);
 
     const ok = confirm(`${waveLabel(wave)} / ${camp} / ${route}\n\n이 행을 삭제할까요?\n변경 저장을 눌러야 DB에 반영됩니다.`);
+
     if (!ok) return;
 
     if (row.isNew && !row.original.route) {
@@ -1527,6 +1888,8 @@
     $("waveFilter").value = "";
     $("g1Filter").value = "";
     $("g2Filter").value = "";
+    $("presetNameInput").value = "";
+    $("savedPresetSelect").value = "";
 
     rawRows = [];
     initDefaultRows();
@@ -1549,6 +1912,23 @@
   $("saveBtn").addEventListener("click", () => run(saveChanges));
   $("clearBtn").addEventListener("click", clearAll);
   $("copyBtn").addEventListener("click", () => run(copyTableImage));
+
+  $("savePresetBtn").addEventListener("click", () => run(async () => {
+    saveCurrentPreset();
+  }));
+
+  $("loadPresetBtn").addEventListener("click", () => run(loadSelectedPresetAndQuery));
+  $("deletePresetBtn").addEventListener("click", deleteSelectedPreset);
+  $("loadLastPresetBtn").addEventListener("click", () => run(loadLastQueryPresetAndQuery));
+
+  $("savedPresetSelect").addEventListener("change", () => {
+    const selectedId = $("savedPresetSelect").value;
+    const preset = getSavedPresets().find(item => item.id === selectedId);
+
+    if (preset) {
+      $("presetNameInput").value = preset.name || "";
+    }
+  });
 
   $("resultTable").addEventListener("click", e => {
     const td = e.target.closest("td.editable");
@@ -1579,10 +1959,8 @@
     });
   });
 
-  ["campFilter"].forEach(id => {
-    $(id).addEventListener("keydown", e => {
-      if (e.key === "Enter") run(loadData);
-    });
+  $("campFilter").addEventListener("keydown", e => {
+    if (e.key === "Enter") run(loadData);
   });
 
   try {
@@ -1590,9 +1968,10 @@
     run(async () => {
       await checkSessionAndAccess();
       initDefaultRows();
+      renderPresetOptions();
 
       if (canEdit) {
-        setStatus("기본 4행이 준비되었습니다. Camp / 주야간 선택 후 Route를 입력하고 조회하세요.", "ok");
+        setStatus("기본 4행이 준비되었습니다. Camp / 주야간 선택 후 Route를 입력하고 조회하거나 프리셋을 불러오세요.", "ok");
       }
     });
   } catch (e) {

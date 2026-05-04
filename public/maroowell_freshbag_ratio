@@ -16,6 +16,11 @@
       --line:rgba(255,255,255,.12);
       --txt:#e6eefc;
       --muted:#9fb0d2;
+      --good:#7dd3fc;
+      --bad:#ffffff;
+      --badText:#ef4444;
+      --dark:#111827;
+      --head:#263247;
     }
 
     *{box-sizing:border-box}
@@ -197,6 +202,16 @@
       font-size:18px;
       font-weight:950;
       margin:0 0 12px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+    }
+
+    .sectionTitle small{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
     }
 
     .tableWrap{
@@ -204,7 +219,7 @@
       border:1px solid var(--line);
       border-radius:16px;
       background:rgba(0,0,0,.18);
-      max-height:580px;
+      max-height:620px;
     }
 
     table{
@@ -219,11 +234,10 @@
     th,td{
       border-right:1px solid rgba(255,255,255,.12);
       border-bottom:1px solid rgba(255,255,255,.12);
-      padding:8px 10px;
       text-align:center;
       white-space:nowrap;
       min-width:88px;
-      max-width:180px;
+      max-width:190px;
       overflow:hidden;
       text-overflow:ellipsis;
     }
@@ -232,29 +246,74 @@
       position:sticky;
       top:0;
       z-index:5;
-      background:#263247;
+      background:var(--head);
       color:#fff;
+      font-weight:950;
+      padding:8px 10px;
+    }
+
+    td{
+      background:rgba(255,255,255,.025);
+      padding:0;
+      height:58px;
+    }
+
+    .fixedCell{
+      padding:8px 10px;
+      background:var(--dark);
+      color:#e6eefc;
       font-weight:950;
     }
 
-    .ratioGood{background:#7dd3fc;color:#082f49;font-weight:950}
-    .ratioNormal{background:#dbeafe;color:#0f172a;font-weight:950}
-    .ratioLow{background:#fff;color:#ef4444;font-weight:950}
-    .ratioEmpty{color:#64748b;background:rgba(255,255,255,.03);font-weight:700}
+    .routeCell{
+      color:#bfdbfe;
+    }
 
-    .totalTable td:first-child,
-    .totalTable td:nth-child(2),
-    .totalTable td:nth-child(3),
-    .weekTable td:first-child,
-    .weekTable td:nth-child(2),
-    .weekTable td:nth-child(3){
-      background:#111827;
-      color:#e6eefc;
-      font-weight:900;
+    .ratioBox{
+      display:grid;
+      grid-template-rows:1fr 1fr;
+      height:100%;
+      min-height:58px;
+    }
+
+    .ratioLine{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      font-weight:950;
+      padding:5px 8px;
+      border-bottom:1px solid rgba(15,23,42,.35);
+      line-height:1.15;
+    }
+
+    .ratioLine:last-child{
+      border-bottom:0;
+    }
+
+    .ratioLabel{
+      font-size:11px;
+      opacity:.85;
+    }
+
+    .ratioGood{
+      background:var(--good);
+      color:#082f49;
+    }
+
+    .ratioBad{
+      background:var(--bad);
+      color:var(--badText);
+    }
+
+    .ratioEmpty{
+      color:#64748b;
+      background:rgba(255,255,255,.03);
+      font-weight:700;
     }
 
     .weekBlock{
-      margin-top:16px;
+      margin-top:18px;
     }
 
     .weekTitle{
@@ -272,32 +331,27 @@
       font-weight:800;
     }
 
-    .dayCell{
-      min-width:116px;
-      max-width:116px;
-      cursor:default;
-    }
-
-    .dayCellInner{
+    .weekActions{
       display:flex;
-      flex-direction:column;
-      gap:3px;
-      line-height:1.25;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
     }
 
-    .dayCellInner .g1{
-      color:#7dd3fc;
-      font-weight:950;
+    .dayHead{
+      min-width:124px;
+      max-width:124px;
     }
 
-    .dayCellInner .g2{
-      color:#fef3c7;
-      font-weight:950;
+    .dayCell{
+      min-width:124px;
+      max-width:124px;
     }
 
     .emptyDay{
       color:#64748b;
       background:rgba(255,255,255,.03);
+      font-weight:700;
     }
 
     .accessDenied{
@@ -417,7 +471,6 @@
 
         <button id="loadBtn">조회</button>
         <button id="clearBtn" class="secondary">초기화</button>
-        <button id="copyTextBtn" class="secondary">표 복사</button>
       </div>
 
       <div class="presetRow">
@@ -454,9 +507,12 @@
     </div>
 
     <div class="card">
-      <div class="sectionTitle">월 누적 회수율</div>
+      <div class="sectionTitle">
+        <span>월 누적 회수율</span>
+        <small id="totalPeriodText"></small>
+      </div>
       <div class="tableWrap">
-        <table id="totalTable" class="totalTable">
+        <table id="totalTable">
           <thead></thead>
           <tbody></tbody>
         </table>
@@ -464,7 +520,10 @@
     </div>
 
     <div class="card">
-      <div class="sectionTitle">주차별 일자 회수율</div>
+      <div class="sectionTitle">
+        <span>주차별 일자 회수율</span>
+        <small>각 주차 우측의 이미지 복사 버튼 사용</small>
+      </div>
       <div id="weekContainer"></div>
     </div>
   </div>
@@ -490,7 +549,7 @@
 
   const DAILY_TABLE = "maroowell_freshbag_ration";
   const TOTAL_TABLE = "maroowell_freshbag_ration_month_total";
-  const PRESET_STORAGE_KEY = "mw:maroowell_freshbag_ratio:presets:v2";
+  const PRESET_STORAGE_KEY = "mw:maroowell_freshbag_ratio:presets:v3";
 
   let supabaseClient = null;
   let currentUser = null;
@@ -560,13 +619,41 @@
     return n.toFixed(2) + "%";
   }
 
-  function ratioClass(v) {
-    if (v === null || v === undefined || v === "") return "ratioEmpty";
-    const n = Number(v);
-    if (!Number.isFinite(n)) return "ratioEmpty";
-    if (n >= 100) return "ratioGood";
-    if (n >= 95) return "ratioNormal";
-    return "ratioLow";
+  function isGoodValue(field, wave, value) {
+    if (value === null || value === undefined || value === "") return false;
+
+    const n = Number(value);
+    if (!Number.isFinite(n)) return false;
+
+    if (field === "gajoong1") {
+      return n >= 95;
+    }
+
+    if (field === "gajoong2") {
+      return clean(wave).toUpperCase() === "W1" ? n >= 75 : n >= 85;
+    }
+
+    return false;
+  }
+
+  function valueClass(field, wave, value) {
+    if (value === null || value === undefined || value === "") return "ratioEmpty";
+    return isGoodValue(field, wave, value) ? "ratioGood" : "ratioBad";
+  }
+
+  function ratioBox(row) {
+    return `
+      <div class="ratioBox">
+        <div class="ratioLine ${valueClass("gajoong1", row.wave, row.gajoong1)}">
+          <span class="ratioLabel">가중1:</span>
+          <span>${esc(formatPercent(row.gajoong1) || "-")}</span>
+        </div>
+        <div class="ratioLine ${valueClass("gajoong2", row.wave, row.gajoong2)}">
+          <span class="ratioLabel">가중2:</span>
+          <span>${esc(formatPercent(row.gajoong2) || "-")}</span>
+        </div>
+      </div>
+    `;
   }
 
   function routeListFromInput() {
@@ -726,7 +813,7 @@
       .order("camp", { ascending:true })
       .order("wave", { ascending:true })
       .order("route_norm", { ascending:true })
-      .limit(20000);
+      .limit(50000);
 
     q = applyCommonFilters(q);
 
@@ -777,6 +864,7 @@
 
     const add = (row) => {
       const key = rowKey(row);
+
       if (!map.has(key)) {
         map.set(key, {
           key,
@@ -831,48 +919,36 @@
   function renderTotalTable() {
     const thead = $("totalTable").querySelector("thead");
     const tbody = $("totalTable").querySelector("tbody");
+    const p = getSelectedPeriod();
+
+    $("totalPeriodText").textContent = `${p.period_start} ~ ${p.period_end}`;
 
     thead.innerHTML = `
       <tr>
         <th>주야간</th>
         <th>Camp</th>
         <th>Route</th>
-        <th>누적 가중1</th>
-        <th>누적 가중2</th>
-        <th>기간</th>
+        <th>누적 회수율</th>
+        <th>누적 기간</th>
         <th>파일명</th>
       </tr>
     `;
 
     if (!totalRows.length) {
-      tbody.innerHTML = `<tr><td colspan="7" class="ratioEmpty">월 누적 데이터 없음</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" class="ratioEmpty" style="padding:18px">월 누적 데이터 없음</td></tr>`;
       return;
     }
 
     tbody.innerHTML = totalRows.map(row => `
       <tr>
-        <td>${esc(waveLabel(row.wave))}</td>
-        <td>${esc(row.camp)}</td>
-        <td>${esc(normalizeRoute(row.route_norm || row.route))}</td>
-        <td class="${ratioClass(row.gajoong1)}">${esc(formatPercent(row.gajoong1))}</td>
-        <td class="${ratioClass(row.gajoong2)}">${esc(formatPercent(row.gajoong2))}</td>
-        <td>${esc(row.period_start)} ~ ${esc(row.period_end)}</td>
-        <td>${esc(row.source_file_name || "")}</td>
+        <td class="fixedCell">${esc(waveLabel(row.wave))}</td>
+        <td class="fixedCell">${esc(row.camp)}</td>
+        <td class="fixedCell routeCell">${esc(normalizeRoute(row.route_norm || row.route))}</td>
+        <td>${ratioBox(row)}</td>
+        <td class="fixedCell">${esc(row.period_start)} ~ ${esc(row.period_end)}</td>
+        <td class="fixedCell">${esc(row.source_file_name || "")}</td>
       </tr>
     `).join("");
-  }
-
-  function dateRange(startIso, endIso) {
-    const out = [];
-    let d = parseIsoDate(startIso);
-    const end = parseIsoDate(endIso);
-
-    while (d <= end) {
-      out.push(isoDate(d));
-      d = addDays(d, 1);
-    }
-
-    return out;
   }
 
   function getWeeks() {
@@ -908,6 +984,7 @@
           end: activeDays[activeDays.length - 1].iso,
           days
         });
+
         seq++;
       }
 
@@ -939,7 +1016,7 @@
 
     container.innerHTML = weeks.map(week => {
       const headers = week.days.map(day => {
-        return `<th class="dayCell">${day.inPeriod ? esc(formatKoreanDate(day.iso)) : ""}</th>`;
+        return `<th class="dayHead">${day.inPeriod ? esc(formatKoreanDate(day.iso)) : ""}</th>`;
       }).join("");
 
       const bodyRows = routeRows.map(routeRow => {
@@ -952,34 +1029,30 @@
             return `<td class="emptyDay">-</td>`;
           }
 
-          return `
-            <td class="dayCell ${ratioClass(item.gajoong1)}">
-              <div class="dayCellInner">
-                <div class="g1">1: ${esc(formatPercent(item.gajoong1))}</div>
-                <div class="g2">2: ${esc(formatPercent(item.gajoong2))}</div>
-              </div>
-            </td>
-          `;
+          return `<td class="dayCell">${ratioBox(item)}</td>`;
         }).join("");
 
         return `
           <tr>
-            <td>${esc(waveLabel(routeRow.wave))}</td>
-            <td>${esc(routeRow.camp)}</td>
-            <td>${esc(routeRow.route)}</td>
+            <td class="fixedCell">${esc(waveLabel(routeRow.wave))}</td>
+            <td class="fixedCell">${esc(routeRow.camp)}</td>
+            <td class="fixedCell routeCell">${esc(routeRow.route)}</td>
             ${cells}
           </tr>
         `;
       }).join("");
 
       return `
-        <div class="weekBlock">
+        <div class="weekBlock" data-week="${week.seq}">
           <div class="weekTitle">
             <div>${week.seq}주차</div>
-            <small>${esc(week.start)} ~ ${esc(week.end)}</small>
+            <div class="weekActions">
+              <small>${esc(week.start)} ~ ${esc(week.end)}</small>
+              <button type="button" class="secondary copyWeekImageBtn" data-week="${week.seq}">이미지 복사</button>
+            </div>
           </div>
           <div class="tableWrap">
-            <table class="weekTable">
+            <table class="weekTable" data-week-table="${week.seq}">
               <thead>
                 <tr>
                   <th>주야간</th>
@@ -996,72 +1069,216 @@
     }).join("");
   }
 
-  function copyTextTable() {
-    if (!routeRows.length) {
-      setStatus("복사할 데이터가 없습니다.", "bad");
-      return;
+  function drawCell(ctx, x, y, w, h, options = {}) {
+    const {
+      bg = "#111827",
+      border = "#334155",
+      text = "",
+      color = "#e6eefc",
+      font = "900 14px Arial",
+      align = "center"
+    } = options;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    if (text) {
+      ctx.fillStyle = color;
+      ctx.font = font;
+      ctx.textAlign = align;
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(text), align === "left" ? x + 8 : x + w / 2, y + h / 2);
+    }
+  }
+
+  function getRatioStyle(field, wave, value) {
+    if (value === null || value === undefined || value === "") {
+      return { bg:"#111827", color:"#64748b" };
     }
 
-    const p = getSelectedPeriod();
-    const lines = [];
-
-    lines.push(`마루웰 회수율\t${p.data_year}년 ${p.month_no}월\t${p.period_start} ~ ${p.period_end}`);
-    lines.push("");
-
-    lines.push("[월 누적]");
-    lines.push(["주야간", "Camp", "Route", "누적 가중1", "누적 가중2", "기간"].join("\t"));
-
-    for (const row of totalRows) {
-      lines.push([
-        waveLabel(row.wave),
-        row.camp,
-        normalizeRoute(row.route_norm || row.route),
-        formatPercent(row.gajoong1),
-        formatPercent(row.gajoong2),
-        `${row.period_start} ~ ${row.period_end}`
-      ].join("\t"));
+    if (isGoodValue(field, wave, value)) {
+      return { bg:"#7dd3fc", color:"#082f49" };
     }
 
-    lines.push("");
-    lines.push("[주차별 일자]");
+    return { bg:"#ffffff", color:"#ef4444" };
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+  }
+
+  async function copyWeekImage(weekSeq) {
+    const weeks = getWeeks();
+    const week = weeks.find(item => Number(item.seq) === Number(weekSeq));
+    if (!week) return;
 
     const dmap = dailyMap();
 
-    for (const week of getWeeks()) {
-      lines.push("");
-      lines.push(`${week.seq}주차\t${week.start} ~ ${week.end}`);
+    const columns = [
+      { key:"wave", label:"주야간", width:90 },
+      { key:"camp", label:"Camp", width:120 },
+      { key:"route", label:"Route", width:110 },
+      ...week.days.map(day => ({
+        key:day.iso,
+        label:day.inPeriod ? formatKoreanDate(day.iso) : "",
+        width:132,
+        inPeriod:day.inPeriod
+      }))
+    ];
 
-      const headers = ["주야간", "Camp", "Route"];
+    const titleHeight = 64;
+    const headerHeight = 38;
+    const rowHeight = 48;
+    const pad = 18;
 
-      for (const day of week.days) {
-        headers.push(day.inPeriod ? `${formatKoreanDate(day.iso)} 가중1` : "");
-        headers.push(day.inPeriod ? `${formatKoreanDate(day.iso)} 가중2` : "");
-      }
+    const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+    const tableHeight = headerHeight + routeRows.length * rowHeight;
+    const canvasWidth = tableWidth + pad * 2;
+    const canvasHeight = titleHeight + tableHeight + pad * 2;
 
-      lines.push(headers.join("\t"));
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
 
-      for (const routeRow of routeRows) {
-        const cols = [waveLabel(routeRow.wave), routeRow.camp, routeRow.route];
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
 
-        for (const day of week.days) {
-          if (!day.inPeriod) {
-            cols.push("");
-            cols.push("");
-            continue;
-          }
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-          const item = dmap.get(`${routeRow.key}||${day.iso}`);
-          cols.push(item ? formatPercent(item.gajoong1) : "");
-          cols.push(item ? formatPercent(item.gajoong2) : "");
-        }
+    const p = getSelectedPeriod();
 
-        lines.push(cols.join("\t"));
-      }
+    ctx.fillStyle = "#e6eefc";
+    ctx.font = "900 24px Arial";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`마루웰 회수율 ${week.seq}주차`, pad, pad + 18);
+
+    ctx.fillStyle = "#9fb0d2";
+    ctx.font = "800 13px Arial";
+    ctx.fillText(`${p.data_year}년 ${p.month_no}월 / ${week.start} ~ ${week.end}`, pad, pad + 44);
+
+    let x = pad;
+    let y = pad + titleHeight;
+
+    for (const col of columns) {
+      drawCell(ctx, x, y, col.width, headerHeight, {
+        bg:"#263247",
+        border:"#475569",
+        text:col.label,
+        color:"#ffffff",
+        font:"900 13px Arial"
+      });
+      x += col.width;
     }
 
-    navigator.clipboard.writeText(lines.join("\n"))
-      .then(() => setStatus("표 복사 완료", "ok"))
-      .catch(() => setStatus("클립보드 복사 실패", "bad"));
+    y += headerHeight;
+
+    for (const routeRow of routeRows) {
+      x = pad;
+
+      drawCell(ctx, x, y, columns[0].width, rowHeight, {
+        text:waveLabel(routeRow.wave),
+        bg:"#111827",
+        color:"#e6eefc",
+        font:"900 13px Arial"
+      });
+      x += columns[0].width;
+
+      drawCell(ctx, x, y, columns[1].width, rowHeight, {
+        text:routeRow.camp,
+        bg:"#111827",
+        color:"#e6eefc",
+        font:"900 13px Arial"
+      });
+      x += columns[1].width;
+
+      drawCell(ctx, x, y, columns[2].width, rowHeight, {
+        text:routeRow.route,
+        bg:"#111827",
+        color:"#bfdbfe",
+        font:"900 13px Arial"
+      });
+      x += columns[2].width;
+
+      for (let i = 3; i < columns.length; i++) {
+        const col = columns[i];
+
+        if (!col.inPeriod) {
+          drawCell(ctx, x, y, col.width, rowHeight, {
+            bg:"#111827",
+            border:"#334155"
+          });
+          x += col.width;
+          continue;
+        }
+
+        const item = dmap.get(`${routeRow.key}||${col.key}`);
+
+        if (!item) {
+          drawCell(ctx, x, y, col.width, rowHeight, {
+            text:"-",
+            bg:"#111827",
+            color:"#64748b",
+            font:"900 13px Arial"
+          });
+          x += col.width;
+          continue;
+        }
+
+        const g1Style = getRatioStyle("gajoong1", item.wave, item.gajoong1);
+        const g2Style = getRatioStyle("gajoong2", item.wave, item.gajoong2);
+
+        drawCell(ctx, x, y, col.width, rowHeight / 2, {
+          text:`가중1: ${formatPercent(item.gajoong1) || "-"}`,
+          bg:g1Style.bg,
+          color:g1Style.color,
+          border:"#334155",
+          font:"900 12px Arial"
+        });
+
+        drawCell(ctx, x, y + rowHeight / 2, col.width, rowHeight / 2, {
+          text:`가중2: ${formatPercent(item.gajoong2) || "-"}`,
+          bg:g2Style.bg,
+          color:g2Style.color,
+          border:"#334155",
+          font:"900 12px Arial"
+        });
+
+        x += col.width;
+      }
+
+      y += rowHeight;
+    }
+
+    const blob = await canvasToBlob(canvas);
+
+    if (!blob) {
+      setStatus("이미지 생성 실패", "bad");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob })
+      ]);
+
+      setStatus(`${week.seq}주차 이미지 복사 완료`, "ok");
+    } catch {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maroowell_freshbag_ratio_week${week.seq}_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 복사를 막아서 PNG로 다운로드했습니다.", "warn");
+    }
   }
 
   function safeLocalStorageGet(key, fallback) {
@@ -1265,7 +1482,6 @@
   function bindEvents() {
     $("loadBtn").addEventListener("click", () => run(loadData));
     $("clearBtn").addEventListener("click", clearAll);
-    $("copyTextBtn").addEventListener("click", copyTextTable);
 
     $("savePresetBtn").addEventListener("click", () => run(async () => savePreset()));
     $("loadPresetBtn").addEventListener("click", () => run(loadPresetAndQuery));
@@ -1285,6 +1501,13 @@
       $(id).addEventListener("keydown", e => {
         if (e.key === "Enter") run(loadData);
       });
+    });
+
+    $("weekContainer").addEventListener("click", e => {
+      const btn = e.target.closest(".copyWeekImageBtn");
+      if (!btn) return;
+
+      run(() => copyWeekImage(btn.dataset.week));
     });
 
     $("deniedHomeBtn").addEventListener("click", () => {

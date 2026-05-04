@@ -33,7 +33,7 @@
       label: "프레시백 현황 조회",
       path: "/coupang_freshbag",
       aliases: ["/coupang_freshbag", "/coupang_freshbag.html"],
-      requireMaroowell: true
+      public: true
     },
     {
       key: "freshbag-upload",
@@ -278,7 +278,7 @@
 
       case "/coupang_freshbag":
       case "/coupang_freshbag.html":
-        return "프레시백 가중요인 현황 조회";
+        return "프레시백 가중요인 현황 전체 조회";
 
       case "/coupang_freshbag_upload":
       case "/coupang_freshbag_upload.html":

@@ -29,6 +29,20 @@
       public: true
     },
     {
+      key: "freshbag-view",
+      label: "프레시백 현황 조회",
+      path: "/coupang_freshbag",
+      aliases: ["/coupang_freshbag", "/coupang_freshbag.html"],
+      requireMaroowell: true
+    },
+    {
+      key: "freshbag-upload",
+      label: "프레시백 현황 업로드",
+      path: "/coupang_freshbag_upload",
+      aliases: ["/coupang_freshbag_upload", "/coupang_freshbag_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
       key: "info",
       label: "마루웰 정보",
       path: "/maroowell_info",
@@ -262,6 +276,14 @@
       case "/coupang_camp.html":
         return "쿠팡 캠프 / 주소조회";
 
+      case "/coupang_freshbag":
+      case "/coupang_freshbag.html":
+        return "프레시백 가중요인 현황 조회";
+
+      case "/coupang_freshbag_upload":
+      case "/coupang_freshbag_upload.html":
+        return "프레시백 엑셀 업로드";
+
       case "/maroowell_info":
       case "/maroowell_info.html":
         return "마루웰 기본 정보";
@@ -370,6 +392,7 @@
         display:none;
       }
       .mw-board-backdrop.open{display:block}
+
       .mw-board-panel{
         position:fixed;
         top:18px;
@@ -385,6 +408,7 @@
         display:none;
       }
       .mw-board-panel.open{display:block}
+
       .mw-board-head{
         display:flex;
         align-items:center;
@@ -411,6 +435,7 @@
         cursor:pointer;
       }
       .mw-board-close:hover{background:rgba(255,255,255,.12)}
+
       .mw-board-body{padding:12px}
       .mw-board-desc{
         color:rgba(230,238,252,.68);
@@ -419,6 +444,7 @@
         margin:0 2px 10px;
       }
       .mw-board-list{display:grid;gap:10px}
+
       .mw-board-item{
         border:1px solid rgba(255,255,255,.10);
         background:rgba(255,255,255,.04);
@@ -464,6 +490,7 @@
         font-weight:900;
         vertical-align:middle;
       }
+
       .mw-denied-screen{
         position:fixed;
         inset:0;
@@ -685,6 +712,8 @@
 
     const access = await loadAccess();
     const currentPage = findCurrentPage();
+
+    document.documentElement.style.visibility = "visible";
 
     if (currentPage && !canAccessPage(currentPage, access)) {
       showAccessDenied(currentPage, access);

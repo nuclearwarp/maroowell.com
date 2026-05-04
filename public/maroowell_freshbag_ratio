@@ -509,7 +509,10 @@
     <div class="card">
       <div class="sectionTitle">
         <span>월 누적 회수율</span>
-        <small id="totalPeriodText"></small>
+        <div class="weekActions">
+          <small id="totalPeriodText"></small>
+          <button type="button" class="secondary" id="copyTotalImageBtn">이미지 복사</button>
+        </div>
       </div>
       <div class="tableWrap">
         <table id="totalTable">
@@ -804,9 +807,7 @@
         route,
         route_norm,
         gajoong1,
-        gajoong2,
-        source_file_name,
-        updated_at
+        gajoong2
       `)
       .eq("data_year", p.data_year)
       .eq("month_no", p.month_no)
@@ -930,12 +931,11 @@
         <th>Route</th>
         <th>누적 회수율</th>
         <th>누적 기간</th>
-        <th>파일명</th>
       </tr>
     `;
 
     if (!totalRows.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="ratioEmpty" style="padding:18px">월 누적 데이터 없음</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="ratioEmpty" style="padding:18px">월 누적 데이터 없음</td></tr>`;
       return;
     }
 
@@ -946,7 +946,6 @@
         <td class="fixedCell routeCell">${esc(normalizeRoute(row.route_norm || row.route))}</td>
         <td>${ratioBox(row)}</td>
         <td class="fixedCell">${esc(row.period_start)} ~ ${esc(row.period_end)}</td>
-        <td class="fixedCell">${esc(row.source_file_name || "")}</td>
       </tr>
     `).join("");
   }
@@ -1109,6 +1108,151 @@
 
   function canvasToBlob(canvas) {
     return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+  }
+
+  async function copyTotalImage() {
+    if (!totalRows.length) {
+      setStatus("이미지로 복사할 월 누적 데이터가 없습니다.", "bad");
+      return;
+    }
+
+    const p = getSelectedPeriod();
+
+    const columns = [
+      { key:"wave", label:"주야간", width:90 },
+      { key:"camp", label:"Camp", width:130 },
+      { key:"route", label:"Route", width:110 },
+      { key:"ratio", label:"누적 회수율", width:180 },
+      { key:"period", label:"누적 기간", width:230 }
+    ];
+
+    const titleHeight = 64;
+    const headerHeight = 38;
+    const rowHeight = 54;
+    const pad = 18;
+
+    const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+    const canvasWidth = tableWidth + pad * 2;
+    const canvasHeight = titleHeight + headerHeight + totalRows.length * rowHeight + pad * 2;
+
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    ctx.fillStyle = "#e6eefc";
+    ctx.font = "900 24px Arial";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("마루웰 월 누적 회수율", pad, pad + 18);
+
+    ctx.fillStyle = "#9fb0d2";
+    ctx.font = "800 13px Arial";
+    ctx.fillText(`${p.data_year}년 ${p.month_no}월 / ${p.period_start} ~ ${p.period_end}`, pad, pad + 44);
+
+    let x = pad;
+    let y = pad + titleHeight;
+
+    for (const col of columns) {
+      drawCell(ctx, x, y, col.width, headerHeight, {
+        bg:"#263247",
+        border:"#475569",
+        text:col.label,
+        color:"#ffffff",
+        font:"900 13px Arial"
+      });
+      x += col.width;
+    }
+
+    y += headerHeight;
+
+    for (const row of totalRows) {
+      x = pad;
+
+      drawCell(ctx, x, y, columns[0].width, rowHeight, {
+        text:waveLabel(row.wave),
+        bg:"#111827",
+        color:"#e6eefc",
+        font:"900 13px Arial"
+      });
+      x += columns[0].width;
+
+      drawCell(ctx, x, y, columns[1].width, rowHeight, {
+        text:row.camp,
+        bg:"#111827",
+        color:"#e6eefc",
+        font:"900 13px Arial"
+      });
+      x += columns[1].width;
+
+      drawCell(ctx, x, y, columns[2].width, rowHeight, {
+        text:normalizeRoute(row.route_norm || row.route),
+        bg:"#111827",
+        color:"#bfdbfe",
+        font:"900 13px Arial"
+      });
+      x += columns[2].width;
+
+      const g1Style = getRatioStyle("gajoong1", row.wave, row.gajoong1);
+      const g2Style = getRatioStyle("gajoong2", row.wave, row.gajoong2);
+
+      drawCell(ctx, x, y, columns[3].width, rowHeight / 2, {
+        text:`가중1: ${formatPercent(row.gajoong1) || "-"}`,
+        bg:g1Style.bg,
+        color:g1Style.color,
+        border:"#334155",
+        font:"900 12px Arial"
+      });
+
+      drawCell(ctx, x, y + rowHeight / 2, columns[3].width, rowHeight / 2, {
+        text:`가중2: ${formatPercent(row.gajoong2) || "-"}`,
+        bg:g2Style.bg,
+        color:g2Style.color,
+        border:"#334155",
+        font:"900 12px Arial"
+      });
+
+      x += columns[3].width;
+
+      drawCell(ctx, x, y, columns[4].width, rowHeight, {
+        text:`${row.period_start} ~ ${row.period_end}`,
+        bg:"#111827",
+        color:"#e6eefc",
+        font:"900 12px Arial"
+      });
+
+      y += rowHeight;
+    }
+
+    const blob = await canvasToBlob(canvas);
+
+    if (!blob) {
+      setStatus("월 누적 이미지 생성 실패", "bad");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob })
+      ]);
+
+      setStatus("월 누적 이미지 복사 완료", "ok");
+    } catch {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maroowell_freshbag_ratio_total_${p.data_year}_${pad2(p.month_no)}_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 복사를 막아서 PNG로 다운로드했습니다.", "warn");
+    }
   }
 
   async function copyWeekImage(weekSeq) {
@@ -1482,6 +1626,7 @@
   function bindEvents() {
     $("loadBtn").addEventListener("click", () => run(loadData));
     $("clearBtn").addEventListener("click", clearAll);
+    $("copyTotalImageBtn").addEventListener("click", () => run(copyTotalImage));
 
     $("savePresetBtn").addEventListener("click", () => run(async () => savePreset()));
     $("loadPresetBtn").addEventListener("click", () => run(loadPresetAndQuery));

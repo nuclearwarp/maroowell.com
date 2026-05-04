@@ -157,12 +157,28 @@
       flex-wrap:wrap;
       margin-top:10px;
     }
+    .hint{
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.55;
+      margin-top:10px;
+    }
+    .routeBox{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(140px,1fr));
+      gap:10px;
+      margin-top:12px;
+    }
+    .routeBox input{
+      width:100%;
+      min-width:0;
+    }
     .tableWrap{
       overflow:auto;
       border:1px solid var(--line);
       border-radius:16px;
       background:rgba(0,0,0,.18);
-      max-height:calc(100vh - 255px);
+      max-height:calc(100vh - 310px);
     }
     table{
       border-collapse:separate;
@@ -240,12 +256,6 @@
       color:#6b7280;
       background:rgba(255,255,255,.03);
     }
-    .hint{
-      color:var(--muted);
-      font-size:13px;
-      line-height:1.55;
-      margin-top:10px;
-    }
     @media(max-width:900px){
       .top{
         flex-direction:column;
@@ -254,6 +264,9 @@
       .row{
         flex-direction:column;
         align-items:stretch;
+      }
+      .routeBox{
+        grid-template-columns:1fr;
       }
       input,select,button{
         width:100%;
@@ -268,7 +281,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">프레시백 현황 조회</div>
-          <div class="sub">원하는 연도 / 캠프 / 웨이브 / 라우트를 월별 가중요인 표로 조회합니다. Route는 101_A → 101A 로 표시됩니다.</div>
+          <div class="sub">연도 / 캠프 / 주야간 / 표시 라우트 기준으로 월별 가중요인 표를 조회합니다.</div>
         </div>
       </div>
       <div class="pill" id="userPill">세션 확인 중</div>
@@ -287,13 +300,12 @@
         </div>
 
         <div class="field">
-          <label>Wave</label>
-          <input id="waveFilter" placeholder="예: W1" />
-        </div>
-
-        <div class="field">
-          <label>Route</label>
-          <input id="routeFilter" placeholder="예: 130_A / 130A" />
+          <label>주야간</label>
+          <select id="waveFilter">
+            <option value="">전체</option>
+            <option value="W2">주간</option>
+            <option value="W1">야간</option>
+          </select>
         </div>
 
         <div class="field">
@@ -319,8 +331,29 @@
         <button id="copyBtn" class="secondary">표 복사</button>
       </div>
 
+      <div class="routeBox">
+        <div class="field">
+          <label>표시 라우트 1</label>
+          <input id="routeFilter1" class="routeInput" placeholder="예: 126A" />
+        </div>
+        <div class="field">
+          <label>표시 라우트 2</label>
+          <input id="routeFilter2" class="routeInput" placeholder="예: 126B" />
+        </div>
+        <div class="field">
+          <label>표시 라우트 3</label>
+          <input id="routeFilter3" class="routeInput" placeholder="예: 126C" />
+        </div>
+        <div class="field">
+          <label>표시 라우트 4</label>
+          <input id="routeFilter4" class="routeInput" placeholder="예: 126D" />
+        </div>
+      </div>
+
       <div class="hint">
-        필터를 넣으면 해당 조건의 라우트만 월별로 피벗 조회합니다. Route 검색은 <b>130_A</b>로 입력해도 <b>130A</b> 기준으로 검색됩니다.
+        주간은 DB의 <b>W2</b>, 야간은 DB의 <b>W1</b>로 조회합니다.
+        라우트는 <b>130_A</b>로 입력해도 <b>130A</b>로 정규화되어 검색/표시됩니다.
+        표시 라우트에 입력한 값은 데이터가 없어도 표에 먼저 깔립니다.
       </div>
 
       <div class="status" id="statusText">대기 중</div>
@@ -378,12 +411,35 @@
     return String(v ?? "").trim();
   }
 
+  function waveLabel(v) {
+    const s = clean(v).toUpperCase();
+    if (s === "W2") return "주간";
+    if (s === "W1") return "야간";
+    return s || "-";
+  }
+
   function valueClass(v) {
     const s = clean(v);
     if (s === "해당") return "yes";
     if (s === "미해당") return "no";
     if (!s) return "empty";
     return "";
+  }
+
+  function getRouteInputs() {
+    return [1,2,3,4]
+      .map(n => normalizeRoute($(`routeFilter${n}`).value))
+      .filter(Boolean)
+      .filter((v, i, arr) => arr.indexOf(v) === i);
+  }
+
+  function getSelectedWaves() {
+    const selected = clean($("waveFilter").value).toUpperCase();
+
+    if (selected === "W2") return ["W2"];
+    if (selected === "W1") return ["W1"];
+
+    return ["W2", "W1"];
   }
 
   function initYearOptions() {
@@ -434,17 +490,14 @@
   function applyFilterToQuery(q) {
     const year = Number($("yearFilter").value);
     const camp = clean($("campFilter").value);
-    const wave = clean($("waveFilter").value);
-    const routeInput = clean($("routeFilter").value);
-    const routeNorm = normalizeRoute(routeInput);
+    const selectedWave = clean($("waveFilter").value).toUpperCase();
     const g1 = $("g1Filter").value;
     const g2 = $("g2Filter").value;
 
     q = q.eq("data_year", year);
 
     if (camp) q = q.ilike("camp", `%${camp}%`);
-    if (wave) q = q.ilike("wave", `%${wave}%`);
-    if (routeNorm) q = q.ilike("route_norm", `%${routeNorm}%`);
+    if (selectedWave === "W2" || selectedWave === "W1") q = q.eq("wave", selectedWave);
     if (g1) q = q.eq("gajoong1", g1);
     if (g2) q = q.eq("gajoong2", g2);
 
@@ -507,20 +560,16 @@
     renderTable(pivotRows);
     renderSummary();
 
-    setStatus(`조회 완료: 원본 ${rawRows.length.toLocaleString()}건 / 표시 ${pivotRows.length.toLocaleString()}개 라우트`, "ok");
+    setStatus(`조회 완료: 원본 ${rawRows.length.toLocaleString()}건 / 표시 ${pivotRows.length.toLocaleString()}개`, "ok");
   }
 
   function makePivotRows(rows) {
+    const campFilter = clean($("campFilter").value);
+    const routeInputs = getRouteInputs();
+    const selectedWaves = getSelectedWaves();
     const map = new Map();
 
-    for (const row of rows) {
-      const wave = clean(row.wave);
-      const camp = clean(row.camp);
-      const routeNorm = normalizeRoute(row.route_norm || row.route);
-      const month = Number(row.month_no || 0);
-
-      if (!wave || !camp || !routeNorm || month < 1 || month > 12) continue;
-
+    function ensureRow(wave, camp, routeNorm) {
       const key = `${wave}||${camp}||${routeNorm}`;
 
       if (!map.has(key)) {
@@ -532,7 +581,31 @@
         });
       }
 
-      const item = map.get(key);
+      return map.get(key);
+    }
+
+    if (routeInputs.length > 0) {
+      const baseCamp = campFilter || inferCampFromRows(rows) || "-";
+
+      for (const wave of selectedWaves) {
+        for (const routeNorm of routeInputs) {
+          ensureRow(wave, baseCamp, routeNorm);
+        }
+      }
+    }
+
+    for (const row of rows) {
+      const wave = clean(row.wave).toUpperCase();
+      const camp = clean(row.camp);
+      const routeNorm = normalizeRoute(row.route_norm || row.route);
+      const month = Number(row.month_no || 0);
+
+      if (!wave || !camp || !routeNorm || month < 1 || month > 12) continue;
+
+      if (routeInputs.length > 0 && !routeInputs.includes(routeNorm)) continue;
+      if (!selectedWaves.includes(wave)) continue;
+
+      const item = ensureRow(wave, camp, routeNorm);
 
       item.months[month] = {
         gajoong1: row.gajoong1 || "",
@@ -543,12 +616,18 @@
     }
 
     return Array.from(map.values()).sort((a, b) => {
+      const waveOrder = { W2: 1, W1: 2 };
       return (
         a.camp.localeCompare(b.camp, "ko") ||
-        a.wave.localeCompare(b.wave, "ko", { numeric: true }) ||
+        (waveOrder[a.wave] || 99) - (waveOrder[b.wave] || 99) ||
         a.route.localeCompare(b.route, "ko", { numeric: true })
       );
     });
+  }
+
+  function inferCampFromRows(rows) {
+    const first = rows.find(row => clean(row.camp));
+    return first ? clean(first.camp) : "";
   }
 
   function renderSummary() {
@@ -578,7 +657,7 @@
 
     thead.innerHTML = `
       <tr>
-        <th class="sticky">Wave</th>
+        <th class="sticky">주야간</th>
         <th class="sticky2">Camp</th>
         <th class="sticky3">Route</th>
         ${headers.join("")}
@@ -604,7 +683,7 @@
 
       return `
         <tr>
-          <td class="sticky">${esc(item.wave)}</td>
+          <td class="sticky">${esc(waveLabel(item.wave))}</td>
           <td class="sticky2">${esc(item.camp)}</td>
           <td class="sticky3">${esc(item.route)}</td>
           ${cells.join("")}
@@ -619,7 +698,7 @@
       return;
     }
 
-    const header = ["Wave", "Camp", "Route"];
+    const header = ["주야간", "Camp", "Route"];
 
     for (let m = 1; m <= 12; m++) {
       header.push(`${m}월 가중1`, `${m}월 가중2`);
@@ -628,7 +707,7 @@
     const lines = [header.join("\t")];
 
     for (const item of pivotRows) {
-      const row = [item.wave, item.camp, item.route];
+      const row = [waveLabel(item.wave), item.camp, item.route];
 
       for (let m = 1; m <= 12; m++) {
         const month = item.months[m] || {};
@@ -648,9 +727,12 @@
     $("yearFilter").value = String(now);
     $("campFilter").value = "";
     $("waveFilter").value = "";
-    $("routeFilter").value = "";
     $("g1Filter").value = "";
     $("g2Filter").value = "";
+
+    [1,2,3,4].forEach(n => {
+      $(`routeFilter${n}`).value = "";
+    });
 
     renderTable([]);
     rawRows = [];
@@ -674,11 +756,11 @@
   $("clearBtn").addEventListener("click", clearFilters);
   $("copyBtn").addEventListener("click", () => run(copyTable));
 
-  ["yearFilter", "g1Filter", "g2Filter"].forEach(id => {
+  ["yearFilter", "waveFilter", "g1Filter", "g2Filter"].forEach(id => {
     $(id).addEventListener("change", () => run(loadData));
   });
 
-  ["campFilter", "waveFilter", "routeFilter"].forEach(id => {
+  ["campFilter", "routeFilter1", "routeFilter2", "routeFilter3", "routeFilter4"].forEach(id => {
     $(id).addEventListener("keydown", e => {
       if (e.key === "Enter") run(loadData);
     });

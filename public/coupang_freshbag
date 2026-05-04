@@ -329,7 +329,8 @@
       cursor:cell;
     }
 
-    td.editable:hover{
+    td.editable:hover,
+    td.editable:focus{
       outline:2px solid rgba(96,165,250,.45);
       outline-offset:-2px;
       background-color:rgba(96,165,250,.12);
@@ -395,7 +396,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">프레시백 현황 조회</div>
-          <div class="sub">연도 / 캠프 / 주야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 최고관리자는 셀을 더블클릭해 수정할 수 있습니다.</div>
+          <div class="sub">연도 / 캠프 / 주야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 최고관리자는 셀을 클릭해 수정할 수 있습니다.</div>
         </div>
       </div>
       <div class="pill" id="userPill">세션 확인 중</div>
@@ -414,9 +415,9 @@
         </div>
 
         <div class="field">
-          <label>주/야</label>
+          <label>주야간</label>
           <select id="waveFilter">
-            <option value="">선택(주/야)</option>
+            <option value="">선택 (주/야)</option>
             <option value="W2">주간</option>
             <option value="W1">야간</option>
           </select>
@@ -444,12 +445,12 @@
         <button id="addRowBtn" class="ok">행 추가</button>
         <button id="saveBtn" class="ok">변경 저장</button>
         <button id="clearBtn" class="secondary">초기화</button>
-        <button id="copyBtn" class="secondary">표 복사</button>
+        <button id="copyBtn" class="secondary">이미지 복사</button>
       </div>
 
       <div class="hint">
         조회는 아래 표에 입력된 행만 가져옵니다. 예: Camp <b>일산2</b>, 주야간 <b>주간</b>, Route 행 <b>126A/126B/126C/126D</b>를 입력하면 해당 4개 라우트만 조회합니다.
-        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다.
+        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다. 셀은 클릭 한 번으로 수정되고, Tab으로 다음 셀로 이동합니다.
       </div>
 
       <div class="status" id="statusText">대기 중</div>
@@ -877,21 +878,23 @@
 
         cells.push(`
           <td
+            tabindex="0"
             class="editable ${valueClass(month.gajoong1)}"
             data-row="${esc(row.localId)}"
             data-month="${m}"
             data-field="gajoong1"
-            title="더블클릭해서 수정"
+            title="클릭해서 수정"
           >${esc(month.gajoong1 || "")}</td>
         `);
 
         cells.push(`
           <td
+            tabindex="0"
             class="editable ${valueClass(month.gajoong2)}"
             data-row="${esc(row.localId)}"
             data-month="${m}"
             data-field="gajoong2"
-            title="더블클릭해서 수정"
+            title="클릭해서 수정"
           >${esc(month.gajoong2 || "")}</td>
         `);
       }
@@ -901,9 +904,9 @@
           <td class="actionCol">
             ${canEdit ? `<button class="small danger" data-action="delete" data-row="${esc(row.localId)}">삭제</button>` : `<span class="readonlyMark">조회</span>`}
           </td>
-          <td class="sticky1 editable" data-row="${esc(row.localId)}" data-meta="wave" title="더블클릭해서 수정">${esc(waveLabel(rowWave))}</td>
-          <td class="sticky2 editable" data-row="${esc(row.localId)}" data-meta="camp" title="더블클릭해서 수정">${esc(rowCamp)}</td>
-          <td class="sticky3 editable" data-row="${esc(row.localId)}" data-meta="route" title="더블클릭해서 수정">${esc(rowRoute)}</td>
+          <td tabindex="0" class="sticky1 editable" data-row="${esc(row.localId)}" data-meta="wave" title="클릭해서 수정">${esc(waveLabel(rowWave))}</td>
+          <td tabindex="0" class="sticky2 editable" data-row="${esc(row.localId)}" data-meta="camp" title="클릭해서 수정">${esc(rowCamp)}</td>
+          <td tabindex="0" class="sticky3 editable" data-row="${esc(row.localId)}" data-meta="route" title="클릭해서 수정">${esc(rowRoute)}</td>
           ${cells.join("")}
         </tr>
       `;
@@ -919,7 +922,28 @@
     renderSummary();
   }
 
-  function startEditCell(td) {
+  function getEditableCells() {
+    return Array.from(document.querySelectorAll("#resultTable td.editable"));
+  }
+
+  function focusNextEditableCell(currentTd, backwards = false) {
+    const cells = getEditableCells();
+    const index = cells.indexOf(currentTd);
+    if (index < 0) return;
+
+    const nextIndex = backwards
+      ? Math.max(0, index - 1)
+      : Math.min(cells.length - 1, index + 1);
+
+    const next = cells[nextIndex];
+
+    if (next && next !== currentTd) {
+      next.focus({ preventScroll: false });
+      startEditCell(next, { fromKeyboard: true });
+    }
+  }
+
+  function startEditCell(td, options = {}) {
     if (!canEdit) {
       setStatus("수정은 최고관리자만 가능합니다.", "bad");
       return;
@@ -935,16 +959,16 @@
     const field = td.dataset.field;
 
     if (meta) {
-      editMetaCell(td, row, meta);
+      editMetaCell(td, row, meta, options);
       return;
     }
 
     if (monthNo && field) {
-      editMonthCell(td, row, monthNo, field);
+      editMonthCell(td, row, monthNo, field, options);
     }
   }
 
-  function editMetaCell(td, row, meta) {
+  function editMetaCell(td, row, meta, options = {}) {
     if (meta === "wave") {
       const select = document.createElement("select");
       select.className = "editorSelect";
@@ -960,7 +984,7 @@
       td.appendChild(select);
       select.focus();
 
-      const commit = () => {
+      const commit = (moveDirection = null) => {
         const next = select.value;
 
         if ((row.wave || "") !== next) {
@@ -969,12 +993,27 @@
         }
 
         renderTable();
+
+        if (moveDirection) {
+          const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-meta="${meta}"]`);
+          if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
+        }
       };
 
-      select.addEventListener("blur", commit, { once:true });
+      select.addEventListener("blur", () => commit(), { once:true });
       select.addEventListener("keydown", e => {
-        if (e.key === "Enter") select.blur();
-        if (e.key === "Escape") renderTable();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          select.blur();
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          commit(e.shiftKey ? "prev" : "next");
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          renderTable();
+        }
       });
 
       return;
@@ -991,7 +1030,7 @@
     input.focus();
     input.select();
 
-    const commit = () => {
+    const commit = (moveDirection = null) => {
       let next = clean(input.value);
 
       if (meta === "route") {
@@ -1004,16 +1043,31 @@
       }
 
       renderTable();
+
+      if (moveDirection) {
+        const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-meta="${meta}"]`);
+        if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
+      }
     };
 
-    input.addEventListener("blur", commit, { once:true });
+    input.addEventListener("blur", () => commit(), { once:true });
     input.addEventListener("keydown", e => {
-      if (e.key === "Enter") input.blur();
-      if (e.key === "Escape") renderTable();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        commit(e.shiftKey ? "prev" : "next");
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        renderTable();
+      }
     });
   }
 
-  function editMonthCell(td, row, monthNo, field) {
+  function editMonthCell(td, row, monthNo, field, options = {}) {
     if (!row.months[monthNo]) {
       row.months[monthNo] = {
         id: null,
@@ -1040,7 +1094,7 @@
     td.appendChild(select);
     select.focus();
 
-    const commit = () => {
+    const commit = (moveDirection = null) => {
       const next = select.value;
 
       if ((month[field] || "") !== next) {
@@ -1049,12 +1103,27 @@
       }
 
       renderTable();
+
+      if (moveDirection) {
+        const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-month="${monthNo}"][data-field="${field}"]`);
+        if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
+      }
     };
 
-    select.addEventListener("blur", commit, { once:true });
+    select.addEventListener("blur", () => commit(), { once:true });
     select.addEventListener("keydown", e => {
-      if (e.key === "Enter") select.blur();
-      if (e.key === "Escape") renderTable();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        select.blur();
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        commit(e.shiftKey ? "prev" : "next");
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        renderTable();
+      }
     });
   }
 
@@ -1209,39 +1278,245 @@
     if (error) throw error;
   }
 
-  async function copyTable() {
+  function getLastMonthWithData() {
     const visibleRows = tableRows.filter(row => !row.deleted);
+    let maxMonth = 0;
+
+    for (const row of visibleRows) {
+      for (let m = 1; m <= 12; m++) {
+        const month = row.months[m] || {};
+        const g1 = clean(month.gajoong1);
+        const g2 = clean(month.gajoong2);
+
+        if (g1 || g2) {
+          maxMonth = Math.max(maxMonth, m);
+        }
+      }
+    }
+
+    return maxMonth;
+  }
+
+  function fitText(ctx, text, maxWidth) {
+    let s = String(text ?? "");
+
+    if (ctx.measureText(s).width <= maxWidth) return s;
+
+    while (s.length > 0 && ctx.measureText(s + "…").width > maxWidth) {
+      s = s.slice(0, -1);
+    }
+
+    return s ? s + "…" : "";
+  }
+
+  function drawCell(ctx, x, y, w, h, options = {}) {
+    const {
+      text = "",
+      bg = "#111827",
+      color = "#e6eefc",
+      border = "#334155",
+      font = "700 14px Arial, 'Noto Sans KR', sans-serif",
+      align = "center"
+    } = options;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = color;
+    ctx.font = font;
+    ctx.textBaseline = "middle";
+
+    const safeText = fitText(ctx, text, w - 12);
+
+    if (align === "left") {
+      ctx.textAlign = "left";
+      ctx.fillText(safeText, x + 8, y + h / 2);
+    } else {
+      ctx.textAlign = "center";
+      ctx.fillText(safeText, x + w / 2, y + h / 2);
+    }
+  }
+
+  function valueStyle(v) {
+    const s = clean(v);
+
+    if (s === "해당") {
+      return {
+        bg: "#7dd3fc",
+        color: "#082f49"
+      };
+    }
+
+    if (s === "미해당") {
+      return {
+        bg: "#ffffff",
+        color: "#ef4444"
+      };
+    }
+
+    return {
+      bg: "#111827",
+      color: "#6b7280"
+    };
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), "image/png");
+    });
+  }
+
+  async function copyTableImage() {
+    const visibleRows = tableRows.filter(row => !row.deleted);
+    const lastMonth = getLastMonthWithData();
 
     if (!visibleRows.length) {
-      setStatus("복사할 데이터가 없습니다.", "bad");
+      setStatus("복사할 행이 없습니다.", "bad");
       return;
     }
 
-    const header = ["주야간", "Camp", "Route"];
-
-    for (let m = 1; m <= 12; m++) {
-      header.push(`${m}월 가중1`, `${m}월 가중2`);
+    if (!lastMonth) {
+      setStatus("데이터가 있는 월이 없습니다. 먼저 조회하거나 값을 입력하세요.", "bad");
+      return;
     }
 
-    const lines = [header.join("\t")];
+    const fixedColumns = [
+      { key: "wave", label: "주야간", width: 90 },
+      { key: "camp", label: "Camp", width: 120 },
+      { key: "route", label: "Route", width: 110 }
+    ];
+
+    const monthColumns = [];
+
+    for (let m = 1; m <= lastMonth; m++) {
+      monthColumns.push({ month: m, field: "gajoong1", label: `${m}월 가중1`, width: 96 });
+      monthColumns.push({ month: m, field: "gajoong2", label: `${m}월 가중2`, width: 96 });
+    }
+
+    const columns = [...fixedColumns, ...monthColumns];
+
+    const titleHeight = 52;
+    const headerHeight = 36;
+    const rowHeight = 34;
+    const padding = 18;
+
+    const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+    const canvasWidth = tableWidth + padding * 2;
+    const canvasHeight = titleHeight + headerHeight + visibleRows.length * rowHeight + padding * 2;
+
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    const titleParts = [
+      $("yearFilter").value || "",
+      clean($("campFilter").value) || "Camp",
+      clean($("waveFilter").value) === "W2" ? "주간" : clean($("waveFilter").value) === "W1" ? "야간" : "주/야"
+    ].filter(Boolean);
+
+    ctx.fillStyle = "#e6eefc";
+    ctx.font = "900 22px Arial, 'Noto Sans KR', sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("프레시백 현황 조회", padding, padding + 14);
+
+    ctx.fillStyle = "#9fb0d2";
+    ctx.font = "700 13px Arial, 'Noto Sans KR', sans-serif";
+    ctx.fillText(titleParts.join(" / "), padding, padding + 38);
+
+    let y = padding + titleHeight;
+    let x = padding;
+
+    for (const col of columns) {
+      drawCell(ctx, x, y, col.width, headerHeight, {
+        text: col.label,
+        bg: "#263247",
+        color: "#ffffff",
+        border: "#475569",
+        font: "900 13px Arial, 'Noto Sans KR', sans-serif"
+      });
+
+      x += col.width;
+    }
+
+    y += headerHeight;
 
     for (const row of visibleRows) {
-      const line = [
-        waveLabel(effectiveWave(row)),
-        effectiveCamp(row),
-        effectiveRoute(row)
-      ];
+      x = padding;
 
-      for (let m = 1; m <= 12; m++) {
-        const month = row.months[m] || {};
-        line.push(month.gajoong1 || "", month.gajoong2 || "");
+      const fixedValues = {
+        wave: waveLabel(effectiveWave(row)),
+        camp: effectiveCamp(row),
+        route: effectiveRoute(row)
+      };
+
+      for (const col of fixedColumns) {
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: fixedValues[col.key],
+          bg: "#111827",
+          color: col.key === "route" ? "#bfdbfe" : "#e6eefc",
+          border: "#334155",
+          font: "900 13px Arial, 'Noto Sans KR', sans-serif"
+        });
+
+        x += col.width;
       }
 
-      lines.push(line.join("\t"));
+      for (const col of monthColumns) {
+        const month = row.months[col.month] || {};
+        const value = clean(month[col.field]);
+        const style = valueStyle(value);
+
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: value,
+          bg: style.bg,
+          color: style.color,
+          border: "#334155",
+          font: "900 13px Arial, 'Noto Sans KR', sans-serif"
+        });
+
+        x += col.width;
+      }
+
+      y += rowHeight;
     }
 
-    await navigator.clipboard.writeText(lines.join("\n"));
-    setStatus("표 복사 완료", "ok");
+    const blob = await canvasToBlob(canvas);
+
+    if (!blob) {
+      setStatus("이미지 생성에 실패했습니다.", "bad");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "image/png": blob
+        })
+      ]);
+
+      setStatus(`이미지 복사 완료: ${lastMonth}월까지 캡쳐`, "ok");
+    } catch (e) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `freshbag_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 클립보드 복사를 막아서 PNG 파일로 다운로드했습니다.", "warn");
+    }
   }
 
   function clearAll() {
@@ -1273,12 +1548,22 @@
   $("addRowBtn").addEventListener("click", addRow);
   $("saveBtn").addEventListener("click", () => run(saveChanges));
   $("clearBtn").addEventListener("click", clearAll);
-  $("copyBtn").addEventListener("click", () => run(copyTable));
+  $("copyBtn").addEventListener("click", () => run(copyTableImage));
 
-  $("resultTable").addEventListener("dblclick", e => {
+  $("resultTable").addEventListener("click", e => {
     const td = e.target.closest("td.editable");
     if (!td) return;
     startEditCell(td);
+  });
+
+  $("resultTable").addEventListener("keydown", e => {
+    const td = e.target.closest("td.editable");
+    if (!td) return;
+
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      startEditCell(td, { fromKeyboard: true });
+    }
   });
 
   $("resultTable").addEventListener("click", e => {

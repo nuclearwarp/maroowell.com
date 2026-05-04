@@ -1,0 +1,1515 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>마루웰 회수율</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --card:#121a2d;
+      --line:rgba(255,255,255,.12);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#60a5fa;
+      --red:#ef4444;
+      --green:#22c55e;
+      --yellow:#f59e0b;
+      --cyan:#7dd3fc;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      min-height:100vh;
+      background:linear-gradient(180deg,#0b1220,#070b13);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    .wrap{
+      max-width:1720px;
+      margin:0 auto;
+      padding:22px 18px 44px;
+    }
+
+    .top{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      margin-bottom:18px;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      min-width:0;
+    }
+
+    .brand img{
+      width:34px;
+      height:34px;
+    }
+
+    .title{
+      font-size:28px;
+      font-weight:950;
+      letter-spacing:-.6px;
+      line-height:1.15;
+    }
+
+    .sub{
+      color:var(--muted);
+      font-size:14px;
+      margin-top:5px;
+      line-height:1.45;
+    }
+
+    .card{
+      background:rgba(18,26,45,.9);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      margin-bottom:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+    }
+
+    .presetRow{
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,.08);
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+
+    .field label{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      margin-left:2px;
+    }
+
+    input,select{
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      padding:0 12px;
+      outline:none;
+      min-width:150px;
+    }
+
+    input:focus,select:focus{
+      border-color:rgba(96,165,250,.55);
+      box-shadow:0 0 0 2px rgba(96,165,250,.12);
+    }
+
+    select option{
+      background:#111827;
+      color:#fff;
+    }
+
+    .campInput{
+      min-width:180px;
+    }
+
+    .routeInput{
+      min-width:280px;
+    }
+
+    .presetNameField input{
+      min-width:240px;
+    }
+
+    .presetSelectField select{
+      min-width:340px;
+    }
+
+    button{
+      min-height:42px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(59,130,246,.24);
+      color:#fff;
+      padding:0 18px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+
+    button:hover{
+      background:rgba(59,130,246,.36);
+    }
+
+    button.secondary{
+      background:rgba(255,255,255,.07);
+    }
+
+    button.secondary:hover{
+      background:rgba(255,255,255,.12);
+    }
+
+    button.ok{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.32);
+    }
+
+    button.ok:hover{
+      background:rgba(34,197,94,.28);
+    }
+
+    button.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.32);
+    }
+
+    button.danger:hover{
+      background:rgba(239,68,68,.28);
+    }
+
+    .hint{
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.55;
+      margin-top:10px;
+    }
+
+    .status{
+      font-size:13px;
+      color:var(--muted);
+      margin-top:10px;
+      line-height:1.55;
+    }
+
+    .status.ok{color:#bbf7d0}
+    .status.bad{color:#fecaca}
+    .status.warn{color:#fde68a}
+
+    .summary{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      min-height:32px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .pill strong{
+      color:#fff;
+      margin-left:5px;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:calc(100vh - 410px);
+    }
+
+    table{
+      border-collapse:separate;
+      border-spacing:0;
+      width:max-content;
+      min-width:100%;
+      table-layout:fixed;
+      font-size:13px;
+    }
+
+    th,td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      padding:8px 10px;
+      text-align:center;
+      white-space:nowrap;
+      min-width:88px;
+      max-width:180px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    th{
+      position:sticky;
+      top:0;
+      z-index:5;
+      background:#263247;
+      color:#fff;
+      font-weight:950;
+    }
+
+    th.sticky1,td.sticky1{
+      position:sticky;
+      left:0;
+      z-index:4;
+      width:92px;
+      min-width:92px;
+      max-width:92px;
+    }
+
+    th.sticky1{
+      z-index:7;
+      background:#263247;
+    }
+
+    td.sticky1{
+      background:#111827;
+      color:#e6eefc;
+      font-weight:900;
+    }
+
+    th.sticky2,td.sticky2{
+      position:sticky;
+      left:92px;
+      z-index:4;
+      width:120px;
+      min-width:120px;
+      max-width:120px;
+    }
+
+    th.sticky2{
+      z-index:7;
+      background:#263247;
+    }
+
+    td.sticky2{
+      background:#111827;
+      color:#e6eefc;
+      font-weight:900;
+    }
+
+    th.sticky3,td.sticky3{
+      position:sticky;
+      left:212px;
+      z-index:4;
+      width:110px;
+      min-width:110px;
+      max-width:110px;
+    }
+
+    th.sticky3{
+      z-index:7;
+      background:#263247;
+    }
+
+    td.sticky3{
+      background:#111827;
+      color:#bfdbfe;
+      font-weight:950;
+    }
+
+    .monthHead{
+      width:92px;
+      min-width:92px;
+      max-width:92px;
+    }
+
+    td.ratioCell{
+      cursor:pointer;
+      font-weight:950;
+    }
+
+    td.ratioCell:hover{
+      outline:2px solid rgba(96,165,250,.45);
+      outline-offset:-2px;
+    }
+
+    .ratioGood{
+      background:#7dd3fc;
+      color:#082f49;
+    }
+
+    .ratioNormal{
+      background:#dbeafe;
+      color:#0f172a;
+    }
+
+    .ratioLow{
+      background:#fff;
+      color:#ef4444;
+    }
+
+    .ratioEmpty{
+      color:#64748b;
+      background:rgba(255,255,255,.03);
+      font-weight:700;
+    }
+
+    .detailGrid{
+      display:grid;
+      grid-template-columns:1fr;
+      gap:12px;
+    }
+
+    .detailTitle{
+      font-size:17px;
+      font-weight:950;
+      margin-bottom:8px;
+    }
+
+    .detailTableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:360px;
+    }
+
+    .detailTable{
+      width:100%;
+      min-width:780px;
+    }
+
+    .detailTable th,
+    .detailTable td{
+      min-width:90px;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:9999;
+    }
+
+    .accessDenied.show{
+      display:flex;
+    }
+
+    .accessCard{
+      width:min(540px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+      line-height:1.6;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media(max-width:900px){
+      .top{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+
+      .row,
+      .presetRow{
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      input,select,button,
+      .campInput,
+      .routeInput,
+      .presetNameField input,
+      .presetSelectField select{
+        width:100%;
+        min-width:0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
+        <div>
+          <div class="title">마루웰 회수율</div>
+          <div class="sub">쿠팡 정산월 기준으로 프레시백 회수율 월평균을 조회합니다. 마루웰 소속 이상만 접근 가능합니다.</div>
+        </div>
+      </div>
+      <div class="pill" id="userPill">세션 확인 중</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label>연도</label>
+          <select id="yearFilter"></select>
+        </div>
+
+        <div class="field">
+          <label>Camp</label>
+          <input id="campFilter" class="campInput" placeholder="예: 일산2" />
+        </div>
+
+        <div class="field">
+          <label>주야간</label>
+          <select id="waveFilter">
+            <option value="">전체</option>
+            <option value="W2">주간</option>
+            <option value="W1">야간</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Route</label>
+          <input id="routeFilter" class="routeInput" placeholder="예: 126A/126B/126C 또는 126_A" />
+        </div>
+
+        <button id="loadBtn">조회</button>
+        <button id="clearBtn" class="secondary">초기화</button>
+        <button id="copyTextBtn" class="secondary">표 복사</button>
+        <button id="copyImageBtn" class="secondary">이미지 복사</button>
+      </div>
+
+      <div class="presetRow">
+        <div class="field presetNameField">
+          <label>프리셋 이름</label>
+          <input id="presetNameInput" placeholder="예: 일산2 주간 126/130 회수율" />
+        </div>
+
+        <div class="field presetSelectField">
+          <label>저장된 프리셋</label>
+          <select id="savedPresetSelect">
+            <option value="">저장된 프리셋 없음</option>
+          </select>
+        </div>
+
+        <button id="savePresetBtn" class="secondary" type="button">프리셋 저장</button>
+        <button id="loadPresetBtn" class="secondary" type="button">불러와서 조회</button>
+        <button id="deletePresetBtn" class="danger" type="button">프리셋 삭제</button>
+      </div>
+
+      <div class="hint">
+        쿠팡 정산월 기준입니다. 예: <b>5월 데이터 = 4월 26일 ~ 5월 25일</b>.
+        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화되어 검색됩니다.
+        월별 회수율 셀을 클릭하면 해당 월의 일자별 상세 데이터를 확인합니다.
+      </div>
+
+      <div class="status" id="statusText">대기 중</div>
+
+      <div class="summary">
+        <span class="pill">DB row <strong id="rawCount">0</strong></span>
+        <span class="pill">표시 행 <strong id="rowCount">0</strong></span>
+        <span class="pill">캠프 <strong id="campCount">0</strong></span>
+        <span class="pill">라우트 <strong id="routeCount">0</strong></span>
+        <span class="pill">월 데이터 <strong id="monthCount">0</strong></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tableWrap">
+        <table id="ratioTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="detailCard">
+      <div class="detailTitle" id="detailTitle">일자별 상세</div>
+      <div class="hint" id="detailHint">월별 회수율 셀을 클릭하면 해당 월의 일자별 상세가 표시됩니다.</div>
+      <div class="detailTableWrap">
+        <table id="detailTable" class="detailTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">마루웰 소속 권한이 필요합니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="deniedHomeBtn" class="secondary" type="button">홈으로</button>
+        <button id="deniedLogoutBtn" class="danger" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.MARUWELL_CONFIG || {};
+
+  const MONTHLY_VIEW = "maroowell_freshbag_ration_monthly";
+  const DETAIL_TABLE = "maroowell_freshbag_ration";
+  const PRESET_STORAGE_KEY = "mw:maroowell_freshbag_ratio:presets:v1";
+
+  let supabaseClient = null;
+  let currentUser = null;
+  let rawRows = [];
+  let displayRows = [];
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg;
+    $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function clean(v) {
+    return String(v ?? "").trim();
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function normalizeRoute(v) {
+    return String(v || "")
+      .toUpperCase()
+      .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function waveLabel(v) {
+    const s = clean(v).toUpperCase();
+    if (s === "W2") return "주간";
+    if (s === "W1") return "야간";
+    return s || "";
+  }
+
+  function formatPercent(v) {
+    if (v === null || v === undefined || v === "") return "";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "";
+    return n.toFixed(2) + "%";
+  }
+
+  function ratioClass(v) {
+    if (v === null || v === undefined || v === "") return "ratioEmpty";
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "ratioEmpty";
+    if (n >= 100) return "ratioGood";
+    if (n >= 95) return "ratioNormal";
+    return "ratioLow";
+  }
+
+  function routeListFromInput() {
+    const raw = clean($("routeFilter").value);
+    if (!raw) return [];
+
+    return raw
+      .split(/[,\s/|]+/g)
+      .map(normalizeRoute)
+      .filter(Boolean);
+  }
+
+  function unique(arr) {
+    return Array.from(new Set(arr.filter(Boolean)));
+  }
+
+  function initYearOptions() {
+    const now = new Date().getFullYear();
+    const years = [];
+
+    for (let y = now + 1; y >= now - 8; y--) {
+      years.push(y);
+    }
+
+    $("yearFilter").innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join("");
+    $("yearFilter").value = String(now);
+  }
+
+  function initSupabase() {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  function showAccessDenied(detail = "") {
+    $("accessDenied").classList.add("show");
+    $("accessDeniedText").textContent = detail || "마루웰 소속 권한이 필요합니다.";
+    $("accessDeniedEmail").textContent = currentUser?.email
+      ? `현재 로그인: ${currentUser.email}`
+      : "현재 로그인 이메일을 확인할 수 없습니다.";
+    document.documentElement.style.visibility = "visible";
+  }
+
+  async function checkMaroowellAccess() {
+    if (!supabaseClient) initSupabase();
+
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    currentUser = sessionData?.session?.user;
+
+    if (!currentUser) {
+      const loginPath = cfg.PATHS?.login || "/login.html";
+      location.href = loginPath + "?next=" + encodeURIComponent(location.pathname);
+      return false;
+    }
+
+    $("userPill").textContent = currentUser.email || currentUser.id;
+
+    const { data: access, error: accessError } = await supabaseClient
+      .rpc("mw_my_access")
+      .maybeSingle();
+
+    if (accessError) {
+      showAccessDenied(accessError.message);
+      return false;
+    }
+
+    if (access?.is_maroowell !== true) {
+      showAccessDenied("마루웰 소속 권한이 필요합니다.\n조건: user_access.is_maroowell = true");
+      return false;
+    }
+
+    document.documentElement.style.visibility = "visible";
+    return true;
+  }
+
+  async function fetchMonthlyRows() {
+    const year = Number($("yearFilter").value);
+    const camp = clean($("campFilter").value);
+    const wave = clean($("waveFilter").value);
+    const routes = routeListFromInput();
+
+    let q = supabaseClient
+      .from(MONTHLY_VIEW)
+      .select(`
+        data_year,
+        month_no,
+        data_month,
+        period_start,
+        period_end,
+        wave,
+        camp,
+        route_norm,
+        route,
+        avg_gajoong1,
+        avg_gajoong2,
+        row_count,
+        first_date,
+        last_date
+      `)
+      .eq("data_year", year)
+      .order("camp", { ascending: true })
+      .order("wave", { ascending: true })
+      .order("route_norm", { ascending: true })
+      .order("month_no", { ascending: true })
+      .limit(20000);
+
+    if (camp) q = q.eq("camp", camp);
+    if (wave) q = q.eq("wave", wave);
+    if (routes.length) q = q.in("route_norm", routes);
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    return Array.isArray(data) ? data : [];
+  }
+
+  function buildDisplayRows(rows) {
+    const map = new Map();
+
+    for (const row of rows) {
+      const key = `${row.wave}||${row.camp}||${row.route_norm}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          wave: row.wave,
+          camp: row.camp,
+          route_norm: row.route_norm,
+          route: normalizeRoute(row.route_norm || row.route),
+          months: {}
+        });
+      }
+
+      const target = map.get(key);
+      const m = Number(row.month_no);
+
+      target.months[m] = {
+        month_no: m,
+        data_month: row.data_month,
+        period_start: row.period_start,
+        period_end: row.period_end,
+        avg_gajoong1: row.avg_gajoong1,
+        avg_gajoong2: row.avg_gajoong2,
+        row_count: row.row_count,
+        first_date: row.first_date,
+        last_date: row.last_date
+      };
+    }
+
+    return Array.from(map.values()).sort((a, b) => {
+      const waveOrder = { W2: 1, W1: 2 };
+      return (
+        String(a.camp).localeCompare(String(b.camp), "ko", { numeric:true }) ||
+        ((waveOrder[a.wave] || 9) - (waveOrder[b.wave] || 9)) ||
+        String(a.route_norm).localeCompare(String(b.route_norm), "ko", { numeric:true })
+      );
+    });
+  }
+
+  async function loadData() {
+    setStatus("월별 회수율 조회 중...", "warn");
+
+    rawRows = await fetchMonthlyRows();
+    displayRows = buildDisplayRows(rawRows);
+
+    renderTable();
+    renderSummary();
+    clearDetail();
+
+    setStatus(`조회 완료: 월별 row ${rawRows.length.toLocaleString()}건 / 표시 행 ${displayRows.length.toLocaleString()}행`, "ok");
+  }
+
+  function renderSummary() {
+    $("rawCount").textContent = rawRows.length.toLocaleString();
+    $("rowCount").textContent = displayRows.length.toLocaleString();
+    $("campCount").textContent = unique(rawRows.map(r => r.camp)).length.toLocaleString();
+    $("routeCount").textContent = unique(rawRows.map(r => r.route_norm)).length.toLocaleString();
+    $("monthCount").textContent = unique(rawRows.map(r => `${r.data_year}-${r.month_no}`)).length.toLocaleString();
+  }
+
+  function renderTable() {
+    const thead = $("ratioTable").querySelector("thead");
+    const tbody = $("ratioTable").querySelector("tbody");
+
+    const monthHeaders = [];
+
+    for (let m = 1; m <= 12; m++) {
+      monthHeaders.push(`<th class="monthHead">${m}월<br>가중1</th>`);
+      monthHeaders.push(`<th class="monthHead">${m}월<br>가중2</th>`);
+    }
+
+    thead.innerHTML = `
+      <tr>
+        <th class="sticky1">주야간</th>
+        <th class="sticky2">Camp</th>
+        <th class="sticky3">Route</th>
+        ${monthHeaders.join("")}
+      </tr>
+    `;
+
+    if (!displayRows.length) {
+      tbody.innerHTML = `<tr><td colspan="27" class="ratioEmpty">데이터 없음</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = displayRows.map(row => {
+      const cells = [];
+
+      for (let m = 1; m <= 12; m++) {
+        const month = row.months[m];
+
+        if (!month) {
+          cells.push(`<td class="ratioEmpty">-</td>`);
+          cells.push(`<td class="ratioEmpty">-</td>`);
+          continue;
+        }
+
+        const g1 = month.avg_gajoong1;
+        const g2 = month.avg_gajoong2;
+
+        cells.push(`
+          <td
+            class="ratioCell ${ratioClass(g1)}"
+            data-key="${esc(row.key)}"
+            data-month="${m}"
+            data-field="gajoong1"
+            title="${esc(month.period_start)} ~ ${esc(month.period_end)} / ${Number(month.row_count || 0).toLocaleString()}건"
+          >${esc(formatPercent(g1))}</td>
+        `);
+
+        cells.push(`
+          <td
+            class="ratioCell ${ratioClass(g2)}"
+            data-key="${esc(row.key)}"
+            data-month="${m}"
+            data-field="gajoong2"
+            title="${esc(month.period_start)} ~ ${esc(month.period_end)} / ${Number(month.row_count || 0).toLocaleString()}건"
+          >${esc(formatPercent(g2))}</td>
+        `);
+      }
+
+      return `
+        <tr>
+          <td class="sticky1">${esc(waveLabel(row.wave))}</td>
+          <td class="sticky2">${esc(row.camp)}</td>
+          <td class="sticky3">${esc(row.route)}</td>
+          ${cells.join("")}
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function clearDetail() {
+    $("detailTitle").textContent = "일자별 상세";
+    $("detailHint").textContent = "월별 회수율 셀을 클릭하면 해당 월의 일자별 상세가 표시됩니다.";
+    $("detailTable").querySelector("thead").innerHTML = "";
+    $("detailTable").querySelector("tbody").innerHTML = "";
+  }
+
+  async function loadDailyDetail(rowKey, monthNo) {
+    const row = displayRows.find(item => item.key === rowKey);
+    if (!row) return;
+
+    const month = row.months[Number(monthNo)];
+    if (!month) return;
+
+    $("detailTitle").textContent =
+      `${month.data_month} / ${waveLabel(row.wave)} / ${row.camp} / ${row.route} 상세`;
+
+    $("detailHint").textContent =
+      `${month.period_start} ~ ${month.period_end} 쿠팡 정산월 기준 / 월평균 가중1 ${formatPercent(month.avg_gajoong1)} / 가중2 ${formatPercent(month.avg_gajoong2)}`;
+
+    const { data, error } = await supabaseClient
+      .from(DETAIL_TABLE)
+      .select(`
+        date,
+        wave,
+        camp,
+        route,
+        route_norm,
+        gajoong1,
+        gajoong2,
+        source_file_name,
+        updated_at
+      `)
+      .eq("wave", row.wave)
+      .eq("camp", row.camp)
+      .eq("route_norm", row.route_norm)
+      .gte("date", month.period_start)
+      .lte("date", month.period_end)
+      .order("date", { ascending:true });
+
+    if (error) throw error;
+
+    renderDetailRows(Array.isArray(data) ? data : []);
+  }
+
+  function renderDetailRows(rows) {
+    const thead = $("detailTable").querySelector("thead");
+    const tbody = $("detailTable").querySelector("tbody");
+
+    thead.innerHTML = `
+      <tr>
+        <th>일자</th>
+        <th>주야간</th>
+        <th>Camp</th>
+        <th>Route</th>
+        <th>가중1</th>
+        <th>가중2</th>
+        <th>파일명</th>
+      </tr>
+    `;
+
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" class="ratioEmpty">상세 데이터 없음</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = rows.map(row => `
+      <tr>
+        <td>${esc(row.date)}</td>
+        <td>${esc(waveLabel(row.wave))}</td>
+        <td>${esc(row.camp)}</td>
+        <td>${esc(normalizeRoute(row.route_norm || row.route))}</td>
+        <td class="${ratioClass(row.gajoong1)}">${esc(formatPercent(row.gajoong1))}</td>
+        <td class="${ratioClass(row.gajoong2)}">${esc(formatPercent(row.gajoong2))}</td>
+        <td>${esc(row.source_file_name || "")}</td>
+      </tr>
+    `).join("");
+  }
+
+  function copyTextTable() {
+    if (!displayRows.length) {
+      setStatus("복사할 데이터가 없습니다.", "bad");
+      return;
+    }
+
+    const headers = ["주야간", "Camp", "Route"];
+
+    for (let m = 1; m <= 12; m++) {
+      headers.push(`${m}월 가중1`);
+      headers.push(`${m}월 가중2`);
+    }
+
+    const lines = [headers.join("\t")];
+
+    for (const row of displayRows) {
+      const cols = [waveLabel(row.wave), row.camp, row.route];
+
+      for (let m = 1; m <= 12; m++) {
+        const month = row.months[m];
+
+        cols.push(month ? formatPercent(month.avg_gajoong1) : "");
+        cols.push(month ? formatPercent(month.avg_gajoong2) : "");
+      }
+
+      lines.push(cols.join("\t"));
+    }
+
+    navigator.clipboard.writeText(lines.join("\n"))
+      .then(() => setStatus("표 복사 완료", "ok"))
+      .catch(() => setStatus("클립보드 복사 실패", "bad"));
+  }
+
+  function getLastMonthWithData() {
+    let maxMonth = 0;
+
+    for (const row of displayRows) {
+      for (let m = 1; m <= 12; m++) {
+        if (row.months[m]) maxMonth = Math.max(maxMonth, m);
+      }
+    }
+
+    return maxMonth;
+  }
+
+  function drawCell(ctx, x, y, w, h, opts = {}) {
+    const {
+      text = "",
+      bg = "#111827",
+      color = "#e6eefc",
+      border = "#334155",
+      font = "900 13px Arial, 'Noto Sans KR', sans-serif"
+    } = opts;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = color;
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.fillText(String(text || ""), x + w / 2, y + h / 2);
+  }
+
+  function ratioStyle(v) {
+    const cls = ratioClass(v);
+
+    if (cls === "ratioGood") {
+      return { bg:"#7dd3fc", color:"#082f49" };
+    }
+
+    if (cls === "ratioNormal") {
+      return { bg:"#dbeafe", color:"#0f172a" };
+    }
+
+    if (cls === "ratioLow") {
+      return { bg:"#ffffff", color:"#ef4444" };
+    }
+
+    return { bg:"#111827", color:"#64748b" };
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => canvas.toBlob(blob => resolve(blob), "image/png"));
+  }
+
+  async function copyImageTable() {
+    if (!displayRows.length) {
+      setStatus("이미지로 복사할 데이터가 없습니다.", "bad");
+      return;
+    }
+
+    const lastMonth = getLastMonthWithData();
+
+    if (!lastMonth) {
+      setStatus("데이터가 있는 월이 없습니다.", "bad");
+      return;
+    }
+
+    const fixedColumns = [
+      { key:"wave", label:"주야간", width:90 },
+      { key:"camp", label:"Camp", width:120 },
+      { key:"route", label:"Route", width:110 }
+    ];
+
+    const monthColumns = [];
+
+    for (let m = 1; m <= lastMonth; m++) {
+      monthColumns.push({ month:m, field:"avg_gajoong1", label:`${m}월 가중1`, width:96 });
+      monthColumns.push({ month:m, field:"avg_gajoong2", label:`${m}월 가중2`, width:96 });
+    }
+
+    const columns = [...fixedColumns, ...monthColumns];
+
+    const titleHeight = 54;
+    const headerHeight = 36;
+    const rowHeight = 34;
+    const padding = 18;
+
+    const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+    const canvasWidth = tableWidth + padding * 2;
+    const canvasHeight = titleHeight + headerHeight + displayRows.length * rowHeight + padding * 2;
+
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    ctx.fillStyle = "#e6eefc";
+    ctx.font = "900 22px Arial, 'Noto Sans KR', sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("마루웰 회수율", padding, padding + 14);
+
+    const subtitle = [
+      $("yearFilter").value || "",
+      clean($("campFilter").value) || "Camp 전체",
+      waveLabel($("waveFilter").value) || "주야간 전체"
+    ].filter(Boolean).join(" / ");
+
+    ctx.fillStyle = "#9fb0d2";
+    ctx.font = "700 13px Arial, 'Noto Sans KR', sans-serif";
+    ctx.fillText(subtitle, padding, padding + 40);
+
+    let x = padding;
+    let y = padding + titleHeight;
+
+    for (const col of columns) {
+      drawCell(ctx, x, y, col.width, headerHeight, {
+        text: col.label,
+        bg:"#263247",
+        color:"#ffffff",
+        border:"#475569"
+      });
+      x += col.width;
+    }
+
+    y += headerHeight;
+
+    for (const row of displayRows) {
+      x = padding;
+
+      const fixedValues = {
+        wave: waveLabel(row.wave),
+        camp: row.camp,
+        route: row.route
+      };
+
+      for (const col of fixedColumns) {
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: fixedValues[col.key],
+          bg:"#111827",
+          color: col.key === "route" ? "#bfdbfe" : "#e6eefc"
+        });
+
+        x += col.width;
+      }
+
+      for (const col of monthColumns) {
+        const month = row.months[col.month];
+        const value = month ? month[col.field] : "";
+        const style = ratioStyle(value);
+
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: value === "" ? "" : formatPercent(value),
+          bg: style.bg,
+          color: style.color
+        });
+
+        x += col.width;
+      }
+
+      y += rowHeight;
+    }
+
+    const blob = await canvasToBlob(canvas);
+
+    if (!blob) {
+      setStatus("이미지 생성 실패", "bad");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob })
+      ]);
+
+      setStatus(`이미지 복사 완료: ${lastMonth}월까지`, "ok");
+    } catch {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maroowell_freshbag_ratio_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 복사를 막아서 PNG로 다운로드했습니다.", "warn");
+    }
+  }
+
+  function safeLocalStorageGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  function safeLocalStorageSet(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getSavedPresets() {
+    const list = safeLocalStorageGet(PRESET_STORAGE_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  function setSavedPresets(list) {
+    return safeLocalStorageSet(PRESET_STORAGE_KEY, Array.isArray(list) ? list : []);
+  }
+
+  function makePresetId() {
+    return "preset_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function buildPreset(name) {
+    const presetName = clean(name);
+
+    if (!presetName) {
+      throw new Error("프리셋 이름을 입력하세요.");
+    }
+
+    return {
+      id:"",
+      name:presetName,
+      updatedAt:new Date().toISOString(),
+      year:$("yearFilter").value || "",
+      camp:clean($("campFilter").value),
+      wave:clean($("waveFilter").value),
+      route:clean($("routeFilter").value)
+    };
+  }
+
+  function renderPresetOptions(selectedId = "") {
+    const presets = getSavedPresets()
+      .slice()
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+
+    if (!presets.length) {
+      $("savedPresetSelect").innerHTML = `<option value="">저장된 프리셋 없음</option>`;
+      return;
+    }
+
+    $("savedPresetSelect").innerHTML = [
+      `<option value="">저장된 프리셋 선택</option>`,
+      ...presets.map(preset => {
+        const date = String(preset.updatedAt || "").slice(0, 10);
+        return `<option value="${esc(preset.id)}">${esc(preset.name)} · ${esc(date)}</option>`;
+      })
+    ].join("");
+
+    if (selectedId) {
+      $("savedPresetSelect").value = selectedId;
+    }
+  }
+
+  function savePreset() {
+    const preset = buildPreset($("presetNameInput").value);
+    const presets = getSavedPresets();
+
+    const selectedId = $("savedPresetSelect").value;
+    const selectedIndex = presets.findIndex(item => item.id === selectedId);
+    const sameNameIndex = presets.findIndex(item => item.name === preset.name);
+
+    if (selectedIndex >= 0) {
+      const ok = confirm(`선택된 프리셋을 덮어쓸까요?\n\n${presets[selectedIndex].name}`);
+      if (!ok) return;
+
+      preset.id = selectedId;
+      presets[selectedIndex] = {
+        ...presets[selectedIndex],
+        ...preset,
+        updatedAt:new Date().toISOString()
+      };
+    } else if (sameNameIndex >= 0) {
+      const ok = confirm(`같은 이름의 프리셋이 있습니다. 덮어쓸까요?\n\n${preset.name}`);
+      if (!ok) return;
+
+      preset.id = presets[sameNameIndex].id;
+      presets[sameNameIndex] = {
+        ...presets[sameNameIndex],
+        ...preset,
+        updatedAt:new Date().toISOString()
+      };
+    } else {
+      preset.id = makePresetId();
+      presets.unshift(preset);
+    }
+
+    setSavedPresets(presets);
+    renderPresetOptions(preset.id);
+    setStatus(`프리셋 저장 완료: ${preset.name}`, "ok");
+  }
+
+  function applyPreset(preset) {
+    if (!preset) return;
+
+    if (preset.year) {
+      const exists = Array.from($("yearFilter").options).some(opt => opt.value === String(preset.year));
+
+      if (!exists) {
+        const option = document.createElement("option");
+        option.value = String(preset.year);
+        option.textContent = String(preset.year);
+        $("yearFilter").appendChild(option);
+      }
+
+      $("yearFilter").value = String(preset.year);
+    }
+
+    $("campFilter").value = preset.camp || "";
+    $("waveFilter").value = preset.wave || "";
+    $("routeFilter").value = preset.route || "";
+    $("presetNameInput").value = preset.name || "";
+  }
+
+  async function loadPresetAndQuery() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      throw new Error("불러올 프리셋을 선택하세요.");
+    }
+
+    const preset = getSavedPresets().find(item => item.id === selectedId);
+
+    if (!preset) {
+      throw new Error("저장된 프리셋을 찾을 수 없습니다.");
+    }
+
+    applyPreset(preset);
+    await loadData();
+  }
+
+  function deletePreset() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      setStatus("삭제할 프리셋을 선택하세요.", "bad");
+      return;
+    }
+
+    const presets = getSavedPresets();
+    const preset = presets.find(item => item.id === selectedId);
+
+    if (!preset) {
+      setStatus("삭제할 프리셋을 찾을 수 없습니다.", "bad");
+      return;
+    }
+
+    const ok = confirm(`프리셋을 삭제할까요?\n\n${preset.name}`);
+    if (!ok) return;
+
+    setSavedPresets(presets.filter(item => item.id !== selectedId));
+    renderPresetOptions();
+    $("presetNameInput").value = "";
+    setStatus("프리셋 삭제 완료", "ok");
+  }
+
+  function clearAll() {
+    const now = new Date().getFullYear();
+
+    $("yearFilter").value = String(now);
+    $("campFilter").value = "";
+    $("waveFilter").value = "";
+    $("routeFilter").value = "";
+    $("presetNameInput").value = "";
+    $("savedPresetSelect").value = "";
+
+    rawRows = [];
+    displayRows = [];
+
+    renderTable();
+    renderSummary();
+    clearDetail();
+
+    setStatus("초기화 완료", "ok");
+  }
+
+  async function signOut() {
+    try {
+      await supabaseClient?.auth?.signOut();
+    } catch {}
+
+    location.href = cfg.PATHS?.login || "/login.html";
+  }
+
+  function handleError(e) {
+    console.error(e);
+    setStatus(e.message || String(e), "bad");
+  }
+
+  function run(fn) {
+    Promise.resolve().then(fn).catch(handleError);
+  }
+
+  function bindEvents() {
+    $("loadBtn").addEventListener("click", () => run(loadData));
+    $("clearBtn").addEventListener("click", clearAll);
+    $("copyTextBtn").addEventListener("click", copyTextTable);
+    $("copyImageBtn").addEventListener("click", () => run(copyImageTable));
+
+    $("savePresetBtn").addEventListener("click", () => run(async () => savePreset()));
+    $("loadPresetBtn").addEventListener("click", () => run(loadPresetAndQuery));
+    $("deletePresetBtn").addEventListener("click", deletePreset);
+
+    $("savedPresetSelect").addEventListener("change", () => {
+      const selectedId = $("savedPresetSelect").value;
+      const preset = getSavedPresets().find(item => item.id === selectedId);
+
+      if (preset) {
+        $("presetNameInput").value = preset.name || "";
+      }
+    });
+
+    $("ratioTable").addEventListener("click", e => {
+      const td = e.target.closest("td.ratioCell");
+      if (!td) return;
+
+      run(() => loadDailyDetail(td.dataset.key, td.dataset.month));
+    });
+
+    ["campFilter", "routeFilter"].forEach(id => {
+      $(id).addEventListener("keydown", e => {
+        if (e.key === "Enter") run(loadData);
+      });
+    });
+
+    $("deniedHomeBtn").addEventListener("click", () => {
+      location.href = cfg.PATHS?.index || "/index.html";
+    });
+
+    $("deniedLogoutBtn").addEventListener("click", signOut);
+  }
+
+  initYearOptions();
+  bindEvents();
+
+  try {
+    initSupabase();
+
+    run(async () => {
+      const ok = await checkMaroowellAccess();
+      if (!ok) return;
+
+      renderPresetOptions();
+      renderTable();
+      renderSummary();
+      clearDetail();
+
+      setStatus("마루웰 권한 확인 완료. 조건을 입력하고 조회하세요.", "ok");
+    });
+  } catch (e) {
+    document.documentElement.style.visibility = "visible";
+    handleError(e);
+  }
+})();
+</script>
+
+<script src="/board-menu.js"></script>
+</body>
+</html>

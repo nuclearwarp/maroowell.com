@@ -384,7 +384,8 @@
             1) <b>Title 2026.05.02</b> 같은 단일 일자 블록은 일자별 테이블에 저장<br>
             2) <b>2026.03.26 ~ 2026.04.25</b>처럼 쿠팡 정산월 전체 기간인 블록은 월 누적 테이블에 저장<br>
             3) <b>마루웰 / 누적</b> 라벨이 있는 기간 블록은 중간 기간이어도 월 누적 테이블에 저장<br>
-            4) 일반 주간/중간 기간 블록은 월 누적으로 저장하지 않음<br><br>
+            4) 월 누적은 기존 DB의 <b>period_end</b>보다 최신이거나 같은 경우에만 저장됩니다.<br>
+            5) 일반 주간/중간 기간 블록은 월 누적으로 저장하지 않음<br><br>
             W2는 조회 화면에서 <b>주간</b>, W1은 <b>야간</b>으로 표시됩니다.
           </div>
         </div>
@@ -393,7 +394,8 @@
           <div class="sectionTitle">주의사항</div>
           <div class="muted">
             일자별 업로드는 <b>date + wave + camp + route</b> 기준으로 덮어쓰기됩니다.<br>
-            월 누적 업로드는 <b>data_year + month_no + wave + camp + route</b> 기준으로 덮어쓰기됩니다.<br><br>
+            월 누적 업로드는 <b>data_year + month_no + wave + camp + route</b> 기준으로 덮어쓰기됩니다.<br>
+            단, 이미 더 최신 <b>period_end</b>의 월누적 데이터가 있으면 오래된 파일의 월누적은 스킵됩니다.<br><br>
             Route는 저장 시 자동으로 <b>126_A → 126A</b>처럼 정규화됩니다.
           </div>
         </div>
@@ -487,10 +489,8 @@
 
   function waveLabel(v) {
     const s = clean(v).toUpperCase();
-
     if (s === "W2") return "주간";
     if (s === "W1") return "야간";
-
     return s;
   }
 
@@ -658,15 +658,6 @@
       end.getDate() === 25 &&
       sameYearMonth(addMonths(start, 1), end);
 
-    /*
-      월누적 저장 조건:
-      1) 26일~25일 완전 정산월
-      2) "마루웰" 또는 "누적" 라벨이 붙은 기간 블록
-
-      예:
-      - 2026.03.26 ~ 2026.04.25 -> 2026년 4월 누적
-      - 마루웰 + 2026.04.26 ~ 2026.05.02 -> 2026년 5월 누적
-    */
     if (!isFullCoupangMonth && !forceMonthTotal) {
       return {
         kind: "ignore_range",
@@ -1301,6 +1292,108 @@
     };
   }
 
+  function totalKey(row) {
+    return [
+      row.data_year,
+      row.month_no,
+      row.wave,
+      row.camp,
+      normalizeRoute(row.route_norm || row.route)
+    ].join("||");
+  }
+
+  function groupTotalRowsByMonth(rows) {
+    const map = new Map();
+
+    for (const row of rows) {
+      const key = `${row.data_year}||${row.month_no}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          data_year: row.data_year,
+          month_no: row.month_no,
+          rows: []
+        });
+      }
+
+      map.get(key).rows.push(row);
+    }
+
+    return Array.from(map.values());
+  }
+
+  async function loadExistingTotalMap(rows) {
+    const existingMap = new Map();
+
+    if (!rows.length) {
+      return existingMap;
+    }
+
+    const groups = groupTotalRowsByMonth(rows);
+
+    for (const group of groups) {
+      const { data, error } = await supabaseClient
+        .from(TOTAL_TABLE)
+        .select(`
+          data_year,
+          month_no,
+          wave,
+          camp,
+          route,
+          route_norm,
+          period_start,
+          period_end
+        `)
+        .eq("data_year", group.data_year)
+        .eq("month_no", group.month_no)
+        .limit(50000);
+
+      if (error) {
+        throw error;
+      }
+
+      for (const item of data || []) {
+        existingMap.set(totalKey(item), item);
+      }
+    }
+
+    return existingMap;
+  }
+
+  async function splitUploadableTotalRows(rows) {
+    const existingMap = await loadExistingTotalMap(rows);
+    const uploadable = [];
+    const skipped = [];
+
+    for (const row of rows) {
+      const key = totalKey(row);
+      const existing = existingMap.get(key);
+
+      if (!existing) {
+        uploadable.push(row);
+        continue;
+      }
+
+      const existingEnd = clean(existing.period_end);
+      const newEnd = clean(row.period_end);
+
+      if (!existingEnd || !newEnd || newEnd >= existingEnd) {
+        uploadable.push(row);
+      } else {
+        skipped.push({
+          ...row,
+          existing_period_start: existing.period_start,
+          existing_period_end: existing.period_end
+        });
+      }
+    }
+
+    return {
+      uploadable,
+      skipped
+    };
+  }
+
   function renderSummary() {
     $("countDaily").textContent = dailyRows.length.toLocaleString();
     $("countTotal").textContent = totalRows.length.toLocaleString();
@@ -1427,11 +1520,20 @@
       throw new Error("먼저 파일 분석을 실행하세요.");
     }
 
+    setStatus("월누적 최신 여부 확인 중...", "warn");
+
+    const totalSplit = await splitUploadableTotalRows(totalRows);
+    const uploadableTotalRows = totalSplit.uploadable;
+    const skippedOldTotalRows = totalSplit.skipped;
+
     const ok = confirm(
       `DB 업로드를 진행할까요?\n\n` +
       `일자별: ${dailyRows.length.toLocaleString()}건\n` +
-      `월누적: ${totalRows.length.toLocaleString()}건\n\n` +
-      `동일 기준 데이터는 새 값으로 덮어쓰기됩니다.`
+      `월누적 추출: ${totalRows.length.toLocaleString()}건\n` +
+      `월누적 저장 대상: ${uploadableTotalRows.length.toLocaleString()}건\n` +
+      `오래된 월누적 스킵: ${skippedOldTotalRows.length.toLocaleString()}건\n\n` +
+      `동일 기준 데이터는 새 값으로 덮어쓰기됩니다.\n` +
+      `단, 기존 DB의 월누적 period_end보다 오래된 데이터는 저장하지 않습니다.`
     );
 
     if (!ok) return;
@@ -1466,10 +1568,10 @@
       }
     }
 
-    if (totalRows.length) {
-      setStatus(`월누적 업로드 중... 0 / ${totalRows.length.toLocaleString()}`, "warn");
+    if (uploadableTotalRows.length) {
+      setStatus(`월누적 업로드 중... 0 / ${uploadableTotalRows.length.toLocaleString()}`, "warn");
 
-      for (const batch of chunk(totalRows, 500)) {
+      for (const batch of chunk(uploadableTotalRows, 500)) {
         const payload = batch.map(row => ({
           data_year: row.data_year,
           month_no: row.month_no,
@@ -1492,14 +1594,24 @@
         if (error) throw error;
 
         doneTotal += batch.length;
-        setStatus(`월누적 업로드 중... ${doneTotal.toLocaleString()} / ${totalRows.length.toLocaleString()}`, "warn");
+        setStatus(`월누적 업로드 중... ${doneTotal.toLocaleString()} / ${uploadableTotalRows.length.toLocaleString()}`, "warn");
       }
     }
 
     setStatus(
-      `업로드 완료: 일자별 ${dailyRows.length.toLocaleString()}건 / 월누적 ${totalRows.length.toLocaleString()}건`,
+      `업로드 완료: 일자별 ${dailyRows.length.toLocaleString()}건 / 월누적 저장 ${uploadableTotalRows.length.toLocaleString()}건 / 오래된 월누적 스킵 ${skippedOldTotalRows.length.toLocaleString()}건`,
       "ok"
     );
+
+    log({
+      upload_result: {
+        daily_uploaded: dailyRows.length,
+        month_total_extracted: totalRows.length,
+        month_total_uploaded: uploadableTotalRows.length,
+        month_total_skipped_old: skippedOldTotalRows.length
+      },
+      skipped_old_month_totals: skippedOldTotalRows.slice(0, 100)
+    });
   }
 
   function clearAll() {

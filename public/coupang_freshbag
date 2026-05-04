@@ -8,6 +8,7 @@
   <title>프레시백 현황 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
     :root{
       --bg:#0b1220;
@@ -354,8 +355,13 @@
       background-color:rgba(96,165,250,.12);
     }
 
-    tr.dirty td{
-      box-shadow:inset 0 0 0 1px rgba(245,158,11,.28);
+    td.readonlyValue{
+      cursor:default;
+      user-select:text;
+    }
+
+    td.readonlyValue:hover{
+      outline:none;
     }
 
     .yes{
@@ -387,11 +393,6 @@
       box-shadow:none;
     }
 
-    .readonlyMark{
-      color:#fca5a5;
-      font-weight:900;
-    }
-
     @media(max-width:900px){
       .top{
         flex-direction:column;
@@ -413,6 +414,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="top">
@@ -467,7 +469,6 @@
 
         <button id="loadBtn">조회</button>
         <button id="addRowBtn" class="ok">행 추가</button>
-        <button id="saveBtn" class="ok">변경 저장</button>
         <button id="clearBtn" class="secondary">초기화</button>
         <button id="copyBtn" class="secondary">이미지 복사</button>
       </div>
@@ -495,6 +496,7 @@
         조회는 아래 표에 입력된 행만 가져옵니다.
         Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다.
         프리셋은 현재 브라우저의 localStorage에 여러 개 저장됩니다.
+        <b>조회된 가중1/가중2 값은 수정할 수 없습니다.</b>
       </div>
 
       <div class="status" id="statusText">대기 중</div>
@@ -504,7 +506,6 @@
         <span class="pill">표시 행 <strong id="routeCount">0</strong></span>
         <span class="pill">캠프 <strong id="campCount">0</strong></span>
         <span class="pill">월 데이터 <strong id="monthCount">0</strong></span>
-        <span class="pill">미저장 <strong id="dirtyCount">0</strong></span>
       </div>
     </div>
 
@@ -527,13 +528,12 @@
 
   let supabaseClient = null;
   let currentUser = null;
-  let canEdit = false;
   let rawRows = [];
   let tableRows = [];
   let localSeq = 1;
 
-  const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v2";
-  const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v2";
+  const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v3";
+  const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v3";
 
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
@@ -595,19 +595,6 @@
     return normalizeRoute(row.route);
   }
 
-  function rowKey(row) {
-    return `${effectiveWave(row)}||${effectiveCamp(row)}||${effectiveRoute(row)}`;
-  }
-
-  function originalKey(row) {
-    return `${row.original.wave}||${row.original.camp}||${row.original.route}`;
-  }
-
-  function isRowKeyChanged(row) {
-    if (row.isNew) return false;
-    return rowKey(row) !== originalKey(row);
-  }
-
   function initYearOptions() {
     const now = new Date().getFullYear();
     const years = [];
@@ -641,7 +628,7 @@
     });
   }
 
-  async function checkSessionAndAccess() {
+  async function checkSession() {
     if (!supabaseClient) initSupabase();
 
     const { data, error } = await supabaseClient.auth.getSession();
@@ -651,37 +638,14 @@
     if (!currentUser) throw new Error("로그인이 필요합니다.");
 
     $("userPill").textContent = currentUser.email || currentUser.id;
-
-    try {
-      const { data: access } = await supabaseClient
-        .rpc("mw_my_access")
-        .maybeSingle();
-
-      canEdit =
-        access?.is_maroowell === true &&
-        access?.is_admin === true &&
-        Number(access?.max_role_level || 0) >= 90;
-    } catch {
-      canEdit = false;
-    }
-
-    if (!canEdit) {
-      $("addRowBtn").style.display = "none";
-      $("saveBtn").style.display = "none";
-      setStatus("조회 전용입니다. 수정/추가는 최고관리자만 가능합니다.", "warn");
-    }
   }
 
   function createBlankRow() {
     return {
       localId: `row_${localSeq++}`,
-      isNew: true,
-      dirty: false,
-      deleted: false,
       wave: "",
       camp: "",
       route: "",
-      original: { wave: "", camp: "", route: "" },
       months: {}
     };
   }
@@ -738,7 +702,6 @@
 
   function getPresetRowsFromTable() {
     const rows = tableRows
-      .filter(row => !row.deleted)
       .map(row => ({
         wave: effectiveWave(row),
         camp: effectiveCamp(row),
@@ -767,6 +730,7 @@
       : preset.rows?.length
         ? "주/야"
         : "";
+
     const routes = (preset.rows || [])
       .map(row => row.route)
       .filter(Boolean)
@@ -879,17 +843,9 @@
   function makeRowFromPresetItem(item) {
     const row = createBlankRow();
 
-    row.isNew = false;
-    row.dirty = false;
-    row.deleted = false;
     row.wave = waveValueFromLabel(item.wave);
     row.camp = clean(item.camp);
     row.route = normalizeRoute(item.route);
-    row.original = {
-      wave: row.wave,
-      camp: row.camp,
-      route: row.route
-    };
     row.months = {};
 
     return row;
@@ -1000,7 +956,6 @@
 
   function getCriteriaRows() {
     return tableRows
-      .filter(row => !row.deleted)
       .map(row => ({
         row,
         wave: effectiveWave(row),
@@ -1097,7 +1052,7 @@
     renderSummary();
 
     saveLastQueryPreset();
-    setStatus(`조회 완료: DB row ${rawRows.length.toLocaleString()}건 / 표시 행 ${tableRows.filter(r => !r.deleted).length.toLocaleString()}행`, "ok");
+    setStatus(`조회 완료: DB row ${rawRows.length.toLocaleString()}건 / 표시 행 ${tableRows.length.toLocaleString()}행`, "ok");
   }
 
   function applyFetchedRowsToTable(criteria, rows) {
@@ -1110,10 +1065,6 @@
       item.row.wave = item.wave;
       item.row.camp = item.camp;
       item.row.route = item.route;
-      item.row.original = { wave: item.wave, camp: item.camp, route: item.route };
-      item.row.isNew = false;
-      item.row.dirty = false;
-      item.row.deleted = false;
       item.row.months = {};
     }
 
@@ -1133,8 +1084,6 @@
         id: row.id || null,
         gajoong1: row.gajoong1 || "",
         gajoong2: row.gajoong2 || "",
-        originalGajoong1: row.gajoong1 || "",
-        originalGajoong2: row.gajoong2 || "",
         period: row.period_label || row.data_month || "",
         source_file_name: row.source_file_name || ""
       };
@@ -1147,8 +1096,6 @@
             id: null,
             gajoong1: "",
             gajoong2: "",
-            originalGajoong1: "",
-            originalGajoong2: "",
             period: "",
             source_file_name: ""
           };
@@ -1158,10 +1105,8 @@
   }
 
   function renderSummary() {
-    const visibleRows = tableRows.filter(row => !row.deleted);
     const campSet = new Set();
     const monthSet = new Set();
-    const dirty = tableRows.filter(row => row.dirty || row.deleted).length;
 
     for (const row of rawRows) {
       if (row.camp) campSet.add(row.camp);
@@ -1169,10 +1114,9 @@
     }
 
     $("rawCount").textContent = rawRows.length.toLocaleString();
-    $("routeCount").textContent = visibleRows.length.toLocaleString();
+    $("routeCount").textContent = tableRows.length.toLocaleString();
     $("campCount").textContent = campSet.size.toLocaleString();
     $("monthCount").textContent = monthSet.size.toLocaleString();
-    $("dirtyCount").textContent = dirty.toLocaleString();
   }
 
   function renderTable() {
@@ -1195,14 +1139,12 @@
       </tr>
     `;
 
-    const visibleRows = tableRows.filter(row => !row.deleted);
-
-    if (!visibleRows.length) {
+    if (!tableRows.length) {
       tbody.innerHTML = `<tr><td colspan="28" class="empty">데이터 없음</td></tr>`;
       return;
     }
 
-    tbody.innerHTML = visibleRows.map(row => {
+    tbody.innerHTML = tableRows.map(row => {
       const rowWave = effectiveWave(row);
       const rowCamp = effectiveCamp(row);
       const rowRoute = effectiveRoute(row);
@@ -1213,38 +1155,28 @@
         const month = row.months[m] || {
           id: null,
           gajoong1: "",
-          gajoong2: "",
-          originalGajoong1: "",
-          originalGajoong2: ""
+          gajoong2: ""
         };
 
         cells.push(`
           <td
-            tabindex="0"
-            class="editable ${valueClass(month.gajoong1)}"
-            data-row="${esc(row.localId)}"
-            data-month="${m}"
-            data-field="gajoong1"
-            title="클릭해서 수정"
+            class="readonlyValue ${valueClass(month.gajoong1)}"
+            title="조회값은 수정할 수 없습니다."
           >${esc(month.gajoong1 || "")}</td>
         `);
 
         cells.push(`
           <td
-            tabindex="0"
-            class="editable ${valueClass(month.gajoong2)}"
-            data-row="${esc(row.localId)}"
-            data-month="${m}"
-            data-field="gajoong2"
-            title="클릭해서 수정"
+            class="readonlyValue ${valueClass(month.gajoong2)}"
+            title="조회값은 수정할 수 없습니다."
           >${esc(month.gajoong2 || "")}</td>
         `);
       }
 
       return `
-        <tr class="${row.dirty ? "dirty" : ""}" data-row="${esc(row.localId)}">
+        <tr data-row="${esc(row.localId)}">
           <td class="actionCol">
-            ${canEdit ? `<button class="small danger" data-action="delete" data-row="${esc(row.localId)}">삭제</button>` : `<span class="readonlyMark">조회</span>`}
+            <button class="small danger" data-action="delete" data-row="${esc(row.localId)}">삭제</button>
           </td>
           <td tabindex="0" class="sticky1 editable" data-row="${esc(row.localId)}" data-meta="wave" title="클릭해서 수정">${esc(waveLabel(rowWave))}</td>
           <td tabindex="0" class="sticky2 editable" data-row="${esc(row.localId)}" data-meta="camp" title="클릭해서 수정">${esc(rowCamp)}</td>
@@ -1257,11 +1189,6 @@
 
   function getRowById(localId) {
     return tableRows.find(row => row.localId === localId);
-  }
-
-  function markDirty(row) {
-    row.dirty = true;
-    renderSummary();
   }
 
   function getEditableCells() {
@@ -1281,36 +1208,27 @@
 
     if (next && next !== currentTd) {
       next.focus({ preventScroll: false });
-      startEditCell(next, { fromKeyboard: true });
+      startEditCell(next);
     }
   }
 
-  function startEditCell(td, options = {}) {
-    if (!canEdit) {
-      setStatus("수정은 최고관리자만 가능합니다.", "bad");
-      return;
-    }
-
+  function startEditCell(td) {
     if (td.querySelector("input,select")) return;
 
     const row = getRowById(td.dataset.row);
     if (!row) return;
 
     const meta = td.dataset.meta;
-    const monthNo = Number(td.dataset.month || 0);
-    const field = td.dataset.field;
 
-    if (meta) {
-      editMetaCell(td, row, meta, options);
+    if (!meta) {
+      setStatus("조회된 가중1/가중2 값은 이 페이지에서 수정할 수 없습니다.", "warn");
       return;
     }
 
-    if (monthNo && field) {
-      editMonthCell(td, row, monthNo, field, options);
-    }
+    editMetaCell(td, row, meta);
   }
 
-  function editMetaCell(td, row, meta, options = {}) {
+  function editMetaCell(td, row, meta) {
     if (meta === "wave") {
       const select = document.createElement("select");
       select.className = "editorSelect";
@@ -1332,13 +1250,7 @@
         if (committed) return;
         committed = true;
 
-        const next = select.value;
-
-        if ((row.wave || "") !== next) {
-          row.wave = next;
-          markDirty(row);
-        }
-
+        row.wave = select.value;
         renderTable();
 
         if (moveDirection) {
@@ -1390,10 +1302,7 @@
         next = normalizeRoute(next);
       }
 
-      if ((row[meta] || "") !== next) {
-        row[meta] = next;
-        markDirty(row);
-      }
+      row[meta] = next;
 
       renderTable();
 
@@ -1421,78 +1330,7 @@
     });
   }
 
-  function editMonthCell(td, row, monthNo, field, options = {}) {
-    if (!row.months[monthNo]) {
-      row.months[monthNo] = {
-        id: null,
-        gajoong1: "",
-        gajoong2: "",
-        originalGajoong1: "",
-        originalGajoong2: ""
-      };
-    }
-
-    const month = row.months[monthNo];
-
-    const select = document.createElement("select");
-    select.className = "editorSelect";
-    select.innerHTML = `
-      <option value=""></option>
-      <option value="해당">해당</option>
-      <option value="미해당">미해당</option>
-    `;
-
-    select.value = month[field] || "";
-
-    td.textContent = "";
-    td.appendChild(select);
-    select.focus();
-
-    let committed = false;
-
-    const commit = (moveDirection = null) => {
-      if (committed) return;
-      committed = true;
-
-      const next = select.value;
-
-      if ((month[field] || "") !== next) {
-        month[field] = next;
-        markDirty(row);
-      }
-
-      renderTable();
-
-      if (moveDirection) {
-        const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-month="${monthNo}"][data-field="${field}"]`);
-        if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
-      }
-    };
-
-    select.addEventListener("blur", () => commit(), { once:true });
-    select.addEventListener("keydown", e => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        select.blur();
-      }
-      if (e.key === "Tab") {
-        e.preventDefault();
-        commit(e.shiftKey ? "prev" : "next");
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        committed = true;
-        renderTable();
-      }
-    });
-  }
-
   function deleteRow(localId) {
-    if (!canEdit) {
-      setStatus("삭제는 최고관리자만 가능합니다.", "bad");
-      return;
-    }
-
     const row = getRowById(localId);
     if (!row) return;
 
@@ -1500,150 +1338,25 @@
     const camp = effectiveCamp(row);
     const route = effectiveRoute(row);
 
-    const ok = confirm(`${waveLabel(wave)} / ${camp} / ${route}\n\n이 행을 삭제할까요?\n변경 저장을 눌러야 DB에 반영됩니다.`);
+    const ok = confirm(`${waveLabel(wave)} / ${camp} / ${route}\n\n이 조회 행을 화면에서 제거할까요?\nDB 데이터는 삭제되지 않습니다.`);
 
     if (!ok) return;
 
-    if (row.isNew && !row.original.route) {
-      tableRows = tableRows.filter(item => item.localId !== localId);
-    } else {
-      row.deleted = true;
-      row.dirty = true;
+    tableRows = tableRows.filter(item => item.localId !== localId);
+
+    while (tableRows.length < 4) {
+      tableRows.push(createBlankRow());
     }
 
     renderTable();
     renderSummary();
-    setStatus("행 삭제 표시 완료. 변경 저장을 누르면 DB에 반영됩니다.", "warn");
-  }
-
-  function validateRowForSave(row) {
-    const wave = effectiveWave(row);
-    const camp = effectiveCamp(row);
-    const route = effectiveRoute(row);
-
-    if (!wave || !["W1","W2"].includes(wave)) {
-      throw new Error("주야간 값이 올바르지 않습니다.");
-    }
-
-    if (!camp) {
-      throw new Error("Camp가 비어 있습니다.");
-    }
-
-    if (!route) {
-      throw new Error("Route가 비어 있습니다.");
-    }
-
-    return { wave, camp, route };
-  }
-
-  function hasAnyMonthValue(row) {
-    for (let m = 1; m <= 12; m++) {
-      const month = row.months[m];
-      if (!month) continue;
-      if (clean(month.gajoong1) || clean(month.gajoong2)) return true;
-    }
-    return false;
-  }
-
-  function rowsToUpsertPayload(row) {
-    const year = Number($("yearFilter").value);
-    const key = validateRowForSave(row);
-    const out = [];
-
-    for (let m = 1; m <= 12; m++) {
-      const month = row.months[m];
-      if (!month) continue;
-
-      const g1 = clean(month.gajoong1);
-      const g2 = clean(month.gajoong2);
-      const hadOriginal = Boolean(month.id || month.originalGajoong1 || month.originalGajoong2);
-
-      if (!g1 && !g2 && !hadOriginal) continue;
-
-      out.push({
-        data_year: year,
-        month_no: m,
-        data_month: `${year}-${String(m).padStart(2, "0")}`,
-        period_label: `${year}-${String(m).padStart(2, "0")}`,
-        wave: key.wave,
-        camp: key.camp,
-        route: key.route,
-        route_norm: key.route,
-        gajoong1: g1 || null,
-        gajoong2: g2 || null,
-        source_file_name: "manual-edit"
-      });
-    }
-
-    return out;
-  }
-
-  async function saveChanges() {
-    if (!canEdit) {
-      setStatus("저장은 최고관리자만 가능합니다.", "bad");
-      return;
-    }
-
-    const dirtyRows = tableRows.filter(row => row.dirty || row.deleted);
-
-    if (!dirtyRows.length) {
-      setStatus("저장할 변경사항이 없습니다.", "ok");
-      return;
-    }
-
-    setStatus(`저장 중... ${dirtyRows.length}행`);
-
-    for (const row of dirtyRows) {
-      if (!row.isNew) {
-        if (row.deleted || isRowKeyChanged(row)) {
-          await deleteOriginalRows(row);
-        }
-      }
-
-      if (row.deleted) continue;
-
-      validateRowForSave(row);
-
-      if (!hasAnyMonthValue(row)) continue;
-
-      const payload = rowsToUpsertPayload(row);
-      if (!payload.length) continue;
-
-      const { error } = await supabaseClient
-        .from("coupang_freshbag")
-        .upsert(payload, {
-          onConflict: "data_year,month_no,wave,camp,route_norm"
-        });
-
-      if (error) throw error;
-    }
-
-    setStatus("저장 완료. 현재 조건으로 다시 조회합니다.", "ok");
-    await loadData();
-  }
-
-  async function deleteOriginalRows(row) {
-    const year = Number($("yearFilter").value);
-    const original = row.original || {};
-
-    if (!original.wave || !original.camp || !original.route) return;
-
-    const { error } = await supabaseClient
-      .from("coupang_freshbag")
-      .delete()
-      .eq("data_year", year)
-      .eq("wave", original.wave)
-      .eq("camp", original.camp)
-      .eq("route_norm", original.route);
-
-    if (error) throw error;
+    setStatus("조회 행을 화면에서 제거했습니다. DB 데이터는 변경되지 않았습니다.", "ok");
   }
 
   function getLastMonthWithData() {
-    const visibleRows = tableRows.filter(row => !row.deleted);
     let maxMonth = 0;
 
-    for (const row of visibleRows) {
+    for (const row of tableRows) {
       for (let m = 1; m <= 12; m++) {
         const month = row.months[m] || {};
         const g1 = clean(month.gajoong1);
@@ -1732,16 +1445,15 @@
   }
 
   async function copyTableImage() {
-    const visibleRows = tableRows.filter(row => !row.deleted);
     const lastMonth = getLastMonthWithData();
 
-    if (!visibleRows.length) {
+    if (!tableRows.length) {
       setStatus("복사할 행이 없습니다.", "bad");
       return;
     }
 
     if (!lastMonth) {
-      setStatus("데이터가 있는 월이 없습니다. 먼저 조회하거나 값을 입력하세요.", "bad");
+      setStatus("데이터가 있는 월이 없습니다. 먼저 조회하세요.", "bad");
       return;
     }
 
@@ -1767,7 +1479,7 @@
 
     const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
     const canvasWidth = tableWidth + padding * 2;
-    const canvasHeight = titleHeight + headerHeight + visibleRows.length * rowHeight + padding * 2;
+    const canvasHeight = titleHeight + headerHeight + tableRows.length * rowHeight + padding * 2;
 
     const scale = 2;
     const canvas = document.createElement("canvas");
@@ -1813,7 +1525,7 @@
 
     y += headerHeight;
 
-    for (const row of visibleRows) {
+    for (const row of tableRows) {
       x = padding;
 
       const fixedValues = {
@@ -1909,7 +1621,6 @@
 
   $("loadBtn").addEventListener("click", () => run(loadData));
   $("addRowBtn").addEventListener("click", addRow);
-  $("saveBtn").addEventListener("click", () => run(saveChanges));
   $("clearBtn").addEventListener("click", clearAll);
   $("copyBtn").addEventListener("click", () => run(copyTableImage));
 
@@ -1931,8 +1642,15 @@
   });
 
   $("resultTable").addEventListener("click", e => {
+    const btn = e.target.closest("[data-action='delete']");
+    if (btn) {
+      deleteRow(btn.dataset.row);
+      return;
+    }
+
     const td = e.target.closest("td.editable");
     if (!td) return;
+
     startEditCell(td);
   });
 
@@ -1942,14 +1660,8 @@
 
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      startEditCell(td, { fromKeyboard: true });
+      startEditCell(td);
     }
-  });
-
-  $("resultTable").addEventListener("click", e => {
-    const btn = e.target.closest("[data-action='delete']");
-    if (!btn) return;
-    deleteRow(btn.dataset.row);
   });
 
   ["yearFilter", "waveFilter", "g1Filter", "g2Filter"].forEach(id => {
@@ -1965,20 +1677,22 @@
 
   try {
     initSupabase();
+
     run(async () => {
-      await checkSessionAndAccess();
+      await checkSession();
       initDefaultRows();
       renderPresetOptions();
 
-      if (canEdit) {
-        setStatus("기본 4행이 준비되었습니다. Camp / 주야간 선택 후 Route를 입력하고 조회하거나 프리셋을 불러오세요.", "ok");
-      }
+      document.documentElement.style.visibility = "visible";
+      setStatus("기본 4행이 준비되었습니다. Camp / 주야간 선택 후 Route를 입력하고 조회하거나 프리셋을 불러오세요.", "ok");
     });
   } catch (e) {
+    document.documentElement.style.visibility = "visible";
     handleError(e);
   }
 })();
 </script>
+
 <script src="/board-menu.js"></script>
 </body>
 </html>

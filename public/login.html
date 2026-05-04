@@ -1,1137 +1,1698 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <style>html{visibility:hidden}</style>
   <script src="/config.js"></script>
-  <script>
-    function MAROOWELL_ENABLE_SIGNUP() { return false; }
-  </script>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>마루웰</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>프레시백 현황 조회</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
   <style>
     :root{
-      --bg:#f6f7fb;
-      --card:#ffffff;
-      --line:#d9deea;
-      --text:#0f172a;
-      --muted:#475569;
-      --btn:#0f172a;
-      --btnHover:#1e293b;
-      --danger:#b91c1c;
-      --accent:#2563eb;
-      --accentSoft:#dbeafe;
+      --bg:#0b1220;
+      --card:#121a2d;
+      --line:rgba(255,255,255,.12);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#60a5fa;
+      --red:#ef4444;
+      --green:#22c55e;
+      --yellow:#f59e0b;
     }
+
     *{box-sizing:border-box}
-    html,body{
-      height:100%;
+
+    body{
       margin:0;
-      background:var(--bg);
-      color:var(--text);
-      font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;
+      min-height:100vh;
+      background:linear-gradient(180deg,#0b1220,#070b13);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
     }
-    body.modal-open{overflow:hidden}
+
     .wrap{
-      min-height:100%;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:24px;
+      max-width:1720px;
+      margin:0 auto;
+      padding:22px 18px 44px;
     }
-    .auth-stack{
-      width:100%;
-      max-width:420px;
-    }
-    .logo-panel{
-      width:100%;
-      aspect-ratio:1 / 1;
-      margin:0 auto 14px;
-      border:1px solid var(--line);
-      border-radius:16px;
-      background:#fff;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-      box-shadow:0 10px 30px rgba(15,23,42,.06);
-    }
-    .card{
-      width:100%;
-      background:var(--card);
-      border:1px solid var(--line);
-      border-radius:16px;
-      padding:22px;
-      box-shadow:0 10px 30px rgba(15,23,42,.08);
-    }
-    .logo{
-      display:block;
-      width:100%;
-      height:100%;
-      object-fit:contain;
-    }
-    .title{
-      margin:0 0 18px;
-      font-size:28px;
-      line-height:1.2;
-      font-weight:800;
-      letter-spacing:-.2px;
-      text-align:center;
-    }
-    .label{
-      display:block;
-      margin:12px 0 6px;
-      color:var(--muted);
-      font-size:13px;
-      font-weight:600;
-    }
-    input{
-      width:100%;
-      padding:12px;
-      border-radius:12px;
-      border:1px solid var(--line);
-      background:#fff;
-      color:var(--text);
-      outline:none;
-      font-size:15px;
-    }
-    input:focus{
-      border-color:#64748b;
-      box-shadow:0 0 0 3px rgba(100,116,139,.15);
-    }
-    .btn{
-      width:100%;
-      margin-top:16px;
-      padding:12px 14px;
-      border:none;
-      border-radius:12px;
-      background:var(--btn);
-      color:#fff;
-      font-size:15px;
-      font-weight:700;
-      cursor:pointer;
-    }
-    .btn:hover{background:var(--btnHover)}
-    .btn:disabled{opacity:.65;cursor:not-allowed}
-    .btn.secondary{
-      margin-top:8px;
-      background:#fff;
-      color:var(--text);
-      border:1px solid var(--line);
-    }
-    .btn.secondary:hover{background:#f1f5f9}
-    .remember-actions{
+
+    .top{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:10px;
-      margin-top:12px;
+      gap:14px;
+      margin-bottom:18px;
     }
-    .remember-row{
+
+    .brand{
       display:flex;
       align-items:center;
-      gap:8px;
-      color:var(--muted);
-      font-size:13px;
-      user-select:none;
-    }
-    .remember-row input[type="checkbox"]{
-      width:16px;
-      height:16px;
-      margin:0;
-      padding:0;
-      border-radius:4px;
-      accent-color:#0f172a;
-      box-shadow:none;
-      cursor:pointer;
-    }
-    .text-btn{
-      border:none;
-      background:transparent;
-      color:var(--accent);
-      font-size:13px;
-      font-weight:700;
-      padding:0;
-      cursor:pointer;
-    }
-    .text-btn[hidden]{display:none}
-    .helper{
-      margin-top:8px;
-      font-size:12px;
-      color:#64748b;
-    }
-    .status{
-      margin-top:12px;
-      min-height:20px;
-      font-size:13px;
-      color:var(--muted);
-      white-space:pre-wrap;
-      line-height:1.45;
-    }
-    .status.error{color:var(--danger)}
-    .status.success{color:#166534}
-    .modal-backdrop{
-      position:fixed;
-      inset:0;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:18px;
-      background:rgba(15,23,42,.42);
-      z-index:1000;
-    }
-    .modal-backdrop[hidden]{display:none}
-    .modal{
-      width:100%;
-      max-width:420px;
-      background:#fff;
-      border:1px solid var(--line);
-      border-radius:18px;
-      box-shadow:0 24px 60px rgba(15,23,42,.18);
-      overflow:hidden;
-    }
-    .modal-head{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
       gap:12px;
-      padding:18px 20px 12px;
-      border-bottom:1px solid #eef2f7;
+      min-width:0;
     }
-    .modal-title{
-      margin:0;
-      font-size:20px;
-      font-weight:800;
-      line-height:1.3;
+
+    .brand img{
+      width:34px;
+      height:34px;
     }
-    .icon-btn{
-      width:36px;
-      height:36px;
-      border:none;
-      border-radius:10px;
-      background:#f8fafc;
-      color:#334155;
-      font-size:20px;
-      cursor:pointer;
+
+    .title{
+      font-size:28px;
+      font-weight:950;
+      letter-spacing:-.6px;
+      line-height:1.15;
     }
-    .modal-body{
-      padding:18px 20px 20px;
-    }
-    .modal-copy{
-      margin:0 0 14px;
+
+    .sub{
       color:var(--muted);
       font-size:14px;
-      line-height:1.6;
-      white-space:pre-wrap;
+      margin-top:5px;
+      line-height:1.45;
     }
-    .badge{
+
+    .card{
+      background:rgba(18,26,45,.9);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:16px;
+      margin-bottom:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+    }
+
+    .presetRow{
+      display:flex;
+      gap:10px;
+      align-items:flex-end;
+      flex-wrap:wrap;
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,.08);
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+
+    .field label{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      margin-left:2px;
+    }
+
+    input,select{
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.25);
+      color:var(--txt);
+      padding:0 12px;
+      outline:none;
+      min-width:150px;
+    }
+
+    .presetNameField input{
+      min-width:240px;
+    }
+
+    .presetSelectField select{
+      min-width:300px;
+    }
+
+    select option{
+      background:#111827;
+      color:#fff;
+    }
+
+    input:focus,select:focus{
+      border-color:rgba(96,165,250,.55);
+      box-shadow:0 0 0 2px rgba(96,165,250,.12);
+    }
+
+    button{
+      min-height:42px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(59,130,246,.24);
+      color:#fff;
+      padding:0 18px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+
+    button:hover{
+      background:rgba(59,130,246,.36);
+    }
+
+    button.secondary{
+      background:rgba(255,255,255,.07);
+    }
+
+    button.secondary:hover{
+      background:rgba(255,255,255,.12);
+    }
+
+    button.ok{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.32);
+    }
+
+    button.ok:hover{
+      background:rgba(34,197,94,.28);
+    }
+
+    button.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.32);
+    }
+
+    button.danger:hover{
+      background:rgba(239,68,68,.28);
+    }
+
+    button.small{
+      min-height:30px;
+      padding:0 10px;
+      font-size:12px;
+      border-radius:999px;
+    }
+
+    .pill{
       display:inline-flex;
       align-items:center;
-      padding:6px 10px;
+      min-height:32px;
+      padding:0 12px;
+      border:1px solid var(--line);
       border-radius:999px;
-      background:var(--accentSoft);
-      color:#1d4ed8;
+      background:rgba(255,255,255,.06);
       font-size:12px;
-      font-weight:700;
-      margin-bottom:12px;
+      color:var(--muted);
+      font-weight:900;
+      white-space:nowrap;
     }
-    .inline-note{
-      margin-top:8px;
-      font-size:12px;
-      color:#64748b;
-      line-height:1.5;
+
+    .pill strong{
+      color:#fff;
+      margin-left:5px;
     }
-    @media (max-width: 520px){
-      .wrap{padding:14px;}
-      .logo-panel{margin-bottom:10px;}
-      .card{padding:18px;}
-      .modal-head{padding:16px 16px 10px;}
-      .modal-body{padding:16px;}
+
+    .status{
+      font-size:13px;
+      color:var(--muted);
+      margin-top:10px;
+      line-height:1.55;
+    }
+
+    .status.ok{color:#bbf7d0}
+    .status.bad{color:#fecaca}
+    .status.warn{color:#fde68a}
+
+    .summary{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+
+    .hint{
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.55;
+      margin-top:10px;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:calc(100vh - 360px);
+    }
+
+    table{
+      border-collapse:separate;
+      border-spacing:0;
+      width:max-content;
+      min-width:100%;
+      table-layout:fixed;
+      font-size:13px;
+    }
+
+    th,td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      padding:8px 10px;
+      text-align:center;
+      white-space:nowrap;
+      min-width:82px;
+      max-width:160px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    th{
+      position:sticky;
+      top:0;
+      z-index:5;
+      background:#263247;
+      color:#fff;
+      font-weight:950;
+    }
+
+    th.actionCol,td.actionCol{
+      position:sticky;
+      left:0;
+      z-index:4;
+      width:76px;
+      min-width:76px;
+      max-width:76px;
+      background:#111827;
+    }
+
+    th.actionCol{
+      z-index:7;
+      background:#263247;
+    }
+
+    th.sticky1,td.sticky1{
+      position:sticky;
+      left:76px;
+      z-index:4;
+      width:96px;
+      min-width:96px;
+      max-width:96px;
+    }
+
+    th.sticky1{z-index:7}
+
+    td.sticky1{
+      background:#111827;
+      color:#e6eefc;
+      font-weight:900;
+    }
+
+    th.sticky2,td.sticky2{
+      position:sticky;
+      left:172px;
+      z-index:4;
+      width:120px;
+      min-width:120px;
+      max-width:120px;
+    }
+
+    th.sticky2{z-index:7}
+
+    td.sticky2{
+      background:#111827;
+      color:#e6eefc;
+      font-weight:900;
+    }
+
+    th.sticky3,td.sticky3{
+      position:sticky;
+      left:292px;
+      z-index:4;
+      width:110px;
+      min-width:110px;
+      max-width:110px;
+    }
+
+    th.sticky3{z-index:7}
+
+    td.sticky3{
+      background:#111827;
+      color:#bfdbfe;
+      font-weight:950;
+    }
+
+    th.monthHead{
+      width:92px;
+      min-width:92px;
+      max-width:92px;
+    }
+
+    td.editable{
+      cursor:cell;
+    }
+
+    td.editable:hover,
+    td.editable:focus{
+      outline:2px solid rgba(96,165,250,.45);
+      outline-offset:-2px;
+      background-color:rgba(96,165,250,.12);
+    }
+
+    td.readonlyValue{
+      cursor:default;
+      user-select:text;
+    }
+
+    td.readonlyValue:hover{
+      outline:none;
+    }
+
+    .yes{
+      background:#7dd3fc;
+      color:#082f49;
+      font-weight:950;
+    }
+
+    .no{
+      background:#fff;
+      color:#ef4444;
+      font-weight:950;
+    }
+
+    .empty{
+      color:#6b7280;
+      background:rgba(255,255,255,.03);
+    }
+
+    .tableWrap input.editorInput,
+    .tableWrap select.editorSelect{
+      width:100% !important;
+      min-width:0 !important;
+      max-width:100% !important;
+      height:28px !important;
+      border-radius:8px;
+      padding:0 6px;
+      font-size:13px;
+      box-shadow:none;
+    }
+
+    @media(max-width:900px){
+      .top{
+        flex-direction:column;
+        align-items:flex-start;
+      }
+
+      .row,
+      .presetRow{
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      input,select,button,
+      .presetNameField input,
+      .presetSelectField select{
+        width:100%;
+        min-width:0;
+      }
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+
 <body>
-<div class="wrap">
-  <div class="auth-stack">
-    <div class="logo-panel" aria-hidden="true">
-      <img class="logo" src="/maroowell-logo2.png" alt="Maroowell Logo" onerror="if(this.dataset.fallback){this.onerror=null;this.src='/favicon.ico';}else{this.dataset.fallback='1';this.src='/public/maroowell-logo2.png';}" />
-    </div>
-    <div class="card">
-      <h1 class="title">마루웰</h1>
-      <label class="label" for="email">이메일</label>
-      <input id="email" type="email" placeholder="name@company.com" autocomplete="email" />
-      <label class="label" for="password">비밀번호</label>
-      <input id="password" type="password" placeholder="********" autocomplete="current-password" />
-
-      <div class="remember-actions">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-          <label class="remember-row" for="rememberEmail">
-            <input id="rememberEmail" type="checkbox" />
-            <span>아이디 저장</span>
-          </label>
-          <label class="remember-row" for="rememberPassword">
-            <input id="rememberPassword" type="checkbox" />
-            <span>비밀번호 저장</span>
-          </label>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
+        <div>
+          <div class="title">프레시백 현황 조회</div>
+          <div class="sub">연도 / 캠프 / 주야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 조회조건을 프리셋으로 저장할 수 있습니다.</div>
         </div>
-        <button class="text-btn" id="btnForgotPassword" type="button" hidden>비밀번호 찾기</button>
       </div>
-      <div class="helper" id="forgotHint">비밀번호 5회 연속 실패 시 비밀번호 찾기가 활성화됩니다.</div>
+      <div class="pill" id="userPill">세션 확인 중</div>
+    </div>
 
-      <button class="btn" id="btnSignIn" type="button">로그인</button>
-      <button class="btn secondary" id="btnSignUp" type="button">회원가입</button>
-      <div class="status" id="statusLogin"></div>
+    <div class="card">
+      <div class="row">
+        <div class="field">
+          <label>연도</label>
+          <select id="yearFilter"></select>
+        </div>
+
+        <div class="field">
+          <label>Camp</label>
+          <input id="campFilter" placeholder="예: 일산2" />
+        </div>
+
+        <div class="field">
+          <label>주야간</label>
+          <select id="waveFilter">
+            <option value="">선택 (주/야)</option>
+            <option value="W2">주간</option>
+            <option value="W1">야간</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>가중1</label>
+          <select id="g1Filter">
+            <option value="">전체</option>
+            <option value="해당">해당</option>
+            <option value="미해당">미해당</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>가중2</label>
+          <select id="g2Filter">
+            <option value="">전체</option>
+            <option value="해당">해당</option>
+            <option value="미해당">미해당</option>
+          </select>
+        </div>
+
+        <button id="loadBtn">조회</button>
+        <button id="addRowBtn" class="ok">행 추가</button>
+        <button id="clearBtn" class="secondary">초기화</button>
+        <button id="copyBtn" class="secondary">이미지 복사</button>
+      </div>
+
+      <div class="presetRow">
+        <div class="field presetNameField">
+          <label>프리셋 이름</label>
+          <input id="presetNameInput" placeholder="예: 일산2 주간 126/130" />
+        </div>
+
+        <div class="field presetSelectField">
+          <label>저장된 프리셋</label>
+          <select id="savedPresetSelect">
+            <option value="">저장된 프리셋 없음</option>
+          </select>
+        </div>
+
+        <button id="savePresetBtn" class="secondary" type="button">프리셋 저장</button>
+        <button id="loadPresetBtn" class="secondary" type="button">불러와서 조회</button>
+        <button id="deletePresetBtn" class="danger" type="button">프리셋 삭제</button>
+        <button id="loadLastPresetBtn" class="secondary" type="button">최근 조회</button>
+      </div>
+
+      <div class="hint">
+        조회는 아래 표에 입력된 행만 가져옵니다.
+        Route는 <b>126_A</b>로 입력해도 <b>126A</b>로 정규화됩니다.
+        프리셋은 현재 브라우저의 localStorage에 여러 개 저장됩니다.
+        <b>조회된 가중1/가중2 값은 수정할 수 없습니다.</b>
+      </div>
+
+      <div class="status" id="statusText">대기 중</div>
+
+      <div class="summary">
+        <span class="pill">DB 조회 row <strong id="rawCount">0</strong></span>
+        <span class="pill">표시 행 <strong id="routeCount">0</strong></span>
+        <span class="pill">캠프 <strong id="campCount">0</strong></span>
+        <span class="pill">월 데이터 <strong id="monthCount">0</strong></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="tableWrap">
+        <table id="resultTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </div>
-</div>
-
-<div class="modal-backdrop" id="modalBackdrop" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modal-head">
-      <h2 class="modal-title" id="modalTitle">안내</h2>
-      <button class="icon-btn" id="modalClose" type="button" aria-label="닫기">×</button>
-    </div>
-    <div class="modal-body">
-      <div id="paneMessage" hidden>
-        <div class="badge" id="messageBadge" hidden></div>
-        <p class="modal-copy" id="messageText"></p>
-        <button class="btn" id="messagePrimary" type="button">확인</button>
-        <button class="btn secondary" id="messageSecondary" type="button" hidden>닫기</button>
-      </div>
-
-      <form id="paneSignup" hidden>
-        <label class="label" for="signupName">이름</label>
-        <input id="signupName" type="text" placeholder="이름" autocomplete="name" />
-        <label class="label" for="signupEmail">이메일</label>
-        <input id="signupEmail" type="email" placeholder="name@company.com" autocomplete="email" />
-        <label class="label" for="signupPassword">비밀번호</label>
-        <input id="signupPassword" type="password" placeholder="8자 이상" autocomplete="new-password" />
-        <label class="label" for="signupPasswordConfirm">비밀번호 확인</label>
-        <input id="signupPasswordConfirm" type="password" placeholder="비밀번호 확인" autocomplete="new-password" />
-        <button class="btn" id="btnCreateAccount" type="submit">가입하기</button>
-      </form>
-
-      <form id="paneRecovery" hidden>
-        <p class="modal-copy">메일에서 비밀번호 재설정 링크를 눌렀습니다.
-새 비밀번호를 입력하면 바로 변경됩니다.</p>
-        <label class="label" for="recoveryPassword">새 비밀번호</label>
-        <input id="recoveryPassword" type="password" placeholder="8자 이상" autocomplete="new-password" />
-        <label class="label" for="recoveryPasswordConfirm">새 비밀번호 확인</label>
-        <input id="recoveryPasswordConfirm" type="password" placeholder="비밀번호 확인" autocomplete="new-password" />
-        <button class="btn" id="btnApplyRecovery" type="submit">비밀번호 변경</button>
-      </form>
-    </div>
-  </div>
-</div>
 
 <script>
-(async () => {
-  const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
-  const DEFAULT_NEXT = (PATHS?.index || "/index.html");
-  const LOGIN_PATH = (PATHS?.login || "/login.html");
-  const EMAIL_REDIRECT_ORIGIN = "https://maroowell.com";
-  const FLOW_SIGNUP_COMPLETE = "signup-complete";
-  const FLOW_RECOVERY = "recovery";
-  const SAVED_EMAIL_KEY = "mw_saved_login_email";
-  const SAVED_PASSWORD_KEY = "mw_saved_login_password";
-  const FAIL_COUNT_PREFIX = "mw_login_fail_count:";
+(() => {
+  "use strict";
 
-  const params = new URLSearchParams(location.search);
-  const rawNext = params.get("next") || DEFAULT_NEXT;
-  const currentFlow = params.get("flow") || "";
+  const $ = (id) => document.getElementById(id);
+  const cfg = window.MARUWELL_CONFIG || {};
 
-  function getSupabaseProjectRef(url) {
+  let supabaseClient = null;
+  let currentUser = null;
+  let rawRows = [];
+  let tableRows = [];
+  let localSeq = 1;
+
+  const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v3";
+  const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v3";
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg;
+    $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#39;");
+  }
+
+  function clean(v) {
+    return String(v ?? "").trim();
+  }
+
+  function normalizeRoute(v) {
+    return String(v || "")
+      .toUpperCase()
+      .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function waveLabel(v) {
+    const s = clean(v).toUpperCase();
+    if (s === "W2") return "주간";
+    if (s === "W1") return "야간";
+    return "";
+  }
+
+  function waveValueFromLabel(v) {
+    const s = clean(v).toUpperCase();
+    if (s === "주간") return "W2";
+    if (s === "야간") return "W1";
+    if (s === "W2") return "W2";
+    if (s === "W1") return "W1";
+    return "";
+  }
+
+  function valueClass(v) {
+    const s = clean(v);
+    if (s === "해당") return "yes";
+    if (s === "미해당") return "no";
+    if (!s) return "empty";
+    return "";
+  }
+
+  function effectiveWave(row) {
+    return waveValueFromLabel(row.wave) || clean($("waveFilter").value).toUpperCase();
+  }
+
+  function effectiveCamp(row) {
+    return clean(row.camp) || clean($("campFilter").value);
+  }
+
+  function effectiveRoute(row) {
+    return normalizeRoute(row.route);
+  }
+
+  function initYearOptions() {
+    const now = new Date().getFullYear();
+    const years = [];
+
+    for (let y = now + 1; y >= now - 6; y--) {
+      years.push(y);
+    }
+
+    $("yearFilter").innerHTML =
+      years.map(y => `<option value="${y}">${y}</option>`).join("");
+
+    $("yearFilter").value = String(now);
+  }
+
+  function initSupabase() {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  async function checkSession() {
+    if (!supabaseClient) initSupabase();
+
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error) throw error;
+
+    currentUser = data?.session?.user;
+    if (!currentUser) throw new Error("로그인이 필요합니다.");
+
+    $("userPill").textContent = currentUser.email || currentUser.id;
+  }
+
+  function createBlankRow() {
+    return {
+      localId: `row_${localSeq++}`,
+      wave: "",
+      camp: "",
+      route: "",
+      months: {}
+    };
+  }
+
+  function initDefaultRows() {
+    tableRows = [];
+
+    for (let i = 0; i < 4; i++) {
+      tableRows.push(createBlankRow());
+    }
+
+    renderTable();
+    renderSummary();
+  }
+
+  function addRow() {
+    tableRows.push(createBlankRow());
+    renderTable();
+    renderSummary();
+    setStatus("행이 추가되었습니다. Camp/주야간은 상단값을 기본으로 사용하고, Route는 행에 입력하세요.", "ok");
+  }
+
+  function safeLocalStorageGet(key, fallback) {
     try {
-      const host = new URL(url).hostname || "";
-      return host.split(".")[0] || "";
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
     } catch {
-      return "";
+      return fallback;
     }
   }
 
-  function clearLegacySupabaseLocalSession(url) {
-    const projectRef = getSupabaseProjectRef(url);
-    if (!projectRef) return;
-
-    const prefixes = [
-      "sb-" + projectRef + "-auth-token",
-      "sb-" + projectRef + "-auth-token-code-verifier"
-    ];
-
+  function safeLocalStorageSet(key, value) {
     try {
-      const keysToRemove = [];
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const key = window.localStorage.key(i);
-        if (key && prefixes.some(prefix => key === prefix || key.startsWith(prefix))) {
-          keysToRemove.push(key);
-        }
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function getSavedPresets() {
+    const list = safeLocalStorageGet(PRESET_STORAGE_KEY, []);
+    return Array.isArray(list) ? list : [];
+  }
+
+  function setSavedPresets(list) {
+    return safeLocalStorageSet(PRESET_STORAGE_KEY, Array.isArray(list) ? list : []);
+  }
+
+  function makePresetId() {
+    return "preset_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function getPresetRowsFromTable() {
+    const rows = tableRows
+      .map(row => ({
+        wave: effectiveWave(row),
+        camp: effectiveCamp(row),
+        route: effectiveRoute(row)
+      }))
+      .filter(row => row.route);
+
+    const seen = new Set();
+    const out = [];
+
+    for (const row of rows) {
+      const key = `${row.wave}||${row.camp}||${row.route}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+    }
+
+    return out;
+  }
+
+  function makeDefaultPresetName(preset) {
+    const year = preset.year || $("yearFilter").value || "";
+    const camp = preset.camp || preset.rows?.[0]?.camp || "Camp";
+    const wave = preset.wave
+      ? waveLabel(preset.wave)
+      : preset.rows?.length
+        ? "주/야"
+        : "";
+
+    const routes = (preset.rows || [])
+      .map(row => row.route)
+      .filter(Boolean)
+      .slice(0, 8)
+      .join("/");
+
+    return [year, camp, wave, routes].filter(Boolean).join(" / ");
+  }
+
+  function buildCurrentPreset(nameOverride = "") {
+    const rows = getPresetRowsFromTable();
+
+    if (!rows.length) {
+      throw new Error("저장할 Route 행이 없습니다. Route를 먼저 입력하거나 조회 후 저장하세요.");
+    }
+
+    const preset = {
+      id: "",
+      name: clean(nameOverride),
+      updatedAt: new Date().toISOString(),
+      year: $("yearFilter").value || "",
+      camp: clean($("campFilter").value),
+      wave: clean($("waveFilter").value).toUpperCase(),
+      gajoong1: $("g1Filter").value || "",
+      gajoong2: $("g2Filter").value || "",
+      rows
+    };
+
+    if (!preset.name) {
+      preset.name = makeDefaultPresetName(preset);
+    }
+
+    return preset;
+  }
+
+  function renderPresetOptions(selectedId = "") {
+    const select = $("savedPresetSelect");
+    if (!select) return;
+
+    const presets = getSavedPresets()
+      .slice()
+      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+
+    if (!presets.length) {
+      select.innerHTML = `<option value="">저장된 프리셋 없음</option>`;
+      return;
+    }
+
+    select.innerHTML = [
+      `<option value="">저장된 프리셋 선택</option>`,
+      ...presets.map(preset => {
+        const date = String(preset.updatedAt || "").slice(0, 10);
+        const count = Array.isArray(preset.rows) ? preset.rows.length : 0;
+        const label = `${preset.name || "이름 없음"} · ${count}행 · ${date}`;
+        return `<option value="${esc(preset.id)}">${esc(label)}</option>`;
+      })
+    ].join("");
+
+    if (selectedId) {
+      select.value = selectedId;
+    }
+  }
+
+  function saveCurrentPreset() {
+    const name = clean($("presetNameInput").value);
+
+    if (!name) {
+      throw new Error("프리셋 이름을 입력하세요. 예: 일산2 주간 126/130");
+    }
+
+    const preset = buildCurrentPreset(name);
+    const presets = getSavedPresets();
+
+    const selectedId = $("savedPresetSelect").value;
+    const selectedIndex = presets.findIndex(item => item.id === selectedId);
+    const sameNameIndex = presets.findIndex(item => item.name === preset.name);
+
+    if (selectedIndex >= 0) {
+      const ok = confirm(`선택된 프리셋을 덮어쓸까요?\n\n${presets[selectedIndex].name}`);
+      if (!ok) return;
+
+      preset.id = selectedId;
+      presets[selectedIndex] = {
+        ...presets[selectedIndex],
+        ...preset,
+        updatedAt: new Date().toISOString()
+      };
+    } else if (sameNameIndex >= 0) {
+      const ok = confirm(`같은 이름의 프리셋이 있습니다. 덮어쓸까요?\n\n${preset.name}`);
+      if (!ok) return;
+
+      preset.id = presets[sameNameIndex].id;
+      presets[sameNameIndex] = {
+        ...presets[sameNameIndex],
+        ...preset,
+        updatedAt: new Date().toISOString()
+      };
+    } else {
+      preset.id = makePresetId();
+      presets.unshift(preset);
+    }
+
+    setSavedPresets(presets);
+    renderPresetOptions(preset.id);
+
+    $("presetNameInput").value = preset.name;
+    setStatus(`프리셋 저장 완료: ${preset.name}`, "ok");
+  }
+
+  function makeRowFromPresetItem(item) {
+    const row = createBlankRow();
+
+    row.wave = waveValueFromLabel(item.wave);
+    row.camp = clean(item.camp);
+    row.route = normalizeRoute(item.route);
+    row.months = {};
+
+    return row;
+  }
+
+  function applyPresetToScreen(preset) {
+    if (!preset) throw new Error("불러올 프리셋이 없습니다.");
+
+    if (preset.year) {
+      const exists = Array.from($("yearFilter").options).some(opt => opt.value === String(preset.year));
+
+      if (!exists) {
+        const option = document.createElement("option");
+        option.value = String(preset.year);
+        option.textContent = String(preset.year);
+        $("yearFilter").appendChild(option);
       }
-      keysToRemove.forEach(key => window.localStorage.removeItem(key));
+
+      $("yearFilter").value = String(preset.year);
+    }
+
+    $("campFilter").value = preset.camp || "";
+    $("waveFilter").value = preset.wave || "";
+    $("g1Filter").value = preset.gajoong1 || "";
+    $("g2Filter").value = preset.gajoong2 || "";
+    $("presetNameInput").value = preset.name || "";
+
+    const rows = Array.isArray(preset.rows) ? preset.rows : [];
+
+    tableRows = rows
+      .map(makeRowFromPresetItem)
+      .filter(row => effectiveRoute(row));
+
+    while (tableRows.length < 4) {
+      tableRows.push(createBlankRow());
+    }
+
+    rawRows = [];
+    renderTable();
+    renderSummary();
+  }
+
+  async function loadSelectedPresetAndQuery() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      throw new Error("불러올 프리셋을 선택하세요.");
+    }
+
+    const preset = getSavedPresets().find(item => item.id === selectedId);
+
+    if (!preset) {
+      throw new Error("저장된 프리셋을 찾을 수 없습니다.");
+    }
+
+    applyPresetToScreen(preset);
+    setStatus(`프리셋 불러오기 완료: ${preset.name}. 조회 중...`, "warn");
+    await loadData();
+  }
+
+  function deleteSelectedPreset() {
+    const selectedId = $("savedPresetSelect").value;
+
+    if (!selectedId) {
+      setStatus("삭제할 프리셋을 선택하세요.", "bad");
+      return;
+    }
+
+    const presets = getSavedPresets();
+    const preset = presets.find(item => item.id === selectedId);
+
+    if (!preset) {
+      setStatus("삭제할 프리셋을 찾을 수 없습니다.", "bad");
+      return;
+    }
+
+    const ok = confirm(`저장된 프리셋을 삭제할까요?\n\n${preset.name}`);
+
+    if (!ok) return;
+
+    setSavedPresets(presets.filter(item => item.id !== selectedId));
+    renderPresetOptions();
+
+    $("presetNameInput").value = "";
+    setStatus("프리셋 삭제 완료", "ok");
+  }
+
+  function saveLastQueryPreset() {
+    try {
+      const preset = buildCurrentPreset("최근 조회");
+      preset.id = "last_query";
+      preset.updatedAt = new Date().toISOString();
+      safeLocalStorageSet(LAST_QUERY_STORAGE_KEY, preset);
     } catch {}
   }
 
+  async function loadLastQueryPresetAndQuery() {
+    const preset = safeLocalStorageGet(LAST_QUERY_STORAGE_KEY, null);
 
-  function createSupabaseSessionBridge(url) {
-    const projectRef = getSupabaseProjectRef(url);
-    const prefixes = projectRef ? [
-      "sb-" + projectRef + "-auth-token",
-      "sb-" + projectRef + "-auth-token-code-verifier"
-    ] : [];
-    const origin = window.location.origin;
-    const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
-    const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
-    const pending = new Map();
-    let channel = null;
-    let started = false;
-
-    function matchesKey(key) {
-      return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+    if (!preset) {
+      throw new Error("최근 조회조건이 없습니다.");
     }
 
-    function readEntries(storage) {
-      const target = storage || window.sessionStorage;
-      const rows = [];
-      try {
-        for (let i = 0; i < target.length; i++) {
-          const key = target.key(i);
-          if (!matchesKey(key)) continue;
-          rows.push({ key, value: target.getItem(key) });
+    applyPresetToScreen(preset);
+    setStatus("최근 조회조건 불러오기 완료. 조회 중...", "warn");
+    await loadData();
+  }
+
+  function getCriteriaRows() {
+    return tableRows
+      .map(row => ({
+        row,
+        wave: effectiveWave(row),
+        camp: effectiveCamp(row),
+        route: effectiveRoute(row)
+      }))
+      .filter(item => item.route);
+  }
+
+  function validateCriteria() {
+    const criteria = getCriteriaRows();
+
+    if (!criteria.length) {
+      throw new Error("조회할 Route 행을 입력하세요. 기본 4행의 Route 칸에 126A, 126B처럼 입력하면 됩니다.");
+    }
+
+    const missingWave = criteria.find(item => !item.wave);
+    if (missingWave) {
+      throw new Error("주야간을 선택하세요. 상단에서 주간/야간을 선택하거나 행의 주야간 셀을 입력하세요.");
+    }
+
+    const missingCamp = criteria.find(item => !item.camp);
+    if (missingCamp) {
+      throw new Error("Camp를 입력하세요. 상단 Camp에 입력하거나 행의 Camp 셀을 입력하세요.");
+    }
+
+    return criteria;
+  }
+
+  function unique(arr) {
+    return Array.from(new Set(arr.filter(Boolean)));
+  }
+
+  async function fetchRowsByCriteria(criteria) {
+    const year = Number($("yearFilter").value);
+    const waves = unique(criteria.map(x => x.wave));
+    const camps = unique(criteria.map(x => x.camp));
+    const routes = unique(criteria.map(x => x.route));
+    const g1 = $("g1Filter").value;
+    const g2 = $("g2Filter").value;
+
+    let q = supabaseClient
+      .from("coupang_freshbag")
+      .select(`
+        id,
+        data_year,
+        month_no,
+        data_month,
+        period_label,
+        wave,
+        camp,
+        route,
+        route_norm,
+        gajoong1,
+        gajoong2,
+        source_file_name,
+        created_at,
+        updated_at
+      `)
+      .eq("data_year", year)
+      .in("wave", waves)
+      .in("camp", camps)
+      .in("route_norm", routes)
+      .order("camp", { ascending: true })
+      .order("wave", { ascending: true })
+      .order("route_norm", { ascending: true })
+      .order("month_no", { ascending: true });
+
+    if (g1) q = q.eq("gajoong1", g1);
+    if (g2) q = q.eq("gajoong2", g2);
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const criteriaSet = new Set(criteria.map(x => `${x.wave}||${x.camp}||${x.route}`));
+
+    return (Array.isArray(data) ? data : []).filter(row => {
+      const wave = clean(row.wave).toUpperCase();
+      const camp = clean(row.camp);
+      const route = normalizeRoute(row.route_norm || row.route);
+      return criteriaSet.has(`${wave}||${camp}||${route}`);
+    });
+  }
+
+  async function loadData() {
+    setStatus("조건 행 기준으로 조회 중...");
+
+    const criteria = validateCriteria();
+    rawRows = await fetchRowsByCriteria(criteria);
+
+    applyFetchedRowsToTable(criteria, rawRows);
+
+    renderTable();
+    renderSummary();
+
+    saveLastQueryPreset();
+    setStatus(`조회 완료: DB row ${rawRows.length.toLocaleString()}건 / 표시 행 ${tableRows.length.toLocaleString()}행`, "ok");
+  }
+
+  function applyFetchedRowsToTable(criteria, rows) {
+    const rowMap = new Map();
+
+    for (const item of criteria) {
+      const key = `${item.wave}||${item.camp}||${item.route}`;
+      rowMap.set(key, item.row);
+
+      item.row.wave = item.wave;
+      item.row.camp = item.camp;
+      item.row.route = item.route;
+      item.row.months = {};
+    }
+
+    for (const row of rows) {
+      const wave = clean(row.wave).toUpperCase();
+      const camp = clean(row.camp);
+      const route = normalizeRoute(row.route_norm || row.route);
+      const month = Number(row.month_no || 0);
+
+      if (month < 1 || month > 12) continue;
+
+      const key = `${wave}||${camp}||${route}`;
+      const target = rowMap.get(key);
+      if (!target) continue;
+
+      target.months[month] = {
+        id: row.id || null,
+        gajoong1: row.gajoong1 || "",
+        gajoong2: row.gajoong2 || "",
+        period: row.period_label || row.data_month || "",
+        source_file_name: row.source_file_name || ""
+      };
+    }
+
+    for (const item of criteria) {
+      for (let m = 1; m <= 12; m++) {
+        if (!item.row.months[m]) {
+          item.row.months[m] = {
+            id: null,
+            gajoong1: "",
+            gajoong2: "",
+            period: "",
+            source_file_name: ""
+          };
         }
-      } catch {}
-      return rows;
+      }
+    }
+  }
+
+  function renderSummary() {
+    const campSet = new Set();
+    const monthSet = new Set();
+
+    for (const row of rawRows) {
+      if (row.camp) campSet.add(row.camp);
+      if (row.month_no) monthSet.add(row.month_no);
     }
 
-    function hasSession(storage) {
-      return readEntries(storage).some(row => row.key.includes("-auth-token") && !row.key.includes("code-verifier") && !!row.value);
+    $("rawCount").textContent = rawRows.length.toLocaleString();
+    $("routeCount").textContent = tableRows.length.toLocaleString();
+    $("campCount").textContent = campSet.size.toLocaleString();
+    $("monthCount").textContent = monthSet.size.toLocaleString();
+  }
+
+  function renderTable() {
+    const thead = $("resultTable").querySelector("thead");
+    const tbody = $("resultTable").querySelector("tbody");
+
+    const headers = [];
+    for (let m = 1; m <= 12; m++) {
+      headers.push(`<th class="monthHead">${m}월 가중1</th>`);
+      headers.push(`<th class="monthHead">${m}월 가중2</th>`);
     }
 
-    function writeEntries(entries, storage) {
-      const target = storage || window.sessionStorage;
-      try {
-        for (const row of entries || []) {
-          if (!row || !matchesKey(row.key)) continue;
-          if (row.value == null) target.removeItem(row.key);
-          else target.setItem(row.key, row.value);
+    thead.innerHTML = `
+      <tr>
+        <th class="actionCol">작업</th>
+        <th class="sticky1">주야간</th>
+        <th class="sticky2">Camp</th>
+        <th class="sticky3">Route</th>
+        ${headers.join("")}
+      </tr>
+    `;
+
+    if (!tableRows.length) {
+      tbody.innerHTML = `<tr><td colspan="28" class="empty">데이터 없음</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = tableRows.map(row => {
+      const rowWave = effectiveWave(row);
+      const rowCamp = effectiveCamp(row);
+      const rowRoute = effectiveRoute(row);
+
+      const cells = [];
+
+      for (let m = 1; m <= 12; m++) {
+        const month = row.months[m] || {
+          id: null,
+          gajoong1: "",
+          gajoong2: ""
+        };
+
+        cells.push(`
+          <td
+            class="readonlyValue ${valueClass(month.gajoong1)}"
+            title="조회값은 수정할 수 없습니다."
+          >${esc(month.gajoong1 || "")}</td>
+        `);
+
+        cells.push(`
+          <td
+            class="readonlyValue ${valueClass(month.gajoong2)}"
+            title="조회값은 수정할 수 없습니다."
+          >${esc(month.gajoong2 || "")}</td>
+        `);
+      }
+
+      return `
+        <tr data-row="${esc(row.localId)}">
+          <td class="actionCol">
+            <button class="small danger" data-action="delete" data-row="${esc(row.localId)}">삭제</button>
+          </td>
+          <td tabindex="0" class="sticky1 editable" data-row="${esc(row.localId)}" data-meta="wave" title="클릭해서 수정">${esc(waveLabel(rowWave))}</td>
+          <td tabindex="0" class="sticky2 editable" data-row="${esc(row.localId)}" data-meta="camp" title="클릭해서 수정">${esc(rowCamp)}</td>
+          <td tabindex="0" class="sticky3 editable" data-row="${esc(row.localId)}" data-meta="route" title="클릭해서 수정">${esc(rowRoute)}</td>
+          ${cells.join("")}
+        </tr>
+      `;
+    }).join("");
+  }
+
+  function getRowById(localId) {
+    return tableRows.find(row => row.localId === localId);
+  }
+
+  function getEditableCells() {
+    return Array.from(document.querySelectorAll("#resultTable td.editable"));
+  }
+
+  function focusNextEditableCell(currentTd, backwards = false) {
+    const cells = getEditableCells();
+    const index = cells.indexOf(currentTd);
+    if (index < 0) return;
+
+    const nextIndex = backwards
+      ? Math.max(0, index - 1)
+      : Math.min(cells.length - 1, index + 1);
+
+    const next = cells[nextIndex];
+
+    if (next && next !== currentTd) {
+      next.focus({ preventScroll: false });
+      startEditCell(next);
+    }
+  }
+
+  function startEditCell(td) {
+    if (td.querySelector("input,select")) return;
+
+    const row = getRowById(td.dataset.row);
+    if (!row) return;
+
+    const meta = td.dataset.meta;
+
+    if (!meta) {
+      setStatus("조회된 가중1/가중2 값은 이 페이지에서 수정할 수 없습니다.", "warn");
+      return;
+    }
+
+    editMetaCell(td, row, meta);
+  }
+
+  function editMetaCell(td, row, meta) {
+    if (meta === "wave") {
+      const select = document.createElement("select");
+      select.className = "editorSelect";
+      select.innerHTML = `
+        <option value=""></option>
+        <option value="W2">주간</option>
+        <option value="W1">야간</option>
+      `;
+
+      select.value = row.wave || "";
+
+      td.textContent = "";
+      td.appendChild(select);
+      select.focus();
+
+      let committed = false;
+
+      const commit = (moveDirection = null) => {
+        if (committed) return;
+        committed = true;
+
+        row.wave = select.value;
+        renderTable();
+
+        if (moveDirection) {
+          const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-meta="${meta}"]`);
+          if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
         }
-      } catch {}
-    }
-
-    function clearSession(storage) {
-      const target = storage || window.sessionStorage;
-      try {
-        const keys = [];
-        for (let i = 0; i < target.length; i++) {
-          const key = target.key(i);
-          if (matchesKey(key)) keys.push(key);
-        }
-        keys.forEach(key => target.removeItem(key));
-      } catch {}
-    }
-
-    function resolvePending(requestId, entries) {
-      const item = pending.get(requestId);
-      if (!item) return;
-      pending.delete(requestId);
-      clearTimeout(item.timer);
-      if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
-      item.resolve(hasSession(window.sessionStorage));
-    }
-
-    function handleSyncState(state) {
-      if (state === "SIGNED_OUT") {
-        clearSession(window.sessionStorage);
-        return;
-      }
-      if (state === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
-        requestSessionCopy(1200).catch(() => {});
-      }
-    }
-
-    function onWindowMessage(event) {
-      if (event.origin !== origin) return;
-      const msg = event.data || {};
-      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-      if (msg.type === "MW_SESSION_REQUEST") {
-        if (!hasSession(window.sessionStorage)) return;
-        try {
-          event.source?.postMessage({
-            type: "MW_SESSION_RESPONSE",
-            projectRef,
-            requestId: msg.requestId,
-            entries: readEntries(window.sessionStorage),
-            fromTabId: tabId
-          }, origin);
-        } catch {}
-        return;
-      }
-
-      if (msg.type === "MW_SESSION_RESPONSE") {
-        resolvePending(msg.requestId, msg.entries);
-        return;
-      }
-
-      if (msg.type === "MW_AUTH_SYNC") {
-        handleSyncState(msg.state);
-      }
-    }
-
-    function onChannelMessage(event) {
-      const msg = event.data || {};
-      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-      if (msg.type === "MW_SESSION_REQUEST") {
-        if (!hasSession(window.sessionStorage)) return;
-        try {
-          channel?.postMessage({
-            type: "MW_SESSION_RESPONSE",
-            projectRef,
-            requestId: msg.requestId,
-            entries: readEntries(window.sessionStorage),
-            fromTabId: tabId
-          });
-        } catch {}
-        return;
-      }
-
-      if (msg.type === "MW_SESSION_RESPONSE") {
-        resolvePending(msg.requestId, msg.entries);
-        return;
-      }
-
-      if (msg.type === "MW_AUTH_SYNC") {
-        handleSyncState(msg.state);
-      }
-    }
-
-    function start() {
-      if (started || !projectRef) return;
-      started = true;
-      window.addEventListener("message", onWindowMessage);
-      try {
-        if ("BroadcastChannel" in window) {
-          channel = new BroadcastChannel(channelName);
-          channel.addEventListener("message", onChannelMessage);
-        }
-      } catch {}
-    }
-
-    function requestSessionCopy(timeoutMs) {
-      start();
-      if (!projectRef) return Promise.resolve(false);
-      if (hasSession(window.sessionStorage)) return Promise.resolve(true);
-
-      const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
-      const payload = {
-        type: "MW_SESSION_REQUEST",
-        projectRef,
-        requestId,
-        fromTabId: tabId
       };
 
-      return new Promise(resolve => {
-        const timer = window.setTimeout(() => {
-          pending.delete(requestId);
-          resolve(hasSession(window.sessionStorage));
-        }, Math.max(300, Number(timeoutMs) || 900));
-
-        pending.set(requestId, { resolve, timer });
-
-        try { channel?.postMessage(payload); } catch {}
-        try {
-          if (window.opener && window.opener !== window) {
-            window.opener.postMessage(payload, origin);
-          }
-        } catch {}
+      select.addEventListener("blur", () => commit(), { once:true });
+      select.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          select.blur();
+        }
+        if (e.key === "Tab") {
+          e.preventDefault();
+          commit(e.shiftKey ? "prev" : "next");
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          committed = true;
+          renderTable();
+        }
       });
+
+      return;
     }
 
-    function broadcastAuthState(state) {
-      start();
-      const payload = {
-        type: "MW_AUTH_SYNC",
-        projectRef,
-        state,
-        fromTabId: tabId
-      };
-      try { channel?.postMessage(payload); } catch {}
-      try {
-        if (window.opener && window.opener !== window) {
-          window.opener.postMessage(payload, origin);
+    const input = document.createElement("input");
+    input.className = "editorInput";
+
+    if (meta === "camp") input.value = row.camp || "";
+    if (meta === "route") input.value = row.route || "";
+
+    td.textContent = "";
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    let committed = false;
+
+    const commit = (moveDirection = null) => {
+      if (committed) return;
+      committed = true;
+
+      let next = clean(input.value);
+
+      if (meta === "route") {
+        next = normalizeRoute(next);
+      }
+
+      row[meta] = next;
+
+      renderTable();
+
+      if (moveDirection) {
+        const newTd = document.querySelector(`[data-row="${CSS.escape(row.localId)}"][data-meta="${meta}"]`);
+        if (newTd) focusNextEditableCell(newTd, moveDirection === "prev");
+      }
+    };
+
+    input.addEventListener("blur", () => commit(), { once:true });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        input.blur();
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        commit(e.shiftKey ? "prev" : "next");
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        committed = true;
+        renderTable();
+      }
+    });
+  }
+
+  function deleteRow(localId) {
+    const row = getRowById(localId);
+    if (!row) return;
+
+    const wave = effectiveWave(row);
+    const camp = effectiveCamp(row);
+    const route = effectiveRoute(row);
+
+    const ok = confirm(`${waveLabel(wave)} / ${camp} / ${route}\n\n이 조회 행을 화면에서 제거할까요?\nDB 데이터는 삭제되지 않습니다.`);
+
+    if (!ok) return;
+
+    tableRows = tableRows.filter(item => item.localId !== localId);
+
+    while (tableRows.length < 4) {
+      tableRows.push(createBlankRow());
+    }
+
+    renderTable();
+    renderSummary();
+    setStatus("조회 행을 화면에서 제거했습니다. DB 데이터는 변경되지 않았습니다.", "ok");
+  }
+
+  function getLastMonthWithData() {
+    let maxMonth = 0;
+
+    for (const row of tableRows) {
+      for (let m = 1; m <= 12; m++) {
+        const month = row.months[m] || {};
+        const g1 = clean(month.gajoong1);
+        const g2 = clean(month.gajoong2);
+
+        if (g1 || g2) {
+          maxMonth = Math.max(maxMonth, m);
         }
-      } catch {}
+      }
+    }
+
+    return maxMonth;
+  }
+
+  function fitText(ctx, text, maxWidth) {
+    let s = String(text ?? "");
+
+    if (ctx.measureText(s).width <= maxWidth) return s;
+
+    while (s.length > 0 && ctx.measureText(s + "…").width > maxWidth) {
+      s = s.slice(0, -1);
+    }
+
+    return s ? s + "…" : "";
+  }
+
+  function drawCell(ctx, x, y, w, h, options = {}) {
+    const {
+      text = "",
+      bg = "#111827",
+      color = "#e6eefc",
+      border = "#334155",
+      font = "700 14px Arial, 'Noto Sans KR', sans-serif",
+      align = "center"
+    } = options;
+
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = color;
+    ctx.font = font;
+    ctx.textBaseline = "middle";
+
+    const safeText = fitText(ctx, text, w - 12);
+
+    if (align === "left") {
+      ctx.textAlign = "left";
+      ctx.fillText(safeText, x + 8, y + h / 2);
+    } else {
+      ctx.textAlign = "center";
+      ctx.fillText(safeText, x + w / 2, y + h / 2);
+    }
+  }
+
+  function valueStyle(v) {
+    const s = clean(v);
+
+    if (s === "해당") {
+      return {
+        bg: "#7dd3fc",
+        color: "#082f49"
+      };
+    }
+
+    if (s === "미해당") {
+      return {
+        bg: "#ffffff",
+        color: "#ef4444"
+      };
     }
 
     return {
-      projectRef,
-      start,
-      hasSession,
-      clearSession,
-      requestSessionCopy,
-      broadcastAuthState
+      bg: "#111827",
+      color: "#6b7280"
     };
   }
 
-
-  const authStorage = (() => {
-    try { return window.sessionStorage; } catch {}
-    return null;
-  })();
-  const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
-
-  clearLegacySupabaseLocalSession(SUPABASE_URL);
-  sessionBridge.start();
-  await sessionBridge.requestSessionCopy(1200);
-
-  const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
-    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-        auth: {
-          persistSession: !!authStorage,
-          storage: authStorage || undefined,
-          autoRefreshToken: true,
-          detectSessionInUrl: true
-        }
-      })
-    : null;
-
-  const email = document.getElementById("email");
-  const password = document.getElementById("password");
-  const rememberEmail = document.getElementById("rememberEmail");
-  const rememberPassword = document.getElementById("rememberPassword");
-  const btnSignIn = document.getElementById("btnSignIn");
-  const btnSignUp = document.getElementById("btnSignUp");
-  const btnForgotPassword = document.getElementById("btnForgotPassword");
-  const forgotHint = document.getElementById("forgotHint");
-  const statusLogin = document.getElementById("statusLogin");
-  const ENABLE_SIGNUP = !!(window.MAROOWELL_ENABLE_SIGNUP?.());
-
-  const modalBackdrop = document.getElementById("modalBackdrop");
-  const modalClose = document.getElementById("modalClose");
-  const modalTitle = document.getElementById("modalTitle");
-  const paneMessage = document.getElementById("paneMessage");
-  const paneSignup = document.getElementById("paneSignup");
-  const paneRecovery = document.getElementById("paneRecovery");
-  const messageBadge = document.getElementById("messageBadge");
-  const messageText = document.getElementById("messageText");
-  const messagePrimary = document.getElementById("messagePrimary");
-  const messageSecondary = document.getElementById("messageSecondary");
-  const signupName = document.getElementById("signupName");
-  const signupEmail = document.getElementById("signupEmail");
-  const signupPassword = document.getElementById("signupPassword");
-  const signupPasswordConfirm = document.getElementById("signupPasswordConfirm");
-  const recoveryPassword = document.getElementById("recoveryPassword");
-  const recoveryPasswordConfirm = document.getElementById("recoveryPasswordConfirm");
-
-  const SIGNUP_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_SIGNUP_COMPLETE;
-  const RECOVERY_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_RECOVERY;
-
-  let suppressAutoRedirect = false;
-  let handledSignupFlow = false;
-  let handledRecoveryFlow = false;
-
-  function safeNextUrl(u) {
-    if (!u) return DEFAULT_NEXT;
-    if (u.startsWith("http://") || u.startsWith("https://")) return DEFAULT_NEXT;
-    if (!u.startsWith("/")) return DEFAULT_NEXT;
-    return u;
+  function canvasToBlob(canvas) {
+    return new Promise(resolve => {
+      canvas.toBlob(blob => resolve(blob), "image/png");
+    });
   }
 
-  const next = safeNextUrl(rawNext);
+  async function copyTableImage() {
+    const lastMonth = getLastMonthWithData();
 
-  function normalizeEmail(v) {
-    return (v || "").trim().toLowerCase();
-  }
-
-  function setStatus(msg, type) {
-    statusLogin.textContent = msg || "";
-    statusLogin.className = "status" + (type ? " " + type : "");
-  }
-
-  function requireSupabase() {
-    if (supabase) return true;
-    setStatus("설정 오류: Supabase 연결 실패", "error");
-    return false;
-  }
-
-  function clearFlowFromUrl() {
-    const url = new URL(location.href);
-    url.searchParams.delete("flow");
-    url.hash = "";
-    const query = url.searchParams.toString();
-    history.replaceState({}, "", url.pathname + (query ? "?" + query : ""));
-  }
-
-  function modalHideAll() {
-    paneMessage.hidden = true;
-    paneSignup.hidden = true;
-    paneRecovery.hidden = true;
-  }
-
-  function openModal(title, paneName) {
-    modalTitle.textContent = title;
-    modalHideAll();
-    if (paneName === "message") paneMessage.hidden = false;
-    if (paneName === "signup") paneSignup.hidden = false;
-    if (paneName === "recovery") paneRecovery.hidden = false;
-    modalBackdrop.hidden = false;
-    document.body.classList.add("modal-open");
-  }
-
-  function closeModal(force) {
-    if (!force && paneRecovery.hidden === false) return;
-    modalBackdrop.hidden = true;
-    document.body.classList.remove("modal-open");
-    modalHideAll();
-    messagePrimary.onclick = null;
-    messageSecondary.onclick = null;
-    messageSecondary.hidden = true;
-  }
-
-  function showMessageModal(title, message, options) {
-    const opts = options || {};
-    modalTitle.textContent = title || "안내";
-    messageText.textContent = message || "";
-
-    if (opts.badge) {
-      messageBadge.hidden = false;
-      messageBadge.textContent = opts.badge;
-    } else {
-      messageBadge.hidden = true;
-      messageBadge.textContent = "";
+    if (!tableRows.length) {
+      setStatus("복사할 행이 없습니다.", "bad");
+      return;
     }
 
-    messagePrimary.textContent = opts.primaryText || "확인";
-    messagePrimary.onclick = () => {
-      if (typeof opts.onPrimary === "function") {
-        opts.onPrimary();
-        return;
-      }
-      closeModal(true);
-    };
+    if (!lastMonth) {
+      setStatus("데이터가 있는 월이 없습니다. 먼저 조회하세요.", "bad");
+      return;
+    }
 
-    if (opts.secondaryText) {
-      messageSecondary.hidden = false;
-      messageSecondary.textContent = opts.secondaryText;
-      messageSecondary.onclick = () => {
-        if (typeof opts.onSecondary === "function") {
-          opts.onSecondary();
-          return;
-        }
-        closeModal(true);
+    const fixedColumns = [
+      { key: "wave", label: "주야간", width: 90 },
+      { key: "camp", label: "Camp", width: 120 },
+      { key: "route", label: "Route", width: 110 }
+    ];
+
+    const monthColumns = [];
+
+    for (let m = 1; m <= lastMonth; m++) {
+      monthColumns.push({ month: m, field: "gajoong1", label: `${m}월 가중1`, width: 96 });
+      monthColumns.push({ month: m, field: "gajoong2", label: `${m}월 가중2`, width: 96 });
+    }
+
+    const columns = [...fixedColumns, ...monthColumns];
+
+    const titleHeight = 52;
+    const headerHeight = 36;
+    const rowHeight = 34;
+    const padding = 18;
+
+    const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
+    const canvasWidth = tableWidth + padding * 2;
+    const canvasHeight = titleHeight + headerHeight + tableRows.length * rowHeight + padding * 2;
+
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+
+    ctx.fillStyle = "#0b1220";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    const titleParts = [
+      $("yearFilter").value || "",
+      clean($("campFilter").value) || "Camp",
+      clean($("waveFilter").value) === "W2" ? "주간" : clean($("waveFilter").value) === "W1" ? "야간" : "주/야"
+    ].filter(Boolean);
+
+    ctx.fillStyle = "#e6eefc";
+    ctx.font = "900 22px Arial, 'Noto Sans KR', sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText("프레시백 현황 조회", padding, padding + 14);
+
+    ctx.fillStyle = "#9fb0d2";
+    ctx.font = "700 13px Arial, 'Noto Sans KR', sans-serif";
+    ctx.fillText(titleParts.join(" / "), padding, padding + 38);
+
+    let y = padding + titleHeight;
+    let x = padding;
+
+    for (const col of columns) {
+      drawCell(ctx, x, y, col.width, headerHeight, {
+        text: col.label,
+        bg: "#263247",
+        color: "#ffffff",
+        border: "#475569",
+        font: "900 13px Arial, 'Noto Sans KR', sans-serif"
+      });
+
+      x += col.width;
+    }
+
+    y += headerHeight;
+
+    for (const row of tableRows) {
+      x = padding;
+
+      const fixedValues = {
+        wave: waveLabel(effectiveWave(row)),
+        camp: effectiveCamp(row),
+        route: effectiveRoute(row)
       };
-    } else {
-      messageSecondary.hidden = true;
-      messageSecondary.onclick = null;
-    }
 
-    openModal(title || "안내", "message");
-  }
-
-  function failKey(em) {
-    return FAIL_COUNT_PREFIX + normalizeEmail(em);
-  }
-
-  function getFailCount(em) {
-    const key = failKey(em);
-    if (!em) return 0;
-    try {
-      return Math.max(0, Number(window.localStorage.getItem(key) || 0));
-    } catch {
-      return 0;
-    }
-  }
-
-  function setFailCount(em, value) {
-    if (!em) return;
-    const key = failKey(em);
-    try {
-      if (value > 0) window.localStorage.setItem(key, String(value));
-      else window.localStorage.removeItem(key);
-    } catch {}
-  }
-
-  function bumpFailCount(em) {
-    const nextValue = getFailCount(em) + 1;
-    setFailCount(em, nextValue);
-    return nextValue;
-  }
-
-  function clearFailCount(em) {
-    setFailCount(em, 0);
-  }
-
-  function refreshForgotPasswordUi() {
-    const em = normalizeEmail(email.value);
-    const count = getFailCount(em);
-    const enabled = !!em && count >= 5;
-    btnForgotPassword.hidden = !enabled;
-    forgotHint.textContent = enabled
-      ? "비밀번호 찾기가 활성화되었습니다. 클릭하면 재설정 메일을 보냅니다."
-      : "비밀번호 5회 연속 실패 시 비밀번호 찾기가 활성화됩니다.";
-  }
-
-  function loadSavedEmail() {
-    let saved = "";
-    try { saved = (window.localStorage.getItem(SAVED_EMAIL_KEY) || "").trim(); } catch {}
-    if (!saved) return;
-    email.value = saved;
-    if (rememberEmail) rememberEmail.checked = true;
-  }
-
-  function loadSavedPassword() {
-    let raw = "";
-    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
-    if (!raw) return;
-
-    try {
-      const saved = JSON.parse(raw);
-      if (!saved || typeof saved !== "object") return;
-
-      const savedEmail = normalizeEmail(saved.email || "");
-      const savedPassword = String(saved.password || "");
-
-      if (!savedEmail || !savedPassword) return;
-
-      if (!email.value) {
-        email.value = savedEmail;
-      }
-
-      if (normalizeEmail(email.value) === savedEmail) {
-        password.value = savedPassword;
-        if (rememberPassword) rememberPassword.checked = true;
-      }
-    } catch {}
-  }
-
-  function syncSavedPasswordByEmail() {
-    let raw = "";
-    try { raw = window.localStorage.getItem(SAVED_PASSWORD_KEY) || ""; } catch {}
-    if (!raw) {
-      if (rememberPassword) rememberPassword.checked = false;
-      return;
-    }
-
-    try {
-      const saved = JSON.parse(raw);
-      const savedEmail = normalizeEmail(saved?.email || "");
-      const savedPassword = String(saved?.password || "");
-
-      if (normalizeEmail(email.value) === savedEmail && savedPassword) {
-        password.value = savedPassword;
-        if (rememberPassword) rememberPassword.checked = true;
-      } else {
-        password.value = "";
-        if (rememberPassword) rememberPassword.checked = false;
-      }
-    } catch {
-      password.value = "";
-      if (rememberPassword) rememberPassword.checked = false;
-    }
-  }
-
-  function clearSavedPassword() {
-    try { window.localStorage.removeItem(SAVED_PASSWORD_KEY); } catch {}
-  }
-
-  function shouldCountLoginFailure(err) {
-    const msg = String(err?.message || "").toLowerCase();
-    return msg.includes("invalid login credentials") || msg.includes("invalid_credentials");
-  }
-
-  async function redirectToApp() {
-    location.replace(next);
-  }
-
-  function openSignupModal() {
-    signupName.value = "";
-    signupEmail.value = normalizeEmail(email.value);
-    signupPassword.value = "";
-    signupPasswordConfirm.value = "";
-    openModal("회원가입", "signup");
-    setTimeout(() => signupName.focus(), 20);
-  }
-
-  function openRecoveryModal() {
-    suppressAutoRedirect = true;
-    recoveryPassword.value = "";
-    recoveryPasswordConfirm.value = "";
-    openModal("비밀번호 재설정", "recovery");
-    setTimeout(() => recoveryPassword.focus(), 20);
-  }
-
-  async function redirectIfLoggedIn() {
-    if (!supabase?.auth || suppressAutoRedirect) return;
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
-    if (currentFlow === FLOW_SIGNUP_COMPLETE || currentFlow === FLOW_RECOVERY) return;
-    if (redirectIfLoggedIn._scheduled) return;
-    redirectIfLoggedIn._scheduled = true;
-    location.replace(next);
-  }
-
-  async function signIn() {
-    const em = normalizeEmail(email.value);
-    try {
-      if (!requireSupabase()) return;
-      setStatus("로그인 중...");
-
-      const pw = password.value || "";
-      if (!em) throw new Error("이메일을 입력하세요.");
-      if (!pw) throw new Error("비밀번호를 입력하세요.");
-
-      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
-      if (error) throw error;
-
-      try {
-        if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
-        else window.localStorage.removeItem(SAVED_EMAIL_KEY);
-
-        if (rememberPassword?.checked) {
-          window.localStorage.setItem(SAVED_PASSWORD_KEY, JSON.stringify({
-            email: em,
-            password: pw
-          }));
-        } else {
-          window.localStorage.removeItem(SAVED_PASSWORD_KEY);
-        }
-      } catch {}
-
-      clearFailCount(em);
-      refreshForgotPasswordUi();
-      sessionBridge.broadcastAuthState("SESSION_UPDATED");
-      setStatus("로그인 성공", "success");
-      location.replace(next);
-    } catch (e) {
-      let extra = "";
-      if (em && shouldCountLoginFailure(e)) {
-        const count = bumpFailCount(em);
-        refreshForgotPasswordUi();
-        if (count === 4) extra = "\n다음 실패 시 비밀번호 찾기가 활성화됩니다.";
-        if (count >= 5) extra = "\n비밀번호 찾기가 활성화되었습니다.";
-      }
-      setStatus("로그인 실패: " + (e?.message || String(e)) + extra, "error");
-    }
-  }
-
-  async function sendPasswordReset() {
-    try {
-      if (!requireSupabase()) return;
-      const em = normalizeEmail(email.value);
-      if (!em) throw new Error("이메일을 먼저 입력하세요.");
-      if (getFailCount(em) < 5) throw new Error("비밀번호 5회 실패 후에만 활성화됩니다.");
-
-      setStatus("비밀번호 재설정 메일 발송 중...");
-      const { error } = await supabase.auth.resetPasswordForEmail(em, {
-        redirectTo: RECOVERY_REDIRECT_URL
-      });
-      if (error) throw error;
-
-      setStatus("비밀번호 재설정 메일을 보냈습니다.", "success");
-      showMessageModal("재설정 메일 발송", "메일의 링크를 누르면 다시 Maroowell.com으로 돌아와 새 비밀번호를 입력할 수 있습니다.", {
-        badge: "PASSWORD RESET"
-      });
-    } catch (e) {
-      setStatus("비밀번호 찾기 실패: " + (e?.message || String(e)), "error");
-    }
-  }
-
-  async function signUpFromModal(ev) {
-    ev.preventDefault();
-    try {
-      if (!requireSupabase()) return;
-      const nm = (signupName.value || "").trim();
-      const em = normalizeEmail(signupEmail.value);
-      const pw = signupPassword.value || "";
-      const pw2 = signupPasswordConfirm.value || "";
-
-      if (!nm) throw new Error("이름을 입력하세요.");
-      if (!em) throw new Error("이메일을 입력하세요.");
-      if (!pw) throw new Error("비밀번호를 입력하세요.");
-      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
-      if (pw !== pw2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
-
-      setStatus("회원가입 중...");
-      const { data, error } = await supabase.auth.signUp({
-        email: em,
-        password: pw,
-        options: {
-          emailRedirectTo: SIGNUP_REDIRECT_URL,
-          data: {
-            display_name: nm,
-            full_name: nm,
-            name: nm
-          }
-        }
-      });
-      if (error) throw error;
-
-      email.value = em;
-      password.value = "";
-      clearFailCount(em);
-      refreshForgotPasswordUi();
-      closeModal(true);
-
-      if (data?.session) {
-        sessionBridge.broadcastAuthState("SESSION_UPDATED");
-        setStatus("회원가입 완료", "success");
-        showMessageModal("회원가입 완료", "이메일 인증 없이 바로 가입이 완료되었습니다.", {
-          badge: "SIGNED UP",
-          primaryText: "서비스로 이동",
-          onPrimary: redirectToApp
+      for (const col of fixedColumns) {
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: fixedValues[col.key],
+          bg: "#111827",
+          color: col.key === "route" ? "#bfdbfe" : "#e6eefc",
+          border: "#334155",
+          font: "900 13px Arial, 'Noto Sans KR', sans-serif"
         });
-        return;
+
+        x += col.width;
       }
 
-      setStatus("회원가입 완료. 인증 메일을 확인하세요.", "success");
-      showMessageModal("확인 메일 발송", "확인 메일을 보냈습니다.\n메일의 버튼을 누르면 다시 Maroowell.com으로 돌아와 인증 완료 창이 뜹니다.", {
-        badge: "EMAIL VERIFICATION"
-      });
-    } catch (e) {
-      setStatus("회원가입 실패: " + (e?.message || String(e)), "error");
-    }
-  }
+      for (const col of monthColumns) {
+        const month = row.months[col.month] || {};
+        const value = clean(month[col.field]);
+        const style = valueStyle(value);
 
-  async function applyRecoveredPassword(ev) {
-    ev.preventDefault();
+        drawCell(ctx, x, y, col.width, rowHeight, {
+          text: value,
+          bg: style.bg,
+          color: style.color,
+          border: "#334155",
+          font: "900 13px Arial, 'Noto Sans KR', sans-serif"
+        });
+
+        x += col.width;
+      }
+
+      y += rowHeight;
+    }
+
+    const blob = await canvasToBlob(canvas);
+
+    if (!blob) {
+      setStatus("이미지 생성에 실패했습니다.", "bad");
+      return;
+    }
+
     try {
-      if (!requireSupabase()) return;
-      const pw = recoveryPassword.value || "";
-      const pw2 = recoveryPasswordConfirm.value || "";
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "image/png": blob
+        })
+      ]);
 
-      if (!pw) throw new Error("새 비밀번호를 입력하세요.");
-      if (pw.length < 8) throw new Error("비밀번호는 8자 이상 입력하세요.");
-      if (pw !== pw2) throw new Error("비밀번호 확인이 일치하지 않습니다.");
-
-      setStatus("비밀번호 변경 중...");
-      const { error } = await supabase.auth.updateUser({ password: pw });
-      if (error) throw error;
-
-      await supabase.auth.signOut();
-      sessionBridge.broadcastAuthState("SIGNED_OUT");
-      suppressAutoRedirect = false;
-      clearFlowFromUrl();
-      closeModal(true);
-      password.value = "";
-      setStatus("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.", "success");
-      showMessageModal("비밀번호 변경 완료", "비밀번호가 정상적으로 변경되었습니다.\n이제 새 비밀번호로 로그인하면 됩니다.", {
-        badge: "PASSWORD UPDATED"
-      });
+      setStatus(`이미지 복사 완료: ${lastMonth}월까지 캡쳐`, "ok");
     } catch (e) {
-      setStatus("비밀번호 변경 실패: " + (e?.message || String(e)), "error");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `freshbag_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 클립보드 복사를 막아서 PNG 파일로 다운로드했습니다.", "warn");
     }
   }
 
-  function handleSignupCompletedSession() {
-    if (handledSignupFlow) return;
-    handledSignupFlow = true;
-    suppressAutoRedirect = true;
-    showMessageModal("이메일 인증 완료", "확인 메일 인증이 완료되었습니다.\n계속을 누르면 Maroowell 서비스로 이동합니다.", {
-      badge: "VERIFIED",
-      primaryText: "계속",
-      secondaryText: "로그인 화면에 머물기",
-      onPrimary: () => {
-        clearFlowFromUrl();
-        redirectToApp();
-      },
-      onSecondary: () => {
-        clearFlowFromUrl();
-        suppressAutoRedirect = false;
-        closeModal(true);
-        setStatus("이메일 인증이 완료되었습니다. 로그인 상태입니다.", "success");
-      }
-    });
+  function clearAll() {
+    const now = new Date().getFullYear();
+
+    $("yearFilter").value = String(now);
+    $("campFilter").value = "";
+    $("waveFilter").value = "";
+    $("g1Filter").value = "";
+    $("g2Filter").value = "";
+    $("presetNameInput").value = "";
+    $("savedPresetSelect").value = "";
+
+    rawRows = [];
+    initDefaultRows();
+    setStatus("초기화 완료. 기본 4행에 Route를 입력한 뒤 조회하세요.", "ok");
   }
 
-  function handleRecoverySession() {
-    if (handledRecoveryFlow) return;
-    handledRecoveryFlow = true;
-    openRecoveryModal();
+  function handleError(e) {
+    console.error(e);
+    setStatus(e.message || String(e), "bad");
   }
 
-  if (!ENABLE_SIGNUP && btnSignUp) {
-    btnSignUp.style.display = "none";
+  function run(fn) {
+    fn().catch(handleError);
   }
 
-  loadSavedEmail();
-  loadSavedPassword();
-  refreshForgotPasswordUi();
+  initYearOptions();
 
-  email.addEventListener("input", () => {
-    refreshForgotPasswordUi();
-    syncSavedPasswordByEmail();
-  });
-  btnSignIn.addEventListener("click", signIn);
-  btnForgotPassword.addEventListener("click", sendPasswordReset);
-  if (rememberPassword) {
-    rememberPassword.addEventListener("change", () => {
-      if (!rememberPassword.checked) {
-        clearSavedPassword();
-      }
-    });
-  }
-  if (btnSignUp && ENABLE_SIGNUP) {
-    btnSignUp.addEventListener("click", openSignupModal);
-  }
+  $("loadBtn").addEventListener("click", () => run(loadData));
+  $("addRowBtn").addEventListener("click", addRow);
+  $("clearBtn").addEventListener("click", clearAll);
+  $("copyBtn").addEventListener("click", () => run(copyTableImage));
 
-  password.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    signIn();
+  $("savePresetBtn").addEventListener("click", () => run(async () => {
+    saveCurrentPreset();
+  }));
+
+  $("loadPresetBtn").addEventListener("click", () => run(loadSelectedPresetAndQuery));
+  $("deletePresetBtn").addEventListener("click", deleteSelectedPreset);
+  $("loadLastPresetBtn").addEventListener("click", () => run(loadLastQueryPresetAndQuery));
+
+  $("savedPresetSelect").addEventListener("change", () => {
+    const selectedId = $("savedPresetSelect").value;
+    const preset = getSavedPresets().find(item => item.id === selectedId);
+
+    if (preset) {
+      $("presetNameInput").value = preset.name || "";
+    }
   });
 
-  paneSignup.addEventListener("submit", signUpFromModal);
-  paneRecovery.addEventListener("submit", applyRecoveredPassword);
-
-  modalClose.addEventListener("click", () => closeModal(false));
-  modalBackdrop.addEventListener("click", (e) => {
-    if (e.target !== modalBackdrop) return;
-    closeModal(false);
-  });
-
-  (async () => {
-    if (!requireSupabase()) return;
-
-    supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT") {
-        sessionBridge.broadcastAuthState("SIGNED_OUT");
-      } else if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED")) {
-        sessionBridge.broadcastAuthState("SESSION_UPDATED");
-      }
-
-      if (event === "PASSWORD_RECOVERY") {
-        handleRecoverySession();
-        return;
-      }
-
-      if (currentFlow === FLOW_SIGNUP_COMPLETE && session) {
-        handleSignupCompletedSession();
-        return;
-      }
-
-      if (!session) return;
-      if (currentFlow === FLOW_RECOVERY) {
-        handleRecoverySession();
-        return;
-      }
-      if (suppressAutoRedirect || redirectIfLoggedIn._scheduled) return;
-      redirectIfLoggedIn._scheduled = true;
-      location.replace(next);
-    });
-
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (currentFlow === FLOW_RECOVERY && session) {
-      handleRecoverySession();
+  $("resultTable").addEventListener("click", e => {
+    const btn = e.target.closest("[data-action='delete']");
+    if (btn) {
+      deleteRow(btn.dataset.row);
       return;
     }
 
-    if (currentFlow === FLOW_SIGNUP_COMPLETE && session) {
-      handleSignupCompletedSession();
-      return;
-    }
+    const td = e.target.closest("td.editable");
+    if (!td) return;
 
-    await redirectIfLoggedIn();
-  })();
+    startEditCell(td);
+  });
+
+  $("resultTable").addEventListener("keydown", e => {
+    const td = e.target.closest("td.editable");
+    if (!td) return;
+
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      startEditCell(td);
+    }
+  });
+
+  ["yearFilter", "waveFilter", "g1Filter", "g2Filter"].forEach(id => {
+    $(id).addEventListener("change", () => {
+      if (rawRows.length > 0) run(loadData);
+      else renderTable();
+    });
+  });
+
+  $("campFilter").addEventListener("keydown", e => {
+    if (e.key === "Enter") run(loadData);
+  });
+
+  try {
+    initSupabase();
+
+    run(async () => {
+      await checkSession();
+      initDefaultRows();
+      renderPresetOptions();
+
+      document.documentElement.style.visibility = "visible";
+      setStatus("기본 4행이 준비되었습니다. Camp / 주야간 선택 후 Route를 입력하고 조회하거나 프리셋을 불러오세요.", "ok");
+    });
+  } catch (e) {
+    document.documentElement.style.visibility = "visible";
+    handleError(e);
+  }
 })();
 </script>
+
+<script src="/board-menu.js"></script>
 </body>
 </html>

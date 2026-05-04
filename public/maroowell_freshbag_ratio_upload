@@ -407,7 +407,7 @@
           <div class="muted" style="margin-top:12px">
             지원 형식:<br>
             1) <b>date / wave / camp / route / gajoong1 / gajoong2</b> 컬럼이 있는 일반 표<br>
-            2) <b>Wave / Camp / Route</b> 뒤로 날짜별 <b>가중1 / 가중2</b>가 옆으로 이어지는 표<br><br>
+            2) <b>Title + 날짜</b> 블록이 옆으로 반복되고, 각 블록이 <b>Wave / Camp / Route / 가중요인1% / 해당여부 / 가중요인2% / 해당여부</b> 형태인 표<br><br>
             퍼센트는 <b>92%</b>, <b>92.1</b>, <b>0.921</b> 모두 인식합니다. DB에는 <b>92.10</b>처럼 숫자로 저장됩니다.
           </div>
         </div>
@@ -644,18 +644,45 @@
     return null;
   }
 
+  function parseBlockDateFromTitle(value, defaultYear = null) {
+    const s = clean(value);
+    if (!s) return null;
+
+    const fullDates = Array.from(
+      s.matchAll(/(20\d{2})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/g)
+    );
+
+    if (fullDates.length) {
+      const last = fullDates[fullDates.length - 1];
+      return `${last[1]}-${String(Number(last[2])).padStart(2, "0")}-${String(Number(last[3])).padStart(2, "0")}`;
+    }
+
+    const shortDates = Array.from(
+      s.matchAll(/(\d{1,2})[.\-/월\s]+(\d{1,2})/g)
+    );
+
+    if (shortDates.length && defaultYear) {
+      const last = shortDates[shortDates.length - 1];
+      return `${defaultYear}-${String(Number(last[1])).padStart(2, "0")}-${String(Number(last[2])).padStart(2, "0")}`;
+    }
+
+    return parseDateValue(s, defaultYear);
+  }
+
   function parsePercentValue(v) {
     if (v === null || v === undefined || v === "") return null;
 
     if (typeof v === "number") {
       if (!Number.isFinite(v)) return null;
       const val = v > 0 && v <= 1 ? v * 100 : v;
-      if (val < 0 || val > 100) throw new Error(`퍼센트 범위를 벗어났습니다: ${v}`);
+      if (val < 0 || val > 150) throw new Error(`퍼센트 범위를 벗어났습니다: ${v}`);
       return Math.round(val * 100) / 100;
     }
 
     const raw = clean(v);
     if (!raw) return null;
+
+    if (raw === "해당" || raw === "미해당" || raw.includes("해당")) return null;
 
     const hasPercent = raw.includes("%");
 
@@ -671,11 +698,33 @@
 
     const val = !hasPercent && n > 0 && n <= 1 ? n * 100 : n;
 
-    if (val < 0 || val > 100) {
+    if (val < 0 || val > 150) {
       throw new Error(`퍼센트 범위를 벗어났습니다: ${raw}`);
     }
 
     return Math.round(val * 100) / 100;
+  }
+
+  function isPercentLikeValue(v) {
+    try {
+      return parsePercentValue(v) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  function scorePercentColumn(rows, colIndex, startRow, maxScan = 40) {
+    let score = 0;
+
+    for (let r = startRow; r < Math.min(rows.length, startRow + maxScan); r++) {
+      const row = rows[r] || [];
+
+      if (isPercentLikeValue(row[colIndex])) {
+        score++;
+      }
+    }
+
+    return score;
   }
 
   function parseWhich(v) {
@@ -787,7 +836,128 @@
     return count >= 2;
   }
 
+  function findDateNearBlock(rows, headerRowIndex, startCol, endCol) {
+    const defaultYear = Number($("yearSelect").value);
+
+    for (let r = Math.max(0, headerRowIndex - 4); r <= headerRowIndex; r++) {
+      const row = rows[r] || [];
+
+      for (let c = startCol; c <= endCol; c++) {
+        const date = parseBlockDateFromTitle(row[c], defaultYear);
+        if (date) return date;
+      }
+    }
+
+    return null;
+  }
+
+  function findRepeatedWideBlocks(rows, header) {
+    const headerRow = rows[header.rowIndex] || [];
+    const keys = headerRow.map(headerKey);
+    const waveColumns = [];
+
+    for (let c = 0; c < keys.length; c++) {
+      const key = keys[c];
+
+      if (
+        key === "wave" ||
+        key.includes("wave") ||
+        key.includes("웨이브") ||
+        key.includes("주야간")
+      ) {
+        waveColumns.push(c);
+      }
+    }
+
+    const blocks = [];
+
+    for (const waveIdx of waveColumns) {
+      const searchEnd = Math.min(keys.length - 1, waveIdx + 12);
+
+      let campIdx = -1;
+      let routeIdx = -1;
+
+      for (let c = waveIdx + 1; c <= searchEnd; c++) {
+        if (
+          campIdx < 0 &&
+          (keys[c] === "camp" || keys[c].includes("camp") || keys[c].includes("캠프"))
+        ) {
+          campIdx = c;
+        }
+
+        if (
+          routeIdx < 0 &&
+          (keys[c] === "route" || keys[c].includes("route") || keys[c].includes("라우트") || keys[c].includes("노선"))
+        ) {
+          routeIdx = c;
+        }
+      }
+
+      if (campIdx < 0 || routeIdx < 0) continue;
+
+      const nextWaveIdx = waveColumns.find(c => c > waveIdx) || keys.length;
+      const blockEnd = nextWaveIdx - 1;
+      const date = findDateNearBlock(rows, header.rowIndex, waveIdx, blockEnd);
+
+      if (!date) continue;
+
+      const g1Candidates = [];
+      const g2Candidates = [];
+
+      for (let c = routeIdx + 1; c <= blockEnd; c++) {
+        const which = parseWhich(headerRow[c]);
+
+        if (which === 1) g1Candidates.push(c);
+        if (which === 2) g2Candidates.push(c);
+      }
+
+      const dataStart = header.rowIndex + 1;
+
+      const pickBestPercentColumn = (candidates) => {
+        if (!candidates.length) return -1;
+
+        const scored = candidates
+          .map(colIndex => ({
+            colIndex,
+            score: scorePercentColumn(rows, colIndex, dataStart)
+          }))
+          .sort((a, b) => b.score - a.score);
+
+        if (!scored.length) return -1;
+
+        return scored[0].colIndex;
+      };
+
+      const g1Idx = pickBestPercentColumn(g1Candidates);
+      const g2Idx = pickBestPercentColumn(g2Candidates);
+
+      if (g1Idx < 0 && g2Idx < 0) continue;
+
+      blocks.push({
+        date,
+        waveIdx,
+        campIdx,
+        routeIdx,
+        g1Idx,
+        g2Idx,
+        blockStart: waveIdx,
+        blockEnd
+      });
+    }
+
+    return {
+      dataStart: header.rowIndex + 1,
+      columns: blocks
+    };
+  }
+
   function findWideDateColumns(rows, header) {
+    const repeated = findRepeatedWideBlocks(rows, header);
+
+    if (repeated.columns.length) {
+      return repeated;
+    }
+
     const defaultYear = Number($("yearSelect").value);
     const dateRows = [];
 
@@ -858,8 +1028,23 @@
 
       const item = grouped.get(key);
 
-      if (col.which === 1) item.g1Idx = col.colIndex;
-      if (col.which === 2) item.g2Idx = col.colIndex;
+      if (col.which === 1) {
+        if (
+          item.g1Idx < 0 ||
+          scorePercentColumn(rows, col.colIndex, dataStart) > scorePercentColumn(rows, item.g1Idx, dataStart)
+        ) {
+          item.g1Idx = col.colIndex;
+        }
+      }
+
+      if (col.which === 2) {
+        if (
+          item.g2Idx < 0 ||
+          scorePercentColumn(rows, col.colIndex, dataStart) > scorePercentColumn(rows, item.g2Idx, dataStart)
+        ) {
+          item.g2Idx = col.colIndex;
+        }
+      }
     }
 
     return {
@@ -927,28 +1112,56 @@
 
   function parseWideRows(rows, header, wideInfo) {
     const out = [];
+    let skippedEmptyCount = 0;
+    let skippedInvalidCount = 0;
+    const invalidSamples = [];
 
     for (let r = wideInfo.dataStart; r < rows.length; r++) {
       const row = rows[r] || [];
 
-      const wave = clean(row[header.waveIdx]);
-      const camp = clean(row[header.campIdx]);
-      const route = clean(row[header.routeIdx]);
-      const routeNorm = normalizeRoute(route);
+      for (const block of wideInfo.columns) {
+        const wave = clean(row[block.waveIdx ?? header.waveIdx]);
+        const camp = clean(row[block.campIdx ?? header.campIdx]);
+        const route = clean(row[block.routeIdx ?? header.routeIdx]);
+        const routeNorm = normalizeRoute(route);
 
-      if (!wave || !camp || !routeNorm) continue;
+        if (!wave || !camp || !routeNorm) continue;
 
-      for (const col of wideInfo.columns) {
-        const rawG1 = col.g1Idx >= 0 ? row[col.g1Idx] : "";
-        const rawG2 = col.g2Idx >= 0 ? row[col.g2Idx] : "";
+        const rawG1 = block.g1Idx >= 0 ? row[block.g1Idx] : "";
+        const rawG2 = block.g2Idx >= 0 ? row[block.g2Idx] : "";
 
-        const g1 = parsePercentValue(rawG1);
-        const g2 = parsePercentValue(rawG2);
+        let g1 = null;
+        let g2 = null;
 
-        if (g1 === null && g2 === null) continue;
+        try {
+          g1 = parsePercentValue(rawG1);
+          g2 = parsePercentValue(rawG2);
+        } catch (e) {
+          skippedInvalidCount++;
+
+          if (invalidSamples.length < 10) {
+            invalidSamples.push({
+              row: r + 1,
+              date: block.date,
+              wave,
+              camp,
+              route: routeNorm,
+              rawG1: clean(rawG1),
+              rawG2: clean(rawG2),
+              error: e.message || String(e)
+            });
+          }
+
+          continue;
+        }
+
+        if (g1 === null && g2 === null) {
+          skippedEmptyCount++;
+          continue;
+        }
 
         out.push({
-          date: col.date,
+          date: block.date,
           wave,
           camp,
           route: routeNorm,
@@ -958,6 +1171,12 @@
         });
       }
     }
+
+    parseWideRows.lastSkipped = {
+      skippedEmptyCount,
+      skippedInvalidCount,
+      invalidSamples
+    };
 
     return out;
   }
@@ -987,6 +1206,8 @@
   }
 
   function parseRows(rows) {
+    parseWideRows.lastSkipped = null;
+
     const longHeader = findLongHeader(rows);
 
     if (longHeader) {
@@ -1020,6 +1241,15 @@
       dataStartRow: wideInfo.dataStart + 1,
       dateColumns: wideInfo.columns.length,
       dates: wideInfo.columns.map(item => item.date),
+      blocks: wideInfo.columns.map(item => ({
+        date: item.date,
+        waveIdx: item.waveIdx,
+        campIdx: item.campIdx,
+        routeIdx: item.routeIdx,
+        g1Idx: item.g1Idx,
+        g2Idx: item.g2Idx
+      })),
+      skipped: parseWideRows.lastSkipped || null,
       rows: dedupeRows(parsed)
     };
   }
@@ -1094,10 +1324,17 @@
       headerRow: result.headerRow,
       dataStartRow: result.dataStartRow || result.headerRow + 1,
       dateColumns: result.dateColumns,
+      blocks: result.blocks || [],
+      skipped: result.skipped || null,
       extractedRows: parsedRows.length,
-      dates: Array.from(new Set(parsedRows.map(row => row.date))).slice(0, 30),
-      sample: parsedRows.slice(0, 10)
+      dates: Array.from(new Set(parsedRows.map(row => row.date))).slice(0, 50),
+      sample: parsedRows.slice(0, 20)
     });
+
+    if (parsedRows.length === 0) {
+      setStatus("날짜 블록은 찾았지만 추출된 회수율이 없습니다. 로그의 blocks/g1Idx/g2Idx를 확인하세요.", "bad");
+      return;
+    }
 
     setStatus(`분석 완료: ${parsedRows.length.toLocaleString()}건 추출`, "ok");
   }

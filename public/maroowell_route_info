@@ -383,20 +383,7 @@
     }
 
     .mapHint{
-      position:absolute;
-      left:12px;
-      top:12px;
-      z-index:20;
-      max-width:760px;
-      border:1px solid rgba(255,255,255,.14);
-      background:rgba(0,0,0,.58);
-      color:#fff;
-      border-radius:12px;
-      padding:9px 11px;
-      font-size:12px;
-      line-height:1.5;
-      backdrop-filter:blur(6px);
-      pointer-events:none;
+      display:none !important;
     }
 
     .drawStatus{
@@ -734,8 +721,6 @@
         width:auto;
         max-height:45vh;
       }
-
-      .mapHint{top:calc(46vh + 24px)}
     }
   </style>
 </head>
@@ -794,11 +779,7 @@
 
   <main class="mapPane">
     <div id="map"></div>
-
-    <div class="mapHint" id="mapHint">
-      그리기/수정 중에는 지도나 기존 폴리곤 위를 클릭해 점을 추가합니다. 점은 드래그로 이동하고, 우클릭하면 삭제됩니다.
-    </div>
-
+    <div class="mapHint" id="mapHint"></div>
     <div class="drawStatus" id="drawStatus">폴리곤 편집 모드</div>
 
     <div class="mapControls">
@@ -1300,8 +1281,10 @@
           }
         });
 
-        kakao.maps.event.addListener(map, "rightclick", () => {
-          if (drawMode) run(saveDrawPolygon);
+        kakao.maps.event.addListener(map, "rightclick", e => {
+          if (drawMode) {
+            deleteNearestDrawVertex(e.latLng);
+          }
         });
 
         resolve();
@@ -1526,6 +1509,12 @@
           selectRouteByCode(polyRow.camp, code);
         });
 
+        kakao.maps.event.addListener(polygon, "rightclick", mouseEvent => {
+          if (drawMode) {
+            deleteNearestDrawVertex(mouseEvent.latLng);
+          }
+        });
+
         polygonObjects.push(polygon);
 
         const center = ringCenter(ring);
@@ -1599,11 +1588,58 @@
     }
   }
 
+  function deleteDrawVertexAt(index) {
+    if (!drawMode) return;
+    if (index < 0 || index >= drawVertices.length) return;
+
+    if (drawVertices.length <= 3) {
+      setStatus("폴리곤은 최소 3개 점이 필요해서 더 지울 수 없습니다.", "bad");
+      return;
+    }
+
+    drawVertices.splice(index, 1);
+    renderDrawPreview();
+  }
+
+  function deleteNearestDrawVertex(latLng) {
+    if (!drawMode || !latLng || !drawVertices.length) return;
+
+    if (!map || !map.getProjection) {
+      setStatus("지도 좌표 계산을 할 수 없습니다.", "bad");
+      return;
+    }
+
+    const projection = map.getProjection();
+    const clickPoint = projection.containerPointFromCoords(latLng);
+
+    let nearestIndex = -1;
+    let nearestDistance = Infinity;
+
+    drawVertices.forEach((vertex, index) => {
+      const vertexPoint = projection.containerPointFromCoords(vertex);
+      const dx = Number(vertexPoint.x) - Number(clickPoint.x);
+      const dy = Number(vertexPoint.y) - Number(clickPoint.y);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+
+    if (nearestIndex < 0 || nearestDistance > 28) {
+      setStatus("삭제할 점 가까이에서 우클릭하세요.", "warn");
+      return;
+    }
+
+    deleteDrawVertexAt(nearestIndex);
+  }
+
   function renderDrawPreview() {
     clearDrawObjects();
 
     if (!drawVertices.length) {
-      setDrawStatus("그리기: 지도 클릭 첫추가 · Enter 완료 · Backspace 마지막 점 취소 · ESC 취소", true);
+      setDrawStatus("그리기: 지도 클릭 첫추가 · Enter/그리기 저장 버튼 저장 · Backspace 마지막 점 취소 · ESC 취소", true);
       return;
     }
 
@@ -1624,13 +1660,7 @@
       });
 
       kakao.maps.event.addListener(marker, "rightclick", () => {
-        if (drawVertices.length <= 3) {
-          setStatus("폴리곤은 최소 3개 점이 필요해서 더 지울 수 없습니다.", "bad");
-          return;
-        }
-
-        drawVertices.splice(index, 1);
-        renderDrawPreview();
+        deleteDrawVertexAt(index);
       });
 
       drawVertexMarkers.push(marker);
@@ -1664,6 +1694,10 @@
       kakao.maps.event.addListener(drawPreviewPolygon, "click", mouseEvent => {
         if (drawMode) addDrawVertex(mouseEvent.latLng);
       });
+
+      kakao.maps.event.addListener(drawPreviewPolygon, "rightclick", mouseEvent => {
+        if (drawMode) deleteNearestDrawVertex(mouseEvent.latLng);
+      });
     }
 
     const modeText = drawEditingPolygonId
@@ -1673,7 +1707,7 @@
         : "구역 추가";
 
     setDrawStatus(
-      `${modeText}: 지도 클릭 점추가 · 점 드래그 이동 · 점 우클릭 삭제 · Enter/우클릭 저장 · Backspace 마지막 점 취소 · ESC 취소`,
+      `${modeText}: 지도 클릭 점추가 · 점 드래그 이동 · 점 우클릭 삭제 · Enter/그리기 저장 버튼 저장 · Backspace 마지막 점 취소 · ESC 취소`,
       true
     );
   }
@@ -1720,7 +1754,7 @@
 
     const modeText = drawReplaceExisting ? "새로 그리기" : "구역 추가";
     setStatus(`${modeText} 모드입니다. 지도 또는 기존 폴리곤 위에서 꼭짓점을 순서대로 클릭하세요.`, "warn");
-    setDrawStatus(`${modeText}: 지도 클릭 첫추가 · Enter 완료 · Backspace 마지막 점 취소 · ESC 취소`, true);
+    setDrawStatus(`${modeText}: 지도 클릭 첫추가 · Enter/그리기 저장 버튼 저장 · Backspace 마지막 점 취소 · ESC 취소`, true);
   }
 
   function startEditPolygonMode() {
@@ -1779,6 +1813,8 @@
       setStatus("폴리곤 편집 모드가 아닙니다.", "bad");
       return;
     }
+
+    if (!drawVertices.length) return;
 
     drawVertices.pop();
     renderDrawPreview();
@@ -2583,7 +2619,7 @@
       map.panTo(new kakao.maps.LatLng(lat, lng));
     }
 
-    run(() => loadAttachments(point.id));
+    run(() => loadAttachments(point.id, true));
   }
 
   function fillPointForm(point) {
@@ -2660,6 +2696,8 @@
     const payload = collectPointPayload();
     let saved;
 
+    setPointStatus("포인트 저장 중...", "warn");
+
     if (selectedPoint?.id) {
       const { data, error } = await supabaseClient
         .from(TABLE_POINT)
@@ -2688,7 +2726,14 @@
     fillPointForm(saved);
     renderMapFeatures();
     renderCounts();
-    await loadAttachments(saved.id);
+
+    try {
+      await loadAttachments(saved.id, false);
+    } catch (e) {
+      console.warn("attachment load skipped:", e);
+      clearAttachmentsState();
+    }
+
     setPointStatus("포인트 저장 완료", "ok");
   }
 
@@ -2786,7 +2831,11 @@
   }
 
   function attachmentPathOf(row) {
-    return row?.storage_path || row?.file_url || "";
+    return row?.file_url || "";
+  }
+
+  function isHttpUrl(value) {
+    return /^https?:\/\//i.test(String(value || ""));
   }
 
   function clearAttachmentsState() {
@@ -2805,7 +2854,30 @@
     return `${base}.${ext}`;
   }
 
-  async function loadAttachments(pointId) {
+  async function signAttachmentUrls() {
+    attachmentSignedUrls = new Map();
+
+    for (const row of attachmentRows) {
+      const path = attachmentPathOf(row);
+      if (!path) continue;
+
+      if (isHttpUrl(path)) {
+        attachmentSignedUrls.set(row.id, path);
+        continue;
+      }
+
+      const { data: signed, error: signError } = await supabaseClient
+        .storage
+        .from(ATTACHMENT_BUCKET)
+        .createSignedUrl(path, 60 * 60);
+
+      if (!signError && signed?.signedUrl) {
+        attachmentSignedUrls.set(row.id, signed.signedUrl);
+      }
+    }
+  }
+
+  async function loadAttachments(pointId, showErrors = true) {
     attachmentRows = [];
     attachmentSignedUrls = new Map();
 
@@ -2820,14 +2892,11 @@
         id,
         point_id,
         file_url,
-        storage_bucket,
-        storage_path,
         file_name,
         file_type,
         file_size,
         caption,
         sort_order,
-        created_by,
         created_at,
         is_active
       `)
@@ -2836,24 +2905,20 @@
       .order("sort_order", { ascending:true })
       .order("created_at", { ascending:true });
 
-    if (error) throw error;
+    if (error) {
+      attachmentRows = [];
+      renderAttachments();
 
-    attachmentRows = data || [];
-
-    for (const row of attachmentRows) {
-      const path = attachmentPathOf(row);
-      if (!path) continue;
-
-      const { data: signed, error: signError } = await supabaseClient
-        .storage
-        .from(row.storage_bucket || ATTACHMENT_BUCKET)
-        .createSignedUrl(path, 60 * 60);
-
-      if (!signError && signed?.signedUrl) {
-        attachmentSignedUrls.set(row.id, signed.signedUrl);
+      if (showErrors) {
+        throw error;
       }
+
+      console.warn("attachment query skipped:", error);
+      return;
     }
 
+    attachmentRows = data || [];
+    await signAttachmentUrls();
     renderAttachments();
   }
 
@@ -2923,8 +2988,6 @@
 
       const payload = {
         point_id: selectedPoint.id,
-        storage_bucket: ATTACHMENT_BUCKET,
-        storage_path: path,
         file_url: path,
         file_name: file.name,
         file_type: file.type,
@@ -2946,7 +3009,7 @@
     $("attachmentFileInput").value = "";
     $("attachmentCaptionInput").value = "";
 
-    await loadAttachments(selectedPoint.id);
+    await loadAttachments(selectedPoint.id, true);
     setAttachmentStatus(`이미지 업로드 완료: ${uploaded}장`, "ok");
   }
 
@@ -2959,10 +3022,10 @@
 
     const path = attachmentPathOf(row);
 
-    if (path) {
+    if (path && !isHttpUrl(path)) {
       await supabaseClient
         .storage
-        .from(row.storage_bucket || ATTACHMENT_BUCKET)
+        .from(ATTACHMENT_BUCKET)
         .remove([path]);
     }
 
@@ -2973,7 +3036,7 @@
 
     if (error) throw error;
 
-    await loadAttachments(selectedPoint?.id);
+    await loadAttachments(selectedPoint?.id, true);
     setAttachmentStatus("이미지 삭제 완료", "ok");
   }
 

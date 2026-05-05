@@ -184,6 +184,11 @@
       padding:0 12px;
     }
 
+    input[type=file]{
+      height:auto;
+      padding:10px;
+    }
+
     textarea{
       min-height:78px;
       padding:10px 12px;
@@ -553,6 +558,62 @@
       white-space:pre-wrap;
     }
 
+    .attachmentGrid{
+      display:grid;
+      grid-template-columns:repeat(2, minmax(0, 1fr));
+      gap:8px;
+      margin-top:10px;
+    }
+
+    .attachmentCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:14px;
+      overflow:hidden;
+    }
+
+    .attachmentThumb{
+      display:block;
+      width:100%;
+      height:120px;
+      object-fit:cover;
+      background:#020617;
+      cursor:pointer;
+    }
+
+    .attachmentMeta{
+      padding:8px;
+    }
+
+    .attachmentName{
+      font-size:12px;
+      font-weight:900;
+      color:#e6eefc;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .attachmentCaption{
+      margin-top:4px;
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.35;
+      white-space:pre-wrap;
+    }
+
+    .attachmentActions{
+      display:flex;
+      gap:6px;
+      padding:0 8px 8px;
+    }
+
+    .attachmentActions button{
+      min-height:30px;
+      padding:0 10px;
+      font-size:11px;
+    }
+
     .modal{
       position:fixed;
       inset:0;
@@ -605,6 +666,23 @@
       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
       font-size:12px;
       white-space:pre;
+    }
+
+    #imagePreviewImg{
+      display:block;
+      max-width:100%;
+      max-height:72vh;
+      margin:0 auto;
+      border-radius:14px;
+      background:#020617;
+    }
+
+    #imagePreviewCaption{
+      margin-top:10px;
+      color:#dbeafe;
+      font-size:13px;
+      line-height:1.55;
+      white-space:pre-wrap;
     }
 
     .accessDenied{
@@ -927,6 +1005,31 @@
 
       <div class="status" id="pointStatusText"></div>
     </div>
+
+    <div class="card">
+      <div class="cardTitle">
+        <span>이미지 / 사진</span>
+        <small id="attachmentCount">0장</small>
+      </div>
+
+      <div class="field">
+        <label>이미지 파일</label>
+        <input id="attachmentFileInput" type="file" accept="image/*" multiple />
+      </div>
+
+      <div class="field">
+        <label>캡션</label>
+        <input id="attachmentCaptionInput" placeholder="예: 후문 입구, 공동현관 위치" />
+      </div>
+
+      <div class="row">
+        <button id="uploadAttachmentBtn" class="ok">이미지 업로드</button>
+        <button id="clearAttachmentBtn" class="secondary">선택 해제</button>
+      </div>
+
+      <div id="attachmentStatusText" class="status"></div>
+      <div id="attachmentList" class="attachmentGrid"></div>
+    </div>
   </aside>
 </div>
 
@@ -947,6 +1050,19 @@
         <button id="pasteClearBtn" class="secondary">내용 비우기</button>
       </div>
       <div id="pasteStatusText" class="status"></div>
+    </div>
+  </div>
+</div>
+
+<div id="imageModal" class="modal">
+  <div class="modalCard">
+    <div class="modalTop">
+      <div class="modalTitle">이미지 보기</div>
+      <button id="imageModalCloseBtn" class="danger">닫기</button>
+    </div>
+    <div class="modalBody">
+      <img id="imagePreviewImg" src="" alt="preview" />
+      <div id="imagePreviewCaption"></div>
     </div>
   </div>
 </div>
@@ -973,6 +1089,8 @@
   const TABLE_ROUTE = "maroowell_route_info";
   const TABLE_POLYGON = "maroowell_sub_sub_route";
   const TABLE_POINT = "maroowell_route_delivery_points";
+  const TABLE_ATTACHMENT = "maroowell_route_point_attachments";
+  const ATTACHMENT_BUCKET = "maroowell-route-point-images";
 
   let supabaseClient = null;
   let currentUser = null;
@@ -986,6 +1104,8 @@
   let routeRows = [];
   let polygonRows = [];
   let pointRows = [];
+  let attachmentRows = [];
+  let attachmentSignedUrls = new Map();
 
   let selectedRoute = null;
   let selectedPoint = null;
@@ -1012,6 +1132,11 @@
   function setPointStatus(msg, type = "") {
     $("pointStatusText").textContent = msg || "";
     $("pointStatusText").className = type ? "status " + type : "status";
+  }
+
+  function setAttachmentStatus(msg, type = "") {
+    $("attachmentStatusText").textContent = msg || "";
+    $("attachmentStatusText").className = type ? "status " + type : "status";
   }
 
   function setDrawStatus(msg, show = false) {
@@ -1554,6 +1679,13 @@
     setStatus("폴리곤 그리기를 취소했습니다.", "ok");
   }
 
+  function cancelDrawModeSilently() {
+    drawMode = false;
+    drawVertices = [];
+    clearDrawObjects();
+    setDrawStatus("", false);
+  }
+
   function buildGeoJsonPolygon(vertices) {
     const ring = vertices.map(latLng => [
       Number(latLng.getLng().toFixed(8)),
@@ -1775,6 +1907,7 @@
     selectedPoint = null;
 
     cancelDrawModeSilently();
+    clearAttachmentsState();
     renderRouteList();
     renderPointList();
     clearRouteDetail();
@@ -1783,13 +1916,6 @@
     renderCounts();
 
     setStatus("조회 완료", "ok");
-  }
-
-  function cancelDrawModeSilently() {
-    drawMode = false;
-    drawVertices = [];
-    clearDrawObjects();
-    setDrawStatus("", false);
   }
 
   function renderCounts() {
@@ -1877,6 +2003,7 @@
     selectedPoint = null;
 
     cancelDrawModeSilently();
+    clearAttachmentsState();
     renderRouteList();
     renderRouteDetail(row);
     renderPointList();
@@ -2014,6 +2141,7 @@
       is_active: true
     };
 
+    clearAttachmentsState();
     fillPointForm(selectedPoint);
     renderPointList();
     renderMapFeatures();
@@ -2036,7 +2164,13 @@
     cancelDrawModeSilently();
     fillPointForm(point);
     renderRouteList();
-    renderRouteDetail(selectedRoute);
+
+    if (selectedRoute) {
+      renderRouteDetail(selectedRoute);
+    } else {
+      clearRouteDetail();
+    }
+
     renderPointList();
     renderMapFeatures();
 
@@ -2046,6 +2180,8 @@
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
       map.panTo(new kakao.maps.LatLng(lat, lng));
     }
+
+    run(() => loadAttachments(point.id));
   }
 
   function fillPointForm(point) {
@@ -2155,6 +2291,8 @@
     renderMapFeatures();
     renderCounts();
 
+    await loadAttachments(saved.id);
+
     setPointStatus("포인트 저장 완료", "ok");
   }
 
@@ -2184,6 +2322,7 @@
     selectedPoint = null;
 
     fillPointForm(null);
+    clearAttachmentsState();
     renderPointList();
     renderMapFeatures();
     renderCounts();
@@ -2206,6 +2345,7 @@
       };
     }
 
+    clearAttachmentsState();
     fillPointForm(selectedPoint);
     renderPointList();
     renderMapFeatures();
@@ -2252,6 +2392,218 @@
     }
 
     if (latlngs.length) setMapBoundsByLatLngs(latlngs);
+  }
+
+  function attachmentPathOf(row) {
+    return row?.storage_path || row?.file_url || "";
+  }
+
+  function clearAttachmentsState() {
+    attachmentRows = [];
+    attachmentSignedUrls = new Map();
+    $("attachmentFileInput").value = "";
+    $("attachmentCaptionInput").value = "";
+    setAttachmentStatus("");
+    renderAttachments();
+  }
+
+  function safeFileName(name) {
+    const raw = String(name || "image");
+    const ext = raw.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    const base = raw.replace(/\.[^.]+$/, "").replace(/[^\w가-힣.-]+/g, "_").slice(0, 60) || "image";
+    return `${base}.${ext}`;
+  }
+
+  async function loadAttachments(pointId) {
+    attachmentRows = [];
+    attachmentSignedUrls = new Map();
+
+    if (!pointId) {
+      renderAttachments();
+      return;
+    }
+
+    const { data, error } = await supabaseClient
+      .from(TABLE_ATTACHMENT)
+      .select(`
+        id,
+        point_id,
+        file_url,
+        storage_bucket,
+        storage_path,
+        file_name,
+        file_type,
+        file_size,
+        caption,
+        sort_order,
+        created_by,
+        created_at,
+        is_active
+      `)
+      .eq("point_id", pointId)
+      .eq("is_active", true)
+      .order("sort_order", { ascending:true })
+      .order("created_at", { ascending:true });
+
+    if (error) throw error;
+
+    attachmentRows = data || [];
+
+    for (const row of attachmentRows) {
+      const path = attachmentPathOf(row);
+      if (!path) continue;
+
+      const { data: signed, error: signError } = await supabaseClient
+        .storage
+        .from(row.storage_bucket || ATTACHMENT_BUCKET)
+        .createSignedUrl(path, 60 * 60);
+
+      if (!signError && signed?.signedUrl) {
+        attachmentSignedUrls.set(row.id, signed.signedUrl);
+      }
+    }
+
+    renderAttachments();
+  }
+
+  function renderAttachments() {
+    $("attachmentCount").textContent = `${attachmentRows.length.toLocaleString()}장`;
+
+    if (!attachmentRows.length) {
+      $("attachmentList").innerHTML = `<div class="detailEmpty" style="grid-column:1/-1">첨부 이미지가 없습니다.</div>`;
+      return;
+    }
+
+    $("attachmentList").innerHTML = attachmentRows.map(row => {
+      const url = attachmentSignedUrls.get(row.id) || "";
+      const name = row.file_name || "image";
+      const caption = row.caption || "";
+
+      return `
+        <div class="attachmentCard" data-attachment-id="${esc(row.id)}">
+          ${url ? `<img class="attachmentThumb" src="${esc(url)}" alt="${esc(name)}" data-action="open-attachment" data-url="${esc(url)}" data-caption="${esc(caption)}">` : `<div class="attachmentThumb"></div>`}
+          <div class="attachmentMeta">
+            <div class="attachmentName">${esc(name)}</div>
+            <div class="attachmentCaption">${esc(caption)}</div>
+          </div>
+          <div class="attachmentActions">
+            <button type="button" class="secondary" data-action="open-attachment" data-url="${esc(url)}" data-caption="${esc(caption)}">보기</button>
+            <button type="button" class="danger" data-action="delete-attachment" data-id="${esc(row.id)}">삭제</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  async function uploadAttachments() {
+    if (!selectedPoint?.id) {
+      setAttachmentStatus("먼저 포인트를 저장하거나 선택하세요.", "bad");
+      return;
+    }
+
+    const files = Array.from($("attachmentFileInput").files || []);
+
+    if (!files.length) {
+      setAttachmentStatus("업로드할 이미지를 선택하세요.", "bad");
+      return;
+    }
+
+    const caption = clean($("attachmentCaptionInput").value);
+    let uploaded = 0;
+
+    setAttachmentStatus("이미지 업로드 중...", "warn");
+
+    for (const file of files) {
+      if (!file.type.startsWith("image/")) {
+        continue;
+      }
+
+      const fileName = safeFileName(file.name);
+      const path = `${selectedPoint.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${fileName}`;
+
+      const { error: uploadError } = await supabaseClient
+        .storage
+        .from(ATTACHMENT_BUCKET)
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || "image/jpeg"
+        });
+
+      if (uploadError) throw uploadError;
+
+      const payload = {
+        point_id: selectedPoint.id,
+        storage_bucket: ATTACHMENT_BUCKET,
+        storage_path: path,
+        file_url: path,
+        file_name: file.name,
+        file_type: file.type,
+        file_size: file.size,
+        caption: caption || null,
+        sort_order: attachmentRows.length + uploaded,
+        is_active: true
+      };
+
+      const { error: insertError } = await supabaseClient
+        .from(TABLE_ATTACHMENT)
+        .insert(payload);
+
+      if (insertError) throw insertError;
+
+      uploaded++;
+    }
+
+    $("attachmentFileInput").value = "";
+    $("attachmentCaptionInput").value = "";
+
+    await loadAttachments(selectedPoint.id);
+
+    setAttachmentStatus(`이미지 업로드 완료: ${uploaded}장`, "ok");
+  }
+
+  async function deleteAttachment(id) {
+    const row = attachmentRows.find(item => item.id === id);
+
+    if (!row) return;
+
+    const ok = confirm("이 이미지를 삭제할까요?");
+
+    if (!ok) return;
+
+    const path = attachmentPathOf(row);
+
+    if (path) {
+      await supabaseClient
+        .storage
+        .from(row.storage_bucket || ATTACHMENT_BUCKET)
+        .remove([path]);
+    }
+
+    const { error } = await supabaseClient
+      .from(TABLE_ATTACHMENT)
+      .delete()
+      .eq("id", id);
+
+    if (error) throw error;
+
+    await loadAttachments(selectedPoint?.id);
+
+    setAttachmentStatus("이미지 삭제 완료", "ok");
+  }
+
+  function openImagePreview(url, caption) {
+    if (!url) return;
+
+    $("imagePreviewImg").src = url;
+    $("imagePreviewCaption").textContent = caption || "";
+    $("imageModal").classList.add("show");
+  }
+
+  function closeImagePreview() {
+    $("imageModal").classList.remove("show");
+    $("imagePreviewImg").src = "";
+    $("imagePreviewCaption").textContent = "";
   }
 
   function openPasteModal() {
@@ -2441,6 +2793,26 @@
     $("newPointBtn").addEventListener("click", resetPointForm);
     $("softDeletePointBtn").addEventListener("click", () => run(softDeletePoint));
 
+    $("uploadAttachmentBtn").addEventListener("click", () => run(uploadAttachments));
+    $("clearAttachmentBtn").addEventListener("click", () => {
+      $("attachmentFileInput").value = "";
+      $("attachmentCaptionInput").value = "";
+      setAttachmentStatus("선택 해제 완료", "ok");
+    });
+
+    $("attachmentList").addEventListener("click", e => {
+      const openBtn = e.target.closest("[data-action='open-attachment']");
+      if (openBtn) {
+        openImagePreview(openBtn.dataset.url, openBtn.dataset.caption);
+        return;
+      }
+
+      const deleteBtn = e.target.closest("[data-action='delete-attachment']");
+      if (deleteBtn) {
+        run(() => deleteAttachment(deleteBtn.dataset.id));
+      }
+    });
+
     $("addPointModeBtn").addEventListener("click", toggleAddPointMode);
     $("toggleMapTypeBtn").addEventListener("click", setMapType);
     $("fitAllBtn").addEventListener("click", fitAll);
@@ -2456,6 +2828,12 @@
 
     $("pasteImportBtn").addEventListener("click", () => run(importPasteRows));
 
+    $("imageModalCloseBtn").addEventListener("click", closeImagePreview);
+
+    $("imageModal").addEventListener("click", e => {
+      if (e.target.id === "imageModal") closeImagePreview();
+    });
+
     $("deniedHomeBtn").addEventListener("click", () => {
       location.href = cfg.PATHS?.index || "/index.html";
     });
@@ -2465,6 +2843,7 @@
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") {
         closePasteModal();
+        closeImagePreview();
 
         if (drawMode) {
           cancelDrawMode();
@@ -2477,6 +2856,7 @@
     console.error(e);
     setStatus(e.message || String(e), "bad");
     setPointStatus(e.message || String(e), "bad");
+    setAttachmentStatus(e.message || String(e), "bad");
 
     if (drawMode) {
       setDrawStatus(e.message || String(e), true);

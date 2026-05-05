@@ -5,7 +5,7 @@
   <script src="/config.js"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>마루웰 라우트정보</title>
+  <title>라우트정보</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
@@ -822,7 +822,7 @@
       <div id="routeDetailForm" style="display:none">
         <div class="field">
           <label>설명</label>
-          <textarea id="routeDescriptionInput"></textarea>
+          <textarea id="routeDescriptionInput" ></textarea>
         </div>
 
         <div class="field">
@@ -1108,6 +1108,25 @@
     return String(v || "")
       .toUpperCase()
       .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function naturalCompare(a, b) {
+    return String(a ?? "").localeCompare(String(b ?? ""), "ko-KR", {
+      numeric: true,
+      sensitivity: "base"
+    });
+  }
+
+  function sortRouteRows(rows) {
+    return [...(rows || [])].sort((a, b) => {
+      return (
+        naturalCompare(a.camp, b.camp) ||
+        naturalCompare(a.route, b.route) ||
+        naturalCompare(a.sub, b.sub) ||
+        naturalCompare(a.sub_sub, b.sub_sub) ||
+        naturalCompare(routeCodeOf(a), routeCodeOf(b))
+      );
+    });
   }
 
   function routeCodeOf(row) {
@@ -1911,8 +1930,10 @@
       `)
       .eq("is_active", true)
       .order("camp", { ascending:true })
-      .order("sort_order", { ascending:true })
       .order("route", { ascending:true })
+      .order("sub", { ascending:true })
+      .order("sub_sub", { ascending:true })
+      .order("sort_order", { ascending:true })
       .limit(5000);
 
     if (camp) routeQuery = routeQuery.ilike("camp", `%${camp}%`);
@@ -1920,14 +1941,14 @@
     const { data: routes, error: routeError } = await routeQuery;
     if (routeError) throw routeError;
 
-    routeRows = (routes || []).filter(row => {
+    routeRows = sortRouteRows((routes || []).filter(row => {
       if (!routeFilter) return true;
 
       const code = routeCodeOf(row);
       const routeNorm = normalizeRoute(row.route);
 
       return code.includes(routeFilter) || routeNorm.includes(routeFilter);
-    });
+    }));
 
     let polygonQuery = supabaseClient
       .from(TABLE_POLYGON)
@@ -2196,6 +2217,7 @@
 
     selectedRoute = { ...selectedRoute, ...data };
     routeRows = routeRows.map(row => row.id === selectedRoute.id ? selectedRoute : row);
+    routeRows = sortRouteRows(routeRows);
 
     renderRouteList();
     renderRouteDetail(selectedRoute);

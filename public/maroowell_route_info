@@ -403,7 +403,7 @@
       left:12px;
       top:12px;
       z-index:20;
-      max-width:620px;
+      max-width:720px;
       border:1px solid rgba(255,255,255,.14);
       background:rgba(0,0,0,.58);
       color:#fff;
@@ -413,6 +413,28 @@
       line-height:1.5;
       backdrop-filter:blur(6px);
       pointer-events:none;
+    }
+
+    .drawStatus{
+      position:absolute;
+      left:12px;
+      bottom:12px;
+      z-index:20;
+      max-width:720px;
+      display:none;
+      border:1px solid rgba(245,158,11,.45);
+      background:rgba(120,53,15,.84);
+      color:#fff7ed;
+      border-radius:12px;
+      padding:10px 12px;
+      font-size:12px;
+      line-height:1.55;
+      backdrop-filter:blur(6px);
+      pointer-events:none;
+    }
+
+    .drawStatus.show{
+      display:block;
     }
 
     .markerTip{
@@ -465,6 +487,22 @@
     .marker-door .markerBubble{background:#0891b2}
     .marker-gate .markerBubble{background:#0f766e}
     .marker-etc .markerBubble{background:#64748b}
+
+    .drawVertex{
+      width:18px;
+      height:18px;
+      transform:translate(-50%,-50%);
+      border-radius:999px;
+      background:#facc15;
+      border:3px solid #7c2d12;
+      box-shadow:0 4px 16px rgba(0,0,0,.35);
+      color:#111827;
+      font-size:10px;
+      font-weight:950;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
 
     .detailEmpty{
       color:var(--muted);
@@ -739,6 +777,10 @@
       라우트 row를 선택하면 폴리곤이 강조됩니다. 점 추가 ON 상태에서 지도를 클릭하면 배송팁 포인트를 등록합니다.
     </div>
 
+    <div class="drawStatus" id="drawStatus">
+      폴리곤 그리기 모드
+    </div>
+
     <div class="mapControls">
       <button id="toggleMapTypeBtn">위성</button>
       <button id="fitAllBtn">전체보기</button>
@@ -780,6 +822,22 @@
         <div class="row">
           <button id="saveRouteInfoBtn" class="ok">라우트 정보 저장</button>
           <button id="focusRouteBtn" class="secondary">지도 이동</button>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <button id="drawReplaceBtn" class="warn">폴리곤 새로 그리기</button>
+          <button id="drawAppendBtn" class="warn">구역 추가</button>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <button id="drawUndoBtn" class="secondary">마지막 점 취소</button>
+          <button id="drawSaveBtn" class="ok">그리기 저장</button>
+          <button id="drawCancelBtn" class="danger">취소</button>
+        </div>
+
+        <div class="status" id="drawInfoText">
+          폴리곤 새로 그리기: 기존 활성 폴리곤을 비활성화하고 새 폴리곤을 저장합니다.
+          구역 추가: 기존 폴리곤은 유지하고 새 폴리곤을 추가 저장합니다.
         </div>
       </div>
     </div>
@@ -931,11 +989,20 @@
 
   let selectedRoute = null;
   let selectedPoint = null;
+
   let addPointMode = false;
+
+  let drawMode = false;
+  let drawReplaceExisting = true;
+  let drawVertices = [];
 
   let polygonObjects = [];
   let polygonLabels = [];
   let pointOverlays = [];
+
+  let drawVertexOverlays = [];
+  let drawLine = null;
+  let drawPreviewPolygon = null;
 
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg || "";
@@ -945,6 +1012,12 @@
   function setPointStatus(msg, type = "") {
     $("pointStatusText").textContent = msg || "";
     $("pointStatusText").className = type ? "status " + type : "status";
+  }
+
+  function setDrawStatus(msg, show = false) {
+    $("drawStatus").textContent = msg || "";
+    $("drawStatus").className = show ? "drawStatus show" : "drawStatus";
+    $("drawInfoText").textContent = msg || "";
   }
 
   function esc(v) {
@@ -1090,14 +1163,25 @@
         geocoder = new kakao.maps.services.Geocoder();
 
         kakao.maps.event.addListener(map, "click", e => {
-          if (!addPointMode) return;
-
-          if (!selectedRoute) {
-            setStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+          if (drawMode) {
+            addDrawVertex(e.latLng);
             return;
           }
 
-          createNewPointFromMapClick(e.latLng);
+          if (addPointMode) {
+            if (!selectedRoute) {
+              setStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+              return;
+            }
+
+            createNewPointFromMapClick(e.latLng);
+          }
+        });
+
+        kakao.maps.event.addListener(map, "rightclick", () => {
+          if (drawMode) {
+            run(saveDrawPolygon);
+          }
         });
 
         resolve();
@@ -1113,6 +1197,21 @@
     polygonObjects = [];
     polygonLabels = [];
     pointOverlays = [];
+  }
+
+  function clearDrawObjects() {
+    for (const obj of drawVertexOverlays) obj.setMap(null);
+    drawVertexOverlays = [];
+
+    if (drawLine) {
+      drawLine.setMap(null);
+      drawLine = null;
+    }
+
+    if (drawPreviewPolygon) {
+      drawPreviewPolygon.setMap(null);
+      drawPreviewPolygon = null;
+    }
   }
 
   function setMapBoundsByLatLngs(latlngs) {
@@ -1350,6 +1449,216 @@
     }
   }
 
+  function renderDrawPreview() {
+    clearDrawObjects();
+
+    if (!drawVertices.length) {
+      setDrawStatus("폴리곤 그리기 모드입니다. 지도에서 첫 번째 점을 클릭하세요.", true);
+      return;
+    }
+
+    drawVertices.forEach((latLng, index) => {
+      const el = document.createElement("div");
+      el.className = "drawVertex";
+      el.textContent = index + 1;
+
+      const overlay = new kakao.maps.CustomOverlay({
+        position: latLng,
+        content: el,
+        zIndex: 100
+      });
+
+      overlay.setMap(map);
+      drawVertexOverlays.push(overlay);
+    });
+
+    if (drawVertices.length >= 2) {
+      drawLine = new kakao.maps.Polyline({
+        path: drawVertices,
+        strokeWeight: 3,
+        strokeColor: "#facc15",
+        strokeOpacity: 0.95,
+        strokeStyle: "solid"
+      });
+
+      drawLine.setMap(map);
+    }
+
+    if (drawVertices.length >= 3) {
+      drawPreviewPolygon = new kakao.maps.Polygon({
+        path: drawVertices,
+        strokeWeight: 3,
+        strokeColor: "#facc15",
+        strokeOpacity: 0.95,
+        fillColor: "#facc15",
+        fillOpacity: 0.20
+      });
+
+      drawPreviewPolygon.setMap(map);
+    }
+
+    const modeText = drawReplaceExisting ? "새로 그리기" : "구역 추가";
+    setDrawStatus(
+      `${modeText} 모드 / 점 ${drawVertices.length}개\n지도 클릭: 점 추가 · 우클릭 또는 [그리기 저장]: 저장 · [마지막 점 취소]: 되돌리기`,
+      true
+    );
+  }
+
+  function addDrawVertex(latLng) {
+    if (!selectedRoute) {
+      setStatus("먼저 라우트를 선택하세요.", "bad");
+      return;
+    }
+
+    drawVertices.push(latLng);
+    renderDrawPreview();
+  }
+
+  function startDrawMode(replaceExisting) {
+    if (!selectedRoute) {
+      setStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+      return;
+    }
+
+    if (addPointMode) {
+      addPointMode = false;
+      $("addPointModeBtn").textContent = "점 추가 OFF";
+      $("addPointModeBtn").className = "warn";
+    }
+
+    drawMode = true;
+    drawReplaceExisting = replaceExisting;
+    drawVertices = [];
+    clearDrawObjects();
+
+    const modeText = drawReplaceExisting ? "폴리곤 새로 그리기" : "구역 추가";
+    setStatus(`${modeText} 모드입니다. 지도에서 폴리곤 꼭짓점을 순서대로 클릭하세요.`, "warn");
+    setDrawStatus(`${modeText} 모드입니다. 지도에서 첫 번째 점을 클릭하세요.`, true);
+  }
+
+  function undoDrawVertex() {
+    if (!drawMode) {
+      setStatus("폴리곤 그리기 모드가 아닙니다.", "bad");
+      return;
+    }
+
+    drawVertices.pop();
+    renderDrawPreview();
+  }
+
+  function cancelDrawMode() {
+    drawMode = false;
+    drawVertices = [];
+    clearDrawObjects();
+    setDrawStatus("", false);
+    setStatus("폴리곤 그리기를 취소했습니다.", "ok");
+  }
+
+  function buildGeoJsonPolygon(vertices) {
+    const ring = vertices.map(latLng => [
+      Number(latLng.getLng().toFixed(8)),
+      Number(latLng.getLat().toFixed(8))
+    ]);
+
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+      ring.push([...first]);
+    }
+
+    return {
+      type: "Polygon",
+      coordinates: [ring]
+    };
+  }
+
+  async function saveDrawPolygon() {
+    if (!drawMode) {
+      setStatus("폴리곤 그리기 모드가 아닙니다.", "bad");
+      return;
+    }
+
+    if (!selectedRoute) {
+      setStatus("선택된 라우트가 없습니다.", "bad");
+      return;
+    }
+
+    if (drawVertices.length < 3) {
+      setStatus("폴리곤은 최소 3개 점이 필요합니다.", "bad");
+      return;
+    }
+
+    const code = routeCodeOf(selectedRoute);
+    const geo = buildGeoJsonPolygon(drawVertices);
+
+    const modeText = drawReplaceExisting ? "기존 활성 폴리곤 비활성화 후 새 폴리곤 저장" : "기존 폴리곤 유지 후 구역 추가";
+    const ok = confirm(`${selectedRoute.camp} / ${code}\n\n${modeText}할까요?`);
+
+    if (!ok) return;
+
+    setStatus("폴리곤 저장 중...", "warn");
+
+    if (drawReplaceExisting) {
+      const { error: updateError } = await supabaseClient
+        .from(TABLE_POLYGON)
+        .update({ is_active:false })
+        .eq("camp", selectedRoute.camp)
+        .eq("route_norm", code)
+        .eq("is_active", true);
+
+      if (updateError) throw updateError;
+
+      polygonRows = polygonRows.map(row => {
+        const rowCode = normalizeRoute(row.route_code || row.route_norm);
+        if (row.camp === selectedRoute.camp && rowCode === code) {
+          return { ...row, is_active:false };
+        }
+        return row;
+      });
+    }
+
+    const payload = {
+      camp: selectedRoute.camp,
+      route_code: code,
+      polygon_wgs84: geo,
+      camps_code: selectedRoute.coordinate || null,
+      is_active: true
+    };
+
+    const { data, error } = await supabaseClient
+      .from(TABLE_POLYGON)
+      .insert(payload)
+      .select(`
+        id,
+        camp,
+        route_code,
+        route_norm,
+        polygon_wgs84,
+        camps_code,
+        is_active,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (error) throw error;
+
+    polygonRows.push(data);
+
+    drawMode = false;
+    drawVertices = [];
+    clearDrawObjects();
+    setDrawStatus("", false);
+
+    renderMapFeatures();
+    renderRouteList();
+    renderCounts();
+    focusSelectedRoute();
+
+    setStatus("폴리곤 저장 완료", "ok");
+  }
+
   async function loadData() {
     setStatus("데이터를 불러오는 중...", "warn");
 
@@ -1465,6 +1774,7 @@
     selectedRoute = null;
     selectedPoint = null;
 
+    cancelDrawModeSilently();
     renderRouteList();
     renderPointList();
     clearRouteDetail();
@@ -1475,10 +1785,17 @@
     setStatus("조회 완료", "ok");
   }
 
+  function cancelDrawModeSilently() {
+    drawMode = false;
+    drawVertices = [];
+    clearDrawObjects();
+    setDrawStatus("", false);
+  }
+
   function renderCounts() {
     $("routeCount").textContent = routeRows.length.toLocaleString();
-    $("polygonCount").textContent = polygonRows.length.toLocaleString();
-    $("pointCount").textContent = pointRows.length.toLocaleString();
+    $("polygonCount").textContent = polygonRows.filter(row => row.is_active !== false).length.toLocaleString();
+    $("pointCount").textContent = pointRows.filter(row => row.is_active !== false).length.toLocaleString();
   }
 
   function renderRouteList() {
@@ -1498,6 +1815,7 @@
     }
 
     for (const poly of polygonRows) {
+      if (poly.is_active === false) continue;
       const key = `${poly.camp}||${normalizeRoute(poly.route_code || poly.route_norm)}`;
       polygonCountByRoute.set(key, (polygonCountByRoute.get(key) || 0) + 1);
     }
@@ -1558,6 +1876,7 @@
     selectedRoute = row;
     selectedPoint = null;
 
+    cancelDrawModeSilently();
     renderRouteList();
     renderRouteDetail(row);
     renderPointList();
@@ -1609,7 +1928,7 @@
     for (const poly of polygonRows) {
       const polyCode = normalizeRoute(poly.route_code || poly.route_norm);
 
-      if (poly.camp === selectedRoute.camp && polyCode === code) {
+      if (poly.camp === selectedRoute.camp && polyCode === code && poly.is_active !== false) {
         for (const ring of extractRings(poly.polygon_wgs84)) {
           latlngs.push(...ring);
         }
@@ -1714,6 +2033,7 @@
 
     if (matchingRoute) selectedRoute = matchingRoute;
 
+    cancelDrawModeSilently();
     fillPointForm(point);
     renderRouteList();
     renderRouteDetail(selectedRoute);
@@ -1893,6 +2213,10 @@
   }
 
   function toggleAddPointMode() {
+    if (drawMode) {
+      cancelDrawMode();
+    }
+
     addPointMode = !addPointMode;
     $("addPointModeBtn").textContent = addPointMode ? "점 추가 ON" : "점 추가 OFF";
     $("addPointModeBtn").className = addPointMode ? "ok" : "warn";
@@ -1911,6 +2235,8 @@
     const latlngs = [];
 
     for (const poly of polygonRows) {
+      if (poly.is_active === false) continue;
+
       for (const ring of extractRings(poly.polygon_wgs84)) {
         latlngs.push(...ring);
       }
@@ -1945,8 +2271,23 @@
     if (!lines.length) return [];
 
     const first = lines[0].split("\t").map(clean);
+
     const hasHeader = first.some(cell => {
-      return ["캠프","camp","라우트","route","서브","서서브","설명","정보","memo","coordinate","sub_package"].includes(cell.toLowerCase?.() || cell);
+      const key = String(cell || "").replace(/\s+/g, "").toLowerCase();
+      return [
+        "캠프",
+        "camp",
+        "라우트",
+        "route",
+        "서브",
+        "서서브",
+        "설명",
+        "정보",
+        "memo",
+        "coordinate",
+        "sub_package",
+        "subpackage"
+      ].includes(key);
     }) || first.some(cell => ["캠프","라우트","서브","서서브","설명","정보"].includes(cell));
 
     const header = hasHeader ? first : ["캠프","라우트","서브","서서브","설명","정보"];
@@ -1958,7 +2299,7 @@
       if (k === "캠프" || k === "camp") return "camp";
       if (k === "라우트" || k === "route") return "route";
       if (k === "서브" || k === "sub") return "sub";
-      if (k === "서서브" || k === "subsub" || k === "sub_sub") return "sub_sub";
+      if (k === "서서브" || k === "subsub" || k === "sub_sub" || k === "sub-sub") return "sub_sub";
       if (k === "설명" || k === "description") return "description";
       if (k === "정보" || k === "memo" || k === "메모") return "memo";
       if (k === "좌표" || k === "coordinate") return "coordinate";
@@ -2066,9 +2407,11 @@
 
   function bindEvents() {
     $("loadBtn").addEventListener("click", () => run(loadData));
+
     $("campInput").addEventListener("keydown", e => {
       if (e.key === "Enter") run(loadData);
     });
+
     $("routeInput").addEventListener("keydown", e => {
       if (e.key === "Enter") run(loadData);
     });
@@ -2088,6 +2431,12 @@
     $("saveRouteInfoBtn").addEventListener("click", () => run(saveRouteInfo));
     $("focusRouteBtn").addEventListener("click", focusSelectedRoute);
 
+    $("drawReplaceBtn").addEventListener("click", () => startDrawMode(true));
+    $("drawAppendBtn").addEventListener("click", () => startDrawMode(false));
+    $("drawUndoBtn").addEventListener("click", undoDrawVertex);
+    $("drawSaveBtn").addEventListener("click", () => run(saveDrawPolygon));
+    $("drawCancelBtn").addEventListener("click", cancelDrawMode);
+
     $("savePointBtn").addEventListener("click", () => run(savePoint));
     $("newPointBtn").addEventListener("click", resetPointForm);
     $("softDeletePointBtn").addEventListener("click", () => run(softDeletePoint));
@@ -2099,20 +2448,27 @@
 
     $("pasteOpenBtn").addEventListener("click", openPasteModal);
     $("pasteCloseBtn").addEventListener("click", closePasteModal);
+
     $("pasteClearBtn").addEventListener("click", () => {
       $("pasteTextInput").value = "";
       $("pasteStatusText").textContent = "";
     });
+
     $("pasteImportBtn").addEventListener("click", () => run(importPasteRows));
 
     $("deniedHomeBtn").addEventListener("click", () => {
       location.href = cfg.PATHS?.index || "/index.html";
     });
+
     $("deniedLogoutBtn").addEventListener("click", signOut);
 
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") {
         closePasteModal();
+
+        if (drawMode) {
+          cancelDrawMode();
+        }
       }
     });
   }
@@ -2121,6 +2477,10 @@
     console.error(e);
     setStatus(e.message || String(e), "bad");
     setPointStatus(e.message || String(e), "bad");
+
+    if (drawMode) {
+      setDrawStatus(e.message || String(e), true);
+    }
   }
 
   function run(fn) {

@@ -2970,7 +2970,7 @@
         selectedPoint.title ? `제목: ${selectedPoint.title}` : `ID: ${selectedPoint.id}`,
         "",
         "연결된 이미지 정보도 같이 삭제합니다.",
-        "이 작업은 is_active=false가 아니라 실제 delete입니다."
+        "이 작업은 실제 delete입니다."
       ].join("\n")
     );
 
@@ -3088,17 +3088,20 @@
     $("toggleMapTypeBtn").textContent = isSatellite ? "일반" : "위성";
   }
 
-  function fitAll() {
+  function collectAllVisibleLatLngs() {
     const latlngs = [];
 
     for (const poly of polygonRows) {
       if (poly.is_active === false) continue;
+
       for (const ring of extractRings(poly.polygon_wgs84)) {
         latlngs.push(...ring);
       }
     }
 
     for (const point of pointRows) {
+      if (point.is_active === false) continue;
+
       const lat = Number(point.lat);
       const lng = Number(point.lng);
 
@@ -3107,7 +3110,74 @@
       }
     }
 
-    if (latlngs.length) setMapBoundsByLatLngs(latlngs);
+    return latlngs;
+  }
+
+  function fitAll() {
+    if (!map) return;
+
+    try {
+      map.relayout();
+    } catch (e) {
+      console.warn("map relayout skipped:", e);
+    }
+
+    const latlngs = collectAllVisibleLatLngs();
+
+    if (latlngs.length) {
+      setMapBoundsByLatLngs(latlngs);
+      return;
+    }
+
+    map.setCenter(new kakao.maps.LatLng(37.5665, 126.9780));
+    map.setLevel(8);
+  }
+
+  function resetMapView() {
+    if (!map) return;
+
+    if (drawMode) {
+      cancelDrawModeSilently();
+    }
+
+    addPointMode = false;
+    $("addPointModeBtn").textContent = "점 추가 OFF";
+    $("addPointModeBtn").className = "warn";
+
+    selectedRoute = null;
+    selectedPoint = null;
+    selectedPolygonId = null;
+
+    clearAttachmentsState();
+    clearRouteDetail();
+    fillPointForm(null);
+    renderRouteList();
+    renderPointList();
+
+    isSatellite = false;
+    map.setMapTypeId(kakao.maps.MapTypeId.ROADMAP);
+    $("toggleMapTypeBtn").textContent = "위성";
+
+    renderMapFeatures();
+
+    setTimeout(() => {
+      try {
+        map.relayout();
+      } catch (e) {
+        console.warn("map relayout skipped:", e);
+      }
+
+      const latlngs = collectAllVisibleLatLngs();
+
+      if (latlngs.length) {
+        setMapBoundsByLatLngs(latlngs);
+      } else {
+        map.setCenter(new kakao.maps.LatLng(37.5665, 126.9780));
+        map.setLevel(8);
+      }
+
+      setStatus("지도 초기화 완료", "ok");
+    }, 80);
   }
 
   function attachmentPathOf(row) {
@@ -3541,7 +3611,7 @@
     $("addPointModeBtn").addEventListener("click", toggleAddPointMode);
     $("toggleMapTypeBtn").addEventListener("click", setMapType);
     $("fitAllBtn").addEventListener("click", fitAll);
-    $("resetMapBtn").addEventListener("click", fitAll);
+    $("resetMapBtn").addEventListener("click", resetMapView);
 
     $("bulkOpenBtn").addEventListener("click", openBulkModal);
     $("bulkCloseBtn").addEventListener("click", closeBulkModal);

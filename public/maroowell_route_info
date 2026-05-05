@@ -1,1 +1,2147 @@
-test
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>마루웰 라우트정보</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#101827;
+      --panel2:#121a2d;
+      --line:rgba(255,255,255,.12);
+      --txt:#e6eefc;
+      --muted:#9fb0d2;
+      --blue:#60a5fa;
+      --green:#22c55e;
+      --red:#ef4444;
+      --yellow:#f59e0b;
+      --cyan:#7dd3fc;
+    }
+
+    *{box-sizing:border-box}
+
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+      background:#070b13;
+      color:var(--txt);
+      overflow:hidden;
+    }
+
+    .app{
+      height:100%;
+      display:grid;
+      grid-template-columns:390px minmax(480px, 1fr) 420px;
+      background:#070b13;
+    }
+
+    .left,
+    .right{
+      min-height:0;
+      overflow:auto;
+      background:linear-gradient(180deg,var(--bg),#070b13);
+      border-color:var(--line);
+      padding:14px;
+    }
+
+    .left{
+      border-right:1px solid var(--line);
+    }
+
+    .right{
+      border-left:1px solid var(--line);
+    }
+
+    .mapPane{
+      position:relative;
+      min-width:0;
+      min-height:0;
+      background:#0a0f1a;
+    }
+
+    #map{
+      position:absolute;
+      inset:0;
+    }
+
+    .title{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin:0 0 12px;
+      min-width:0;
+    }
+
+    .title a{
+      display:flex;
+      align-items:center;
+      text-decoration:none;
+      flex:0 0 auto;
+    }
+
+    .title img{
+      width:28px;
+      height:28px;
+    }
+
+    .titleText{
+      flex:1;
+      min-width:0;
+    }
+
+    .titleText b{
+      display:block;
+      font-size:21px;
+      line-height:1.1;
+      letter-spacing:-.4px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .titleText small{
+      display:block;
+      margin-top:4px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.35;
+    }
+
+    .userPill{
+      flex:0 0 auto;
+      max-width:160px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      color:#cfe0ff;
+      padding:7px 10px;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .card{
+      background:rgba(18,26,45,.86);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:12px;
+      margin-bottom:12px;
+      box-shadow:0 12px 34px rgba(0,0,0,.18);
+    }
+
+    .cardTitle{
+      font-size:15px;
+      font-weight:950;
+      margin:0 0 10px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+
+    .cardTitle small{
+      color:var(--muted);
+      font-size:11px;
+      font-weight:800;
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-bottom:10px;
+    }
+
+    .field label{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:900;
+      margin-left:2px;
+    }
+
+    input,select,textarea{
+      width:100%;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:rgba(0,0,0,.24);
+      color:var(--txt);
+      outline:none;
+      font:inherit;
+    }
+
+    input,select{
+      height:40px;
+      padding:0 12px;
+    }
+
+    textarea{
+      min-height:78px;
+      padding:10px 12px;
+      resize:vertical;
+      line-height:1.45;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus{
+      border-color:rgba(96,165,250,.58);
+      box-shadow:0 0 0 2px rgba(96,165,250,.12);
+    }
+
+    select option{
+      background:#111827;
+      color:#fff;
+    }
+
+    .row{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .row > *{
+      flex:1;
+      min-width:0;
+    }
+
+    button{
+      min-height:38px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(59,130,246,.24);
+      color:#fff;
+      padding:0 14px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+
+    button:hover{
+      background:rgba(59,130,246,.36);
+    }
+
+    button.secondary{
+      background:rgba(255,255,255,.07);
+    }
+
+    button.secondary:hover{
+      background:rgba(255,255,255,.12);
+    }
+
+    button.ok{
+      background:rgba(34,197,94,.18);
+      border-color:rgba(34,197,94,.30);
+    }
+
+    button.ok:hover{
+      background:rgba(34,197,94,.28);
+    }
+
+    button.danger{
+      background:rgba(239,68,68,.18);
+      border-color:rgba(239,68,68,.34);
+      color:#ffd1d1;
+    }
+
+    button.danger:hover{
+      background:rgba(239,68,68,.28);
+    }
+
+    button.warn{
+      background:rgba(245,158,11,.18);
+      border-color:rgba(245,158,11,.34);
+    }
+
+    button.warn:hover{
+      background:rgba(245,158,11,.28);
+    }
+
+    .status{
+      margin-top:8px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.55;
+      white-space:pre-wrap;
+    }
+
+    .status.ok{color:#bbf7d0}
+    .status.bad{color:#fecaca}
+    .status.warn{color:#fde68a}
+
+    .summary{
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      min-height:28px;
+      padding:0 10px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.06);
+      color:var(--muted);
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .pill strong{
+      color:#fff;
+      margin-left:5px;
+    }
+
+    .routeList{
+      display:grid;
+      gap:8px;
+      max-height:calc(100vh - 360px);
+      overflow:auto;
+      padding-right:2px;
+    }
+
+    .routeCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:14px;
+      padding:11px;
+      cursor:pointer;
+    }
+
+    .routeCard:hover{
+      background:rgba(255,255,255,.08);
+      border-color:rgba(255,255,255,.18);
+    }
+
+    .routeCard.active{
+      border-color:rgba(96,165,250,.70);
+      background:rgba(59,130,246,.16);
+      box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
+    }
+
+    .routeMain{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      align-items:center;
+      margin-bottom:7px;
+    }
+
+    .routeCode{
+      color:#bfdbfe;
+      font-size:15px;
+      font-weight:950;
+    }
+
+    .routeMeta{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+    }
+
+    .routeDesc{
+      color:#dbeafe;
+      font-size:12px;
+      line-height:1.45;
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+
+    .routeBadges{
+      margin-top:8px;
+      display:flex;
+      gap:5px;
+      flex-wrap:wrap;
+    }
+
+    .miniBadge{
+      display:inline-flex;
+      align-items:center;
+      height:22px;
+      padding:0 8px;
+      border-radius:999px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      color:#dbeafe;
+      font-size:11px;
+      font-weight:900;
+    }
+
+    .mapControls{
+      position:absolute;
+      top:12px;
+      right:12px;
+      z-index:20;
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    .mapControls button{
+      background:rgba(0,0,0,.58);
+      border:1px solid rgba(255,255,255,.14);
+      backdrop-filter:blur(6px);
+      min-height:36px;
+      font-size:12px;
+    }
+
+    .mapHint{
+      position:absolute;
+      left:12px;
+      top:12px;
+      z-index:20;
+      max-width:620px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.58);
+      color:#fff;
+      border-radius:12px;
+      padding:9px 11px;
+      font-size:12px;
+      line-height:1.5;
+      backdrop-filter:blur(6px);
+      pointer-events:none;
+    }
+
+    .markerTip{
+      position:relative;
+      transform:translate(-50%,-100%);
+      cursor:pointer;
+      user-select:none;
+    }
+
+    .markerBubble{
+      min-width:34px;
+      height:34px;
+      border-radius:999px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+      font-weight:950;
+      font-size:14px;
+      border:2px solid rgba(255,255,255,.86);
+      box-shadow:0 6px 18px rgba(0,0,0,.32);
+    }
+
+    .markerLabel{
+      position:absolute;
+      top:36px;
+      left:50%;
+      transform:translateX(-50%);
+      white-space:nowrap;
+      background:rgba(0,0,0,.70);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:999px;
+      color:#fff;
+      padding:3px 7px;
+      font-size:11px;
+      font-weight:900;
+      display:none;
+    }
+
+    .markerTip:hover .markerLabel,
+    .markerTip.active .markerLabel{
+      display:block;
+    }
+
+    .marker-tip .markerBubble{background:#2563eb}
+    .marker-entrance .markerBubble{background:#16a34a}
+    .marker-password .markerBubble{background:#7c3aed}
+    .marker-parking .markerBubble{background:#d97706}
+    .marker-caution .markerBubble{background:#dc2626}
+    .marker-door .markerBubble{background:#0891b2}
+    .marker-gate .markerBubble{background:#0f766e}
+    .marker-etc .markerBubble{background:#64748b}
+
+    .detailEmpty{
+      color:var(--muted);
+      line-height:1.6;
+      font-size:13px;
+      padding:16px;
+      border:1px dashed rgba(255,255,255,.15);
+      border-radius:14px;
+      background:rgba(255,255,255,.03);
+    }
+
+    .pointList{
+      display:grid;
+      gap:8px;
+      max-height:220px;
+      overflow:auto;
+      padding-right:2px;
+    }
+
+    .pointCard{
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      border-radius:14px;
+      padding:10px;
+      cursor:pointer;
+    }
+
+    .pointCard:hover{
+      background:rgba(255,255,255,.08);
+    }
+
+    .pointCard.active{
+      border-color:rgba(96,165,250,.65);
+      background:rgba(59,130,246,.16);
+    }
+
+    .pointTitle{
+      font-weight:950;
+      color:#fff;
+      margin-bottom:5px;
+      font-size:13px;
+    }
+
+    .pointSub{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.45;
+      white-space:pre-wrap;
+    }
+
+    .modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:rgba(0,0,0,.48);
+      z-index:9999;
+      backdrop-filter:blur(3px);
+    }
+
+    .modal.show{
+      display:flex;
+    }
+
+    .modalCard{
+      width:min(900px, calc(100vw - 32px));
+      max-height:min(780px, calc(100vh - 32px));
+      overflow:hidden;
+      border-radius:20px;
+      border:1px solid rgba(255,255,255,.14);
+      background:linear-gradient(180deg,#111c31,#08111f);
+      box-shadow:0 24px 80px rgba(0,0,0,.55);
+      display:flex;
+      flex-direction:column;
+    }
+
+    .modalTop{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      padding:14px 16px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+
+    .modalTitle{
+      font-size:17px;
+      font-weight:950;
+    }
+
+    .modalBody{
+      padding:14px 16px;
+      overflow:auto;
+    }
+
+    .pasteBox{
+      min-height:320px;
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;
+      white-space:pre;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:10000;
+    }
+
+    .accessDenied.show{
+      display:flex;
+    }
+
+    .accessCard{
+      width:min(540px, calc(100vw - 24px));
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 60px rgba(0,0,0,.35);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 8px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.6;
+      font-size:14px;
+      white-space:pre-wrap;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      word-break:break-word;
+      line-height:1.6;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media(max-width:1180px){
+      .app{
+        grid-template-columns:360px 1fr;
+      }
+
+      .right{
+        position:absolute;
+        right:12px;
+        top:70px;
+        bottom:12px;
+        width:min(410px, calc(100vw - 24px));
+        z-index:40;
+        border:1px solid var(--line);
+        border-radius:18px;
+        box-shadow:0 20px 60px rgba(0,0,0,.40);
+      }
+    }
+
+    @media(max-width:820px){
+      .app{
+        grid-template-columns:1fr;
+      }
+
+      .left{
+        position:absolute;
+        left:10px;
+        top:10px;
+        width:min(370px, calc(100vw - 20px));
+        max-height:46vh;
+        z-index:50;
+        border:1px solid var(--line);
+        border-radius:18px;
+        box-shadow:0 20px 60px rgba(0,0,0,.45);
+      }
+
+      .right{
+        top:auto;
+        left:10px;
+        right:10px;
+        bottom:10px;
+        width:auto;
+        max-height:45vh;
+      }
+
+      .mapHint{
+        top:calc(46vh + 24px);
+      }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <aside class="left">
+    <div class="title">
+      <a id="mwBoardMenuToggle" href="#"><img src="/favicon.ico" alt="MarooWell"></a>
+      <div class="titleText">
+        <b>마루웰 라우트정보</b>
+        <small>폴리곤 / 배송팁 / 비번 / 입구 정보</small>
+      </div>
+      <div class="userPill" id="userPill">확인 중</div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">검색</div>
+
+      <div class="field">
+        <label>Camp</label>
+        <input id="campInput" placeholder="예: 일산2, 대구3" />
+      </div>
+
+      <div class="field">
+        <label>Route / Route Code</label>
+        <input id="routeInput" placeholder="예: 126, 126A01, 213A" />
+      </div>
+
+      <div class="row">
+        <button id="loadBtn">불러오기</button>
+        <button id="resetMapBtn" class="secondary">지도 초기화</button>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="pasteOpenBtn" class="secondary">엑셀 붙여넣기</button>
+        <button id="addPointModeBtn" class="warn">점 추가 OFF</button>
+      </div>
+
+      <div id="statusText" class="status">대기 중</div>
+
+      <div class="summary">
+        <span class="pill">라우트 <strong id="routeCount">0</strong></span>
+        <span class="pill">폴리곤 <strong id="polygonCount">0</strong></span>
+        <span class="pill">포인트 <strong id="pointCount">0</strong></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">
+        <span>라우트 목록</span>
+        <small>클릭 시 지도 이동</small>
+      </div>
+      <div id="routeList" class="routeList"></div>
+    </div>
+  </aside>
+
+  <main class="mapPane">
+    <div id="map"></div>
+
+    <div class="mapHint" id="mapHint">
+      라우트 row를 선택하면 폴리곤이 강조됩니다. 점 추가 ON 상태에서 지도를 클릭하면 배송팁 포인트를 등록합니다.
+    </div>
+
+    <div class="mapControls">
+      <button id="toggleMapTypeBtn">위성</button>
+      <button id="fitAllBtn">전체보기</button>
+    </div>
+  </main>
+
+  <aside class="right">
+    <div class="card">
+      <div class="cardTitle">
+        <span>선택 라우트</span>
+        <small id="selectedRouteCode">선택 없음</small>
+      </div>
+
+      <div id="routeDetailEmpty" class="detailEmpty">
+        좌측에서 라우트를 선택하세요.
+      </div>
+
+      <div id="routeDetailForm" style="display:none">
+        <div class="field">
+          <label>설명</label>
+          <textarea id="routeDescriptionInput" placeholder="예: 세광타운, 대명4차"></textarea>
+        </div>
+
+        <div class="field">
+          <label>정보 / 메모</label>
+          <textarea id="routeMemoInput" placeholder="예: 개방, 보람 1동 #7101 ..."></textarea>
+        </div>
+
+        <div class="field">
+          <label>서브패키지</label>
+          <input id="routeSubPackageInput" placeholder="sub_package" />
+        </div>
+
+        <div class="field">
+          <label>좌표 / 원본 참고값</label>
+          <input id="routeCoordinateInput" placeholder="coordinate text" />
+        </div>
+
+        <div class="row">
+          <button id="saveRouteInfoBtn" class="ok">라우트 정보 저장</button>
+          <button id="focusRouteBtn" class="secondary">지도 이동</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">
+        <span>배송 포인트</span>
+        <small id="pointListCount">0개</small>
+      </div>
+      <div id="pointList" class="pointList"></div>
+    </div>
+
+    <div class="card">
+      <div class="cardTitle">
+        <span>포인트 상세</span>
+        <small id="selectedPointId">신규/선택 없음</small>
+      </div>
+
+      <div class="field">
+        <label>종류</label>
+        <select id="pointTypeInput">
+          <option value="tip">배송팁</option>
+          <option value="entrance">입구</option>
+          <option value="password">비번/공동현관</option>
+          <option value="parking">주차</option>
+          <option value="caution">주의</option>
+          <option value="door">문/동선</option>
+          <option value="gate">게이트</option>
+          <option value="etc">기타</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>제목</label>
+        <input id="pointTitleInput" placeholder="예: 대명4차 후문" />
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label>위도</label>
+          <input id="pointLatInput" placeholder="lat" />
+        </div>
+        <div class="field">
+          <label>경도</label>
+          <input id="pointLngInput" placeholder="lng" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label>배송팁</label>
+        <textarea id="deliveryTipInput" placeholder="배송팁"></textarea>
+      </div>
+
+      <div class="field">
+        <label>공동현관 / 비번 힌트</label>
+        <textarea id="passwordNoteInput" placeholder="전체 비번보다 힌트 중심 권장"></textarea>
+      </div>
+
+      <div class="field">
+        <label>입구 / 동선</label>
+        <textarea id="entranceNoteInput" placeholder="입구/동선"></textarea>
+      </div>
+
+      <div class="field">
+        <label>주차팁</label>
+        <textarea id="parkingNoteInput" placeholder="주차팁"></textarea>
+      </div>
+
+      <div class="field">
+        <label>주의사항</label>
+        <textarea id="cautionNoteInput" placeholder="주의사항"></textarea>
+      </div>
+
+      <div class="field">
+        <label>내부 메모</label>
+        <textarea id="pointMemoInput" placeholder="내부 메모"></textarea>
+      </div>
+
+      <div class="row">
+        <button id="savePointBtn" class="ok">포인트 저장</button>
+        <button id="newPointBtn" class="secondary">신규 초기화</button>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="softDeletePointBtn" class="danger">포인트 비활성화</button>
+      </div>
+
+      <div class="status" id="pointStatusText"></div>
+    </div>
+  </aside>
+</div>
+
+<div id="pasteModal" class="modal">
+  <div class="modalCard">
+    <div class="modalTop">
+      <div class="modalTitle">엑셀 데이터 붙여넣기</div>
+      <button id="pasteCloseBtn" class="danger">닫기</button>
+    </div>
+    <div class="modalBody">
+      <div class="status">
+        헤더 포함 가능: 캠프, 라우트, 서브, 서서브, 설명, 정보, coordinate, sub_package<br>
+        헤더 없으면 순서: 캠프 / 라우트 / 서브 / 서서브 / 설명 / 정보
+      </div>
+      <textarea id="pasteTextInput" class="pasteBox" placeholder="엑셀에서 범위 복사 후 여기에 붙여넣기"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button id="pasteImportBtn" class="ok">가져오기 / 저장</button>
+        <button id="pasteClearBtn" class="secondary">내용 비우기</button>
+      </div>
+      <div id="pasteStatusText" class="status"></div>
+    </div>
+  </div>
+</div>
+
+<div id="accessDenied" class="accessDenied">
+  <div class="accessCard">
+    <h2>접근 권한 없음</h2>
+    <p id="accessDeniedText">마루웰 소속 권한이 필요합니다.</p>
+    <div id="accessDeniedEmail" class="accessMeta"></div>
+    <div class="accessActions">
+      <button id="deniedHomeBtn" class="secondary">홈으로</button>
+      <button id="deniedLogoutBtn" class="danger">로그아웃</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const cfg = window.MARUWELL_CONFIG || {};
+  const $ = id => document.getElementById(id);
+
+  const TABLE_ROUTE = "maroowell_route_info";
+  const TABLE_POLYGON = "maroowell_sub_sub_route";
+  const TABLE_POINT = "maroowell_route_delivery_points";
+
+  let supabaseClient = null;
+  let currentUser = null;
+  let access = null;
+  let isSuperAdmin = false;
+
+  let map = null;
+  let geocoder = null;
+  let isSatellite = false;
+
+  let routeRows = [];
+  let polygonRows = [];
+  let pointRows = [];
+
+  let selectedRoute = null;
+  let selectedPoint = null;
+  let addPointMode = false;
+
+  let polygonObjects = [];
+  let polygonLabels = [];
+  let pointOverlays = [];
+
+  function setStatus(msg, type = "") {
+    $("statusText").textContent = msg || "";
+    $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function setPointStatus(msg, type = "") {
+    $("pointStatusText").textContent = msg || "";
+    $("pointStatusText").className = type ? "status " + type : "status";
+  }
+
+  function esc(v) {
+    return String(v ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function clean(v) {
+    return String(v ?? "").trim();
+  }
+
+  function normalizeRoute(v) {
+    return String(v || "")
+      .toUpperCase()
+      .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function routeCodeOf(row) {
+    return normalizeRoute(row?.route_code || `${row?.route || ""}${row?.sub || ""}${row?.sub_sub || ""}`);
+  }
+
+  function routeLabel(row) {
+    const sub = clean(row.sub);
+    const subSub = clean(row.sub_sub);
+    return [row.route, sub, subSub].filter(Boolean).join("-");
+  }
+
+  function pointTypeLabel(type) {
+    const map = {
+      tip: "배송팁",
+      entrance: "입구",
+      password: "비번",
+      parking: "주차",
+      caution: "주의",
+      door: "문",
+      gate: "게이트",
+      etc: "기타"
+    };
+
+    return map[type] || "기타";
+  }
+
+  function pointTypeIcon(type) {
+    const map = {
+      tip: "팁",
+      entrance: "입",
+      password: "🔒",
+      parking: "P",
+      caution: "!",
+      door: "문",
+      gate: "G",
+      etc: "·"
+    };
+
+    return map[type] || "·";
+  }
+
+  function pointTypeClass(type) {
+    return "marker-" + (type || "etc");
+  }
+
+  function initSupabase() {
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      throw new Error("config.js의 SUPABASE_URL / SUPABASE_ANON_KEY를 확인하세요.");
+    }
+
+    const storage = (() => {
+      try { return window.sessionStorage; } catch { return undefined; }
+    })();
+
+    supabaseClient = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!storage,
+        storage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+
+  async function checkAccess() {
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    currentUser = sessionData?.session?.user;
+
+    if (!currentUser) {
+      location.href = (cfg.PATHS?.login || "/login.html") + "?next=" + encodeURIComponent(location.pathname);
+      return false;
+    }
+
+    $("userPill").textContent = currentUser.email || currentUser.id;
+
+    const { data, error } = await supabaseClient.rpc("mw_my_access").maybeSingle();
+
+    if (error) {
+      showDenied(error.message);
+      return false;
+    }
+
+    access = data || {};
+    isSuperAdmin =
+      access?.is_maroowell === true &&
+      access?.is_admin === true &&
+      Number(access?.max_role_level || 0) >= 90;
+
+    if (access?.is_maroowell !== true) {
+      showDenied("마루웰 소속 권한이 필요합니다.\n조건: user_access.is_maroowell = true");
+      return false;
+    }
+
+    if (!isSuperAdmin) {
+      $("softDeletePointBtn").style.display = "none";
+    }
+
+    document.documentElement.style.visibility = "visible";
+    return true;
+  }
+
+  function showDenied(message) {
+    $("accessDenied").classList.add("show");
+    $("accessDeniedText").textContent = message || "접근 권한이 없습니다.";
+    $("accessDeniedEmail").textContent = currentUser?.email
+      ? `현재 로그인: ${currentUser.email}`
+      : "현재 로그인 정보를 확인할 수 없습니다.";
+    document.documentElement.style.visibility = "visible";
+  }
+
+  function initMap() {
+    return new Promise(resolve => {
+      kakao.maps.load(() => {
+        const center = new kakao.maps.LatLng(37.5665, 126.9780);
+
+        map = new kakao.maps.Map($("map"), {
+          center,
+          level: 8
+        });
+
+        geocoder = new kakao.maps.services.Geocoder();
+
+        kakao.maps.event.addListener(map, "click", e => {
+          if (!addPointMode) return;
+
+          if (!selectedRoute) {
+            setStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+            return;
+          }
+
+          createNewPointFromMapClick(e.latLng);
+        });
+
+        resolve();
+      });
+    });
+  }
+
+  function clearMapObjects() {
+    for (const obj of polygonObjects) obj.setMap(null);
+    for (const obj of polygonLabels) obj.setMap(null);
+    for (const obj of pointOverlays) obj.setMap(null);
+
+    polygonObjects = [];
+    polygonLabels = [];
+    pointOverlays = [];
+  }
+
+  function setMapBoundsByLatLngs(latlngs) {
+    if (!latlngs.length) return;
+
+    const bounds = new kakao.maps.LatLngBounds();
+
+    for (const latlng of latlngs) {
+      bounds.extend(latlng);
+    }
+
+    map.setBounds(bounds);
+  }
+
+  function safeParseJson(value) {
+    if (!value) return null;
+    if (typeof value === "object") return value;
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  function coordToLatLng(coord) {
+    if (!coord) return null;
+
+    if (Array.isArray(coord) && coord.length >= 2) {
+      let a = Number(coord[0]);
+      let b = Number(coord[1]);
+
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+
+      let lng = a;
+      let lat = b;
+
+      if (a >= 30 && a <= 45 && b >= 120 && b <= 135) {
+        lat = a;
+        lng = b;
+      }
+
+      if (lat < 30 || lat > 45 || lng < 120 || lng > 135) return null;
+
+      return new kakao.maps.LatLng(lat, lng);
+    }
+
+    if (typeof coord === "object") {
+      const lat = Number(coord.lat ?? coord.latitude ?? coord.y);
+      const lng = Number(coord.lng ?? coord.lon ?? coord.longitude ?? coord.x);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (lat < 30 || lat > 45 || lng < 120 || lng > 135) return null;
+
+      return new kakao.maps.LatLng(lat, lng);
+    }
+
+    return null;
+  }
+
+  function extractRings(raw) {
+    const data = safeParseJson(raw);
+    if (!data) return [];
+
+    if (data.type === "Feature") {
+      return extractRings(data.geometry);
+    }
+
+    if (data.type === "FeatureCollection") {
+      return (data.features || []).flatMap(f => extractRings(f));
+    }
+
+    if (data.type === "Polygon") {
+      return (data.coordinates || [])
+        .map(ring => ring.map(coordToLatLng).filter(Boolean))
+        .filter(ring => ring.length >= 3);
+    }
+
+    if (data.type === "MultiPolygon") {
+      return (data.coordinates || []).flatMap(poly => {
+        return (poly || [])
+          .map(ring => ring.map(coordToLatLng).filter(Boolean))
+          .filter(ring => ring.length >= 3);
+      });
+    }
+
+    if (Array.isArray(data)) {
+      if (!data.length) return [];
+
+      if (Array.isArray(data[0]) && typeof data[0][0] === "number") {
+        const ring = data.map(coordToLatLng).filter(Boolean);
+        return ring.length >= 3 ? [ring] : [];
+      }
+
+      if (typeof data[0] === "object" && !Array.isArray(data[0])) {
+        const ring = data.map(coordToLatLng).filter(Boolean);
+        return ring.length >= 3 ? [ring] : [];
+      }
+
+      return data
+        .map(item => {
+          if (Array.isArray(item) && item.length && Array.isArray(item[0]) && typeof item[0][0] === "number") {
+            return item.map(coordToLatLng).filter(Boolean);
+          }
+
+          if (Array.isArray(item) && item.length && typeof item[0] === "object") {
+            return item.map(coordToLatLng).filter(Boolean);
+          }
+
+          return [];
+        })
+        .filter(ring => ring.length >= 3);
+    }
+
+    return [];
+  }
+
+  function ringCenter(ring) {
+    if (!ring.length) return null;
+
+    let lat = 0;
+    let lng = 0;
+
+    for (const item of ring) {
+      lat += item.getLat();
+      lng += item.getLng();
+    }
+
+    return new kakao.maps.LatLng(lat / ring.length, lng / ring.length);
+  }
+
+  function renderMapFeatures() {
+    if (!map) return;
+
+    clearMapObjects();
+
+    const selectedCode = selectedRoute ? routeCodeOf(selectedRoute) : "";
+    const allLatLngs = [];
+
+    for (const polyRow of polygonRows) {
+      if (polyRow.is_active === false) continue;
+
+      const code = normalizeRoute(polyRow.route_code || polyRow.route_norm);
+      const selected = selectedCode && code === selectedCode;
+      const rings = extractRings(polyRow.polygon_wgs84);
+
+      for (const ring of rings) {
+        allLatLngs.push(...ring);
+
+        const polygon = new kakao.maps.Polygon({
+          path: ring,
+          strokeWeight: selected ? 4 : 2,
+          strokeColor: selected ? "#facc15" : "#38bdf8",
+          strokeOpacity: selected ? 0.95 : 0.65,
+          fillColor: selected ? "#fde047" : "#38bdf8",
+          fillOpacity: selected ? 0.22 : 0.12
+        });
+
+        polygon.setMap(map);
+
+        kakao.maps.event.addListener(polygon, "click", () => {
+          selectRouteByCode(polyRow.camp, code);
+        });
+
+        polygonObjects.push(polygon);
+
+        const center = ringCenter(ring);
+
+        if (center) {
+          const label = document.createElement("div");
+          label.style.cssText = [
+            "padding:3px 7px",
+            "border-radius:999px",
+            "border:1px solid rgba(255,255,255,.55)",
+            "background:rgba(0,0,0,.65)",
+            "color:#fff",
+            "font-size:11px",
+            "font-weight:900",
+            "white-space:nowrap"
+          ].join(";");
+
+          label.textContent = code;
+
+          const overlay = new kakao.maps.CustomOverlay({
+            position: center,
+            content: label,
+            yAnchor: 0.5,
+            zIndex: selected ? 15 : 8
+          });
+
+          overlay.setMap(map);
+          polygonLabels.push(overlay);
+        }
+      }
+    }
+
+    for (const point of pointRows) {
+      if (point.is_active === false) continue;
+
+      const lat = Number(point.lat);
+      const lng = Number(point.lng);
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const position = new kakao.maps.LatLng(lat, lng);
+      allLatLngs.push(position);
+
+      const el = document.createElement("div");
+      const active = selectedPoint && selectedPoint.id === point.id;
+
+      el.className = `markerTip ${pointTypeClass(point.point_type)} ${active ? "active" : ""}`;
+      el.innerHTML = `
+        <div class="markerBubble">${esc(pointTypeIcon(point.point_type))}</div>
+        <div class="markerLabel">${esc(point.title || pointTypeLabel(point.point_type))}</div>
+      `;
+
+      el.addEventListener("click", event => {
+        event.stopPropagation();
+        selectPoint(point.id);
+      });
+
+      const overlay = new kakao.maps.CustomOverlay({
+        position,
+        content: el,
+        yAnchor: 1.2,
+        zIndex: active ? 30 : 20
+      });
+
+      overlay.setMap(map);
+      pointOverlays.push(overlay);
+    }
+
+    if (allLatLngs.length && !selectedRoute) {
+      setMapBoundsByLatLngs(allLatLngs);
+    }
+  }
+
+  async function loadData() {
+    setStatus("데이터를 불러오는 중...", "warn");
+
+    const camp = clean($("campInput").value);
+    const routeFilter = normalizeRoute($("routeInput").value);
+
+    let routeQuery = supabaseClient
+      .from(TABLE_ROUTE)
+      .select(`
+        id,
+        camp,
+        route,
+        sub,
+        sub_sub,
+        sub_package,
+        description,
+        memo,
+        coordinate,
+        sort_order,
+        is_active,
+        route_code,
+        route_norm,
+        created_at,
+        updated_at
+      `)
+      .eq("is_active", true)
+      .order("camp", { ascending:true })
+      .order("sort_order", { ascending:true })
+      .order("route", { ascending:true })
+      .limit(5000);
+
+    if (camp) routeQuery = routeQuery.ilike("camp", `%${camp}%`);
+
+    const { data: routes, error: routeError } = await routeQuery;
+    if (routeError) throw routeError;
+
+    routeRows = (routes || []).filter(row => {
+      if (!routeFilter) return true;
+
+      const code = routeCodeOf(row);
+      const routeNorm = normalizeRoute(row.route);
+
+      return code.includes(routeFilter) || routeNorm.includes(routeFilter);
+    });
+
+    let polygonQuery = supabaseClient
+      .from(TABLE_POLYGON)
+      .select(`
+        id,
+        camp,
+        route_code,
+        route_norm,
+        polygon_wgs84,
+        camps_code,
+        is_active,
+        created_at,
+        updated_at
+      `)
+      .eq("is_active", true)
+      .limit(5000);
+
+    if (camp) polygonQuery = polygonQuery.ilike("camp", `%${camp}%`);
+
+    const { data: polygons, error: polygonError } = await polygonQuery;
+    if (polygonError) throw polygonError;
+
+    polygonRows = (polygons || []).filter(row => {
+      if (!routeFilter) return true;
+      const code = normalizeRoute(row.route_code || row.route_norm);
+      return code.includes(routeFilter);
+    });
+
+    let pointQuery = supabaseClient
+      .from(TABLE_POINT)
+      .select(`
+        id,
+        camp,
+        route_code,
+        route_norm,
+        route_info_id,
+        polygon_id,
+        lat,
+        lng,
+        point_type,
+        title,
+        delivery_tip,
+        password_note,
+        entrance_note,
+        parking_note,
+        caution_note,
+        memo,
+        marker_shape,
+        marker_color,
+        marker_json,
+        is_active,
+        created_at,
+        updated_at
+      `)
+      .eq("is_active", true)
+      .limit(10000);
+
+    if (camp) pointQuery = pointQuery.ilike("camp", `%${camp}%`);
+
+    const { data: points, error: pointError } = await pointQuery;
+    if (pointError) throw pointError;
+
+    pointRows = (points || []).filter(row => {
+      if (!routeFilter) return true;
+      const code = normalizeRoute(row.route_code || row.route_norm);
+      return code.includes(routeFilter);
+    });
+
+    selectedRoute = null;
+    selectedPoint = null;
+
+    renderRouteList();
+    renderPointList();
+    clearRouteDetail();
+    fillPointForm(null);
+    renderMapFeatures();
+    renderCounts();
+
+    setStatus("조회 완료", "ok");
+  }
+
+  function renderCounts() {
+    $("routeCount").textContent = routeRows.length.toLocaleString();
+    $("polygonCount").textContent = polygonRows.length.toLocaleString();
+    $("pointCount").textContent = pointRows.length.toLocaleString();
+  }
+
+  function renderRouteList() {
+    const wrap = $("routeList");
+
+    if (!routeRows.length) {
+      wrap.innerHTML = `<div class="detailEmpty">라우트 데이터가 없습니다.</div>`;
+      return;
+    }
+
+    const pointCountByRoute = new Map();
+    const polygonCountByRoute = new Map();
+
+    for (const point of pointRows) {
+      const key = `${point.camp}||${normalizeRoute(point.route_code || point.route_norm)}`;
+      pointCountByRoute.set(key, (pointCountByRoute.get(key) || 0) + 1);
+    }
+
+    for (const poly of polygonRows) {
+      const key = `${poly.camp}||${normalizeRoute(poly.route_code || poly.route_norm)}`;
+      polygonCountByRoute.set(key, (polygonCountByRoute.get(key) || 0) + 1);
+    }
+
+    wrap.innerHTML = routeRows.map(row => {
+      const code = routeCodeOf(row);
+      const key = `${row.camp}||${code}`;
+      const active = selectedRoute && selectedRoute.id === row.id;
+
+      return `
+        <div class="routeCard ${active ? "active" : ""}" data-route-id="${esc(row.id)}">
+          <div class="routeMain">
+            <div class="routeCode">${esc(code)}</div>
+            <div class="routeMeta">${esc(row.camp)} · ${esc(routeLabel(row))}</div>
+          </div>
+          <div class="routeDesc">${esc(row.description || row.memo || "설명 없음")}</div>
+          <div class="routeBadges">
+            <span class="miniBadge">폴리곤 ${polygonCountByRoute.get(key) || 0}</span>
+            <span class="miniBadge">포인트 ${pointCountByRoute.get(key) || 0}</span>
+            ${row.sub_package ? `<span class="miniBadge">${esc(row.sub_package)}</span>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderPointList() {
+    const wrap = $("pointList");
+
+    const list = selectedRoute
+      ? pointRows.filter(p => p.camp === selectedRoute.camp && normalizeRoute(p.route_code || p.route_norm) === routeCodeOf(selectedRoute))
+      : pointRows;
+
+    $("pointListCount").textContent = `${list.length.toLocaleString()}개`;
+
+    if (!list.length) {
+      wrap.innerHTML = `<div class="detailEmpty">배송 포인트가 없습니다.</div>`;
+      return;
+    }
+
+    wrap.innerHTML = list.map(point => {
+      const active = selectedPoint && selectedPoint.id === point.id;
+      const desc = point.delivery_tip || point.entrance_note || point.password_note || point.parking_note || point.caution_note || point.memo || "";
+
+      return `
+        <div class="pointCard ${active ? "active" : ""}" data-point-id="${esc(point.id)}">
+          <div class="pointTitle">[${esc(pointTypeLabel(point.point_type))}] ${esc(point.title || point.route_code)}</div>
+          <div class="pointSub">${esc(desc || `${point.lat}, ${point.lng}`)}</div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function selectRouteById(id) {
+    const row = routeRows.find(item => item.id === id);
+    if (!row) return;
+
+    selectedRoute = row;
+    selectedPoint = null;
+
+    renderRouteList();
+    renderRouteDetail(row);
+    renderPointList();
+    fillPointForm(null);
+    renderMapFeatures();
+    focusSelectedRoute();
+  }
+
+  function selectRouteByCode(camp, code) {
+    const norm = normalizeRoute(code);
+
+    const row = routeRows.find(item => {
+      return item.camp === camp && routeCodeOf(item) === norm;
+    }) || routeRows.find(item => routeCodeOf(item) === norm);
+
+    if (row) {
+      selectRouteById(row.id);
+    }
+  }
+
+  function renderRouteDetail(row) {
+    $("routeDetailEmpty").style.display = "none";
+    $("routeDetailForm").style.display = "";
+    $("selectedRouteCode").textContent = `${row.camp} / ${routeCodeOf(row)}`;
+
+    $("routeDescriptionInput").value = row.description || "";
+    $("routeMemoInput").value = row.memo || "";
+    $("routeSubPackageInput").value = row.sub_package || "";
+    $("routeCoordinateInput").value = row.coordinate || "";
+  }
+
+  function clearRouteDetail() {
+    $("routeDetailEmpty").style.display = "";
+    $("routeDetailForm").style.display = "none";
+    $("selectedRouteCode").textContent = "선택 없음";
+
+    $("routeDescriptionInput").value = "";
+    $("routeMemoInput").value = "";
+    $("routeSubPackageInput").value = "";
+    $("routeCoordinateInput").value = "";
+  }
+
+  function focusSelectedRoute() {
+    if (!selectedRoute) return;
+
+    const code = routeCodeOf(selectedRoute);
+    const latlngs = [];
+
+    for (const poly of polygonRows) {
+      const polyCode = normalizeRoute(poly.route_code || poly.route_norm);
+
+      if (poly.camp === selectedRoute.camp && polyCode === code) {
+        for (const ring of extractRings(poly.polygon_wgs84)) {
+          latlngs.push(...ring);
+        }
+      }
+    }
+
+    for (const point of pointRows) {
+      if (point.camp === selectedRoute.camp && normalizeRoute(point.route_code || point.route_norm) === code) {
+        const lat = Number(point.lat);
+        const lng = Number(point.lng);
+
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          latlngs.push(new kakao.maps.LatLng(lat, lng));
+        }
+      }
+    }
+
+    if (latlngs.length) {
+      setMapBoundsByLatLngs(latlngs);
+    }
+  }
+
+  async function saveRouteInfo() {
+    if (!selectedRoute) {
+      setStatus("선택된 라우트가 없습니다.", "bad");
+      return;
+    }
+
+    const payload = {
+      description: clean($("routeDescriptionInput").value) || null,
+      memo: clean($("routeMemoInput").value) || null,
+      sub_package: clean($("routeSubPackageInput").value) || null,
+      coordinate: clean($("routeCoordinateInput").value) || null
+    };
+
+    const { data, error } = await supabaseClient
+      .from(TABLE_ROUTE)
+      .update(payload)
+      .eq("id", selectedRoute.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    selectedRoute = {
+      ...selectedRoute,
+      ...data
+    };
+
+    routeRows = routeRows.map(row => row.id === selectedRoute.id ? selectedRoute : row);
+
+    renderRouteList();
+    renderRouteDetail(selectedRoute);
+
+    setStatus("라우트 정보 저장 완료", "ok");
+  }
+
+  function createNewPointFromMapClick(latLng) {
+    const code = routeCodeOf(selectedRoute);
+    const polygon = polygonRows.find(poly => {
+      return poly.camp === selectedRoute.camp && normalizeRoute(poly.route_code || poly.route_norm) === code;
+    });
+
+    selectedPoint = {
+      id: null,
+      camp: selectedRoute.camp,
+      route_code: code,
+      route_info_id: selectedRoute.id,
+      polygon_id: polygon?.id || null,
+      lat: latLng.getLat(),
+      lng: latLng.getLng(),
+      point_type: "tip",
+      title: "",
+      delivery_tip: "",
+      password_note: "",
+      entrance_note: "",
+      parking_note: "",
+      caution_note: "",
+      memo: "",
+      marker_shape: "pin",
+      marker_color: "",
+      marker_json: {},
+      is_active: true
+    };
+
+    fillPointForm(selectedPoint);
+    renderPointList();
+    renderMapFeatures();
+
+    setPointStatus("지도 클릭 위치로 신규 포인트가 준비되었습니다. 내용을 입력 후 저장하세요.", "warn");
+  }
+
+  function selectPoint(id) {
+    const point = pointRows.find(item => item.id === id);
+    if (!point) return;
+
+    selectedPoint = point;
+
+    const matchingRoute = routeRows.find(row => {
+      return row.camp === point.camp && routeCodeOf(row) === normalizeRoute(point.route_code || point.route_norm);
+    });
+
+    if (matchingRoute) selectedRoute = matchingRoute;
+
+    fillPointForm(point);
+    renderRouteList();
+    renderRouteDetail(selectedRoute);
+    renderPointList();
+    renderMapFeatures();
+
+    const lat = Number(point.lat);
+    const lng = Number(point.lng);
+
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      map.panTo(new kakao.maps.LatLng(lat, lng));
+    }
+  }
+
+  function fillPointForm(point) {
+    if (!point) {
+      $("selectedPointId").textContent = "신규/선택 없음";
+      $("pointTypeInput").value = "tip";
+      $("pointTitleInput").value = "";
+      $("pointLatInput").value = "";
+      $("pointLngInput").value = "";
+      $("deliveryTipInput").value = "";
+      $("passwordNoteInput").value = "";
+      $("entranceNoteInput").value = "";
+      $("parkingNoteInput").value = "";
+      $("cautionNoteInput").value = "";
+      $("pointMemoInput").value = "";
+      setPointStatus("");
+      return;
+    }
+
+    $("selectedPointId").textContent = point.id ? point.id.slice(0, 8) : "신규";
+    $("pointTypeInput").value = point.point_type || "tip";
+    $("pointTitleInput").value = point.title || "";
+    $("pointLatInput").value = point.lat ?? "";
+    $("pointLngInput").value = point.lng ?? "";
+    $("deliveryTipInput").value = point.delivery_tip || "";
+    $("passwordNoteInput").value = point.password_note || "";
+    $("entranceNoteInput").value = point.entrance_note || "";
+    $("parkingNoteInput").value = point.parking_note || "";
+    $("cautionNoteInput").value = point.caution_note || "";
+    $("pointMemoInput").value = point.memo || "";
+  }
+
+  function collectPointPayload() {
+    if (!selectedRoute && !selectedPoint?.route_code) {
+      throw new Error("먼저 라우트를 선택하세요.");
+    }
+
+    const routeCode = normalizeRoute(selectedPoint?.route_code || routeCodeOf(selectedRoute));
+    const camp = selectedPoint?.camp || selectedRoute?.camp;
+
+    const lat = Number($("pointLatInput").value);
+    const lng = Number($("pointLngInput").value);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new Error("위도/경도 값이 올바르지 않습니다.");
+    }
+
+    const polygon = polygonRows.find(poly => {
+      return poly.camp === camp && normalizeRoute(poly.route_code || poly.route_norm) === routeCode;
+    });
+
+    return {
+      camp,
+      route_code: routeCode,
+      route_info_id: selectedRoute?.id || selectedPoint?.route_info_id || null,
+      polygon_id: polygon?.id || selectedPoint?.polygon_id || null,
+      lat,
+      lng,
+      point_type: $("pointTypeInput").value || "tip",
+      title: clean($("pointTitleInput").value) || null,
+      delivery_tip: clean($("deliveryTipInput").value) || null,
+      password_note: clean($("passwordNoteInput").value) || null,
+      entrance_note: clean($("entranceNoteInput").value) || null,
+      parking_note: clean($("parkingNoteInput").value) || null,
+      caution_note: clean($("cautionNoteInput").value) || null,
+      memo: clean($("pointMemoInput").value) || null,
+      marker_shape: "pin",
+      marker_color: null,
+      marker_json: {}
+    };
+  }
+
+  async function savePoint() {
+    const payload = collectPointPayload();
+
+    let saved;
+
+    if (selectedPoint?.id) {
+      const { data, error } = await supabaseClient
+        .from(TABLE_POINT)
+        .update(payload)
+        .eq("id", selectedPoint.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      saved = data;
+
+      pointRows = pointRows.map(row => row.id === saved.id ? saved : row);
+    } else {
+      const { data, error } = await supabaseClient
+        .from(TABLE_POINT)
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) throw error;
+      saved = data;
+
+      pointRows.push(saved);
+    }
+
+    selectedPoint = saved;
+
+    renderPointList();
+    fillPointForm(saved);
+    renderMapFeatures();
+    renderCounts();
+
+    setPointStatus("포인트 저장 완료", "ok");
+  }
+
+  async function softDeletePoint() {
+    if (!isSuperAdmin) {
+      setPointStatus("포인트 비활성화는 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    if (!selectedPoint?.id) {
+      setPointStatus("선택된 포인트가 없습니다.", "bad");
+      return;
+    }
+
+    const ok = confirm("이 포인트를 비활성화할까요?\nDB 삭제가 아니라 is_active=false 처리됩니다.");
+
+    if (!ok) return;
+
+    const { error } = await supabaseClient
+      .from(TABLE_POINT)
+      .update({ is_active:false })
+      .eq("id", selectedPoint.id);
+
+    if (error) throw error;
+
+    pointRows = pointRows.filter(row => row.id !== selectedPoint.id);
+    selectedPoint = null;
+
+    fillPointForm(null);
+    renderPointList();
+    renderMapFeatures();
+    renderCounts();
+
+    setPointStatus("포인트 비활성화 완료", "ok");
+  }
+
+  function resetPointForm() {
+    selectedPoint = null;
+
+    if (selectedRoute) {
+      selectedPoint = {
+        id: null,
+        camp: selectedRoute.camp,
+        route_code: routeCodeOf(selectedRoute),
+        route_info_id: selectedRoute.id,
+        lat: "",
+        lng: "",
+        point_type: "tip"
+      };
+    }
+
+    fillPointForm(selectedPoint);
+    renderPointList();
+    renderMapFeatures();
+    setPointStatus("신규 포인트 입력 상태입니다. 지도 클릭으로 좌표를 넣거나 직접 입력하세요.", "warn");
+  }
+
+  function toggleAddPointMode() {
+    addPointMode = !addPointMode;
+    $("addPointModeBtn").textContent = addPointMode ? "점 추가 ON" : "점 추가 OFF";
+    $("addPointModeBtn").className = addPointMode ? "ok" : "warn";
+    setStatus(addPointMode ? "점 추가 모드입니다. 지도에서 위치를 클릭하세요." : "점 추가 모드를 종료했습니다.", addPointMode ? "warn" : "ok");
+  }
+
+  function setMapType() {
+    if (!map) return;
+
+    isSatellite = !isSatellite;
+    map.setMapTypeId(isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+    $("toggleMapTypeBtn").textContent = isSatellite ? "일반" : "위성";
+  }
+
+  function fitAll() {
+    const latlngs = [];
+
+    for (const poly of polygonRows) {
+      for (const ring of extractRings(poly.polygon_wgs84)) {
+        latlngs.push(...ring);
+      }
+    }
+
+    for (const point of pointRows) {
+      const lat = Number(point.lat);
+      const lng = Number(point.lng);
+
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        latlngs.push(new kakao.maps.LatLng(lat, lng));
+      }
+    }
+
+    if (latlngs.length) setMapBoundsByLatLngs(latlngs);
+  }
+
+  function openPasteModal() {
+    $("pasteModal").classList.add("show");
+  }
+
+  function closePasteModal() {
+    $("pasteModal").classList.remove("show");
+  }
+
+  function parsePasteText(text) {
+    const lines = String(text || "")
+      .split(/\r?\n/g)
+      .map(line => line.trimEnd())
+      .filter(line => line.trim());
+
+    if (!lines.length) return [];
+
+    const first = lines[0].split("\t").map(clean);
+    const hasHeader = first.some(cell => {
+      return ["캠프","camp","라우트","route","서브","서서브","설명","정보","memo","coordinate","sub_package"].includes(cell.toLowerCase?.() || cell);
+    }) || first.some(cell => ["캠프","라우트","서브","서서브","설명","정보"].includes(cell));
+
+    const header = hasHeader ? first : ["캠프","라우트","서브","서서브","설명","정보"];
+    const bodyLines = hasHeader ? lines.slice(1) : lines;
+
+    const keyOf = label => {
+      const k = String(label || "").replace(/\s+/g, "").toLowerCase();
+
+      if (k === "캠프" || k === "camp") return "camp";
+      if (k === "라우트" || k === "route") return "route";
+      if (k === "서브" || k === "sub") return "sub";
+      if (k === "서서브" || k === "subsub" || k === "sub_sub") return "sub_sub";
+      if (k === "설명" || k === "description") return "description";
+      if (k === "정보" || k === "memo" || k === "메모") return "memo";
+      if (k === "좌표" || k === "coordinate") return "coordinate";
+      if (k === "subpackage" || k === "sub_package" || k === "패키지") return "sub_package";
+      return "";
+    };
+
+    const keys = header.map(keyOf);
+
+    return bodyLines.map((line, idx) => {
+      const cols = line.split("\t");
+      const row = {
+        camp: "",
+        route: "",
+        sub: "",
+        sub_sub: "",
+        description: "",
+        memo: "",
+        coordinate: "",
+        sub_package: "",
+        sort_order: idx
+      };
+
+      cols.forEach((value, i) => {
+        const key = keys[i];
+
+        if (key) row[key] = clean(value);
+      });
+
+      return row;
+    }).filter(row => row.camp && row.route);
+  }
+
+  async function importPasteRows() {
+    const rows = parsePasteText($("pasteTextInput").value);
+
+    if (!rows.length) {
+      $("pasteStatusText").textContent = "가져올 행이 없습니다.";
+      $("pasteStatusText").className = "status bad";
+      return;
+    }
+
+    $("pasteStatusText").textContent = `${rows.length}건 저장 중...`;
+    $("pasteStatusText").className = "status warn";
+
+    let inserted = 0;
+    let updated = 0;
+
+    for (const row of rows) {
+      const code = normalizeRoute(`${row.route}${row.sub}${row.sub_sub}`);
+
+      const { data: existing, error: findError } = await supabaseClient
+        .from(TABLE_ROUTE)
+        .select("id")
+        .eq("camp", row.camp)
+        .eq("route_code", code)
+        .maybeSingle();
+
+      if (findError) throw findError;
+
+      const payload = {
+        camp: row.camp,
+        route: row.route,
+        sub: row.sub || null,
+        sub_sub: row.sub_sub || null,
+        description: row.description || null,
+        memo: row.memo || null,
+        coordinate: row.coordinate || null,
+        sub_package: row.sub_package || null,
+        sort_order: row.sort_order || 0,
+        is_active: true
+      };
+
+      if (existing?.id) {
+        const { error } = await supabaseClient
+          .from(TABLE_ROUTE)
+          .update(payload)
+          .eq("id", existing.id);
+
+        if (error) throw error;
+        updated++;
+      } else {
+        const { error } = await supabaseClient
+          .from(TABLE_ROUTE)
+          .insert(payload);
+
+        if (error) throw error;
+        inserted++;
+      }
+    }
+
+    $("pasteStatusText").textContent = `저장 완료: 신규 ${inserted}건 / 수정 ${updated}건`;
+    $("pasteStatusText").className = "status ok";
+
+    await loadData();
+  }
+
+  async function signOut() {
+    try {
+      await supabaseClient?.auth?.signOut();
+    } catch {}
+
+    location.href = cfg.PATHS?.login || "/login.html";
+  }
+
+  function bindEvents() {
+    $("loadBtn").addEventListener("click", () => run(loadData));
+    $("campInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") run(loadData);
+    });
+    $("routeInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") run(loadData);
+    });
+
+    $("routeList").addEventListener("click", e => {
+      const card = e.target.closest("[data-route-id]");
+      if (!card) return;
+      selectRouteById(card.dataset.routeId);
+    });
+
+    $("pointList").addEventListener("click", e => {
+      const card = e.target.closest("[data-point-id]");
+      if (!card) return;
+      selectPoint(card.dataset.pointId);
+    });
+
+    $("saveRouteInfoBtn").addEventListener("click", () => run(saveRouteInfo));
+    $("focusRouteBtn").addEventListener("click", focusSelectedRoute);
+
+    $("savePointBtn").addEventListener("click", () => run(savePoint));
+    $("newPointBtn").addEventListener("click", resetPointForm);
+    $("softDeletePointBtn").addEventListener("click", () => run(softDeletePoint));
+
+    $("addPointModeBtn").addEventListener("click", toggleAddPointMode);
+    $("toggleMapTypeBtn").addEventListener("click", setMapType);
+    $("fitAllBtn").addEventListener("click", fitAll);
+    $("resetMapBtn").addEventListener("click", fitAll);
+
+    $("pasteOpenBtn").addEventListener("click", openPasteModal);
+    $("pasteCloseBtn").addEventListener("click", closePasteModal);
+    $("pasteClearBtn").addEventListener("click", () => {
+      $("pasteTextInput").value = "";
+      $("pasteStatusText").textContent = "";
+    });
+    $("pasteImportBtn").addEventListener("click", () => run(importPasteRows));
+
+    $("deniedHomeBtn").addEventListener("click", () => {
+      location.href = cfg.PATHS?.index || "/index.html";
+    });
+    $("deniedLogoutBtn").addEventListener("click", signOut);
+
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        closePasteModal();
+      }
+    });
+  }
+
+  function handleError(e) {
+    console.error(e);
+    setStatus(e.message || String(e), "bad");
+    setPointStatus(e.message || String(e), "bad");
+  }
+
+  function run(fn) {
+    Promise.resolve().then(fn).catch(handleError);
+  }
+
+  initSupabase();
+  bindEvents();
+
+  run(async () => {
+    const ok = await checkAccess();
+    if (!ok) return;
+
+    await initMap();
+    await loadData();
+
+    document.documentElement.style.visibility = "visible";
+  });
+})();
+</script>
+
+<script src="/board-menu.js"></script>
+</body>
+</html>

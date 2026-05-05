@@ -291,7 +291,7 @@
     .routeList{
       display:grid;
       gap:8px;
-      max-height:calc(100vh - 360px);
+      max-height:calc(100vh - 402px);
       overflow:auto;
       padding-right:2px;
     }
@@ -571,8 +571,8 @@
     .modal.show{display:flex}
 
     .modalCard{
-      width:min(900px, calc(100vw - 32px));
-      max-height:min(780px, calc(100vh - 32px));
+      width:min(1180px, calc(100vw - 32px));
+      max-height:min(820px, calc(100vh - 32px));
       overflow:hidden;
       border-radius:20px;
       border:1px solid rgba(255,255,255,.14);
@@ -601,11 +601,69 @@
       overflow:auto;
     }
 
-    .pasteBox{
-      min-height:320px;
-      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    .bulkHelp{
+      color:var(--muted);
       font-size:12px;
-      white-space:pre;
+      line-height:1.55;
+      margin-bottom:10px;
+    }
+
+    .bulkTableWrap{
+      overflow:auto;
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      background:rgba(0,0,0,.16);
+    }
+
+    .bulkTable{
+      width:100%;
+      min-width:1120px;
+      border-collapse:collapse;
+      font-size:12px;
+    }
+
+    .bulkTable th,
+    .bulkTable td{
+      border-bottom:1px solid rgba(255,255,255,.10);
+      border-right:1px solid rgba(255,255,255,.08);
+      padding:6px;
+      vertical-align:top;
+    }
+
+    .bulkTable th{
+      position:sticky;
+      top:0;
+      z-index:2;
+      background:#26354d;
+      color:#fff;
+      font-weight:950;
+      text-align:center;
+    }
+
+    .bulkTable td:last-child,
+    .bulkTable th:last-child{
+      border-right:0;
+    }
+
+    .bulkTable input,
+    .bulkTable textarea{
+      height:34px;
+      min-height:34px;
+      border-radius:8px;
+      font-size:12px;
+      padding:6px 8px;
+      background:rgba(0,0,0,.26);
+    }
+
+    .bulkTable textarea{
+      min-height:64px;
+      resize:vertical;
+    }
+
+    .bulkRemoveBtn{
+      min-height:32px;
+      padding:0 10px;
+      font-size:11px;
     }
 
     #imagePreviewImg{
@@ -749,17 +807,22 @@
         <input id="routeInput" placeholder="예: 126, 126A01, 213A" />
       </div>
 
+      <div class="field">
+        <label>Sub package</label>
+        <input id="subPackageInput" placeholder="예: 개방, 보람, 9999, 아파트명" />
+      </div>
+
       <div class="row">
         <button id="loadBtn">불러오기</button>
         <button id="resetMapBtn" class="secondary">지도 초기화</button>
       </div>
 
       <div class="row" style="margin-top:8px">
-        <button id="pasteOpenBtn" class="secondary">엑셀 붙여넣기</button>
+        <button id="bulkOpenBtn" class="secondary">라우트 등록</button>
         <button id="addPointModeBtn" class="warn">점 추가 OFF</button>
       </div>
 
-      <div id="statusText" class="status">대기 중</div>
+      <div id="statusText" class="status">검색 조건을 입력한 뒤 불러오기를 누르세요.</div>
 
       <div class="summary">
         <span class="pill">라우트 <strong id="routeCount">0</strong></span>
@@ -989,23 +1052,46 @@
   </aside>
 </div>
 
-<div id="pasteModal" class="modal">
+<div id="bulkModal" class="modal">
   <div class="modalCard">
     <div class="modalTop">
-      <div class="modalTitle">엑셀 데이터 붙여넣기</div>
-      <button id="pasteCloseBtn" class="danger">닫기</button>
+      <div class="modalTitle">라우트 대강 등록</div>
+      <button id="bulkCloseBtn" class="danger">닫기</button>
     </div>
     <div class="modalBody">
-      <div class="status">
-        헤더 포함 가능: 캠프, 라우트, 서브, 서서브, 설명, 정보, coordinate, sub_package<br>
-        헤더 없으면 순서: 캠프 / 라우트 / 서브 / 서서브 / 설명 / 정보
+      <div class="bulkHelp">
+        엑셀 붙여넣기 대신 여기서 필요한 행만 대강 입력해서 저장합니다.<br>
+        필수값은 Camp / Route 입니다. Sub, Sub-sub가 있으면 route_code는 예: 126 + A + 01 → 126A01 기준으로 잡힙니다.<br>
+        이미 같은 Camp + RouteCode가 있으면 수정, 없으면 신규 등록됩니다.
       </div>
-      <textarea id="pasteTextInput" class="pasteBox" placeholder="엑셀에서 범위 복사 후 여기에 붙여넣기"></textarea>
-      <div class="row" style="margin-top:12px">
-        <button id="pasteImportBtn" class="ok">가져오기 / 저장</button>
-        <button id="pasteClearBtn" class="secondary">내용 비우기</button>
+
+      <div class="row" style="margin-bottom:10px">
+        <button id="bulkAddRowBtn" class="secondary">행 추가</button>
+        <button id="bulkAddFiveBtn" class="secondary">5행 추가</button>
+        <button id="bulkSaveBtn" class="ok">등록 저장</button>
+        <button id="bulkClearBtn" class="danger">전체 비우기</button>
       </div>
-      <div id="pasteStatusText" class="status"></div>
+
+      <div class="bulkTableWrap">
+        <table class="bulkTable">
+          <thead>
+            <tr>
+              <th style="width:60px">작업</th>
+              <th style="width:110px">Camp</th>
+              <th style="width:90px">Route</th>
+              <th style="width:80px">Sub</th>
+              <th style="width:90px">Sub-sub</th>
+              <th style="width:170px">설명</th>
+              <th style="width:210px">정보 / 메모</th>
+              <th style="width:150px">서브패키지</th>
+              <th style="width:150px">좌표 / 원본값</th>
+            </tr>
+          </thead>
+          <tbody id="bulkRows"></tbody>
+        </table>
+      </div>
+
+      <div id="bulkStatusText" class="status"></div>
     </div>
   </div>
 </div>
@@ -1056,6 +1142,9 @@
   let map = null;
   let isSatellite = false;
 
+  let hasSearched = false;
+  let lastFeatureClickAt = 0;
+
   let routeRows = [];
   let polygonRows = [];
   let pointRows = [];
@@ -1104,6 +1193,13 @@
 
   function setRouteBaseStatus(msg, type = "") {
     const el = $("routeBaseInfoText");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = type ? "status " + type : "status";
+  }
+
+  function setBulkStatus(msg, type = "") {
+    const el = $("bulkStatusText");
     if (!el) return;
     el.textContent = msg || "";
     el.className = type ? "status " + type : "status";
@@ -1159,6 +1255,10 @@
     return normalizeRoute(row?.route_code || row?.route_norm);
   }
 
+  function routeKey(camp, code) {
+    return `${camp || ""}||${normalizeRoute(code)}`;
+  }
+
   function pointTypeLabel(type) {
     return {
       tip: "배송팁",
@@ -1166,7 +1266,7 @@
       password: "비번",
       parking: "주차",
       caution: "주의",
-      door: "문",
+      door: "문/동선",
       gate: "게이트",
       etc: "기타"
     }[type] || "기타";
@@ -1187,6 +1287,10 @@
 
   function pointTypeClass(type) {
     return "marker-" + (type || "etc");
+  }
+
+  function markFeatureClick() {
+    lastFeatureClickAt = Date.now();
   }
 
   function initSupabase() {
@@ -1266,6 +1370,8 @@
         });
 
         kakao.maps.event.addListener(map, "click", e => {
+          if (Date.now() - lastFeatureClickAt < 180) return;
+
           if (drawMode) {
             addDrawVertex(e.latLng);
             return;
@@ -1278,7 +1384,10 @@
             }
 
             createNewPointFromMapClick(e.latLng);
+            return;
           }
+
+          clearSelection(true);
         });
 
         kakao.maps.event.addListener(map, "rightclick", e => {
@@ -1328,6 +1437,48 @@
     if (drawPreviewPolygon) {
       drawPreviewPolygon.setMap(null);
       drawPreviewPolygon = null;
+    }
+  }
+
+  function clearSearchResults(showIdleStatus = true) {
+    hasSearched = false;
+    routeRows = [];
+    polygonRows = [];
+    pointRows = [];
+    selectedRoute = null;
+    selectedPoint = null;
+    selectedPolygonId = null;
+    cancelDrawModeSilently();
+    clearAttachmentsState();
+    clearRouteDetail();
+    fillPointForm(null);
+    renderRouteList();
+    renderPointList();
+    clearMapObjects();
+    renderCounts();
+
+    if (showIdleStatus) {
+      setStatus("검색 조건을 입력한 뒤 불러오기를 누르세요.", "warn");
+    }
+  }
+
+  function clearSelection(fromMap = false) {
+    if (drawMode) return;
+
+    if (!selectedRoute && !selectedPoint && !selectedPolygonId) return;
+
+    selectedRoute = null;
+    selectedPoint = null;
+    selectedPolygonId = null;
+    clearAttachmentsState();
+    clearRouteDetail();
+    fillPointForm(null);
+    renderRouteList();
+    renderPointList();
+    renderMapFeatures();
+
+    if (fromMap) {
+      setStatus("선택 해제", "ok");
     }
   }
 
@@ -1489,6 +1640,8 @@
         polygon.setMap(map);
 
         kakao.maps.event.addListener(polygon, "click", mouseEvent => {
+          markFeatureClick();
+
           if (drawMode) {
             addDrawVertex(mouseEvent.latLng);
             return;
@@ -1510,6 +1663,8 @@
         });
 
         kakao.maps.event.addListener(polygon, "rightclick", mouseEvent => {
+          markFeatureClick();
+
           if (drawMode) {
             deleteNearestDrawVertex(mouseEvent.latLng);
           }
@@ -1569,6 +1724,7 @@
 
       el.addEventListener("click", event => {
         event.stopPropagation();
+        markFeatureClick();
         selectPoint(point.id);
       });
 
@@ -1978,10 +2134,18 @@
   }
 
   async function loadData() {
-    setStatus("데이터를 불러오는 중...", "warn");
-
     const camp = clean($("campInput").value);
     const routeFilter = normalizeRoute($("routeInput").value);
+    const subPackageFilter = clean($("subPackageInput").value);
+
+    if (!camp && !routeFilter && !subPackageFilter) {
+      clearSearchResults(false);
+      setStatus("검색 조건을 하나 이상 입력하세요. 전체 기본 조회는 막아두었습니다.", "warn");
+      return;
+    }
+
+    setStatus("데이터를 불러오는 중...", "warn");
+    hasSearched = true;
 
     let routeQuery = supabaseClient
       .from(TABLE_ROUTE)
@@ -2011,6 +2175,7 @@
       .limit(5000);
 
     if (camp) routeQuery = routeQuery.ilike("camp", `%${camp}%`);
+    if (subPackageFilter) routeQuery = routeQuery.ilike("sub_package", `%${subPackageFilter}%`);
 
     const { data: routes, error: routeError } = await routeQuery;
     if (routeError) throw routeError;
@@ -2023,6 +2188,8 @@
 
       return code.includes(routeFilter) || routeNorm.includes(routeFilter);
     }));
+
+    const matchedKeys = new Set(routeRows.map(row => routeKey(row.camp, routeCodeOf(row))));
 
     let polygonQuery = supabaseClient
       .from(TABLE_POLYGON)
@@ -2046,8 +2213,7 @@
     if (polygonError) throw polygonError;
 
     polygonRows = (polygons || []).filter(row => {
-      if (!routeFilter) return true;
-      return polygonCodeOf(row).includes(routeFilter);
+      return matchedKeys.has(routeKey(row.camp, polygonCodeOf(row)));
     });
 
     let pointQuery = supabaseClient
@@ -2085,8 +2251,7 @@
     if (pointError) throw pointError;
 
     pointRows = (points || []).filter(row => {
-      if (!routeFilter) return true;
-      return normalizeRoute(row.route_code || row.route_norm).includes(routeFilter);
+      return matchedKeys.has(routeKey(row.camp, normalizeRoute(row.route_code || row.route_norm)));
     });
 
     selectedRoute = null;
@@ -2114,6 +2279,11 @@
   function renderRouteList() {
     const wrap = $("routeList");
 
+    if (!hasSearched) {
+      wrap.innerHTML = `<div class="detailEmpty">검색 조건을 입력하고 불러오기를 누르세요.</div>`;
+      return;
+    }
+
     if (!routeRows.length) {
       wrap.innerHTML = `<div class="detailEmpty">라우트 데이터가 없습니다.</div>`;
       return;
@@ -2123,19 +2293,19 @@
     const polygonCountByRoute = new Map();
 
     for (const point of pointRows) {
-      const key = `${point.camp}||${normalizeRoute(point.route_code || point.route_norm)}`;
+      const key = routeKey(point.camp, normalizeRoute(point.route_code || point.route_norm));
       pointCountByRoute.set(key, (pointCountByRoute.get(key) || 0) + 1);
     }
 
     for (const poly of polygonRows) {
       if (poly.is_active === false) continue;
-      const key = `${poly.camp}||${polygonCodeOf(poly)}`;
+      const key = routeKey(poly.camp, polygonCodeOf(poly));
       polygonCountByRoute.set(key, (polygonCountByRoute.get(key) || 0) + 1);
     }
 
     wrap.innerHTML = routeRows.map(row => {
       const code = routeCodeOf(row);
-      const key = `${row.camp}||${code}`;
+      const key = routeKey(row.camp, code);
       const active = selectedRoute && selectedRoute.id === row.id;
 
       return `
@@ -2160,9 +2330,14 @@
 
     const list = selectedRoute
       ? pointRows.filter(p => p.camp === selectedRoute.camp && normalizeRoute(p.route_code || p.route_norm) === routeCodeOf(selectedRoute))
-      : pointRows;
+      : [];
 
     $("pointListCount").textContent = `${list.length.toLocaleString()}개`;
+
+    if (!selectedRoute) {
+      wrap.innerHTML = `<div class="detailEmpty">라우트를 선택하면 배송 포인트가 표시됩니다.</div>`;
+      return;
+    }
 
     if (!list.length) {
       wrap.innerHTML = `<div class="detailEmpty">배송 포인트가 없습니다.</div>`;
@@ -2452,7 +2627,7 @@
         `연결 포인트: ${relatedPoints.length}건`,
         "",
         "실제 삭제가 아니라 is_active=false 처리됩니다.",
-        "잘못 등록된 엑셀 데이터 정리용입니다."
+        "잘못 등록된 데이터 정리용입니다."
       ].join("\n")
     );
 
@@ -3054,96 +3229,80 @@
     $("imagePreviewCaption").textContent = "";
   }
 
-  function openPasteModal() {
-    $("pasteModal").classList.add("show");
+  function openBulkModal() {
+    $("bulkModal").classList.add("show");
+
+    if (!$("bulkRows").children.length) {
+      addBulkRows(4);
+    }
   }
 
-  function closePasteModal() {
-    $("pasteModal").classList.remove("show");
+  function closeBulkModal() {
+    $("bulkModal").classList.remove("show");
   }
 
-  function parsePasteText(text) {
-    const lines = String(text || "")
-      .split(/\r?\n/g)
-      .map(line => line.trimEnd())
-      .filter(line => line.trim());
+  function bulkRowHtml(row = {}) {
+    return `
+      <tr data-bulk-row>
+        <td>
+          <button type="button" class="danger bulkRemoveBtn" data-action="bulk-remove">삭제</button>
+        </td>
+        <td><input class="bulk-camp" value="${esc(row.camp || "")}" placeholder="일산2" /></td>
+        <td><input class="bulk-route" value="${esc(row.route || "")}" placeholder="126" /></td>
+        <td><input class="bulk-sub" value="${esc(row.sub || "")}" placeholder="A" /></td>
+        <td><input class="bulk-sub-sub" value="${esc(row.sub_sub || "")}" placeholder="01" /></td>
+        <td><textarea class="bulk-description" placeholder="설명">${esc(row.description || "")}</textarea></td>
+        <td><textarea class="bulk-memo" placeholder="정보 / 메모">${esc(row.memo || "")}</textarea></td>
+        <td><input class="bulk-sub-package" value="${esc(row.sub_package || "")}" placeholder="sub_package" /></td>
+        <td><input class="bulk-coordinate" value="${esc(row.coordinate || "")}" placeholder="coordinate" /></td>
+      </tr>
+    `;
+  }
 
-    if (!lines.length) return [];
+  function addBulkRows(count = 1) {
+    const html = Array.from({ length: count }, () => bulkRowHtml()).join("");
+    $("bulkRows").insertAdjacentHTML("beforeend", html);
+  }
 
-    const first = lines[0].split("\t").map(clean);
+  function clearBulkRows() {
+    $("bulkRows").innerHTML = "";
+    addBulkRows(4);
+    setBulkStatus("초기화 완료", "ok");
+  }
 
-    const hasHeader = first.some(cell => {
-      const key = String(cell || "").replace(/\s+/g, "").toLowerCase();
-
-      return [
-        "캠프",
-        "camp",
-        "라우트",
-        "route",
-        "서브",
-        "서서브",
-        "설명",
-        "정보",
-        "memo",
-        "coordinate",
-        "sub_package",
-        "subpackage"
-      ].includes(key);
-    }) || first.some(cell => ["캠프","라우트","서브","서서브","설명","정보"].includes(cell));
-
-    const header = hasHeader ? first : ["캠프","라우트","서브","서서브","설명","정보"];
-    const bodyLines = hasHeader ? lines.slice(1) : lines;
-
-    const keyOf = label => {
-      const k = String(label || "").replace(/\s+/g, "").toLowerCase();
-
-      if (k === "캠프" || k === "camp") return "camp";
-      if (k === "라우트" || k === "route") return "route";
-      if (k === "서브" || k === "sub") return "sub";
-      if (k === "서서브" || k === "subsub" || k === "sub_sub" || k === "sub-sub") return "sub_sub";
-      if (k === "설명" || k === "description") return "description";
-      if (k === "정보" || k === "memo" || k === "메모") return "memo";
-      if (k === "좌표" || k === "coordinate") return "coordinate";
-      if (k === "subpackage" || k === "sub_package" || k === "패키지") return "sub_package";
-      return "";
-    };
-
-    const keys = header.map(keyOf);
-
-    return bodyLines.map((line, idx) => {
-      const cols = line.split("\t");
-      const row = {
-        camp: "",
-        route: "",
-        sub: "",
-        sub_sub: "",
-        description: "",
-        memo: "",
-        coordinate: "",
-        sub_package: "",
+  function collectBulkRows() {
+    const rows = Array.from(document.querySelectorAll("[data-bulk-row]")).map((tr, idx) => {
+      return {
+        camp: clean(tr.querySelector(".bulk-camp")?.value),
+        route: clean(tr.querySelector(".bulk-route")?.value),
+        sub: clean(tr.querySelector(".bulk-sub")?.value),
+        sub_sub: clean(tr.querySelector(".bulk-sub-sub")?.value),
+        description: clean(tr.querySelector(".bulk-description")?.value),
+        memo: clean(tr.querySelector(".bulk-memo")?.value),
+        sub_package: clean(tr.querySelector(".bulk-sub-package")?.value),
+        coordinate: clean(tr.querySelector(".bulk-coordinate")?.value),
         sort_order: idx
       };
+    }).filter(row => row.camp || row.route || row.sub || row.sub_sub || row.description || row.memo || row.sub_package || row.coordinate);
 
-      cols.forEach((value, i) => {
-        const key = keys[i];
-        if (key) row[key] = clean(value);
-      });
-
-      return row;
-    }).filter(row => row.camp && row.route);
+    return rows;
   }
 
-  async function importPasteRows() {
-    const rows = parsePasteText($("pasteTextInput").value);
+  async function saveBulkRoutes() {
+    const rows = collectBulkRows();
 
     if (!rows.length) {
-      $("pasteStatusText").textContent = "가져올 행이 없습니다.";
-      $("pasteStatusText").className = "status bad";
+      setBulkStatus("저장할 행이 없습니다.", "bad");
       return;
     }
 
-    $("pasteStatusText").textContent = `${rows.length}건 저장 중...`;
-    $("pasteStatusText").className = "status warn";
+    const invalid = rows.find(row => !row.camp || !row.route);
+    if (invalid) {
+      setBulkStatus("Camp와 Route는 필수입니다.", "bad");
+      return;
+    }
+
+    setBulkStatus(`${rows.length}건 저장 중...`, "warn");
 
     let inserted = 0;
     let updated = 0;
@@ -3191,9 +3350,10 @@
       }
     }
 
-    $("pasteStatusText").textContent = `저장 완료: 신규 ${inserted}건 / 수정 ${updated}건`;
-    $("pasteStatusText").className = "status ok";
+    setBulkStatus(`저장 완료: 신규 ${inserted}건 / 수정 ${updated}건`, "ok");
 
+    const first = rows[0];
+    if (first?.camp) $("campInput").value = first.camp;
     await loadData();
   }
 
@@ -3216,15 +3376,21 @@
       if (e.key === "Enter") run(loadData);
     });
 
+    $("subPackageInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") run(loadData);
+    });
+
     $("routeList").addEventListener("click", e => {
       const card = e.target.closest("[data-route-id]");
       if (!card) return;
+      markFeatureClick();
       selectRouteById(card.dataset.routeId);
     });
 
     $("pointList").addEventListener("click", e => {
       const card = e.target.closest("[data-point-id]");
       if (!card) return;
+      markFeatureClick();
       selectPoint(card.dataset.pointId);
     });
 
@@ -3271,20 +3437,33 @@
     $("fitAllBtn").addEventListener("click", fitAll);
     $("resetMapBtn").addEventListener("click", fitAll);
 
-    $("pasteOpenBtn").addEventListener("click", openPasteModal);
-    $("pasteCloseBtn").addEventListener("click", closePasteModal);
+    $("bulkOpenBtn").addEventListener("click", openBulkModal);
+    $("bulkCloseBtn").addEventListener("click", closeBulkModal);
+    $("bulkAddRowBtn").addEventListener("click", () => addBulkRows(1));
+    $("bulkAddFiveBtn").addEventListener("click", () => addBulkRows(5));
+    $("bulkClearBtn").addEventListener("click", clearBulkRows);
+    $("bulkSaveBtn").addEventListener("click", () => run(saveBulkRoutes));
 
-    $("pasteClearBtn").addEventListener("click", () => {
-      $("pasteTextInput").value = "";
-      $("pasteStatusText").textContent = "";
+    $("bulkRows").addEventListener("click", e => {
+      const btn = e.target.closest("[data-action='bulk-remove']");
+      if (!btn) return;
+
+      const tr = btn.closest("[data-bulk-row]");
+      if (tr) tr.remove();
+
+      if (!$("bulkRows").children.length) {
+        addBulkRows(1);
+      }
     });
-
-    $("pasteImportBtn").addEventListener("click", () => run(importPasteRows));
 
     $("imageModalCloseBtn").addEventListener("click", closeImagePreview);
 
     $("imageModal").addEventListener("click", e => {
       if (e.target.id === "imageModal") closeImagePreview();
+    });
+
+    $("bulkModal").addEventListener("click", e => {
+      if (e.target.id === "bulkModal") closeBulkModal();
     });
 
     $("deniedHomeBtn").addEventListener("click", () => {
@@ -3295,10 +3474,22 @@
 
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") {
-        closePasteModal();
-        closeImagePreview();
+        const bulkOpen = $("bulkModal").classList.contains("show");
+        const imageOpen = $("imageModal").classList.contains("show");
 
-        if (drawMode) cancelDrawMode();
+        if (bulkOpen) closeBulkModal();
+        if (imageOpen) closeImagePreview();
+
+        if (drawMode) {
+          cancelDrawMode();
+          return;
+        }
+
+        if (!bulkOpen && !imageOpen) {
+          clearSelection(false);
+        }
+
+        return;
       }
 
       if (drawMode && e.key === "Enter") {
@@ -3319,6 +3510,7 @@
     setPointStatus(e.message || String(e), "bad");
     setAttachmentStatus(e.message || String(e), "bad");
     setRouteBaseStatus(e.message || String(e), "bad");
+    setBulkStatus(e.message || String(e), "bad");
 
     if (drawMode) {
       setDrawStatus(e.message || String(e), true);
@@ -3337,7 +3529,8 @@
     if (!ok) return;
 
     await initMap();
-    await loadData();
+    clearSearchResults(false);
+    setStatus("검색 조건을 입력한 뒤 불러오기를 누르세요. 전체 기본 조회는 막아두었습니다.", "warn");
 
     document.documentElement.style.visibility = "visible";
   });

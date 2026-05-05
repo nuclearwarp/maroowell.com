@@ -826,7 +826,7 @@
 
       <div class="field">
         <label>Route / Route Code</label>
-        <input id="routeInput" placeholder="예: 126, 126A01, 213A" />
+        <input id="routeInput" placeholder="예: 126, 405 406, 126A01, 213A" />
       </div>
 
       <div class="field">
@@ -1261,6 +1261,61 @@
     return String(v || "")
       .toUpperCase()
       .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function parseRouteSearchTokens(value) {
+    return String(value || "")
+      .toUpperCase()
+      .split(/[\s,;/|]+/g)
+      .map(token => normalizeRoute(token))
+      .filter(Boolean);
+  }
+
+  function routeMatchesSearch(row, tokens) {
+    if (!tokens || !tokens.length) return true;
+
+    const routeBase = normalizeRoute(row?.route);
+    const routeCode = routeCodeOf(row);
+    const routeNorm = normalizeRoute(row?.route_norm);
+    const routeLabelNorm = normalizeRoute(routeLabel(row));
+
+    return tokens.some(token => {
+      if (!token) return true;
+
+      if (/^\d+$/.test(token)) {
+        return (
+          routeBase === token ||
+          routeCode.startsWith(token) ||
+          routeNorm.startsWith(token)
+        );
+      }
+
+      return (
+        routeCode.includes(token) ||
+        routeNorm.includes(token) ||
+        routeLabelNorm.includes(token) ||
+        routeBase.includes(token)
+      );
+    });
+  }
+
+  function buildRouteDbOrFilter(tokens) {
+    const safeTokens = (tokens || [])
+      .slice(0, 20)
+      .map(token => normalizeRoute(token))
+      .filter(Boolean);
+
+    if (!safeTokens.length) return "";
+
+    const parts = [];
+
+    safeTokens.forEach(token => {
+      parts.push(`route.ilike.%${token}%`);
+      parts.push(`route_code.ilike.%${token}%`);
+      parts.push(`route_norm.ilike.%${token}%`);
+    });
+
+    return parts.join(",");
   }
 
   function naturalCompare(a, b) {
@@ -2235,10 +2290,10 @@
 
   async function loadData() {
     const camp = clean($("campInput").value);
-    const routeFilter = normalizeRoute($("routeInput").value);
+    const routeTokens = parseRouteSearchTokens($("routeInput").value);
     const subPackageFilter = clean($("subPackageInput").value);
 
-    if (!camp && !routeFilter && !subPackageFilter) {
+    if (!camp && !routeTokens.length && !subPackageFilter) {
       clearSearchResults(false);
       setStatus("검색 조건을 하나 이상 입력하세요. 전체 기본 조회는 막아두었습니다.", "warn");
       return;
@@ -2277,16 +2332,17 @@
     if (camp) routeQuery = routeQuery.ilike("camp", `%${camp}%`);
     if (subPackageFilter) routeQuery = routeQuery.ilike("sub_package", `%${subPackageFilter}%`);
 
+    const routeDbOrFilter = buildRouteDbOrFilter(routeTokens);
+
+    if (routeDbOrFilter) {
+      routeQuery = routeQuery.or(routeDbOrFilter);
+    }
+
     const { data: routes, error: routeError } = await routeQuery;
     if (routeError) throw routeError;
 
     routeRows = sortRouteRows((routes || []).filter(row => {
-      if (!routeFilter) return true;
-
-      const code = routeCodeOf(row);
-      const routeNorm = normalizeRoute(row.route);
-
-      return code.includes(routeFilter) || routeNorm.includes(routeFilter);
+      return routeMatchesSearch(row, routeTokens);
     }));
 
     const matchedKeys = new Set(routeRows.map(row => routeKey(row.camp, routeCodeOf(row))));

@@ -746,8 +746,7 @@
     <div class="title">
       <a id="mwBoardMenuToggle" href="#"><img src="/favicon.ico" alt="MarooWell"></a>
       <div class="titleText">
-        <b>마루웰 라우트정보</b>
-        <small>폴리곤 / 배송팁 / 비번 / 입구 정보</small>
+        <b>라우트정보</b>
       </div>
       <div class="userPill" id="userPill">확인 중</div>
     </div>
@@ -820,24 +819,55 @@
       </div>
 
       <div id="routeDetailForm" style="display:none">
-        <div class="field">
+        <div class="row">
+          <div class="field">
+            <label>Camp</label>
+            <input id="routeCampInput" placeholder="예: 일산2" />
+          </div>
+          <div class="field">
+            <label>Route</label>
+            <input id="routeRouteInput" placeholder="예: 126" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Sub</label>
+            <input id="routeSubInput" placeholder="예: A" />
+          </div>
+          <div class="field">
+            <label>Sub-sub</label>
+            <input id="routeSubSubInput" placeholder="예: 01" />
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="saveRouteBaseBtn" class="ok">라우트 수정 저장</button>
+          <button id="deleteRouteBtn" class="danger">라우트 삭제</button>
+        </div>
+
+        <div class="status" id="routeBaseInfoText">
+          Camp / Route / Sub / Sub-sub 수정 시 연결된 폴리곤·포인트의 route_code도 같이 맞춰집니다.
+        </div>
+
+        <div class="field" style="margin-top:12px">
           <label>설명</label>
-          <textarea id="routeDescriptionInput" ></textarea>
+          <textarea id="routeDescriptionInput"></textarea>
         </div>
 
         <div class="field">
           <label>정보 / 메모</label>
-          <textarea id="routeMemoInput" ></textarea>
+          <textarea id="routeMemoInput"></textarea>
         </div>
 
         <div class="field">
           <label>서브패키지</label>
-          <input id="routeSubPackageInput" placeholder="sub_package" />
+          <input id="routeSubPackageInput"/>
         </div>
 
         <div class="field">
           <label>좌표 / 원본 참고값</label>
-          <input id="routeCoordinateInput" placeholder="coordinate text" />
+          <input id="routeCoordinateInput" />
         </div>
 
         <div class="row">
@@ -1091,6 +1121,13 @@
     $("drawInfoText").textContent = msg || "";
   }
 
+  function setRouteBaseStatus(msg, type = "") {
+    const el = $("routeBaseInfoText");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = type ? "status " + type : "status";
+  }
+
   function esc(v) {
     return String(v ?? "")
       .replaceAll("&", "&amp;")
@@ -1223,6 +1260,7 @@
 
     if (!isSuperAdmin) {
       $("softDeletePointBtn").style.display = "none";
+      $("deleteRouteBtn").style.display = "none";
     }
 
     document.documentElement.style.visibility = "visible";
@@ -2148,10 +2186,17 @@
     $("routeDetailForm").style.display = "";
     $("selectedRouteCode").textContent = `${row.camp} / ${routeCodeOf(row)}`;
 
+    $("routeCampInput").value = row.camp || "";
+    $("routeRouteInput").value = row.route || "";
+    $("routeSubInput").value = row.sub || "";
+    $("routeSubSubInput").value = row.sub_sub || "";
+
     $("routeDescriptionInput").value = row.description || "";
     $("routeMemoInput").value = row.memo || "";
     $("routeSubPackageInput").value = row.sub_package || "";
     $("routeCoordinateInput").value = row.coordinate || "";
+
+    setRouteBaseStatus("Camp / Route / Sub / Sub-sub 수정 시 연결된 폴리곤·포인트의 route_code도 같이 맞춰집니다.");
   }
 
   function clearRouteDetail() {
@@ -2159,10 +2204,17 @@
     $("routeDetailForm").style.display = "none";
     $("selectedRouteCode").textContent = "선택 없음";
 
+    $("routeCampInput").value = "";
+    $("routeRouteInput").value = "";
+    $("routeSubInput").value = "";
+    $("routeSubSubInput").value = "";
+
     $("routeDescriptionInput").value = "";
     $("routeMemoInput").value = "";
     $("routeSubPackageInput").value = "";
     $("routeCoordinateInput").value = "";
+
+    setRouteBaseStatus("");
   }
 
   function focusSelectedRoute() {
@@ -2193,6 +2245,234 @@
     if (latlngs.length) setMapBoundsByLatLngs(latlngs);
   }
 
+  async function saveRouteBase() {
+    if (!selectedRoute) {
+      setRouteBaseStatus("선택된 라우트가 없습니다.", "bad");
+      return;
+    }
+
+    const oldCamp = selectedRoute.camp;
+    const oldCode = routeCodeOf(selectedRoute);
+
+    const nextCamp = clean($("routeCampInput").value);
+    const nextRoute = clean($("routeRouteInput").value);
+    const nextSub = clean($("routeSubInput").value);
+    const nextSubSub = clean($("routeSubSubInput").value);
+    const nextCode = normalizeRoute(`${nextRoute}${nextSub}${nextSubSub}`);
+
+    if (!nextCamp || !nextRoute) {
+      setRouteBaseStatus("Camp와 Route는 필수입니다.", "bad");
+      return;
+    }
+
+    const ok = confirm(
+      [
+        "라우트 기본정보를 수정할까요?",
+        "",
+        `기존: ${oldCamp} / ${oldCode}`,
+        `변경: ${nextCamp} / ${nextCode}`,
+        "",
+        "연결된 폴리곤·포인트의 camp / route_code도 함께 변경됩니다."
+      ].join("\n")
+    );
+
+    if (!ok) return;
+
+    setRouteBaseStatus("라우트 기본정보 수정 중...", "warn");
+
+    const routePayload = {
+      camp: nextCamp,
+      route: nextRoute,
+      sub: nextSub || null,
+      sub_sub: nextSubSub || null
+    };
+
+    const { data, error } = await supabaseClient
+      .from(TABLE_ROUTE)
+      .update(routePayload)
+      .eq("id", selectedRoute.id)
+      .select(`
+        id,
+        camp,
+        route,
+        sub,
+        sub_sub,
+        sub_package,
+        description,
+        memo,
+        coordinate,
+        sort_order,
+        is_active,
+        route_code,
+        route_norm,
+        created_at,
+        updated_at
+      `)
+      .single();
+
+    if (error) throw error;
+
+    const activePolygonsToMove = polygonRows.filter(row => {
+      return row.is_active !== false
+        && row.camp === oldCamp
+        && polygonCodeOf(row) === oldCode;
+    });
+
+    for (const poly of activePolygonsToMove) {
+      const { error: polyError } = await supabaseClient
+        .from(TABLE_POLYGON)
+        .update({
+          camp: nextCamp,
+          route_code: nextCode
+        })
+        .eq("id", poly.id);
+
+      if (polyError) throw polyError;
+    }
+
+    const activePointsToMove = pointRows.filter(row => {
+      return row.is_active !== false
+        && (
+          row.route_info_id === selectedRoute.id ||
+          (row.camp === oldCamp && normalizeRoute(row.route_code || row.route_norm) === oldCode)
+        );
+    });
+
+    for (const point of activePointsToMove) {
+      const { error: pointError } = await supabaseClient
+        .from(TABLE_POINT)
+        .update({
+          camp: nextCamp,
+          route_code: nextCode,
+          route_info_id: selectedRoute.id
+        })
+        .eq("id", point.id);
+
+      if (pointError) throw pointError;
+    }
+
+    selectedRoute = { ...selectedRoute, ...data };
+    routeRows = sortRouteRows(routeRows.map(row => row.id === selectedRoute.id ? selectedRoute : row));
+
+    polygonRows = polygonRows.map(row => {
+      const shouldMove = row.is_active !== false && row.camp === oldCamp && polygonCodeOf(row) === oldCode;
+      return shouldMove ? { ...row, camp: nextCamp, route_code: nextCode, route_norm: nextCode } : row;
+    });
+
+    pointRows = pointRows.map(row => {
+      const shouldMove = row.is_active !== false
+        && (
+          row.route_info_id === selectedRoute.id ||
+          (row.camp === oldCamp && normalizeRoute(row.route_code || row.route_norm) === oldCode)
+        );
+
+      return shouldMove ? { ...row, camp: nextCamp, route_code: nextCode, route_norm: nextCode, route_info_id: selectedRoute.id } : row;
+    });
+
+    renderRouteList();
+    renderRouteDetail(selectedRoute);
+    renderPointList();
+    renderMapFeatures();
+    renderCounts();
+    focusSelectedRoute();
+
+    setRouteBaseStatus("라우트 기본정보 수정 완료", "ok");
+    setStatus("라우트 기본정보 수정 완료", "ok");
+  }
+
+  async function deleteSelectedRoute() {
+    if (!isSuperAdmin) {
+      setRouteBaseStatus("라우트 삭제는 최고관리자만 가능합니다.", "bad");
+      return;
+    }
+
+    if (!selectedRoute) {
+      setRouteBaseStatus("선택된 라우트가 없습니다.", "bad");
+      return;
+    }
+
+    const camp = selectedRoute.camp;
+    const code = routeCodeOf(selectedRoute);
+
+    const relatedPolygons = polygonRows.filter(row => {
+      return row.is_active !== false && row.camp === camp && polygonCodeOf(row) === code;
+    });
+
+    const relatedPoints = pointRows.filter(row => {
+      return row.is_active !== false
+        && (
+          row.route_info_id === selectedRoute.id ||
+          (row.camp === camp && normalizeRoute(row.route_code || row.route_norm) === code)
+        );
+    });
+
+    const ok = confirm(
+      [
+        "이 라우트를 삭제 처리할까요?",
+        "",
+        `${camp} / ${code}`,
+        "",
+        `연결 폴리곤: ${relatedPolygons.length}건`,
+        `연결 포인트: ${relatedPoints.length}건`,
+        "",
+        "실제 삭제가 아니라 is_active=false 처리됩니다.",
+        "잘못 등록된 엑셀 데이터 정리용입니다."
+      ].join("\n")
+    );
+
+    if (!ok) return;
+
+    setRouteBaseStatus("라우트 삭제 처리 중...", "warn");
+
+    for (const poly of relatedPolygons) {
+      const { error } = await supabaseClient
+        .from(TABLE_POLYGON)
+        .update({ is_active:false })
+        .eq("id", poly.id);
+
+      if (error) throw error;
+    }
+
+    for (const point of relatedPoints) {
+      const { error } = await supabaseClient
+        .from(TABLE_POINT)
+        .update({ is_active:false })
+        .eq("id", point.id);
+
+      if (error) throw error;
+    }
+
+    const { error } = await supabaseClient
+      .from(TABLE_ROUTE)
+      .update({ is_active:false })
+      .eq("id", selectedRoute.id);
+
+    if (error) throw error;
+
+    routeRows = routeRows.filter(row => row.id !== selectedRoute.id);
+    polygonRows = polygonRows.map(row => {
+      return relatedPolygons.some(poly => poly.id === row.id) ? { ...row, is_active:false } : row;
+    });
+    pointRows = pointRows.map(row => {
+      return relatedPoints.some(point => point.id === row.id) ? { ...row, is_active:false } : row;
+    }).filter(row => row.is_active !== false);
+
+    selectedRoute = null;
+    selectedPoint = null;
+    selectedPolygonId = null;
+
+    cancelDrawModeSilently();
+    clearAttachmentsState();
+    renderRouteList();
+    renderPointList();
+    clearRouteDetail();
+    fillPointForm(null);
+    renderMapFeatures();
+    renderCounts();
+
+    setStatus("라우트 삭제 처리 완료", "ok");
+  }
+
   async function saveRouteInfo() {
     if (!selectedRoute) {
       setStatus("선택된 라우트가 없습니다.", "bad");
@@ -2210,14 +2490,29 @@
       .from(TABLE_ROUTE)
       .update(payload)
       .eq("id", selectedRoute.id)
-      .select()
+      .select(`
+        id,
+        camp,
+        route,
+        sub,
+        sub_sub,
+        sub_package,
+        description,
+        memo,
+        coordinate,
+        sort_order,
+        is_active,
+        route_code,
+        route_norm,
+        created_at,
+        updated_at
+      `)
       .single();
 
     if (error) throw error;
 
     selectedRoute = { ...selectedRoute, ...data };
-    routeRows = routeRows.map(row => row.id === selectedRoute.id ? selectedRoute : row);
-    routeRows = sortRouteRows(routeRows);
+    routeRows = sortRouteRows(routeRows.map(row => row.id === selectedRoute.id ? selectedRoute : row));
 
     renderRouteList();
     renderRouteDetail(selectedRoute);
@@ -2870,6 +3165,9 @@
       selectPoint(card.dataset.pointId);
     });
 
+    $("saveRouteBaseBtn").addEventListener("click", () => run(saveRouteBase));
+    $("deleteRouteBtn").addEventListener("click", () => run(deleteSelectedRoute));
+
     $("saveRouteInfoBtn").addEventListener("click", () => run(saveRouteInfo));
     $("focusRouteBtn").addEventListener("click", focusSelectedRoute);
 
@@ -2957,6 +3255,7 @@
     setStatus(e.message || String(e), "bad");
     setPointStatus(e.message || String(e), "bad");
     setAttachmentStatus(e.message || String(e), "bad");
+    setRouteBaseStatus(e.message || String(e), "bad");
 
     if (drawMode) {
       setDrawStatus(e.message || String(e), true);

@@ -465,6 +465,24 @@
       background:rgba(255,255,255,.03);
     }
 
+    .locationBox{
+      color:#dbeafe;
+      line-height:1.55;
+      font-size:12px;
+      padding:12px;
+      border:1px dashed rgba(96,165,250,.35);
+      border-radius:14px;
+      background:rgba(59,130,246,.08);
+      min-height:44px;
+      white-space:pre-wrap;
+    }
+
+    .locationBox.empty{
+      color:var(--muted);
+      border-color:rgba(255,255,255,.15);
+      background:rgba(255,255,255,.03);
+    }
+
     .pointList{
       display:grid;
       gap:8px;
@@ -554,6 +572,10 @@
       min-height:30px;
       padding:0 10px;
       font-size:11px;
+    }
+
+    .hiddenCoord{
+      display:none !important;
     }
 
     .modal{
@@ -819,7 +841,7 @@
 
       <div class="row" style="margin-top:8px">
         <button id="bulkOpenBtn" class="secondary">라우트 등록</button>
-        <button id="addPointModeBtn" class="warn">점 추가 OFF</button>
+        <button id="addPointModeBtn" class="warn">마커 찍기 OFF</button>
       </div>
 
       <div id="statusText" class="status">검색 조건을 입력한 뒤 불러오기를 누르세요.</div>
@@ -972,18 +994,33 @@
         <input id="pointTitleInput" placeholder="예: 대명4차 후문" />
       </div>
 
-      <div class="row">
-        <div class="field">
-          <label>위도</label>
-          <input id="pointLatInput" placeholder="lat" />
+      <div class="field">
+        <label>주소 / 건물명으로 지도 이동</label>
+        <div class="row">
+          <input id="addressSearchInput" placeholder="예: 대구 대명4차, 대명동 101동 후문" />
+          <button id="addressSearchBtn" class="secondary" type="button">찾기</button>
         </div>
-        <div class="field">
-          <label>경도</label>
-          <input id="pointLngInput" placeholder="lng" />
+        <div class="status">
+          주소 검색은 지도를 이동시키는 용도입니다. 실제 저장 위치는 마커 찍기 ON 후 지도 클릭 위치로 저장됩니다.
         </div>
       </div>
 
       <div class="field">
+        <label>위치</label>
+        <div id="pointLocationText" class="locationBox empty">아직 위치가 선택되지 않았습니다. 마커 찍기 ON 후 지도에서 위치를 클릭하세요.</div>
+      </div>
+
+      <div class="row">
+        <button id="pointPickModeBtn" class="warn" type="button">마커 찍기 OFF</button>
+        <button id="clearPointLocationBtn" class="secondary" type="button">선택 위치 초기화</button>
+      </div>
+
+      <div class="hiddenCoord">
+        <input id="pointLatInput" type="hidden" />
+        <input id="pointLngInput" type="hidden" />
+      </div>
+
+      <div class="field" style="margin-top:10px">
         <label>배송팁</label>
         <textarea id="deliveryTipInput" placeholder="배송팁"></textarea>
       </div>
@@ -1141,6 +1178,8 @@
 
   let map = null;
   let isSatellite = false;
+  let kakaoGeocoder = null;
+  let kakaoPlaces = null;
 
   let hasSearched = false;
   let lastFeatureClickAt = 0;
@@ -1409,6 +1448,9 @@
           level: 8
         });
 
+        kakaoGeocoder = new kakao.maps.services.Geocoder();
+        kakaoPlaces = new kakao.maps.services.Places();
+
         kakao.maps.event.addListener(map, "click", e => {
           if (Date.now() - lastFeatureClickAt < 180) return;
 
@@ -1489,6 +1531,7 @@
     selectedPoint = null;
     selectedPolygonId = null;
     cancelDrawModeSilently();
+    setPointPickMode(false, false);
     clearAttachmentsState();
     clearRouteDetail();
     fillPointForm(null);
@@ -1645,6 +1688,41 @@
     return new kakao.maps.LatLng(lat / ring.length, lng / ring.length);
   }
 
+  function makePointOverlay(point, options = {}) {
+    const lat = Number(point.lat);
+    const lng = Number(point.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    const position = new kakao.maps.LatLng(lat, lng);
+    const el = document.createElement("div");
+    const active = options.active === true;
+
+    el.className = `markerTip ${pointTypeClass(point.point_type)} ${active ? "active" : ""}`;
+    el.innerHTML = `
+      <div class="markerBubble">${esc(pointTypeIcon(point.point_type))}</div>
+      <div class="markerLabel">${esc(point.title || pointTypeLabel(point.point_type))}</div>
+    `;
+
+    if (point.id) {
+      el.addEventListener("click", event => {
+        event.stopPropagation();
+        markFeatureClick();
+        selectPoint(point.id);
+      });
+    }
+
+    const overlay = new kakao.maps.CustomOverlay({
+      position,
+      content: el,
+      yAnchor: 1.2,
+      zIndex: active ? 35 : 20
+    });
+
+    overlay.setMap(map);
+    return { overlay, position };
+  }
+
   function renderMapFeatures() {
     if (!map) return;
 
@@ -1747,38 +1825,22 @@
     for (const point of pointRows) {
       if (point.is_active === false) continue;
 
-      const lat = Number(point.lat);
-      const lng = Number(point.lng);
-
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-
-      const position = new kakao.maps.LatLng(lat, lng);
-      allLatLngs.push(position);
-
-      const el = document.createElement("div");
-      const active = selectedPoint && selectedPoint.id === point.id;
-
-      el.className = `markerTip ${pointTypeClass(point.point_type)} ${active ? "active" : ""}`;
-      el.innerHTML = `
-        <div class="markerBubble">${esc(pointTypeIcon(point.point_type))}</div>
-        <div class="markerLabel">${esc(point.title || pointTypeLabel(point.point_type))}</div>
-      `;
-
-      el.addEventListener("click", event => {
-        event.stopPropagation();
-        markFeatureClick();
-        selectPoint(point.id);
+      const made = makePointOverlay(point, {
+        active: selectedPoint && selectedPoint.id === point.id
       });
 
-      const overlay = new kakao.maps.CustomOverlay({
-        position,
-        content: el,
-        yAnchor: 1.2,
-        zIndex: active ? 30 : 20
-      });
+      if (made) {
+        allLatLngs.push(made.position);
+        pointOverlays.push(made.overlay);
+      }
+    }
 
-      overlay.setMap(map);
-      pointOverlays.push(overlay);
+    if (selectedPoint && !selectedPoint.id) {
+      const made = makePointOverlay(selectedPoint, { active:true });
+      if (made) {
+        allLatLngs.push(made.position);
+        pointOverlays.push(made.overlay);
+      }
     }
 
     if (allLatLngs.length && !selectedRoute) {
@@ -1939,9 +2001,7 @@
     }
 
     if (addPointMode) {
-      addPointMode = false;
-      $("addPointModeBtn").textContent = "점 추가 OFF";
-      $("addPointModeBtn").className = "warn";
+      setPointPickMode(false, false);
     }
 
     drawMode = true;
@@ -1977,9 +2037,7 @@
     }
 
     if (addPointMode) {
-      addPointMode = false;
-      $("addPointModeBtn").textContent = "점 추가 OFF";
-      $("addPointModeBtn").className = "warn";
+      setPointPickMode(false, false);
     }
 
     drawMode = true;
@@ -2301,6 +2359,7 @@
     selectedPolygonId = null;
 
     cancelDrawModeSilently();
+    setPointPickMode(false, false);
     clearAttachmentsState();
     renderRouteList();
     renderPointList();
@@ -2393,7 +2452,7 @@
       return `
         <div class="pointCard ${active ? "active" : ""}" data-point-id="${esc(point.id)}">
           <div class="pointTitle">[${esc(pointTypeLabel(point.point_type))}] ${esc(point.title || point.route_code)}</div>
-          <div class="pointSub">${esc(desc || `${point.lat}, ${point.lng}`)}</div>
+          <div class="pointSub">${esc(desc || "설명 없음")}</div>
         </div>
       `;
     }).join("");
@@ -2715,6 +2774,7 @@
     selectedPolygonId = null;
 
     cancelDrawModeSilently();
+    setPointPickMode(false, false);
     clearAttachmentsState();
     renderRouteList();
     renderPointList();
@@ -2786,14 +2846,14 @@
       polygon_id: polygon?.id || null,
       lat: latLng.getLat(),
       lng: latLng.getLng(),
-      point_type: "tip",
-      title: "",
-      delivery_tip: "",
-      password_note: "",
-      entrance_note: "",
-      parking_note: "",
-      caution_note: "",
-      memo: "",
+      point_type: $("pointTypeInput").value || "tip",
+      title: clean($("pointTitleInput").value),
+      delivery_tip: clean($("deliveryTipInput").value),
+      password_note: clean($("passwordNoteInput").value),
+      entrance_note: clean($("entranceNoteInput").value),
+      parking_note: clean($("parkingNoteInput").value),
+      caution_note: clean($("cautionNoteInput").value),
+      memo: clean($("pointMemoInput").value),
       marker_shape: "pin",
       marker_color: "",
       marker_json: {},
@@ -2804,7 +2864,9 @@
     fillPointForm(selectedPoint);
     renderPointList();
     renderMapFeatures();
-    setPointStatus("지도 클릭 위치로 신규 포인트가 준비되었습니다. 내용을 입력 후 저장하세요.", "warn");
+
+    setPointStatus("지도 클릭 위치로 마커가 준비되었습니다. 내용을 입력 후 포인트 저장을 누르세요.", "warn");
+    setStatus("마커 위치 선택 완료. 포인트 저장을 누르면 DB에 저장됩니다.", "ok");
   }
 
   function selectPoint(id) {
@@ -2820,6 +2882,7 @@
     if (matchingRoute) selectedRoute = matchingRoute;
 
     cancelDrawModeSilently();
+    setPointPickMode(false, false);
     fillPointForm(point);
     renderRouteList();
 
@@ -2839,6 +2902,27 @@
     run(() => loadAttachments(point.id, true));
   }
 
+  function updatePointLocationText(point) {
+    const el = $("pointLocationText");
+    if (!el) return;
+
+    const lat = Number(point?.lat);
+    const lng = Number(point?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      el.className = "locationBox empty";
+      el.textContent = "아직 위치가 선택되지 않았습니다. 마커 찍기 ON 후 지도에서 위치를 클릭하세요.";
+      return;
+    }
+
+    el.className = "locationBox";
+    el.textContent = [
+      "위치 선택됨",
+      selectedRoute ? `${selectedRoute.camp} / ${routeCodeOf(selectedRoute)} 기준` : `${point.camp || ""} / ${point.route_code || ""}`,
+      `좌표: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+    ].filter(Boolean).join("\n");
+  }
+
   function fillPointForm(point) {
     if (!point) {
       $("selectedPointId").textContent = "신규/선택 없음";
@@ -2852,6 +2936,7 @@
       $("parkingNoteInput").value = "";
       $("cautionNoteInput").value = "";
       $("pointMemoInput").value = "";
+      updatePointLocationText(null);
       setPointStatus("");
       return;
     }
@@ -2867,6 +2952,7 @@
     $("parkingNoteInput").value = point.parking_note || "";
     $("cautionNoteInput").value = point.caution_note || "";
     $("pointMemoInput").value = point.memo || "";
+    updatePointLocationText(point);
   }
 
   function collectPointPayload() {
@@ -2881,7 +2967,7 @@
     const lng = Number($("pointLngInput").value);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      throw new Error("위도/경도 값이 올바르지 않습니다.");
+      throw new Error("마커 위치가 없습니다. 마커 찍기 ON 후 지도에서 위치를 클릭하세요.");
     }
 
     const polygon = polygonRows.find(poly => {
@@ -2940,6 +3026,7 @@
     }
 
     selectedPoint = saved;
+    setPointPickMode(false, false);
     renderPointList();
     fillPointForm(saved);
     renderMapFeatures();
@@ -2955,6 +3042,7 @@
     }
 
     setPointStatus("포인트 저장 완료", "ok");
+    setStatus("포인트 저장 완료", "ok");
   }
 
   async function deleteSelectedPoint() {
@@ -3068,16 +3156,74 @@
     fillPointForm(selectedPoint);
     renderPointList();
     renderMapFeatures();
-    setPointStatus("신규 포인트 입력 상태입니다. 지도 클릭으로 좌표를 넣거나 직접 입력하세요.", "warn");
+    setPointStatus("신규 포인트 입력 상태입니다. 마커 찍기 ON 후 지도에서 위치를 클릭하세요.", "warn");
+  }
+
+  function clearPointLocation() {
+    if (!selectedPoint) {
+      selectedPoint = selectedRoute
+        ? {
+            id: null,
+            camp: selectedRoute.camp,
+            route_code: routeCodeOf(selectedRoute),
+            route_info_id: selectedRoute.id,
+            point_type: $("pointTypeInput").value || "tip"
+          }
+        : null;
+    }
+
+    if (selectedPoint) {
+      selectedPoint.lat = "";
+      selectedPoint.lng = "";
+    }
+
+    $("pointLatInput").value = "";
+    $("pointLngInput").value = "";
+
+    updatePointLocationText(null);
+    renderMapFeatures();
+    setPointStatus("선택 위치를 초기화했습니다. 다시 마커 찍기 ON 후 지도에서 위치를 클릭하세요.", "warn");
+  }
+
+  function setPointPickMode(next, showMessage = true) {
+    if (drawMode && next) cancelDrawMode();
+
+    addPointMode = !!next;
+
+    const text = addPointMode ? "마커 찍기 ON" : "마커 찍기 OFF";
+    const cls = addPointMode ? "ok" : "warn";
+
+    $("addPointModeBtn").textContent = text;
+    $("addPointModeBtn").className = cls;
+
+    $("pointPickModeBtn").textContent = text;
+    $("pointPickModeBtn").className = cls;
+
+    if (showMessage) {
+      setStatus(
+        addPointMode
+          ? "마커 찍기 모드입니다. 선택한 라우트의 배송 포인트 위치를 지도에서 클릭하세요."
+          : "마커 찍기 모드를 종료했습니다.",
+        addPointMode ? "warn" : "ok"
+      );
+
+      setPointStatus(
+        addPointMode
+          ? "지도에서 실제 배송팁 위치를 클릭하세요. 클릭한 좌표가 자동으로 저장 준비됩니다."
+          : "마커 찍기 모드를 종료했습니다.",
+        addPointMode ? "warn" : "ok"
+      );
+    }
   }
 
   function toggleAddPointMode() {
-    if (drawMode) cancelDrawMode();
+    if (!selectedRoute && !addPointMode) {
+      setStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+      setPointStatus("먼저 좌측에서 라우트를 선택하세요.", "bad");
+      return;
+    }
 
-    addPointMode = !addPointMode;
-    $("addPointModeBtn").textContent = addPointMode ? "점 추가 ON" : "점 추가 OFF";
-    $("addPointModeBtn").className = addPointMode ? "ok" : "warn";
-    setStatus(addPointMode ? "점 추가 모드입니다. 지도에서 위치를 클릭하세요." : "점 추가 모드를 종료했습니다.", addPointMode ? "warn" : "ok");
+    setPointPickMode(!addPointMode, true);
   }
 
   function setMapType() {
@@ -3104,6 +3250,15 @@
 
       const lat = Number(point.lat);
       const lng = Number(point.lng);
+
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        latlngs.push(new kakao.maps.LatLng(lat, lng));
+      }
+    }
+
+    if (selectedPoint && !selectedPoint.id) {
+      const lat = Number(selectedPoint.lat);
+      const lng = Number(selectedPoint.lng);
 
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
         latlngs.push(new kakao.maps.LatLng(lat, lng));
@@ -3140,9 +3295,7 @@
       cancelDrawModeSilently();
     }
 
-    addPointMode = false;
-    $("addPointModeBtn").textContent = "점 추가 OFF";
-    $("addPointModeBtn").className = "warn";
+    setPointPickMode(false, false);
 
     selectedRoute = null;
     selectedPoint = null;
@@ -3178,6 +3331,60 @@
 
       setStatus("지도 초기화 완료", "ok");
     }, 80);
+  }
+
+  function searchAddressOrPlace() {
+    if (!map) return;
+
+    const keyword = clean($("addressSearchInput").value);
+
+    if (!keyword) {
+      setPointStatus("검색할 주소나 건물명을 입력하세요.", "bad");
+      return;
+    }
+
+    setPointStatus("주소/건물명 검색 중...", "warn");
+
+    const moveTo = (lat, lng, label) => {
+      const position = new kakao.maps.LatLng(lat, lng);
+      map.setLevel(3);
+      map.panTo(position);
+
+      setPointStatus(
+        `${label || keyword} 위치로 지도를 이동했습니다.\n마커 찍기 ON 후 실제 배송 위치를 지도에서 클릭하세요.`,
+        "ok"
+      );
+    };
+
+    const fallbackAddressSearch = () => {
+      if (!kakaoGeocoder) {
+        setPointStatus("주소 검색 객체를 사용할 수 없습니다.", "bad");
+        return;
+      }
+
+      kakaoGeocoder.addressSearch(keyword, (result, status) => {
+        if (status === kakao.maps.services.Status.OK && result && result.length) {
+          moveTo(Number(result[0].y), Number(result[0].x), result[0].address_name);
+          return;
+        }
+
+        setPointStatus("검색 결과가 없습니다. 건물명보다 도로명/지번 주소로 다시 검색해보세요.", "bad");
+      });
+    };
+
+    if (kakaoPlaces) {
+      kakaoPlaces.keywordSearch(keyword, (result, status) => {
+        if (status === kakao.maps.services.Status.OK && result && result.length) {
+          moveTo(Number(result[0].y), Number(result[0].x), result[0].place_name || result[0].address_name);
+          return;
+        }
+
+        fallbackAddressSearch();
+      });
+      return;
+    }
+
+    fallbackAddressSearch();
   }
 
   function attachmentPathOf(row) {
@@ -3556,6 +3763,12 @@
       if (e.key === "Enter") run(loadData);
     });
 
+    $("addressSearchInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") run(searchAddressOrPlace);
+    });
+
+    $("addressSearchBtn").addEventListener("click", () => run(searchAddressOrPlace));
+
     $("routeList").addEventListener("click", e => {
       const card = e.target.closest("[data-route-id]");
       if (!card) return;
@@ -3586,6 +3799,7 @@
     $("savePointBtn").addEventListener("click", () => run(savePoint));
     $("newPointBtn").addEventListener("click", resetPointForm);
     $("deletePointBtn").addEventListener("click", () => run(deleteSelectedPoint));
+    $("clearPointLocationBtn").addEventListener("click", clearPointLocation);
 
     $("uploadAttachmentBtn").addEventListener("click", () => run(uploadAttachments));
 
@@ -3609,6 +3823,7 @@
     });
 
     $("addPointModeBtn").addEventListener("click", toggleAddPointMode);
+    $("pointPickModeBtn").addEventListener("click", toggleAddPointMode);
     $("toggleMapTypeBtn").addEventListener("click", setMapType);
     $("fitAllBtn").addEventListener("click", fitAll);
     $("resetMapBtn").addEventListener("click", resetMapView);
@@ -3658,6 +3873,11 @@
 
         if (drawMode) {
           cancelDrawMode();
+          return;
+        }
+
+        if (addPointMode) {
+          setPointPickMode(false, true);
           return;
         }
 

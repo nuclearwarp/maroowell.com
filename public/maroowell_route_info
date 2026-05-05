@@ -1019,7 +1019,7 @@
       </div>
 
       <div class="row" style="margin-top:8px">
-        <button id="softDeletePointBtn" class="danger">포인트 비활성화</button>
+        <button id="deletePointBtn" class="danger">포인트 삭제</button>
       </div>
 
       <div class="status" id="pointStatusText"></div>
@@ -1060,7 +1060,7 @@
     </div>
     <div class="modalBody">
       <div class="bulkHelp">
-        엑셀 붙여넣기 대신 여기서 필요한 행만 대강 입력해서 저장합니다.<br>
+        필요한 행만 대강 입력해서 저장합니다.<br>
         필수값은 Camp / Route 입니다. Sub, Sub-sub가 있으면 route_code는 예: 126 + A + 01 → 126A01 기준으로 잡힙니다.<br>
         이미 같은 Camp + RouteCode가 있으면 수정, 없으면 신규 등록됩니다.
       </div>
@@ -1255,6 +1255,47 @@
     return normalizeRoute(row?.route_code || row?.route_norm);
   }
 
+  function subRouteKeyOfCode(code) {
+    const norm = normalizeRoute(code);
+    const match = norm.match(/^\d+([A-Z가-힣])/);
+    return match ? match[1] : norm.slice(0, 1) || "기타";
+  }
+
+  function colorOfSubRoute(code) {
+    const key = subRouteKeyOfCode(code);
+
+    const palette = {
+      A: { stroke:"#38bdf8", fill:"#7dd3fc" },
+      B: { stroke:"#22c55e", fill:"#86efac" },
+      C: { stroke:"#a78bfa", fill:"#c4b5fd" },
+      D: { stroke:"#fb923c", fill:"#fdba74" },
+      E: { stroke:"#f472b6", fill:"#f9a8d4" },
+      F: { stroke:"#14b8a6", fill:"#5eead4" },
+      G: { stroke:"#eab308", fill:"#fde047" },
+      H: { stroke:"#60a5fa", fill:"#93c5fd" }
+    };
+
+    if (palette[key]) return palette[key];
+
+    const fallback = [
+      { stroke:"#38bdf8", fill:"#7dd3fc" },
+      { stroke:"#22c55e", fill:"#86efac" },
+      { stroke:"#a78bfa", fill:"#c4b5fd" },
+      { stroke:"#fb923c", fill:"#fdba74" },
+      { stroke:"#f472b6", fill:"#f9a8d4" },
+      { stroke:"#14b8a6", fill:"#5eead4" },
+      { stroke:"#eab308", fill:"#fde047" },
+      { stroke:"#60a5fa", fill:"#93c5fd" }
+    ];
+
+    let hash = 0;
+    for (const ch of String(key)) {
+      hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+    }
+
+    return fallback[hash % fallback.length];
+  }
+
   function routeKey(camp, code) {
     return `${camp || ""}||${normalizeRoute(code)}`;
   }
@@ -1344,7 +1385,6 @@
     }
 
     if (!isSuperAdmin) {
-      $("softDeletePointBtn").style.display = "none";
       $("deleteRouteBtn").style.display = "none";
     }
 
@@ -1624,6 +1664,7 @@
       const selected = selectedCode && code === selectedCode;
       const selectedPolygon = selectedPolygonId && selectedPolygonId === polyRow.id;
       const rings = extractRings(polyRow.polygon_wgs84);
+      const subColor = colorOfSubRoute(code);
 
       for (const ring of rings) {
         allLatLngs.push(...ring);
@@ -1631,10 +1672,10 @@
         const polygon = new kakao.maps.Polygon({
           path: ring,
           strokeWeight: selectedPolygon ? 4 : selected ? 3 : 2,
-          strokeColor: selectedPolygon ? "#facc15" : selected ? "#facc15" : "#38bdf8",
-          strokeOpacity: selectedPolygon ? 0.95 : selected ? 0.85 : 0.65,
-          fillColor: selectedPolygon ? "#fde047" : selected ? "#fde047" : "#38bdf8",
-          fillOpacity: selectedPolygon ? 0.22 : selected ? 0.16 : 0.12
+          strokeColor: selectedPolygon ? "#facc15" : selected ? "#facc15" : subColor.stroke,
+          strokeOpacity: selectedPolygon ? 0.95 : selected ? 0.9 : 0.75,
+          fillColor: selectedPolygon ? "#fde047" : selected ? "#fde047" : subColor.fill,
+          fillOpacity: selectedPolygon ? 0.24 : selected ? 0.18 : 0.16
         });
 
         polygon.setMap(map);
@@ -1679,8 +1720,9 @@
           label.style.cssText = [
             "padding:3px 7px",
             "border-radius:999px",
-            "border:1px solid rgba(255,255,255,.55)",
-            "background:rgba(0,0,0,.65)",
+            `border:1px solid ${selectedPolygon || selected ? "#facc15" : subColor.stroke}`,
+            `background:${selectedPolygon || selected ? "rgba(0,0,0,.72)" : "rgba(15,23,42,.76)"}`,
+            `box-shadow:0 0 0 2px ${selectedPolygon || selected ? "rgba(250,204,21,.22)" : "rgba(255,255,255,.08)"}`,
             "color:#fff",
             "font-size:11px",
             "font-weight:900",
@@ -2626,8 +2668,8 @@
         `연결 폴리곤: ${relatedPolygons.length}건`,
         `연결 포인트: ${relatedPoints.length}건`,
         "",
-        "실제 삭제가 아니라 is_active=false 처리됩니다.",
-        "잘못 등록된 데이터 정리용입니다."
+        "라우트는 is_active=false 처리됩니다.",
+        "연결 포인트도 is_active=false 처리됩니다."
       ].join("\n")
     );
 
@@ -2863,7 +2905,8 @@
       memo: clean($("pointMemoInput").value) || null,
       marker_shape: "pin",
       marker_color: null,
-      marker_json: {}
+      marker_json: {},
+      is_active: true
     };
   }
 
@@ -2906,34 +2949,94 @@
       await loadAttachments(saved.id, false);
     } catch (e) {
       console.warn("attachment load skipped:", e);
-      clearAttachmentsState();
+      attachmentRows = [];
+      attachmentSignedUrls = new Map();
+      renderAttachments();
     }
 
     setPointStatus("포인트 저장 완료", "ok");
   }
 
-  async function softDeletePoint() {
-    if (!isSuperAdmin) {
-      setPointStatus("포인트 비활성화는 최고관리자만 가능합니다.", "bad");
-      return;
-    }
-
+  async function deleteSelectedPoint() {
     if (!selectedPoint?.id) {
-      setPointStatus("선택된 포인트가 없습니다.", "bad");
+      setPointStatus("삭제할 포인트를 먼저 선택하세요.", "bad");
       return;
     }
 
-    const ok = confirm("이 포인트를 비활성화할까요?\nDB 삭제가 아니라 is_active=false 처리됩니다.");
+    const ok = confirm(
+      [
+        "이 배송 포인트를 삭제할까요?",
+        "",
+        selectedPoint.title ? `제목: ${selectedPoint.title}` : `ID: ${selectedPoint.id}`,
+        "",
+        "연결된 이미지 정보도 같이 삭제합니다.",
+        "이 작업은 is_active=false가 아니라 실제 delete입니다."
+      ].join("\n")
+    );
+
     if (!ok) return;
+
+    setPointStatus("포인트 삭제 중...", "warn");
+
+    let relatedAttachments = [];
+
+    try {
+      const { data, error } = await supabaseClient
+        .from(TABLE_ATTACHMENT)
+        .select(`
+          id,
+          point_id,
+          file_url,
+          file_name,
+          file_type,
+          file_size,
+          caption,
+          sort_order,
+          created_at
+        `)
+        .eq("point_id", selectedPoint.id);
+
+      if (error) throw error;
+      relatedAttachments = data || [];
+    } catch (e) {
+      console.warn("attachment lookup before point delete skipped:", e);
+      relatedAttachments = [];
+    }
+
+    for (const att of relatedAttachments) {
+      const path = attachmentPathOf(att);
+
+      if (path && !isHttpUrl(path)) {
+        try {
+          await supabaseClient
+            .storage
+            .from(ATTACHMENT_BUCKET)
+            .remove([path]);
+        } catch (e) {
+          console.warn("storage file delete skipped:", e);
+        }
+      }
+    }
+
+    if (relatedAttachments.length) {
+      const { error: attDeleteError } = await supabaseClient
+        .from(TABLE_ATTACHMENT)
+        .delete()
+        .eq("point_id", selectedPoint.id);
+
+      if (attDeleteError) throw attDeleteError;
+    }
+
+    const deletingId = selectedPoint.id;
 
     const { error } = await supabaseClient
       .from(TABLE_POINT)
-      .update({ is_active:false })
-      .eq("id", selectedPoint.id);
+      .delete()
+      .eq("id", deletingId);
 
     if (error) throw error;
 
-    pointRows = pointRows.filter(row => row.id !== selectedPoint.id);
+    pointRows = pointRows.filter(row => row.id !== deletingId);
     selectedPoint = null;
 
     fillPointForm(null);
@@ -2941,7 +3044,9 @@
     renderPointList();
     renderMapFeatures();
     renderCounts();
-    setPointStatus("포인트 비활성화 완료", "ok");
+
+    setPointStatus("포인트 삭제 완료", "ok");
+    setStatus("포인트 삭제 완료", "ok");
   }
 
   function resetPointForm() {
@@ -3072,11 +3177,9 @@
         file_size,
         caption,
         sort_order,
-        created_at,
-        is_active
+        created_at
       `)
       .eq("point_id", pointId)
-      .eq("is_active", true)
       .order("sort_order", { ascending:true })
       .order("created_at", { ascending:true });
 
@@ -3168,8 +3271,7 @@
         file_type: file.type,
         file_size: file.size,
         caption: caption || null,
-        sort_order: attachmentRows.length + uploaded,
-        is_active: true
+        sort_order: attachmentRows.length + uploaded
       };
 
       const { error: insertError } = await supabaseClient
@@ -3198,10 +3300,14 @@
     const path = attachmentPathOf(row);
 
     if (path && !isHttpUrl(path)) {
-      await supabaseClient
-        .storage
-        .from(ATTACHMENT_BUCKET)
-        .remove([path]);
+      try {
+        await supabaseClient
+          .storage
+          .from(ATTACHMENT_BUCKET)
+          .remove([path]);
+      } catch (e) {
+        console.warn("storage file delete skipped:", e);
+      }
     }
 
     const { error } = await supabaseClient
@@ -3409,7 +3515,7 @@
 
     $("savePointBtn").addEventListener("click", () => run(savePoint));
     $("newPointBtn").addEventListener("click", resetPointForm);
-    $("softDeletePointBtn").addEventListener("click", () => run(softDeletePoint));
+    $("deletePointBtn").addEventListener("click", () => run(deleteSelectedPoint));
 
     $("uploadAttachmentBtn").addEventListener("click", () => run(uploadAttachments));
 

@@ -1101,6 +1101,56 @@
         return Number.isNaN(d.getTime()) ? null : d;
       }
 
+      function isoDate(d){
+        if(!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+        return d.getFullYear()
+          + "-"
+          + String(d.getMonth() + 1).padStart(2,"0")
+          + "-"
+          + String(d.getDate()).padStart(2,"0");
+      }
+
+      function settlementRangeFromMonth(month){
+        const m = String(month || "").match(/^(\d{4})-(\d{2})$/);
+        if(!m) return null;
+
+        const year = Number(m[1]);
+        const monthNo = Number(m[2]);
+
+        return {
+          start:isoDate(new Date(year, monthNo - 2, 26)),
+          end:isoDate(new Date(year, monthNo - 1, 25))
+        };
+      }
+
+      function settlementMonthFromDate(v, fallbackMonth){
+        const d = parseDate(v, fallbackMonth);
+        if(!d) return "";
+
+        let y = d.getFullYear();
+        let m = d.getMonth() + 1;
+
+        if(d.getDate() >= 26){
+          m += 1;
+          if(m > 12){
+            m = 1;
+            y += 1;
+          }
+        }
+
+        return y + "-" + String(m).padStart(2,"0");
+      }
+
+      function isDateInSettlementMonth(v, month){
+        const d = parseDate(v, month);
+        const range = settlementRangeFromMonth(month);
+
+        if(!d || !range) return false;
+
+        const s = isoDate(d);
+        return s >= range.start && s <= range.end;
+      }
+
       function sortInfosByDate(infos){
         return [...(infos || [])].sort((a,b) => {
           const at = parseDate(a.date, state.month)?.getTime() || 0;
@@ -1152,10 +1202,34 @@
 
         const s = compact(v).toLowerCase();
         if(!s) return false;
-        if(["입금","입금완료","완료","o","y","yes","true","1","paid"].includes(s)) return true;
-        if(s.includes("미입금")) return false;
 
-        return s.includes("입금");
+        if([
+          "true",
+          "1",
+          "y",
+          "yes",
+          "o",
+          "입금",
+          "입금완료",
+          "완료",
+          "paid"
+        ].includes(s)) return true;
+
+        if([
+          "false",
+          "0",
+          "n",
+          "no",
+          "x",
+          "미입금",
+          "미완료",
+          "unpaid"
+        ].includes(s)) return false;
+
+        if(s.includes("미입금")) return false;
+        if(s.includes("입금")) return true;
+
+        return false;
       }
 
       function falseLike(v){
@@ -1198,7 +1272,15 @@
         ]));
 
         if(/^\d{4}-\d{2}$/.test(mv)) return mv;
-        return dateMonth(getDate(row), state.month);
+
+        return settlementMonthFromDate(getDate(row), state.month) || dateMonth(getDate(row), state.month);
+      }
+
+      function rowBelongsToSelectedMonth(row){
+        const parsedMonth = getMonthFromRow(row);
+        if(parsedMonth === state.month) return true;
+
+        return isDateInSettlementMonth(getDate(row), state.month);
       }
 
       function vendorNameById(id){
@@ -1280,7 +1362,7 @@
             "is_tax_invoice_issued","is_tax_issued",
             "세금계산서","세금계산서발행","세금계산서 발행"
           ])),
-          paid:paid(first(row,["payment_status","paid_status","is_paid","deposit_status","입금여부"]))
+          paid:paid(row.payment_confirm)
         };
       }
 
@@ -1405,7 +1487,7 @@
       function buildGroups(){
         const q = clean(dom.searchInput.value);
 
-        state.monthRows = state.allRows.filter(r => getMonthFromRow(r) === state.month);
+        state.monthRows = state.allRows.filter(rowBelongsToSelectedMonth);
 
         const rows = state.monthRows
           .map(rowInfo)
@@ -1990,8 +2072,11 @@
 
         render();
 
+        const range = settlementRangeFromMonth(state.month);
+        const rangeText = range ? ` / 정산기간 ${range.start} ~ ${range.end}` : "";
+
         setPill("ok","READY");
-        setStatus("불러오기 완료: 원본 " + fmt(state.allRows.length) + "행 / 기사정보 " + fmt(state.infoRows.length) + "행");
+        setStatus("불러오기 완료: 원본 " + fmt(state.allRows.length) + "행 / 기사정보 " + fmt(state.infoRows.length) + "행" + rangeText);
         dom.btnReload.disabled = false;
       }
 
@@ -2177,53 +2262,59 @@
           render();
         });
 
-        dom.btnModeVendor.addEventListener("click", () => {
-          if(state.mode === "vendor") return;
+        dom.searchInput.addEventListener("keydown", e => {
+          if(e.key === "Enter"){
+            state.selectedGroupKey = "";
+            render();
+          }
+        });
 
+        dom.btnModeVendor.addEventListener("click", () => {
           state.mode = "vendor";
           state.selectedGroupKey = "";
-
           dom.btnModeVendor.classList.add("active");
           dom.btnModeDriver.classList.remove("active");
-
           render();
         });
 
         dom.btnModeDriver.addEventListener("click", () => {
-          if(state.mode === "driver") return;
-
           state.mode = "driver";
           state.selectedGroupKey = "";
-
           dom.btnModeDriver.classList.add("active");
           dom.btnModeVendor.classList.remove("active");
-
           render();
         });
       }
 
       async function boot(){
         bind();
+
+        const authed = await ensureAuth();
+        if(!authed) return;
+
+        const allowed = await checkAccess();
+
         document.documentElement.style.visibility = "visible";
 
-        if(!(await ensureAuth())) return;
-        if(!(await checkAccess())) return;
+        if(!allowed) return;
 
-        await loadData();
+        await loadData().catch(e => {
+          console.error(e);
+          setPill("err","ERROR");
+          setStatus("초기 불러오기 실패: " + (e?.message || e));
+          dom.btnReload.disabled = false;
+        });
       }
 
       boot().catch(e => {
         console.error(e);
         document.documentElement.style.visibility = "visible";
         setPill("err","ERROR");
-        setStatus("초기화 실패: " + (e?.message || e));
+        setStatus(e?.message || String(e));
       });
     })();
   </script>
 
-  <script>
-    window.MW_BOARD_MENU_MODE = "admin"
-  </script>
   <script src="/board-menu.js"></script>
 </body>
 </html>

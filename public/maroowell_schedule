@@ -460,7 +460,6 @@
         for(const routeLabel of labels){
           const value=valueForCell(date,routeLabel);
           if(!value) continue;
-
           personKeyCandidates(value).forEach(k=>set.add(k));
         }
 
@@ -662,8 +661,11 @@
         for(const r of rows){
           const subSub=clean(r.sub_sub);
           const parentLabel=normalizeRouteLabel(clean(r.parent_route_label)||routeBaseLabel(r.route,r.sub)||clean(r.route_label));
+          const routeLabelFromRow=normalizeRouteLabel(clean(r.route_label));
+          const childByFields=routeChildLabel(r.route,r.sub,r.sub_sub);
+
           const childLabel=subSub
-            ? normalizeRouteLabel(clean(r.route_label)||routeChildLabel(r.route,r.sub,r.sub_sub))
+            ? normalizeRouteLabel(routeLabelFromRow && routeLabelFromRow!==parentLabel ? routeLabelFromRow : childByFields)
             : parentLabel;
 
           if(!parentLabel&&!childLabel)continue;
@@ -1309,37 +1311,92 @@
         setStatus(`${dateLabel(date)}에 ${count}건 붙여넣기 완료. 전체 저장을 누르면 DB에 반영됩니다.`);
       }
 
-      async function sharePddForDate(date){
-        const labels=allRouteLabels({includeOff:false});
-        const lines=[];
+      function pddRowsForDate(date){
+        const rows=[];
+        const seen=new Set();
 
-        for(const routeLabel of labels){
-          const value=valueForCell(date,routeLabel);
-          if(!value)continue;
+        for(const parent of state.routeParents){
+          if(!parent || parent.isOff) continue;
 
-          const source=rowForCell(date,routeLabel)||{};
-          const account=resolveAccount(value);
-          const id=clean(source.driver_coupang_id||account?.exportId||"");
-          const route=normalizeRouteLabel(routeLabel);
+          const parentLabel=normalizeRouteLabel(parent.label);
+          const parentValue=valueForCell(date,parentLabel);
+          const children=Array.isArray(parent.children) ? parent.children : [];
 
-          if(!id||!route)continue;
-          lines.push(`${id} ${route}`);
+          if(children.length){
+            for(const child of children){
+              const childLabel=normalizeRouteLabel(child.label);
+              const childValue=valueForCell(date,childLabel);
+              const finalValue=clean(childValue || parentValue);
+
+              if(!finalValue) continue;
+
+              const source=rowForCell(date,childLabel) || rowForCell(date,parentLabel) || {};
+              const account=resolveAccount(finalValue);
+              const id=clean(source.driver_coupang_id || account?.exportId || "");
+              const route=childLabel;
+
+              if(!id || !route) continue;
+
+              const dedupeKey=`${id}||${route}`;
+              if(seen.has(dedupeKey)) continue;
+              seen.add(dedupeKey);
+
+              rows.push({
+                id,
+                route,
+                driver:finalValue,
+                parentRoute:parentLabel,
+                sourceRoute:childValue ? childLabel : parentLabel
+              });
+            }
+
+            continue;
+          }
+
+          const finalValue=clean(parentValue);
+          if(!finalValue) continue;
+
+          const source=rowForCell(date,parentLabel) || {};
+          const account=resolveAccount(finalValue);
+          const id=clean(source.driver_coupang_id || account?.exportId || "");
+          const route=parentLabel;
+
+          if(!id || !route) continue;
+
+          const dedupeKey=`${id}||${route}`;
+          if(seen.has(dedupeKey)) continue;
+          seen.add(dedupeKey);
+
+          rows.push({
+            id,
+            route,
+            driver:finalValue,
+            parentRoute:parentLabel,
+            sourceRoute:parentLabel
+          });
         }
 
-        if(!lines.length){
+        return rows.sort((a,b)=>sortText(a.route,b.route)||sortText(a.id,b.id));
+      }
+
+      async function sharePddForDate(date){
+        const rows=pddRowsForDate(date);
+
+        if(!rows.length){
           alert(`${dateLabel(date)}에 공유할 PDD 데이터가 없습니다.`);
           return;
         }
 
         const pddDate=pddDateForScheduleDate(date);
+
         const text=[
           `마루웰 / PDD ${pddTitleDate(pddDate)}`,
-          ...lines
+          ...rows.map(row=>`${row.id} ${row.route}`)
         ].join("\n");
 
         try{
           await navigator.clipboard.writeText(text);
-          setStatus(`${dateLabel(date)} PDD 공유 텍스트 ${lines.length}줄 복사 완료`);
+          setStatus(`${dateLabel(date)} PDD 공유 텍스트 ${rows.length}줄 복사 완료`);
           alert(`${dateLabel(date)} PDD 공유 텍스트가 복사되었습니다.\n\n${text}`);
         }catch{
           prompt("아래 내용을 복사하세요.",text);

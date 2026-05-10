@@ -1,1 +1,1966 @@
-test
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="referrer" content="origin" />
+  <title>마루웰 스케줄</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+
+  <style>
+    html { visibility:hidden; }
+
+    :root{
+      --bg:#081120;
+      --bg2:#0b1424;
+      --panel:#101b2f;
+      --panel2:#0d1728;
+      --line:rgba(255,255,255,.11);
+      --line2:rgba(255,255,255,.18);
+      --txt:#eaf2ff;
+      --muted:#9fb0d0;
+      --blue:#60a5fa;
+      --blue2:#1d4ed8;
+      --green:#16a34a;
+      --red:#dc2626;
+      --yellow:#f59e0b;
+      --cell:#111827;
+      --cell2:#172033;
+      --head:#27364d;
+      --route:#d7ead0;
+      --camp:#bcd0ef;
+      --week:#ffdf6a;
+      --paper:#f8fafc;
+      --ink:#111827;
+      --shadow:0 16px 42px rgba(0,0,0,.28);
+    }
+
+    *{box-sizing:border-box}
+
+    html,body{
+      margin:0;
+      min-height:100%;
+      background:var(--bg);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    body{
+      overflow:hidden;
+    }
+
+    button,input,select,textarea{
+      font-family:inherit;
+    }
+
+    .app{
+      height:100vh;
+      height:100dvh;
+      display:grid;
+      grid-template-rows:auto auto 1fr;
+      background:linear-gradient(180deg,var(--bg),#060b13);
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,#0b1424,#07101d);
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .brand img{
+      width:28px;
+      height:28px;
+      flex:0 0 auto;
+    }
+
+    .brandText{
+      min-width:0;
+    }
+
+    .brandText h1{
+      margin:0;
+      font-size:22px;
+      line-height:1.05;
+      letter-spacing:-.04em;
+    }
+
+    .brandText p{
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .topSpacer{flex:1}
+
+    .userBadge{
+      display:inline-flex;
+      align-items:center;
+      min-height:34px;
+      max-width:220px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.05);
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .btn{
+      height:38px;
+      padding:0 13px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.07);
+      color:var(--txt);
+      font-size:13px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+      touch-action:manipulation;
+    }
+
+    .btn:hover{background:rgba(255,255,255,.11)}
+    .btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}
+    .btn.ok{background:rgba(22,163,74,.55);border-color:rgba(134,239,172,.35)}
+    .btn.warn{background:rgba(245,158,11,.34);border-color:rgba(253,230,138,.35)}
+    .btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+
+    .toolbar{
+      display:grid;
+      grid-template-columns:160px 170px 170px 1fr auto auto auto auto auto;
+      gap:10px;
+      align-items:end;
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      background:var(--panel2);
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      min-width:0;
+    }
+
+    .field label{
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .input,
+    .select{
+      width:100%;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line2);
+      background:#0b1220;
+      color:var(--txt);
+      padding:0 12px;
+      font-size:14px;
+      font-weight:800;
+      outline:none;
+    }
+
+    .input:focus,
+    .select:focus{
+      border-color:rgba(96,165,250,.75);
+      box-shadow:0 0 0 3px rgba(96,165,250,.12);
+    }
+
+    .weekBtns{
+      display:flex;
+      gap:6px;
+      align-items:center;
+    }
+
+    .metaLine{
+      grid-column:1 / -1;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+      min-height:24px;
+      color:#b7c7e6;
+      font-size:12px;
+      font-weight:800;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:5px 10px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.06);
+      color:#dbeafe;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .pill.ok{color:#bbf7d0}
+    .pill.warn{color:#fde68a}
+    .pill.err{color:#fecaca}
+
+    .main{
+      min-height:0;
+      display:grid;
+      grid-template-columns:1fr 330px;
+      gap:0;
+    }
+
+    .boardWrap{
+      min-width:0;
+      min-height:0;
+      overflow:auto;
+      padding:14px;
+      background:#08101d;
+    }
+
+    .side{
+      min-height:0;
+      overflow:auto;
+      border-left:1px solid var(--line);
+      background:linear-gradient(180deg,var(--panel),#09111f);
+      padding:14px;
+    }
+
+    .card{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:rgba(255,255,255,.045);
+      box-shadow:0 10px 28px rgba(0,0,0,.18);
+      padding:14px;
+      margin-bottom:12px;
+    }
+
+    .cardTitle{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:10px;
+      font-size:15px;
+      font-weight:1000;
+      letter-spacing:-.03em;
+    }
+
+    .smallText{
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+      line-height:1.55;
+    }
+
+    .driverList{
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      max-height:360px;
+      overflow:auto;
+      padding-right:4px;
+    }
+
+    .driverItem{
+      border:1px solid var(--line);
+      border-radius:13px;
+      padding:10px;
+      background:rgba(255,255,255,.04);
+    }
+
+    .driverName{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      font-size:13px;
+      font-weight:1000;
+      color:#fff;
+    }
+
+    .driverName span{
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .driverMeta{
+      margin-top:5px;
+      color:#cbd5e1;
+      font-size:11px;
+      font-weight:800;
+      line-height:1.45;
+      word-break:break-word;
+    }
+
+    .scheduleBoard{
+      min-width:980px;
+      border:1px solid var(--line2);
+      border-radius:18px;
+      overflow:hidden;
+      background:#0e1728;
+      box-shadow:var(--shadow);
+    }
+
+    .boardHeader{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 16px;
+      background:linear-gradient(180deg,#17233a,#111c30);
+      border-bottom:1px solid var(--line);
+    }
+
+    .boardTitle{
+      min-width:0;
+    }
+
+    .boardTitle h2{
+      margin:0;
+      font-size:22px;
+      line-height:1.15;
+      letter-spacing:-.04em;
+    }
+
+    .boardTitle p{
+      margin:6px 0 0;
+      color:#bfdbfe;
+      font-size:13px;
+      font-weight:900;
+    }
+
+    .boardActions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex:0 0 auto;
+    }
+
+    table.scheduleTable{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      background:#0f1728;
+    }
+
+    .scheduleTable th,
+    .scheduleTable td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      text-align:center;
+      vertical-align:middle;
+    }
+
+    .scheduleTable th:last-child,
+    .scheduleTable td:last-child{
+      border-right:none;
+    }
+
+    .scheduleTable tr:last-child td{
+      border-bottom:none;
+    }
+
+    .scheduleTable th{
+      height:42px;
+      padding:7px 6px;
+      background:var(--head);
+      color:#fff;
+      font-size:13px;
+      font-weight:1000;
+      line-height:1.15;
+      white-space:nowrap;
+    }
+
+    .scheduleTable th.sun{
+      color:#ff4444;
+    }
+
+    .weekCell{
+      width:110px;
+      background:var(--week)!important;
+      color:#111827!important;
+      font-size:16px!important;
+      font-weight:1000!important;
+    }
+
+    .campCell{
+      width:110px;
+      background:var(--camp)!important;
+      color:#0f172a!important;
+      font-size:17px!important;
+      font-weight:1000!important;
+    }
+
+    .routeHead{
+      width:150px;
+    }
+
+    .routeCell{
+      width:150px;
+      padding:0;
+      background:#d8ead2;
+      color:#111827;
+      font-weight:1000;
+    }
+
+    .routeInner{
+      display:flex;
+      align-items:center;
+      gap:6px;
+      min-height:42px;
+      padding:6px 8px;
+    }
+
+    .expander{
+      width:24px;
+      height:24px;
+      border-radius:8px;
+      border:1px solid rgba(15,23,42,.25);
+      background:rgba(255,255,255,.6);
+      color:#111827;
+      font-weight:1000;
+      cursor:pointer;
+      flex:0 0 auto;
+    }
+
+    .expander.empty{
+      visibility:hidden;
+      pointer-events:none;
+    }
+
+    .routeLabel{
+      flex:1;
+      min-width:0;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      text-align:left;
+      font-size:14px;
+    }
+
+    .childRoute .routeCell{
+      background:#eef7e9;
+    }
+
+    .childRoute .routeLabel{
+      padding-left:18px;
+      font-size:13px;
+      color:#334155;
+    }
+
+    .childBadge{
+      display:inline-flex;
+      align-items:center;
+      height:20px;
+      padding:0 7px;
+      border-radius:999px;
+      background:#334155;
+      color:white;
+      font-size:11px;
+      font-weight:900;
+      margin-left:4px;
+    }
+
+    .cellEdit{
+      min-width:0;
+      width:100%;
+      height:42px;
+      border:0;
+      border-radius:0;
+      padding:5px 7px;
+      background:var(--cell);
+      color:#f8fafc;
+      font-size:13px;
+      font-weight:900;
+      text-align:center;
+      outline:none;
+    }
+
+    .cellEdit:focus{
+      box-shadow:inset 0 0 0 3px rgba(96,165,250,.65);
+      background:#0b1220!important;
+    }
+
+    .cellEdit.dirty{
+      box-shadow:inset 0 -3px 0 rgba(245,158,11,.85);
+    }
+
+    .cellEdit.hasValue{
+      color:#0f172a;
+    }
+
+    .cellEdit::placeholder{
+      color:rgba(148,163,184,.8);
+      font-weight:800;
+    }
+
+    .emptyBoard{
+      padding:48px 16px;
+      text-align:center;
+      color:#cbd5e1;
+      font-weight:900;
+      border:1px dashed var(--line2);
+      border-radius:18px;
+      background:rgba(255,255,255,.035);
+    }
+
+    .legendGrid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+    }
+
+    .legendItem{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      min-width:0;
+      font-size:12px;
+      font-weight:900;
+      color:#dbeafe;
+    }
+
+    .legendColor{
+      width:20px;
+      height:20px;
+      border-radius:6px;
+      border:1px solid rgba(255,255,255,.25);
+      flex:0 0 auto;
+    }
+
+    .captureArea{
+      background:#0e1728;
+    }
+
+    .captureArea.export{
+      width:1280px!important;
+      max-width:none!important;
+      min-width:1280px!important;
+      border-radius:0!important;
+      box-shadow:none!important;
+    }
+
+    .captureHost{
+      position:fixed;
+      left:-200000px;
+      top:0;
+      width:auto;
+      height:auto;
+      overflow:visible;
+      background:#0e1728;
+      padding:24px;
+      z-index:-1;
+    }
+
+    .warnLine{
+      color:#fde68a;
+      font-size:12px;
+      font-weight:900;
+      line-height:1.45;
+    }
+
+    .okLine{
+      color:#bbf7d0;
+      font-size:12px;
+      font-weight:900;
+      line-height:1.45;
+    }
+
+    @media(max-width:1080px){
+      body{overflow:auto}
+      .app{
+        min-height:100dvh;
+        height:auto;
+        display:block;
+      }
+
+      .topbar{
+        position:sticky;
+        top:0;
+        z-index:20;
+      }
+
+      .brandText h1{font-size:19px}
+      .brandText p{display:none}
+      .userBadge{display:none}
+
+      .toolbar{
+        position:sticky;
+        top:57px;
+        z-index:19;
+        grid-template-columns:1fr 1fr;
+        align-items:end;
+      }
+
+      .toolbar > .btn,
+      .toolbar > .weekBtns{
+        width:100%;
+      }
+
+      .toolbar .btn{
+        width:100%;
+      }
+
+      .weekBtns{
+        display:grid;
+        grid-template-columns:1fr 1fr;
+      }
+
+      .metaLine{
+        grid-column:1 / -1;
+      }
+
+      .main{
+        display:block;
+      }
+
+      .boardWrap{
+        padding:10px;
+        overflow:auto;
+      }
+
+      .side{
+        border-left:none;
+        border-top:1px solid var(--line);
+      }
+
+      .scheduleBoard{
+        min-width:920px;
+      }
+    }
+
+    @media(max-width:560px){
+      .topbar{
+        padding:10px;
+      }
+
+      .brand img{
+        width:24px;
+        height:24px;
+      }
+
+      .brandText h1{
+        font-size:18px;
+      }
+
+      .btn{
+        height:36px;
+        padding:0 10px;
+        font-size:12px;
+      }
+
+      .toolbar{
+        top:49px;
+        grid-template-columns:1fr;
+        gap:8px;
+        padding:10px;
+      }
+
+      .field label{
+        font-size:11px;
+      }
+
+      .input,
+      .select{
+        height:40px;
+        font-size:13px;
+      }
+
+      .metaLine{
+        font-size:11px;
+      }
+
+      .boardWrap{
+        padding:8px;
+      }
+
+      .boardHeader{
+        align-items:flex-start;
+        flex-direction:column;
+      }
+
+      .boardActions{
+        width:100%;
+        display:grid;
+        grid-template-columns:1fr 1fr;
+      }
+
+      .boardActions .btn{
+        width:100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/favicon.ico" alt="Maroowell" />
+        <div class="brandText">
+          <h1>마루웰 스케줄</h1>
+          <p>캠프 / 주야 / 주차별 입차 스케줄 등록</p>
+        </div>
+      </div>
+
+      <div class="topSpacer"></div>
+
+      <div id="userBadge" class="userBadge">-</div>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </header>
+
+    <section class="toolbar">
+      <div class="field">
+        <label for="campInput">Camp</label>
+        <input id="campInput" class="input" type="text" placeholder="예: M익산1, 일산2" autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <label for="waveSelect">주/야</label>
+        <select id="waveSelect" class="select">
+          <option value="W2">주간</option>
+          <option value="W1">야간</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="baseDateInput">주차 기준일</label>
+        <input id="baseDateInput" class="input" type="date" />
+      </div>
+
+      <div class="field">
+        <label for="searchInput">검색</label>
+        <input id="searchInput" class="input" type="text" placeholder="라우트 / 기사 / ID" autocomplete="off" />
+      </div>
+
+      <div class="weekBtns">
+        <button id="btnPrevWeek" class="btn" type="button">이전주</button>
+        <button id="btnNextWeek" class="btn" type="button">다음주</button>
+      </div>
+
+      <button id="btnLoad" class="btn primary" type="button">불러오기</button>
+      <button id="btnSave" class="btn ok" type="button">전체 저장</button>
+      <button id="btnCopyImage" class="btn warn" type="button">이미지 복사</button>
+      <button id="btnReset" class="btn" type="button">초기화</button>
+
+      <div class="metaLine">
+        <span id="statePill" class="pill ok">READY</span>
+        <span id="weekPill" class="pill">-</span>
+        <span id="rowPill" class="pill">라우트 0</span>
+        <span id="dirtyPill" class="pill">미저장 0</span>
+        <span id="schemaPill" class="pill warn">wave 확인중</span>
+        <span id="statusText">캠프와 주/야를 선택하고 불러오기를 누르세요.</span>
+      </div>
+    </section>
+
+    <main class="main">
+      <section class="boardWrap">
+        <div id="boardRoot" class="scheduleBoard captureArea">
+          <div class="boardHeader">
+            <div class="boardTitle">
+              <h2 id="boardTitle">스케줄</h2>
+              <p id="boardSubTitle">-</p>
+            </div>
+
+            <div class="boardActions">
+              <button id="btnCollapseAll" class="btn" type="button">전체 접기</button>
+              <button id="btnExpandAll" class="btn" type="button">전체 펼치기</button>
+            </div>
+          </div>
+
+          <div id="tableHost">
+            <div class="emptyBoard">
+              캠프를 입력하고 불러오기를 누르면 라우트 스케줄 표가 표시됩니다.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="card">
+          <div class="cardTitle">
+            <span>사용 방법</span>
+          </div>
+          <div class="smallText">
+            기본은 서브 라우트 단위로 입력됩니다.<br />
+            <b>&gt;</b> 버튼이 있는 라우트는 클릭하면 서서브가 펼쳐집니다.<br />
+            셀에 기사명을 입력한 뒤 <b>전체 저장</b>을 누르면 저장됩니다.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardTitle">
+            <span>계정 / 기사 참고</span>
+            <span id="driverCountText" class="pill">0명</span>
+          </div>
+          <div id="driverList" class="driverList">
+            <div class="smallText">기사 정보가 없습니다.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="cardTitle">
+            <span>색상 기준</span>
+          </div>
+          <div id="legendGrid" class="legendGrid"></div>
+        </div>
+
+        <div class="card">
+          <div class="cardTitle">
+            <span>상태</span>
+          </div>
+          <div id="detailStatus" class="smallText">대기중</div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <datalist id="driverOptions"></datalist>
+
+  <script>
+    (async function(){
+      "use strict";
+
+      const CONFIG = window.MARUWELL_CONFIG || {};
+      const SUPABASE_URL = CONFIG.SUPABASE_URL;
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY;
+      const LOGIN_PATH = CONFIG.PATHS?.login || "/login.html";
+
+      const TABLE_SCHEDULE = "maroowell_schedule";
+      const TABLE_ROUTE = "maroowell_route_info";
+      const TABLE_INFO = "maroowell_info";
+
+      const DAYS = ["일","월","화","수","목","금","토"];
+      const WAVE_LABEL = { W1:"야간", W2:"주간" };
+      const WAVE_ALIASES = {
+        W1:["W1","WAVE1","야간","NIGHT","N"],
+        W2:["W2","WAVE2","주간","DAY","D"]
+      };
+
+      const els = {
+        userBadge:document.getElementById("userBadge"),
+        btnLogout:document.getElementById("btnLogout"),
+        campInput:document.getElementById("campInput"),
+        waveSelect:document.getElementById("waveSelect"),
+        baseDateInput:document.getElementById("baseDateInput"),
+        searchInput:document.getElementById("searchInput"),
+        btnPrevWeek:document.getElementById("btnPrevWeek"),
+        btnNextWeek:document.getElementById("btnNextWeek"),
+        btnLoad:document.getElementById("btnLoad"),
+        btnSave:document.getElementById("btnSave"),
+        btnCopyImage:document.getElementById("btnCopyImage"),
+        btnReset:document.getElementById("btnReset"),
+        btnCollapseAll:document.getElementById("btnCollapseAll"),
+        btnExpandAll:document.getElementById("btnExpandAll"),
+        statePill:document.getElementById("statePill"),
+        weekPill:document.getElementById("weekPill"),
+        rowPill:document.getElementById("rowPill"),
+        dirtyPill:document.getElementById("dirtyPill"),
+        schemaPill:document.getElementById("schemaPill"),
+        statusText:document.getElementById("statusText"),
+        detailStatus:document.getElementById("detailStatus"),
+        boardRoot:document.getElementById("boardRoot"),
+        boardTitle:document.getElementById("boardTitle"),
+        boardSubTitle:document.getElementById("boardSubTitle"),
+        tableHost:document.getElementById("tableHost"),
+        driverList:document.getElementById("driverList"),
+        driverCountText:document.getElementById("driverCountText"),
+        driverOptions:document.getElementById("driverOptions"),
+        legendGrid:document.getElementById("legendGrid")
+      };
+
+      const state = {
+        session:null,
+        email:"",
+        userId:"",
+        camp:"",
+        wave:"W2",
+        baseDate:todayIso(),
+        weekStart:"",
+        weekDates:[],
+        isoYear:0,
+        isoWeek:0,
+        weekLabel:"",
+        scheduleHasWave:false,
+        routesRaw:[],
+        routeParents:[],
+        displayRows:[],
+        schedules:[],
+        scheduleMap:new Map(),
+        driversRaw:[],
+        drivers:[],
+        driverByName:new Map(),
+        expanded:new Set(),
+        dirty:new Map(),
+        loading:false
+      };
+
+      const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth:{
+              storage:window.sessionStorage,
+              persistSession:true,
+              autoRefreshToken:true,
+              detectSessionInUrl:true
+            }
+          })
+        : null;
+
+      function clean(v){ return String(v ?? "").trim(); }
+      function compact(v){ return clean(v).replace(/\s+/g,""); }
+
+      function esc(v){
+        return String(v ?? "")
+          .replace(/&/g,"&amp;")
+          .replace(/</g,"&lt;")
+          .replace(/>/g,"&gt;")
+          .replace(/"/g,"&quot;")
+          .replace(/'/g,"&#39;");
+      }
+
+      function todayIso(){
+        const d = new Date();
+        return toIso(d);
+      }
+
+      function toIso(d){
+        if(!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2,"0");
+        const day = String(d.getDate()).padStart(2,"0");
+        return `${y}-${m}-${day}`;
+      }
+
+      function parseIso(v){
+        const m = clean(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(!m) return null;
+        return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      }
+
+      function addDays(iso, days){
+        const d = parseIso(iso) || new Date();
+        d.setDate(d.getDate() + days);
+        return toIso(d);
+      }
+
+      function sundayOf(iso){
+        const d = parseIso(iso) || new Date();
+        d.setDate(d.getDate() - d.getDay());
+        return toIso(d);
+      }
+
+      function weekDatesFromStart(startIso){
+        return Array.from({ length:7 }, (_,i) => addDays(startIso, i));
+      }
+
+      function isoWeekInfoFromMondayRef(startIso){
+        const sunday = parseIso(startIso) || new Date();
+        const ref = new Date(sunday);
+        ref.setDate(ref.getDate() + 1);
+
+        const target = new Date(Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate()));
+        const dayNum = target.getUTCDay() || 7;
+        target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+
+        const isoYear = target.getUTCFullYear();
+        const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+        const isoWeek = Math.ceil((((target - yearStart) / 86400000) + 1) / 7);
+
+        return {
+          isoYear,
+          isoWeek,
+          weekLabel:`${isoYear} - ${isoWeek}W`
+        };
+      }
+
+      function dateLabel(iso){
+        const d = parseIso(iso);
+        if(!d) return iso;
+        return `${d.getMonth() + 1}/${d.getDate()} ${DAYS[d.getDay()]}`;
+      }
+
+      function fullDateLabel(iso){
+        const d = parseIso(iso);
+        if(!d) return iso;
+        return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")} ${DAYS[d.getDay()]}`;
+      }
+
+      function normalizeRoutePart(v){
+        return clean(v).replace(/[^0-9A-Za-z가-힣]/g,"").toUpperCase();
+      }
+
+      function routeBaseLabel(route, sub){
+        return normalizeRoutePart(route) + normalizeRoutePart(sub);
+      }
+
+      function routeChildLabel(route, sub, subSub){
+        return routeBaseLabel(route, sub) + normalizeRoutePart(subSub);
+      }
+
+      function sortText(a,b){
+        return String(a || "").localeCompare(String(b || ""), "ko", { numeric:true, sensitivity:"base" });
+      }
+
+      function setState(kind, text){
+        els.statePill.className = "pill " + (kind || "ok");
+        els.statePill.textContent = text || "READY";
+      }
+
+      function setStatus(text){
+        els.statusText.textContent = text || "";
+      }
+
+      function setDetail(text, good){
+        els.detailStatus.className = good ? "okLine" : "smallText";
+        els.detailStatus.textContent = text || "";
+      }
+
+      function updateWeekState(){
+        state.weekStart = sundayOf(state.baseDate);
+        state.weekDates = weekDatesFromStart(state.weekStart);
+
+        const w = isoWeekInfoFromMondayRef(state.weekStart);
+        state.isoYear = w.isoYear;
+        state.isoWeek = w.isoWeek;
+        state.weekLabel = w.weekLabel;
+
+        els.weekPill.textContent = `${state.weekLabel} / ${state.weekDates[0]} ~ ${state.weekDates[6]}`;
+      }
+
+      function bgForName(name){
+        const n = compact(name);
+        if(!n) return "#111827";
+
+        let hash = 0;
+        for(let i = 0; i < n.length; i++){
+          hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
+        }
+
+        const colors = [
+          "#bfdbfe",
+          "#bbf7d0",
+          "#fde68a",
+          "#fecaca",
+          "#ddd6fe",
+          "#bae6fd",
+          "#fbcfe8",
+          "#fed7aa",
+          "#ccfbf1",
+          "#e9d5ff"
+        ];
+
+        return colors[hash % colors.length];
+      }
+
+      function textColorForBg(bg){
+        return "#0f172a";
+      }
+
+      async function fetchAll(table, select="*"){
+        const pageSize = 1000;
+        let from = 0;
+        const out = [];
+
+        while(true){
+          const { data, error } = await supabase
+            .from(table)
+            .select(select)
+            .range(from, from + pageSize - 1);
+
+          if(error) throw error;
+
+          out.push(...(data || []));
+
+          if(!data || data.length < pageSize) break;
+          from += pageSize;
+        }
+
+        return out;
+      }
+
+      async function ensureAuth(){
+        if(!supabase){
+          document.documentElement.style.visibility = "visible";
+          alert("Supabase 설정을 찾을 수 없습니다.");
+          return false;
+        }
+
+        const { data } = await supabase.auth.getSession();
+        state.session = data?.session || null;
+
+        if(!state.session){
+          location.href = LOGIN_PATH;
+          return false;
+        }
+
+        state.email = state.session.user?.email || "";
+        state.userId = state.session.user?.id || "";
+        els.userBadge.textContent = state.email || "로그인";
+
+        return true;
+      }
+
+      async function checkAccess(){
+        try{
+          const { data, error } = await supabase.rpc("mw_my_access");
+          if(!error && data){
+            const row = Array.isArray(data) ? data[0] : data;
+            const role = Number(row?.role_level || row?.max_role_level || 0);
+            if(row?.is_maroowell || row?.is_admin || role >= 30) return true;
+          }
+        } catch {}
+
+        try{
+          const { data } = await supabase
+            .from("user_access")
+            .select("*")
+            .or(`email.eq.${state.email},user_id.eq.${state.userId}`)
+            .limit(1)
+            .maybeSingle();
+
+          const role = Number(data?.role_level || data?.max_role_level || 0);
+          if(data?.is_maroowell || data?.is_admin || role >= 30) return true;
+        } catch {}
+
+        document.documentElement.style.visibility = "visible";
+        alert("마루웰 소속 이상만 접근 가능합니다.");
+        location.href = "/";
+        return false;
+      }
+
+      async function detectScheduleSchema(){
+        state.scheduleHasWave = false;
+
+        try{
+          const { error } = await supabase
+            .from(TABLE_SCHEDULE)
+            .select("wave")
+            .limit(1);
+
+          state.scheduleHasWave = !error;
+        } catch {
+          state.scheduleHasWave = false;
+        }
+
+        if(state.scheduleHasWave){
+          els.schemaPill.className = "pill ok";
+          els.schemaPill.textContent = "wave 저장 ON";
+        } else {
+          els.schemaPill.className = "pill warn";
+          els.schemaPill.textContent = "wave 컬럼 없음";
+        }
+      }
+
+      function campMatches(infoCamp, selectedCamp){
+        const a = compact(infoCamp).toUpperCase();
+        const b = compact(selectedCamp).toUpperCase();
+        if(!a || !b) return false;
+        return a === b || a.includes(b) || b.includes(a);
+      }
+
+      function waveMatches(infoWave, selectedWave){
+        const raw = compact(infoWave).toUpperCase();
+        if(!raw) return true;
+
+        const aliases = WAVE_ALIASES[selectedWave] || [selectedWave];
+        return aliases.some(x => raw === compact(x).toUpperCase() || raw.includes(compact(x).toUpperCase()));
+      }
+
+      function parseSubAccounts(v){
+        const raw = clean(v);
+        if(!raw) return [];
+
+        return raw
+          .split(/[\n,;]+/)
+          .map(s => clean(s))
+          .filter(Boolean);
+      }
+
+      function buildDrivers(){
+        const camp = state.camp;
+        const wave = state.wave;
+
+        const filtered = state.driversRaw
+          .map(r => ({
+            raw:r,
+            name:clean(r.person_name),
+            camp:clean(r.camp_code),
+            wave:clean(r.wave),
+            coupangId:clean(r.coupang_id),
+            subAccounts:parseSubAccounts(r.sub_account_info),
+            position:clean(r.position_title)
+          }))
+          .filter(d => d.name)
+          .filter(d => campMatches(d.camp, camp))
+          .sort((a,b) => {
+            const aw = waveMatches(a.wave, wave) ? 0 : 1;
+            const bw = waveMatches(b.wave, wave) ? 0 : 1;
+            if(aw !== bw) return aw - bw;
+            return sortText(a.name, b.name);
+          });
+
+        state.drivers = filtered;
+        state.driverByName.clear();
+
+        for(const d of filtered){
+          state.driverByName.set(compact(d.name), d);
+        }
+      }
+
+      function renderDrivers(){
+        els.driverCountText.textContent = `${state.drivers.length}명`;
+
+        els.driverOptions.innerHTML = state.drivers.map(d => {
+          const label = [d.name, d.coupangId, d.subAccounts.join(" ")].filter(Boolean).join(" / ");
+          return `<option value="${esc(d.name)}" label="${esc(label)}"></option>`;
+        }).join("");
+
+        if(!state.drivers.length){
+          els.driverList.innerHTML = `<div class="smallText">선택 캠프 기준 기사 정보가 없습니다.</div>`;
+          return;
+        }
+
+        els.driverList.innerHTML = state.drivers.map(d => {
+          const waveOk = waveMatches(d.wave, state.wave);
+          const sub = d.subAccounts.length ? d.subAccounts.join("<br>") : "-";
+          return `
+            <div class="driverItem">
+              <div class="driverName">
+                <span>${esc(d.name)}</span>
+                <span class="pill ${waveOk ? "ok" : ""}">${esc(d.wave || "공통")}</span>
+              </div>
+              <div class="driverMeta">
+                ID: ${esc(d.coupangId || "-")}<br>
+                부계정: ${sub}<br>
+                캠프: ${esc(d.camp || "-")}
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function buildRoutes(){
+        const rows = state.routesRaw
+          .filter(r => r.is_active !== false)
+          .filter(r => campMatches(r.camp, state.camp))
+          .sort((a,b) => {
+            const so = Number(a.sort_order || 0) - Number(b.sort_order || 0);
+            if(so !== 0) return so;
+            const routeCmp = sortText(a.route, b.route);
+            if(routeCmp !== 0) return routeCmp;
+            const subCmp = sortText(a.sub, b.sub);
+            if(subCmp !== 0) return subCmp;
+            return sortText(a.sub_sub, b.sub_sub);
+          });
+
+        const parentMap = new Map();
+
+        for(const r of rows){
+          const parentLabel = routeBaseLabel(r.route, r.sub);
+          if(!parentLabel) continue;
+
+          if(!parentMap.has(parentLabel)){
+            parentMap.set(parentLabel, {
+              key:parentLabel,
+              route:String(r.route || ""),
+              sub:String(r.sub || ""),
+              label:parentLabel,
+              description:clean(r.description),
+              memo:clean(r.memo),
+              subPackage:clean(r.sub_package),
+              sortOrder:Number(r.sort_order || 0),
+              children:[]
+            });
+          }
+
+          const parent = parentMap.get(parentLabel);
+          const subSub = clean(r.sub_sub);
+
+          if(subSub){
+            parent.children.push({
+              key:routeChildLabel(r.route, r.sub, subSub),
+              route:String(r.route || ""),
+              sub:String(r.sub || ""),
+              subSub,
+              label:routeChildLabel(r.route, r.sub, subSub),
+              description:clean(r.description),
+              memo:clean(r.memo),
+              subPackage:clean(r.sub_package),
+              sortOrder:Number(r.sort_order || 0)
+            });
+          }
+        }
+
+        state.routeParents = Array.from(parentMap.values()).map(p => {
+          const dedup = new Map();
+          for(const c of p.children){
+            if(!dedup.has(c.key)) dedup.set(c.key, c);
+          }
+
+          p.children = Array.from(dedup.values())
+            .sort((a,b) => sortText(a.subSub, b.subSub) || sortText(a.label, b.label));
+
+          return p;
+        });
+
+        buildDisplayRows();
+      }
+
+      function buildDisplayRows(){
+        const q = compact(els.searchInput.value).toUpperCase();
+        const out = [];
+
+        for(const p of state.routeParents){
+          const parentMatch = !q || compact(p.label + p.description + p.memo + p.subPackage).toUpperCase().includes(q);
+          const childMatches = p.children.filter(c => {
+            if(!q) return true;
+            return compact(c.label + c.description + c.memo + c.subPackage).toUpperCase().includes(q);
+          });
+
+          if(parentMatch || childMatches.length){
+            out.push({ type:"parent", ...p });
+
+            if(state.expanded.has(p.key)){
+              const childrenToShow = q ? childMatches : p.children;
+              for(const c of childrenToShow){
+                out.push({ type:"child", parentKey:p.key, ...c });
+              }
+            }
+          }
+        }
+
+        state.displayRows = out;
+      }
+
+      function scheduleKey(date, routeLabel){
+        return `${date}||${state.camp}||${state.wave}||${routeLabel}`;
+      }
+
+      function scheduleLookupKey(date, routeLabel){
+        return `${date}||${routeLabel}`;
+      }
+
+      function makeScheduleMap(){
+        state.scheduleMap.clear();
+
+        for(const r of state.schedules){
+          const key = scheduleLookupKey(r.schedule_date, r.route_label);
+          state.scheduleMap.set(key, r);
+        }
+      }
+
+      async function fetchRoutes(){
+        const { data, error } = await supabase
+          .from(TABLE_ROUTE)
+          .select("id,camp,route,sub,sub_sub,description,memo,coordinate,sort_order,is_active,sub_package,route_code")
+          .eq("is_active", true)
+          .eq("camp", state.camp)
+          .order("sort_order", { ascending:true })
+          .order("route", { ascending:true })
+          .order("sub", { ascending:true })
+          .order("sub_sub", { ascending:true });
+
+        if(error) throw error;
+        state.routesRaw = data || [];
+      }
+
+      async function fetchSchedules(){
+        let q = supabase
+          .from(TABLE_SCHEDULE)
+          .select("*")
+          .eq("camp", state.camp)
+          .gte("schedule_date", state.weekDates[0])
+          .lte("schedule_date", state.weekDates[6])
+          .eq("is_active", true);
+
+        if(state.scheduleHasWave){
+          q = q.eq("wave", state.wave);
+        }
+
+        const { data, error } = await q
+          .order("row_order", { ascending:true })
+          .order("route_label", { ascending:true });
+
+        if(error) throw error;
+
+        state.schedules = data || [];
+        makeScheduleMap();
+      }
+
+      async function fetchDrivers(){
+        const rows = await fetchAll(
+          TABLE_INFO,
+          "pk_id,person_name,camp_code,wave,coupang_id,sub_account_info,position_title"
+        );
+
+        state.driversRaw = rows || [];
+      }
+
+      async function loadAll(){
+        state.camp = clean(els.campInput.value);
+        state.wave = els.waveSelect.value;
+        state.baseDate = els.baseDateInput.value || todayIso();
+        updateWeekState();
+
+        if(!state.camp){
+          alert("Camp를 입력하세요.");
+          return;
+        }
+
+        state.loading = true;
+        setState("warn","LOAD");
+        setStatus("스케줄 데이터를 불러오는 중입니다.");
+        els.btnLoad.disabled = true;
+        els.btnSave.disabled = true;
+
+        try{
+          await Promise.all([
+            fetchRoutes(),
+            fetchSchedules(),
+            fetchDrivers()
+          ]);
+
+          buildDrivers();
+          buildRoutes();
+          render();
+
+          setState("ok","READY");
+          setStatus(`조회 완료: 라우트 ${state.routeParents.length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.drivers.length}명`);
+          setDetail(
+            state.scheduleHasWave
+              ? "wave 컬럼이 있어 주/야를 분리 저장합니다."
+              : "현재 maroowell_schedule 테이블에 wave 컬럼이 없어 주/야 분리 저장은 다음 백엔드 추가 후 적용됩니다.",
+            state.scheduleHasWave
+          );
+        } catch(e){
+          console.error(e);
+          setState("err","ERROR");
+          setStatus("불러오기 실패: " + (e?.message || e));
+          alert("불러오기 실패: " + (e?.message || e));
+        } finally {
+          state.loading = false;
+          els.btnLoad.disabled = false;
+          els.btnSave.disabled = false;
+        }
+      }
+
+      function render(){
+        buildDisplayRows();
+        renderHeader();
+        renderTable();
+        renderDrivers();
+        renderLegend();
+        updatePills();
+      }
+
+      function renderHeader(){
+        els.boardTitle.textContent = `${state.camp || "-"} / ${WAVE_LABEL[state.wave] || state.wave}`;
+        els.boardSubTitle.textContent = `${state.weekLabel} · ${state.weekDates[0]} ~ ${state.weekDates[6]}`;
+      }
+
+      function renderLegend(){
+        const names = Array.from(new Set(
+          state.schedules
+            .map(r => clean(r.driver_name))
+            .filter(Boolean)
+        )).slice(0, 20);
+
+        if(!names.length){
+          els.legendGrid.innerHTML = `<div class="smallText">등록된 기사명이 생기면 색상 기준이 표시됩니다.</div>`;
+          return;
+        }
+
+        els.legendGrid.innerHTML = names.map(name => `
+          <div class="legendItem">
+            <span class="legendColor" style="background:${bgForName(name)}"></span>
+            <span>${esc(name)}</span>
+          </div>
+        `).join("");
+      }
+
+      function valueForCell(date, routeLabel){
+        const dirtyKey = scheduleKey(date, routeLabel);
+        if(state.dirty.has(dirtyKey)) return state.dirty.get(dirtyKey).driver_name || "";
+
+        const found = state.scheduleMap.get(scheduleLookupKey(date, routeLabel));
+        return clean(found?.driver_name);
+      }
+
+      function renderTable(){
+        if(!state.routeParents.length){
+          els.tableHost.innerHTML = `
+            <div class="emptyBoard">
+              조회된 라우트가 없습니다.<br>
+              Camp명이 maroowell_route_info.camp 값과 같은지 확인하세요.
+            </div>
+          `;
+          return;
+        }
+
+        const rows = state.displayRows;
+        const weekRowSpan = Math.max(rows.length, 1);
+
+        let html = `
+          <table class="scheduleTable">
+            <colgroup>
+              <col style="width:110px">
+              <col style="width:110px">
+              <col style="width:150px">
+              ${state.weekDates.map(() => `<col style="width:120px">`).join("")}
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Week</th>
+                <th>Camp</th>
+                <th class="routeHead">Route</th>
+                ${state.weekDates.map((d,i) => `
+                  <th class="${i === 0 ? "sun" : ""}">${esc(dateLabel(d))}</th>
+                `).join("")}
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        rows.forEach((row, rowIndex) => {
+          const hasChildren = row.type === "parent" && row.children && row.children.length > 0;
+          const isExpanded = state.expanded.has(row.key);
+          const routeClass = row.type === "child" ? "childRoute" : "";
+
+          html += `<tr class="${routeClass}">`;
+
+          if(rowIndex === 0){
+            html += `<td class="weekCell" rowspan="${weekRowSpan}">${esc(state.weekLabel)}</td>`;
+            html += `<td class="campCell" rowspan="${weekRowSpan}">${esc(state.camp)}</td>`;
+          }
+
+          html += `
+            <td class="routeCell">
+              <div class="routeInner">
+                <button
+                  class="expander ${hasChildren ? "" : "empty"}"
+                  type="button"
+                  data-expand="${esc(row.key)}"
+                  title="서서브 펼치기/접기"
+                >${isExpanded ? "▼" : "▶"}</button>
+                <div class="routeLabel" title="${esc(row.description || row.memo || row.subPackage || "")}">
+                  ${esc(row.label)}
+                  ${row.type === "child" ? `<span class="childBadge">${esc(row.subSub)}</span>` : ""}
+                </div>
+              </div>
+            </td>
+          `;
+
+          state.weekDates.forEach(date => {
+            const val = valueForCell(date, row.label);
+            const has = !!compact(val);
+            const bg = has ? bgForName(val) : "";
+            const color = has ? textColorForBg(bg) : "";
+            const dirty = state.dirty.has(scheduleKey(date, row.label));
+
+            html += `
+              <td>
+                <input
+                  class="cellEdit ${has ? "hasValue" : ""} ${dirty ? "dirty" : ""}"
+                  style="${has ? `background:${bg};color:${color};` : ""}"
+                  list="driverOptions"
+                  value="${esc(val)}"
+                  placeholder="-"
+                  data-date="${esc(date)}"
+                  data-route="${esc(row.label)}"
+                  data-row-order="${rowIndex}"
+                  title="${esc(cellTitle(val))}"
+                />
+              </td>
+            `;
+          });
+
+          html += `</tr>`;
+        });
+
+        html += `
+            </tbody>
+          </table>
+        `;
+
+        els.tableHost.innerHTML = html;
+
+        els.tableHost.querySelectorAll("[data-expand]").forEach(btn => {
+          btn.addEventListener("click", e => {
+            const key = e.currentTarget.dataset.expand;
+            if(!key) return;
+
+            if(state.expanded.has(key)) state.expanded.delete(key);
+            else state.expanded.add(key);
+
+            render();
+          });
+        });
+
+        els.tableHost.querySelectorAll(".cellEdit").forEach(input => {
+          input.addEventListener("input", onCellInput);
+          input.addEventListener("change", onCellInput);
+          input.addEventListener("focus", e => e.currentTarget.select());
+        });
+      }
+
+      function cellTitle(name){
+        const d = state.driverByName.get(compact(name));
+        if(!d) return name || "";
+
+        return [
+          d.name,
+          d.coupangId ? "ID: " + d.coupangId : "",
+          d.subAccounts.length ? "부계정: " + d.subAccounts.join(" / ") : "",
+          d.wave ? "wave: " + d.wave : ""
+        ].filter(Boolean).join("\n");
+      }
+
+      function onCellInput(e){
+        const input = e.currentTarget;
+        const date = input.dataset.date;
+        const routeLabel = input.dataset.route;
+        const rowOrder = Number(input.dataset.rowOrder || 0);
+        const value = clean(input.value);
+        const key = scheduleKey(date, routeLabel);
+
+        state.dirty.set(key, {
+          schedule_date:date,
+          camp:state.camp,
+          wave:state.wave,
+          route_label:routeLabel,
+          driver_name:value || null,
+          memo:null,
+          row_order:rowOrder,
+          cell_color:value ? bgForName(value) : null,
+          is_active:!!value
+        });
+
+        if(value){
+          const bg = bgForName(value);
+          input.classList.add("hasValue");
+          input.style.background = bg;
+          input.style.color = textColorForBg(bg);
+          input.title = cellTitle(value);
+        } else {
+          input.classList.remove("hasValue");
+          input.style.background = "";
+          input.style.color = "";
+          input.title = "";
+        }
+
+        input.classList.add("dirty");
+        updatePills();
+      }
+
+      function updatePills(){
+        els.rowPill.textContent = `라우트 ${state.displayRows.length}`;
+        els.dirtyPill.textContent = `미저장 ${state.dirty.size}`;
+      }
+
+      async function saveAll(){
+        if(!state.camp || !state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        if(state.dirty.size === 0){
+          alert("저장할 변경사항이 없습니다.");
+          return;
+        }
+
+        const payloads = Array.from(state.dirty.values()).map(item => {
+          const payload = {
+            schedule_date:item.schedule_date,
+            iso_year:state.isoYear,
+            iso_week:state.isoWeek,
+            week_label:state.weekLabel,
+            camp:item.camp,
+            route_label:item.route_label,
+            driver_name:item.driver_name,
+            memo:item.memo,
+            row_order:item.row_order,
+            cell_color:item.cell_color,
+            is_active:item.is_active
+          };
+
+          if(state.scheduleHasWave){
+            payload.wave = item.wave;
+          }
+
+          return payload;
+        });
+
+        setState("warn","SAVE");
+        setStatus(`저장 중: ${payloads.length}건`);
+        els.btnSave.disabled = true;
+
+        try{
+          const conflict = state.scheduleHasWave
+            ? "schedule_date,camp,wave,route_label"
+            : "schedule_date,camp,route_label";
+
+          const { error } = await supabase
+            .from(TABLE_SCHEDULE)
+            .upsert(payloads, { onConflict:conflict });
+
+          if(error) throw error;
+
+          state.dirty.clear();
+          await fetchSchedules();
+          render();
+
+          setState("ok","READY");
+          setStatus(`저장 완료: ${payloads.length}건`);
+          setDetail("저장 완료", true);
+        } catch(e){
+          console.error(e);
+          setState("err","ERROR");
+          setStatus("저장 실패: " + (e?.message || e));
+          alert("저장 실패: " + (e?.message || e));
+        } finally {
+          els.btnSave.disabled = false;
+        }
+      }
+
+      async function copyImage(){
+        if(!window.htmlToImage){
+          alert("이미지 변환 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        const clone = els.boardRoot.cloneNode(true);
+        clone.classList.add("export");
+
+        clone.querySelectorAll("input.cellEdit").forEach(input => {
+          const div = document.createElement("div");
+          div.textContent = input.value || "-";
+          div.style.cssText = input.getAttribute("style") || "";
+          div.style.minHeight = "42px";
+          div.style.display = "flex";
+          div.style.alignItems = "center";
+          div.style.justifyContent = "center";
+          div.style.fontSize = "13px";
+          div.style.fontWeight = "900";
+          div.style.padding = "5px 7px";
+          div.style.background = input.value ? (input.style.background || bgForName(input.value)) : "#111827";
+          div.style.color = input.value ? "#0f172a" : "#94a3b8";
+          input.replaceWith(div);
+        });
+
+        clone.querySelectorAll("button").forEach(btn => {
+          if(btn.classList.contains("expander")){
+            const span = document.createElement("span");
+            span.textContent = btn.textContent || "";
+            span.style.display = "inline-flex";
+            span.style.alignItems = "center";
+            span.style.justifyContent = "center";
+            span.style.width = "24px";
+            span.style.height = "24px";
+            span.style.borderRadius = "8px";
+            span.style.background = "rgba(255,255,255,.65)";
+            span.style.color = "#111827";
+            span.style.fontWeight = "1000";
+            btn.replaceWith(span);
+          } else {
+            btn.remove();
+          }
+        });
+
+        const host = document.createElement("div");
+        host.className = "captureHost";
+        host.appendChild(clone);
+        document.body.appendChild(host);
+
+        setState("warn","IMAGE");
+        setStatus("이미지 생성 중입니다.");
+        els.btnCopyImage.disabled = true;
+
+        try{
+          const blob = await window.htmlToImage.toBlob(clone, {
+            cacheBust:true,
+            pixelRatio:2,
+            backgroundColor:"#0e1728",
+            width:clone.scrollWidth,
+            height:clone.scrollHeight,
+            style:{
+              transform:"none",
+              transformOrigin:"top left"
+            }
+          });
+
+          if(!blob) throw new Error("이미지 blob 생성 실패");
+
+          if(navigator.clipboard && window.ClipboardItem){
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png":blob })
+            ]);
+            setStatus("이미지 복사 완료");
+          } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `마루웰_스케줄_${state.camp}_${state.weekLabel}.png`.replace(/[\\/:*?"<>|]/g,"_");
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            setStatus("클립보드 복사가 지원되지 않아 PNG로 다운로드했습니다.");
+          }
+
+          setState("ok","READY");
+        } catch(e){
+          console.error(e);
+          setState("err","ERROR");
+          alert("이미지 복사 실패: " + (e?.message || e));
+        } finally {
+          host.remove();
+          els.btnCopyImage.disabled = false;
+        }
+      }
+
+      function resetFilters(){
+        els.campInput.value = "";
+        els.searchInput.value = "";
+        state.camp = "";
+        state.routesRaw = [];
+        state.routeParents = [];
+        state.displayRows = [];
+        state.schedules = [];
+        state.scheduleMap.clear();
+        state.dirty.clear();
+        renderHeader();
+        els.tableHost.innerHTML = `
+          <div class="emptyBoard">
+            캠프를 입력하고 불러오기를 누르면 라우트 스케줄 표가 표시됩니다.
+          </div>
+        `;
+        updatePills();
+        setStatus("초기화 완료");
+      }
+
+      function bind(){
+        els.baseDateInput.value = state.baseDate;
+        els.waveSelect.value = state.wave;
+
+        els.btnLogout.addEventListener("click", async () => {
+          try{ await supabase.auth.signOut(); } catch {}
+          location.href = LOGIN_PATH;
+        });
+
+        els.btnLoad.addEventListener("click", loadAll);
+        els.btnSave.addEventListener("click", saveAll);
+        els.btnCopyImage.addEventListener("click", copyImage);
+        els.btnReset.addEventListener("click", resetFilters);
+
+        els.btnPrevWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart || state.baseDate, -7);
+          els.baseDateInput.value = state.baseDate;
+          state.dirty.clear();
+          loadAll();
+        });
+
+        els.btnNextWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart || state.baseDate, 7);
+          els.baseDateInput.value = state.baseDate;
+          state.dirty.clear();
+          loadAll();
+        });
+
+        els.baseDateInput.addEventListener("change", () => {
+          state.baseDate = els.baseDateInput.value || todayIso();
+          updateWeekState();
+          if(state.camp) loadAll();
+          else renderHeader();
+        });
+
+        els.waveSelect.addEventListener("change", () => {
+          state.wave = els.waveSelect.value;
+          state.dirty.clear();
+          if(state.camp) loadAll();
+          else renderHeader();
+        });
+
+        els.campInput.addEventListener("keydown", e => {
+          if(e.key === "Enter") loadAll();
+        });
+
+        els.searchInput.addEventListener("input", () => {
+          render();
+        });
+
+        els.btnCollapseAll.addEventListener("click", () => {
+          state.expanded.clear();
+          render();
+        });
+
+        els.btnExpandAll.addEventListener("click", () => {
+          state.routeParents.forEach(p => {
+            if(p.children && p.children.length) state.expanded.add(p.key);
+          });
+          render();
+        });
+
+        window.addEventListener("beforeunload", e => {
+          if(state.dirty.size > 0){
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
+      }
+
+      async function boot(){
+        bind();
+        updateWeekState();
+        renderHeader();
+        updatePills();
+
+        const authed = await ensureAuth();
+        if(!authed) return;
+
+        const ok = await checkAccess();
+        if(!ok) return;
+
+        await detectScheduleSchema();
+
+        document.documentElement.style.visibility = "visible";
+        setState("ok","READY");
+        setStatus("캠프와 주/야를 선택하고 불러오기를 누르세요.");
+      }
+
+      boot().catch(e => {
+        console.error(e);
+        document.documentElement.style.visibility = "visible";
+        setState("err","ERROR");
+        setStatus(e?.message || String(e));
+      });
+    })();
+  </script>
+</body>
+</html>

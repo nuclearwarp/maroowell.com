@@ -9,6 +9,7 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="/board-menu.js" defer></script>
 
   <style>
@@ -16,7 +17,6 @@
 
     :root{
       --bg:#081120;
-      --bg2:#0b1424;
       --panel:#101b2f;
       --panel2:#0d1728;
       --line:rgba(255,255,255,.11);
@@ -30,6 +30,7 @@
       --cell:#111827;
       --head:#27364d;
       --camp:#bcd0ef;
+      --route:#d8ead2;
       --week:#ffdf6a;
       --shadow:0 16px 42px rgba(0,0,0,.28);
     }
@@ -155,12 +156,13 @@
     .btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}
     .btn.ok{background:rgba(22,163,74,.55);border-color:rgba(134,239,172,.35)}
     .btn.warn{background:rgba(245,158,11,.34);border-color:rgba(253,230,138,.35)}
+    .btn.excel{background:rgba(20,120,70,.7);border-color:rgba(134,239,172,.35)}
     .btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}
     .btn:disabled{opacity:.55;cursor:not-allowed}
 
     .toolbar{
       display:grid;
-      grid-template-columns:160px 150px 180px 1fr auto auto auto auto auto;
+      grid-template-columns:160px 150px 180px minmax(240px,1fr) auto auto auto auto auto auto;
       gap:10px;
       align-items:end;
       padding:12px 14px;
@@ -224,9 +226,7 @@
       margin-left:8px;
     }
 
-    .weekPickerWrap{
-      position:relative;
-    }
+    .weekPickerWrap{position:relative}
 
     .weekPopup{
       position:absolute;
@@ -244,9 +244,7 @@
       z-index:100;
     }
 
-    .weekPopup.open{
-      display:block;
-    }
+    .weekPopup.open{display:block}
 
     .weekPopupHeader{
       display:flex;
@@ -262,10 +260,7 @@
       color:#0f172a;
     }
 
-    .weekNav{
-      display:flex;
-      gap:6px;
-    }
+    .weekNav{display:flex;gap:6px}
 
     .weekNav button{
       width:34px;
@@ -305,27 +300,11 @@
       cursor:pointer;
     }
 
-    .weekDay.other{
-      color:#94a3b8;
-    }
-
-    .weekDay.today{
-      box-shadow:inset 0 0 0 2px rgba(37,99,235,.35);
-    }
-
-    .weekDay.selected{
-      background:#2563eb;
-      color:#fff;
-    }
-
-    .weekRowHighlight{
-      background:#dbeafe!important;
-    }
-
-    .weekDay.selected.weekRowHighlight{
-      background:#2563eb!important;
-      color:#fff!important;
-    }
+    .weekDay.other{color:#94a3b8}
+    .weekDay.today{box-shadow:inset 0 0 0 2px rgba(37,99,235,.35)}
+    .weekDay.selected{background:#2563eb;color:#fff}
+    .weekRowHighlight{background:#dbeafe!important}
+    .weekDay.selected.weekRowHighlight{background:#2563eb!important;color:#fff!important}
 
     .weekPopupFooter{
       display:flex;
@@ -387,94 +366,17 @@
 
     .main{
       min-height:0;
-      display:grid;
-      grid-template-columns:1fr 330px;
-      gap:0;
+      display:block;
+      overflow:hidden;
     }
 
     .boardWrap{
       min-width:0;
       min-height:0;
+      height:100%;
       overflow:auto;
       padding:14px;
       background:#08101d;
-    }
-
-    .side{
-      min-height:0;
-      overflow:auto;
-      border-left:1px solid var(--line);
-      background:linear-gradient(180deg,var(--panel),#09111f);
-      padding:14px;
-    }
-
-    .card{
-      border:1px solid var(--line);
-      border-radius:18px;
-      background:rgba(255,255,255,.045);
-      box-shadow:0 10px 28px rgba(0,0,0,.18);
-      padding:14px;
-      margin-bottom:12px;
-    }
-
-    .cardTitle{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
-      margin-bottom:10px;
-      font-size:15px;
-      font-weight:1000;
-      letter-spacing:-.03em;
-    }
-
-    .smallText{
-      color:var(--muted);
-      font-size:12px;
-      font-weight:800;
-      line-height:1.55;
-    }
-
-    .driverList{
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-      max-height:360px;
-      overflow:auto;
-      padding-right:4px;
-    }
-
-    .driverItem{
-      border:1px solid var(--line);
-      border-radius:13px;
-      padding:10px;
-      background:rgba(255,255,255,.04);
-    }
-
-    .driverName{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      font-size:13px;
-      font-weight:1000;
-      color:#fff;
-    }
-
-    .driverName span{
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-
-    .driverMeta{
-      margin-top:5px;
-      color:#cbd5e1;
-      font-size:11px;
-      font-weight:800;
-      line-height:1.45;
-      word-break:break-word;
     }
 
     .scheduleBoard{
@@ -537,7 +439,6 @@
 
     .scheduleTable th:last-child,
     .scheduleTable td:last-child{border-right:none}
-
     .scheduleTable tr:last-child td{border-bottom:none}
 
     .scheduleTable th{
@@ -554,7 +455,7 @@
     .scheduleTable th.sun{color:#ff4444}
 
     .weekCell{
-      width:110px;
+      width:120px;
       background:var(--week)!important;
       color:#111827!important;
       font-size:16px!important;
@@ -569,12 +470,12 @@
       font-weight:1000!important;
     }
 
-    .routeHead{width:150px}
+    .routeHead{width:160px}
 
     .routeCell{
-      width:150px;
+      width:160px;
       padding:0;
-      background:#d8ead2;
+      background:var(--route);
       color:#111827;
       font-weight:1000;
     }
@@ -587,23 +488,6 @@
       padding:6px 8px;
     }
 
-    .expander{
-      width:24px;
-      height:24px;
-      border-radius:8px;
-      border:1px solid rgba(15,23,42,.25);
-      background:rgba(255,255,255,.6);
-      color:#111827;
-      font-weight:1000;
-      cursor:pointer;
-      flex:0 0 auto;
-    }
-
-    .expander.empty{
-      visibility:hidden;
-      pointer-events:none;
-    }
-
     .routeLabel{
       flex:1;
       min-width:0;
@@ -612,6 +496,24 @@
       white-space:nowrap;
       text-align:left;
       font-size:14px;
+    }
+
+    .expander{
+      width:25px;
+      height:25px;
+      border-radius:999px;
+      border:1px solid rgba(15,23,42,.25);
+      background:rgba(255,255,255,.72);
+      color:#111827;
+      font-weight:1000;
+      cursor:pointer;
+      flex:0 0 auto;
+      line-height:1;
+    }
+
+    .expander.empty{
+      visibility:hidden;
+      pointer-events:none;
     }
 
     .childRoute .routeCell{background:#eef7e9}
@@ -658,11 +560,7 @@
 
     .cellEdit.dirty{box-shadow:inset 0 -3px 0 rgba(245,158,11,.85)}
     .cellEdit.hasValue{color:#0f172a}
-
-    .cellEdit::placeholder{
-      color:rgba(148,163,184,.8);
-      font-weight:800;
-    }
+    .cellEdit::placeholder{color:rgba(148,163,184,.8);font-weight:800}
 
     .emptyBoard{
       padding:48px 16px;
@@ -674,28 +572,66 @@
       background:rgba(255,255,255,.035);
     }
 
-    .legendGrid{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px;
+    .suggestBox{
+      position:fixed;
+      display:none;
+      z-index:2147482000;
+      width:320px;
+      max-height:290px;
+      overflow:auto;
+      border:1px solid rgba(148,163,184,.42);
+      border-radius:14px;
+      background:#0f172a;
+      box-shadow:0 20px 60px rgba(0,0,0,.45);
+      padding:6px;
     }
 
-    .legendItem{
+    .suggestBox.open{display:block}
+
+    .suggestItem{
+      width:100%;
+      display:block;
+      text-align:left;
+      border:1px solid transparent;
+      border-radius:11px;
+      background:transparent;
+      color:#eaf2ff;
+      padding:9px 10px;
+      cursor:pointer;
+    }
+
+    .suggestItem:hover,
+    .suggestItem.active{
+      background:rgba(96,165,250,.18);
+      border-color:rgba(96,165,250,.35);
+    }
+
+    .suggestTop{
       display:flex;
       align-items:center;
+      justify-content:space-between;
       gap:8px;
-      min-width:0;
-      font-size:12px;
-      font-weight:900;
-      color:#dbeafe;
+      font-size:13px;
+      font-weight:1000;
     }
 
-    .legendColor{
-      width:20px;
-      height:20px;
-      border-radius:6px;
-      border:1px solid rgba(255,255,255,.25);
+    .suggestType{
       flex:0 0 auto;
+      border-radius:999px;
+      padding:2px 8px;
+      border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);
+      color:#bfdbfe;
+      font-size:11px;
+      font-weight:1000;
+    }
+
+    .suggestMeta{
+      margin-top:4px;
+      color:#b6c4dc;
+      font-size:11px;
+      font-weight:800;
+      line-height:1.45;
     }
 
     .captureArea{background:#0e1728}
@@ -718,20 +654,6 @@
       background:#0e1728;
       padding:24px;
       z-index:-1;
-    }
-
-    .warnLine{
-      color:#fde68a;
-      font-size:12px;
-      font-weight:900;
-      line-height:1.45;
-    }
-
-    .okLine{
-      color:#bbf7d0;
-      font-size:12px;
-      font-weight:900;
-      line-height:1.45;
     }
 
     @media(max-width:1080px){
@@ -762,9 +684,7 @@
       }
 
       .toolbar > .btn,
-      .toolbar > .weekBtns{
-        width:100%;
-      }
+      .toolbar > .weekBtns{width:100%}
 
       .toolbar .btn{width:100%}
 
@@ -775,16 +695,12 @@
 
       .metaLine{grid-column:1 / -1}
 
-      .main{display:block}
+      .main{display:block;overflow:visible}
 
       .boardWrap{
         padding:10px;
         overflow:auto;
-      }
-
-      .side{
-        border-left:none;
-        border-top:1px solid var(--line);
+        height:auto;
       }
 
       .scheduleBoard{min-width:920px}
@@ -801,16 +717,8 @@
     @media(max-width:560px){
       .topbar{padding:10px}
 
-      .logoButton{
-        width:32px;
-        height:32px;
-      }
-
-      .logoButton img{
-        width:24px;
-        height:24px;
-      }
-
+      .logoButton{width:32px;height:32px}
+      .logoButton img{width:24px;height:24px}
       .brandText h1{font-size:18px}
 
       .btn{
@@ -850,6 +758,7 @@
       }
 
       .boardActions .btn{width:100%}
+      .suggestBox{width:calc(100vw - 20px)}
     }
   </style>
 </head>
@@ -876,7 +785,7 @@
     <section class="toolbar">
       <div class="field">
         <label for="campInput">Camp</label>
-        <input id="campInput" class="input" type="text" placeholder="예: M익산1, 일산2" autocomplete="off" />
+        <input id="campInput" class="input" type="text" placeholder="예: M익산1, 대구3" autocomplete="off" />
       </div>
 
       <div class="field">
@@ -924,6 +833,7 @@
 
       <button id="btnLoad" class="btn primary" type="button">불러오기</button>
       <button id="btnSave" class="btn ok" type="button">전체 저장</button>
+      <button id="btnExportMeta" class="btn excel" type="button">엑셀 생성</button>
       <button id="btnCopyImage" class="btn warn" type="button">이미지 복사</button>
       <button id="btnReset" class="btn" type="button">초기화</button>
 
@@ -938,7 +848,7 @@
     </section>
 
     <main class="main">
-      <section class="boardWrap">
+      <section id="boardWrap" class="boardWrap">
         <div id="boardRoot" class="scheduleBoard captureArea">
           <div class="boardHeader">
             <div class="boardTitle">
@@ -959,47 +869,10 @@
           </div>
         </div>
       </section>
-
-      <aside class="side">
-        <div class="card">
-          <div class="cardTitle">
-            <span>사용 방법</span>
-          </div>
-          <div class="smallText">
-            기본은 서브 라우트 단위로 입력됩니다.<br />
-            <b>▶</b> 버튼이 있는 라우트는 클릭하면 서서브가 펼쳐집니다.<br />
-            셀에 기사명을 입력한 뒤 <b>전체 저장</b>을 누르면 저장됩니다.
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="cardTitle">
-            <span>계정 / 기사 참고</span>
-            <span id="driverCountText" class="pill">0명</span>
-          </div>
-          <div id="driverList" class="driverList">
-            <div class="smallText">기사 정보가 없습니다.</div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="cardTitle">
-            <span>색상 기준</span>
-          </div>
-          <div id="legendGrid" class="legendGrid"></div>
-        </div>
-
-        <div class="card">
-          <div class="cardTitle">
-            <span>상태</span>
-          </div>
-          <div id="detailStatus" class="smallText">대기중</div>
-        </div>
-      </aside>
     </main>
   </div>
 
-  <datalist id="driverOptions"></datalist>
+  <div id="suggestBox" class="suggestBox"></div>
 
   <script>
     (async function(){
@@ -1015,12 +888,26 @@
         "https://schedule.maroowell.com"
       ).replace(/\/+$/,"");
 
+      const META_VENDOR_NAME = CONFIG.METAADMIN_VENDOR_NAME || "마루웰/MARUL";
+      const META_BUSINESS_NO = CONFIG.METAADMIN_BUSINESS_NO || "2591501828";
+      const META_WORK_TURN = CONFIG.METAADMIN_WORK_TURN || "출근";
+      const META_WORK_LINE = CONFIG.METAADMIN_WORK_LINE || "D1,D2,F3";
+
       const DAYS = ["일","월","화","수","목","금","토"];
       const WAVE_LABEL = { WAVE1:"야간", WAVE2:"주간" };
       const WAVE_ALIASES = {
         WAVE1:["WAVE1","W1","야간","NIGHT","N"],
         WAVE2:["WAVE2","W2","주간","DAY","D"]
       };
+
+      const LIGHT_PALETTE = [
+        "#e9d5ff", "#bae6fd", "#fde68a", "#bbf7d0", "#fecaca",
+        "#bfdbfe", "#fbcfe8", "#fed7aa", "#ccfbf1", "#ddd6fe",
+        "#d9f99d", "#fef3c7", "#cffafe", "#fae8ff", "#dcfce7",
+        "#fee2e2", "#e0f2fe", "#fce7f3", "#ede9fe", "#ecfccb",
+        "#dbeafe", "#ffedd5", "#ccfbf1", "#fef9c3", "#f5d0fe",
+        "#c7d2fe", "#bbf7d0", "#fecdd3", "#fde68a", "#bfdbfe"
+      ];
 
       const els = {
         userBadge:document.getElementById("userBadge"),
@@ -1040,6 +927,7 @@
         btnNextWeek:document.getElementById("btnNextWeek"),
         btnLoad:document.getElementById("btnLoad"),
         btnSave:document.getElementById("btnSave"),
+        btnExportMeta:document.getElementById("btnExportMeta"),
         btnCopyImage:document.getElementById("btnCopyImage"),
         btnReset:document.getElementById("btnReset"),
         btnCollapseAll:document.getElementById("btnCollapseAll"),
@@ -1050,15 +938,12 @@
         dirtyPill:document.getElementById("dirtyPill"),
         apiPill:document.getElementById("apiPill"),
         statusText:document.getElementById("statusText"),
-        detailStatus:document.getElementById("detailStatus"),
         boardRoot:document.getElementById("boardRoot"),
         boardTitle:document.getElementById("boardTitle"),
         boardSubTitle:document.getElementById("boardSubTitle"),
         tableHost:document.getElementById("tableHost"),
-        driverList:document.getElementById("driverList"),
-        driverCountText:document.getElementById("driverCountText"),
-        driverOptions:document.getElementById("driverOptions"),
-        legendGrid:document.getElementById("legendGrid")
+        boardWrap:document.getElementById("boardWrap"),
+        suggestBox:document.getElementById("suggestBox")
       };
 
       const state = {
@@ -1082,11 +967,15 @@
         schedules:[],
         scheduleMap:new Map(),
         driversRaw:[],
-        drivers:[],
-        driverByName:new Map(),
+        driverAccounts:[],
+        accountByDisplay:new Map(),
+        accountByExportName:new Map(),
+        accountById:new Map(),
+        personColorMap:new Map(),
         expanded:new Set(),
         dirty:new Map(),
-        loading:false
+        loading:false,
+        suggestInput:null
       };
 
       const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
@@ -1102,6 +991,7 @@
 
       function clean(v){ return String(v ?? "").trim(); }
       function compact(v){ return clean(v).replace(/\s+/g,""); }
+      function keyOf(v){ return compact(v).toUpperCase(); }
 
       function normalizeWave(v){
         const raw = compact(v).toUpperCase();
@@ -1223,11 +1113,6 @@
         els.statusText.textContent = text || "";
       }
 
-      function setDetail(text, good){
-        els.detailStatus.className = good ? "okLine" : "smallText";
-        els.detailStatus.textContent = text || "";
-      }
-
       function updateWeekState(){
         state.weekStart = sundayOf(state.baseDate);
         state.weekDates = weekDatesFromStart(state.weekStart);
@@ -1242,29 +1127,20 @@
         els.weekPill.textContent = `${weekRangeLabel()} / ${state.weekLabel}`;
       }
 
-      function bgForName(name){
-        const n = compact(name);
-        if(!n) return "#111827";
+      function assignColorKey(key){
+        const k = clean(key) || "-";
+        if(state.personColorMap.has(k)) return state.personColorMap.get(k);
 
-        let hash = 0;
-        for(let i = 0; i < n.length; i++){
-          hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
-        }
+        const idx = state.personColorMap.size % LIGHT_PALETTE.length;
+        const color = LIGHT_PALETTE[idx];
+        state.personColorMap.set(k, color);
+        return color;
+      }
 
-        const colors = [
-          "#bfdbfe",
-          "#bbf7d0",
-          "#fde68a",
-          "#fecaca",
-          "#ddd6fe",
-          "#bae6fd",
-          "#fbcfe8",
-          "#fed7aa",
-          "#ccfbf1",
-          "#e9d5ff"
-        ];
-
-        return colors[hash % colors.length];
+      function colorForValue(value){
+        const account = resolveAccount(value);
+        const key = account?.colorKey || account?.ownerName || clean(value) || "-";
+        return assignColorKey(key);
       }
 
       function textColorForBg(){
@@ -1291,7 +1167,6 @@
         state.accessToken = state.session.access_token || "";
 
         els.userBadge.textContent = state.email || "로그인";
-
         return true;
       }
 
@@ -1336,9 +1211,7 @@
       async function checkAccess(){
         try{
           const me = await apiFetch("/me");
-          if(me?.ok){
-            return true;
-          }
+          if(me?.ok) return true;
         } catch(e){
           console.error(e);
           document.documentElement.style.visibility = "visible";
@@ -1372,20 +1245,60 @@
         if(!raw) return [];
 
         return raw
-          .split(/[\n,;]+/)
+          .split(/[\n;]+/)
           .map(s => clean(s))
-          .filter(Boolean);
+          .filter(Boolean)
+          .flatMap(line => {
+            if(line.includes(",")){
+              const parts = line.split(",").map(x => clean(x)).filter(Boolean);
+              if(parts.length >= 2 && parts.every(x => !/[/:：]/.test(x))){
+                return parts.map(x => ({ id:x, adminName:"" }));
+              }
+            }
+            return [line];
+          })
+          .map(item => {
+            if(typeof item === "object") return item;
+
+            const text = clean(item);
+            const slash = text.split(/\s*[/／]\s*/).map(x => clean(x)).filter(Boolean);
+            if(slash.length >= 2){
+              return { id:slash[0], adminName:slash.slice(1).join(" / ") };
+            }
+
+            const colon = text.split(/\s*[:：]\s*/).map(x => clean(x)).filter(Boolean);
+            if(colon.length >= 2){
+              return { id:colon[0], adminName:colon.slice(1).join(" ") };
+            }
+
+            const parts = text.split(/\s+/).map(x => clean(x)).filter(Boolean);
+            if(parts.length >= 2){
+              return { id:parts[0], adminName:parts.slice(1).join(" ") };
+            }
+
+            return { id:text, adminName:"" };
+          })
+          .filter(x => x.id || x.adminName);
       }
 
-      function buildDrivers(){
-        const filtered = state.driversRaw
+      function buildDriverAccounts(){
+        state.driverAccounts = [];
+        state.accountByDisplay.clear();
+        state.accountByExportName.clear();
+        state.accountById.clear();
+        state.personColorMap.clear();
+
+        const drivers = state.driversRaw
           .map(r => ({
             raw:r,
             name:clean(r.person_name || r.name),
             camp:clean(r.camp_code || r.camp),
             wave:clean(r.wave_raw || r.wave),
             coupangId:clean(r.coupang_id),
-            subAccounts:Array.isArray(r.sub_accounts) ? r.sub_accounts : parseSubAccounts(r.sub_account_info),
+            subAccounts:Array.isArray(r.sub_accounts) ? r.sub_accounts.map(x => {
+              if(typeof x === "object") return x;
+              return parseSubAccounts(x)[0] || { id:clean(x), adminName:"" };
+            }) : parseSubAccounts(r.sub_account_info),
             position:clean(r.position_title)
           }))
           .filter(d => d.name)
@@ -1396,44 +1309,88 @@
             return sortText(a.name, b.name);
           });
 
-        state.drivers = filtered;
-        state.driverByName.clear();
+        const seen = new Set();
 
-        for(const d of filtered){
-          state.driverByName.set(compact(d.name), d);
+        for(const d of drivers){
+          const baseName = d.name;
+          assignColorKey(baseName);
+
+          const mainAccount = {
+            displayName:baseName,
+            ownerName:baseName,
+            exportName:baseName,
+            exportId:d.coupangId,
+            accountType:"본계정",
+            colorKey:baseName,
+            camp:d.camp,
+            wave:d.wave,
+            search:[baseName, d.coupangId, d.camp, d.wave, "본계정"].join(" ")
+          };
+
+          addAccount(mainAccount, seen);
+
+          d.subAccounts.forEach((sub, idx) => {
+            const subNo = idx + 2;
+            const subId = clean(sub.id);
+            const adminName = clean(sub.adminName);
+            const displayName = `${baseName}${subNo}`;
+
+            const account = {
+              displayName,
+              ownerName:baseName,
+              exportName:adminName || baseName,
+              exportId:subId,
+              accountType:"서브계정",
+              colorKey:baseName,
+              camp:d.camp,
+              wave:d.wave,
+              search:[displayName, baseName, adminName, subId, d.camp, d.wave, "서브계정"].join(" ")
+            };
+
+            addAccount(account, seen);
+          });
+        }
+
+        state.driverAccounts.sort((a,b) => {
+          const ao = sortText(a.ownerName, b.ownerName);
+          if(ao !== 0) return ao;
+          return sortText(a.displayName, b.displayName);
+        });
+
+        for(const acc of state.driverAccounts){
+          state.accountByDisplay.set(keyOf(acc.displayName), acc);
+          if(acc.exportName) state.accountByExportName.set(keyOf(acc.exportName), acc);
+          if(acc.exportId) state.accountById.set(keyOf(acc.exportId), acc);
         }
       }
 
-      function renderDrivers(){
-        els.driverCountText.textContent = `${state.drivers.length}명`;
+      function addAccount(account, seen){
+        const k = keyOf(account.displayName);
+        if(!k || seen.has(k)) return;
+        seen.add(k);
+        state.driverAccounts.push(account);
+      }
 
-        els.driverOptions.innerHTML = state.drivers.map(d => {
-          const label = [d.name, d.coupangId, d.subAccounts.join(" ")].filter(Boolean).join(" / ");
-          return `<option value="${esc(d.name)}" label="${esc(label)}"></option>`;
-        }).join("");
+      function resolveAccount(value){
+        const raw = clean(value);
+        if(!raw) return null;
 
-        if(!state.drivers.length){
-          els.driverList.innerHTML = `<div class="smallText">선택 캠프 기준 기사 정보가 없습니다.</div>`;
-          return;
-        }
+        const k = keyOf(raw);
 
-        els.driverList.innerHTML = state.drivers.map(d => {
-          const waveOk = waveMatches(d.wave, state.wave);
-          const sub = d.subAccounts.length ? d.subAccounts.map(esc).join("<br>") : "-";
-          return `
-            <div class="driverItem">
-              <div class="driverName">
-                <span>${esc(d.name)}</span>
-                <span class="pill ${waveOk ? "ok" : ""}">${esc(d.wave || "공통")}</span>
-              </div>
-              <div class="driverMeta">
-                ID: ${esc(d.coupangId || "-")}<br>
-                부계정: ${sub}<br>
-                캠프: ${esc(d.camp || state.camp || "-")}
-              </div>
-            </div>
-          `;
-        }).join("");
+        return (
+          state.accountByDisplay.get(k) ||
+          state.accountByExportName.get(k) ||
+          state.accountById.get(k) ||
+          {
+            displayName:raw,
+            ownerName:raw,
+            exportName:raw,
+            exportId:"",
+            accountType:"직접입력",
+            colorKey:raw,
+            search:raw
+          }
+        );
       }
 
       function buildRoutes(){
@@ -1547,6 +1504,19 @@
         state.displayRows = out;
       }
 
+      function allRouteLabels(){
+        const labels = [];
+
+        for(const p of state.routeParents){
+          labels.push(p.label);
+          for(const c of p.children || []){
+            labels.push(c.label);
+          }
+        }
+
+        return Array.from(new Set(labels.map(normalizeRouteLabel).filter(Boolean)));
+      }
+
       function scheduleKey(date, routeLabel){
         return `${date}||${state.camp}||${state.wave}||${normalizeRouteLabel(routeLabel)}`;
       }
@@ -1563,6 +1533,10 @@
           const route = normalizeRouteLabel(r.route_label);
           const key = `${r.schedule_date}||${normalizedWave}||${route}`;
           state.scheduleMap.set(key, r);
+
+          if(r.driver_name){
+            assignColorKey(resolveAccount(r.driver_name)?.colorKey || r.driver_name);
+          }
         }
       }
 
@@ -1576,6 +1550,8 @@
           alert("Camp를 입력하세요.");
           return;
         }
+
+        hideSuggest();
 
         state.loading = true;
         setState("warn","LOAD");
@@ -1600,14 +1576,13 @@
           }));
           state.driversRaw = json.drivers || [];
 
-          buildDrivers();
+          buildDriverAccounts();
           makeScheduleMap();
           buildRoutes();
           render();
 
           setState("ok","READY");
-          setStatus(`조회 완료: 라우트 ${state.routeParents.length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.drivers.length}명`);
-          setDetail(`Worker API 조회 완료 · ${waveLabel(state.wave)} · ${weekRangeLabel()}`, true);
+          setStatus(`조회 완료: 라우트 ${state.routeParents.length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.driverAccounts.length}개 계정`);
         } catch(e){
           console.error(e);
           setState("err","ERROR");
@@ -1624,34 +1599,12 @@
         buildDisplayRows();
         renderHeader();
         renderTable();
-        renderDrivers();
-        renderLegend();
         updatePills();
       }
 
       function renderHeader(){
         els.boardTitle.textContent = `${state.camp || "-"} / ${waveLabel(state.wave)}`;
         els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel} · DB: ${state.wave}`;
-      }
-
-      function renderLegend(){
-        const names = Array.from(new Set(
-          state.schedules
-            .map(r => clean(r.driver_name))
-            .filter(Boolean)
-        )).slice(0, 20);
-
-        if(!names.length){
-          els.legendGrid.innerHTML = `<div class="smallText">등록된 기사명이 생기면 색상 기준이 표시됩니다.</div>`;
-          return;
-        }
-
-        els.legendGrid.innerHTML = names.map(name => `
-          <div class="legendItem">
-            <span class="legendColor" style="background:${bgForName(name)}"></span>
-            <span>${esc(name)}</span>
-          </div>
-        `).join("");
       }
 
       function valueForCell(date, routeLabel){
@@ -1683,9 +1636,9 @@
         let html = `
           <table class="scheduleTable">
             <colgroup>
+              <col style="width:120px">
               <col style="width:110px">
-              <col style="width:110px">
-              <col style="width:150px">
+              <col style="width:160px">
               ${state.weekDates.map(() => `<col style="width:120px">`).join("")}
             </colgroup>
             <thead>
@@ -1709,23 +1662,23 @@
           html += `<tr class="${routeClass}">`;
 
           if(rowIndex === 0){
-            html += `<td class="weekCell" rowspan="${weekRowSpan}">${esc(weekRangeLabel())}</td>`;
+            html += `<td class="weekCell" rowspan="${weekRowSpan}">${esc(state.weekLabel)}</td>`;
             html += `<td class="campCell" rowspan="${weekRowSpan}">${esc(state.camp)}</td>`;
           }
 
           html += `
             <td class="routeCell">
               <div class="routeInner">
+                <div class="routeLabel" title="${esc(row.description || row.memo || row.subPackage || "")}">
+                  ${esc(row.label)}
+                  ${row.type === "child" ? `<span class="childBadge">${esc(row.subSub)}</span>` : ""}
+                </div>
                 <button
                   class="expander ${hasChildren ? "" : "empty"}"
                   type="button"
                   data-expand="${esc(row.key)}"
                   title="서서브 펼치기/접기"
                 >${isExpanded ? "▼" : "▶"}</button>
-                <div class="routeLabel" title="${esc(row.description || row.memo || row.subPackage || "")}">
-                  ${esc(row.label)}
-                  ${row.type === "child" ? `<span class="childBadge">${esc(row.subSub)}</span>` : ""}
-                </div>
               </div>
             </td>
           `;
@@ -1733,7 +1686,7 @@
           state.weekDates.forEach(date => {
             const val = valueForCell(date, row.label);
             const has = !!compact(val);
-            const bg = has ? bgForName(val) : "";
+            const bg = has ? colorForValue(val) : "";
             const color = has ? textColorForBg(bg) : "";
             const dirty = state.dirty.has(scheduleKey(date, row.label));
 
@@ -1742,9 +1695,9 @@
                 <input
                   class="cellEdit ${has ? "hasValue" : ""} ${dirty ? "dirty" : ""}"
                   style="${has ? `background:${bg};color:${color};` : ""}"
-                  list="driverOptions"
                   value="${esc(val)}"
                   placeholder="-"
+                  autocomplete="off"
                   data-date="${esc(date)}"
                   data-route="${esc(row.label)}"
                   data-row-order="${rowIndex}"
@@ -1778,20 +1731,30 @@
 
         els.tableHost.querySelectorAll(".cellEdit").forEach(input => {
           input.addEventListener("input", onCellInput);
-          input.addEventListener("change", onCellInput);
-          input.addEventListener("focus", e => e.currentTarget.select());
+          input.addEventListener("focus", e => {
+            e.currentTarget.select();
+            showSuggest(e.currentTarget);
+          });
+          input.addEventListener("keyup", e => {
+            if(e.key === "Escape"){
+              hideSuggest();
+              e.currentTarget.blur();
+              return;
+            }
+            showSuggest(e.currentTarget);
+          });
         });
       }
 
       function cellTitle(name){
-        const d = state.driverByName.get(compact(name));
+        const d = resolveAccount(name);
         if(!d) return name || "";
 
         return [
-          d.name,
-          d.coupangId ? "ID: " + d.coupangId : "",
-          d.subAccounts.length ? "부계정: " + d.subAccounts.join(" / ") : "",
-          d.wave ? "wave: " + d.wave : ""
+          d.displayName,
+          d.accountType ? "구분: " + d.accountType : "",
+          d.exportId ? "ID: " + d.exportId : "",
+          d.exportName ? "엑셀 이름: " + d.exportName : ""
         ].filter(Boolean).join("\n");
       }
 
@@ -1811,12 +1774,12 @@
           driver_name:value || null,
           memo:null,
           row_order:rowOrder,
-          cell_color:value ? bgForName(value) : null,
+          cell_color:value ? colorForValue(value) : null,
           is_active:!!value
         });
 
         if(value){
-          const bg = bgForName(value);
+          const bg = colorForValue(value);
           input.classList.add("hasValue");
           input.style.background = bg;
           input.style.color = textColorForBg(bg);
@@ -1830,6 +1793,76 @@
 
         input.classList.add("dirty");
         updatePills();
+      }
+
+      function showSuggest(input){
+        state.suggestInput = input;
+
+        const q = keyOf(input.value);
+        let list = state.driverAccounts.filter(acc => {
+          if(!q) return true;
+          return keyOf(acc.search).includes(q);
+        });
+
+        if(!list.length && q){
+          list = state.driverAccounts.filter(acc => keyOf(acc.ownerName).includes(q));
+        }
+
+        list = list.slice(0, 40);
+
+        if(!list.length){
+          hideSuggest();
+          return;
+        }
+
+        els.suggestBox.innerHTML = list.map((acc, idx) => `
+          <button class="suggestItem" type="button" data-idx="${idx}" data-display="${esc(acc.displayName)}">
+            <div class="suggestTop">
+              <span>${esc(acc.displayName)}</span>
+              <span class="suggestType">${esc(acc.accountType)}</span>
+            </div>
+            <div class="suggestMeta">
+              ID: ${esc(acc.exportId || "-")} · 엑셀 이름: ${esc(acc.exportName || "-")}
+            </div>
+          </button>
+        `).join("");
+
+        els.suggestBox.querySelectorAll(".suggestItem").forEach(btn => {
+          btn.addEventListener("mousedown", e => {
+            e.preventDefault();
+            const display = btn.getAttribute("data-display") || "";
+            if(state.suggestInput){
+              state.suggestInput.value = display;
+              onCellInput({ currentTarget:state.suggestInput });
+              state.suggestInput.focus();
+            }
+            hideSuggest();
+          });
+        });
+
+        const rect = input.getBoundingClientRect();
+        const width = Math.max(280, Math.min(360, rect.width + 130));
+        let left = rect.left;
+        let top = rect.bottom + 6;
+
+        if(left + width > window.innerWidth - 8){
+          left = window.innerWidth - width - 8;
+        }
+
+        if(top + 290 > window.innerHeight - 8){
+          top = Math.max(8, rect.top - 296);
+        }
+
+        els.suggestBox.style.left = `${Math.max(8, left)}px`;
+        els.suggestBox.style.top = `${top}px`;
+        els.suggestBox.style.width = `${width}px`;
+        els.suggestBox.classList.add("open");
+      }
+
+      function hideSuggest(){
+        els.suggestBox.classList.remove("open");
+        els.suggestBox.innerHTML = "";
+        state.suggestInput = null;
       }
 
       function updatePills(){
@@ -1847,6 +1880,8 @@
           alert("저장할 변경사항이 없습니다.");
           return;
         }
+
+        hideSuggest();
 
         const records = Array.from(state.dirty.values()).map(item => ({
           schedule_date:item.schedule_date,
@@ -1878,7 +1913,6 @@
 
           setState("ok","READY");
           setStatus(`저장 완료: ${json.saved || records.length}건`);
-          setDetail("저장 완료", true);
         } catch(e){
           console.error(e);
           setState("err","ERROR");
@@ -1889,11 +1923,142 @@
         }
       }
 
+      function metaCampName(camp){
+        const s = clean(camp);
+        const m = s.match(/^M_?(.+)$/i);
+        if(m) return "M_" + m[1];
+        return s;
+      }
+
+      function collectMetaRows(){
+        const grouped = new Map();
+        const labels = allRouteLabels();
+
+        for(const date of state.weekDates){
+          for(const routeLabel of labels){
+            const displayName = valueForCell(date, routeLabel);
+            if(!displayName) continue;
+
+            const acc = resolveAccount(displayName);
+            const name = clean(acc?.exportName || displayName);
+            const id = clean(acc?.exportId || "");
+            const groupKey = [date, name, id].join("||");
+
+            if(!grouped.has(groupKey)){
+              grouped.set(groupKey, {
+                date,
+                name,
+                id,
+                routes:[]
+              });
+            }
+
+            const row = grouped.get(groupKey);
+            const route = normalizeRouteLabel(routeLabel);
+            if(route && !row.routes.includes(route)){
+              row.routes.push(route);
+            }
+          }
+        }
+
+        return Array.from(grouped.values())
+          .map(row => ({
+            ...row,
+            routes:row.routes.sort((a,b) => sortText(a,b))
+          }))
+          .sort((a,b) => {
+            if(a.date !== b.date) return a.date.localeCompare(b.date);
+            const nc = sortText(a.name, b.name);
+            if(nc !== 0) return nc;
+            return sortText(a.id, b.id);
+          });
+      }
+
+      function exportMetaExcel(){
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        if(!state.camp || !state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        const rows = collectMetaRows();
+
+        if(!rows.length){
+          alert("엑셀로 생성할 스케줄 데이터가 없습니다.");
+          return;
+        }
+
+        const header = [
+          "업무일",
+          "벤더명",
+          "사업자등록번호",
+          "캠프명",
+          "웨이브",
+          "이름",
+          "아이디",
+          "업무회전",
+          "업무라인",
+          "업무라우트"
+        ];
+
+        const aoa = [
+          header,
+          ...rows.map(r => [
+            r.date,
+            META_VENDOR_NAME,
+            META_BUSINESS_NO,
+            metaCampName(state.camp),
+            state.wave,
+            r.name,
+            r.id,
+            META_WORK_TURN,
+            META_WORK_LINE,
+            r.routes.join(",")
+          ])
+        ];
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+        ws["!cols"] = [
+          { wch:12 },
+          { wch:14 },
+          { wch:14 },
+          { wch:12 },
+          { wch:10 },
+          { wch:12 },
+          { wch:16 },
+          { wch:10 },
+          { wch:14 },
+          { wch:28 }
+        ];
+
+        ws["!autofilter"] = {
+          ref:`A1:J${aoa.length}`
+        };
+
+        XLSX.utils.book_append_sheet(wb, ws, "Sheet0");
+
+        const fileName = `MetaAdmin_${metaCampName(state.camp)}_${state.wave}_${state.weekLabel}_${weekRangeLabel()}.xlsx`
+          .replace(/[\\/:*?"<>|]/g,"_")
+          .replace(/\s+/g," ");
+
+        XLSX.writeFile(wb, fileName);
+
+        setStatus(`엑셀 생성 완료: ${rows.length}행 / Sheet0`);
+      }
+
       async function copyImage(){
         if(!window.htmlToImage){
           alert("이미지 변환 라이브러리를 불러오지 못했습니다.");
           return;
         }
+
+        hideSuggest();
 
         const clone = els.boardRoot.cloneNode(true);
         clone.classList.add("export");
@@ -1909,7 +2074,7 @@
           div.style.fontSize = "13px";
           div.style.fontWeight = "900";
           div.style.padding = "5px 7px";
-          div.style.background = input.value ? (input.style.background || bgForName(input.value)) : "#111827";
+          div.style.background = input.value ? (input.style.background || colorForValue(input.value)) : "#111827";
           div.style.color = input.value ? "#0f172a" : "#94a3b8";
           input.replaceWith(div);
         });
@@ -1923,7 +2088,7 @@
             span.style.justifyContent = "center";
             span.style.width = "24px";
             span.style.height = "24px";
-            span.style.borderRadius = "8px";
+            span.style.borderRadius = "999px";
             span.style.background = "rgba(255,255,255,.65)";
             span.style.color = "#111827";
             span.style.fontWeight = "1000";
@@ -1966,7 +2131,7 @@
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `마루웰_스케줄_${state.camp}_${waveLabel(state.wave)}_${weekRangeLabel()}.png`.replace(/[\\/:*?"<>|]/g,"_");
+            a.download = `마루웰_스케줄_${state.camp}_${waveLabel(state.wave)}_${state.weekLabel}.png`.replace(/[\\/:*?"<>|]/g,"_");
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -1986,6 +2151,7 @@
       }
 
       function resetFilters(){
+        hideSuggest();
         els.campInput.value = "";
         els.searchInput.value = "";
         state.camp = "";
@@ -2102,6 +2268,7 @@
 
             state.dirty.clear();
             closeWeekPicker();
+            hideSuggest();
 
             els.weekButtonText.textContent = weekRangeLabel();
             els.weekPill.textContent = `${weekRangeLabel()} / ${state.weekLabel}`;
@@ -2125,6 +2292,7 @@
 
         els.btnLoad.addEventListener("click", loadAll);
         els.btnSave.addEventListener("click", saveAll);
+        els.btnExportMeta.addEventListener("click", exportMetaExcel);
         els.btnCopyImage.addEventListener("click", copyImage);
         els.btnReset.addEventListener("click", resetFilters);
 
@@ -2135,6 +2303,7 @@
           state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
           renderHeader();
           renderWeekPicker();
+          hideSuggest();
           if(state.camp) loadAll();
         });
 
@@ -2145,11 +2314,13 @@
           state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
           renderHeader();
           renderWeekPicker();
+          hideSuggest();
           if(state.camp) loadAll();
         });
 
         els.weekButton.addEventListener("click", e => {
           e.stopPropagation();
+          hideSuggest();
           if(els.weekPopup.classList.contains("open")) closeWeekPicker();
           else openWeekPicker();
         });
@@ -2173,6 +2344,7 @@
           state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
           renderWeekPicker();
           renderHeader();
+          hideSuggest();
           if(state.camp) loadAll();
         });
 
@@ -2180,16 +2352,27 @@
           if(!e.target.closest(".weekPickerWrap")){
             closeWeekPicker();
           }
+
+          if(!e.target.closest(".suggestBox") && !e.target.closest(".cellEdit")){
+            hideSuggest();
+          }
         });
 
         document.addEventListener("keydown", e => {
-          if(e.key === "Escape") closeWeekPicker();
+          if(e.key === "Escape"){
+            closeWeekPicker();
+            hideSuggest();
+          }
         });
+
+        els.boardWrap.addEventListener("scroll", hideSuggest, { passive:true });
+        window.addEventListener("resize", hideSuggest);
 
         els.waveSelect.addEventListener("change", () => {
           state.wave = normalizeWave(els.waveSelect.value);
           els.waveSelect.value = state.wave;
           state.dirty.clear();
+          hideSuggest();
           if(state.camp) loadAll();
           else renderHeader();
         });

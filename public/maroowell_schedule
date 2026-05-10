@@ -534,9 +534,10 @@
         if(!a||!b)return false;
         return a===b||a.includes(b)||b.includes(a);
       }
+
       function waveMatches(infoWave,selectedWave){
         const raw=compact(infoWave).toUpperCase();
-        if(!raw)return true;
+        if(!raw || raw==="-" || raw==="전체" || raw==="ALL")return true;
         const selected=normalizeWave(selectedWave);
         const aliases=WAVE_ALIASES[selected]||[selected];
         return aliases.some(x=>raw===compact(x).toUpperCase()||raw.includes(compact(x).toUpperCase()));
@@ -564,6 +565,86 @@
         }).filter(x=>x.id||x.adminName);
       }
 
+      function isSubAccountRole(position){
+        const p=compact(position).toUpperCase();
+        return p.includes("서브") || p.includes("SUB");
+      }
+
+      function normalizeDriverRow(row){
+        return {
+          ...row,
+          person_name:clean(row.person_name||row.name),
+          name:clean(row.name||row.person_name),
+          camp_code:clean(row.camp_code||row.camp),
+          camp:clean(row.camp||row.camp_code),
+          wave:clean(row.wave),
+          wave_raw:clean(row.wave_raw||row.wave),
+          coupang_id:clean(row.coupang_id),
+          sub_account_info:clean(row.sub_account_info),
+          position_title:clean(row.position_title)
+        };
+      }
+
+      function mergeDriverRows(...lists){
+        const map=new Map();
+
+        for(const list of lists){
+          for(const raw of (Array.isArray(list)?list:[])){
+            const row=normalizeDriverRow(raw);
+            const person=clean(row.person_name||row.name);
+            const id=clean(row.coupang_id);
+            const pos=clean(row.position_title);
+            if(!person && !id)continue;
+
+            const key=keyOf(id) || keyOf(`${person}|${pos}|${row.camp_code}|${row.wave}|${row.sub_account_info}`);
+            if(!key)continue;
+
+            const prev=map.get(key);
+            if(!prev){
+              map.set(key,row);
+              continue;
+            }
+
+            map.set(key,{
+              ...prev,
+              ...row,
+              person_name:clean(row.person_name)||clean(prev.person_name),
+              name:clean(row.name)||clean(prev.name),
+              camp_code:clean(row.camp_code)||clean(prev.camp_code),
+              camp:clean(row.camp)||clean(prev.camp),
+              wave:clean(row.wave)||clean(prev.wave),
+              wave_raw:clean(row.wave_raw)||clean(prev.wave_raw),
+              coupang_id:clean(row.coupang_id)||clean(prev.coupang_id),
+              sub_account_info:clean(row.sub_account_info)||clean(prev.sub_account_info),
+              position_title:clean(row.position_title)||clean(prev.position_title)
+            });
+          }
+        }
+
+        return Array.from(map.values());
+      }
+
+      async function fetchMaroowellInfoFallbackRows(){
+        if(!supabase)return [];
+
+        try{
+          const {data,error}=await supabase
+            .from("maroowell_info")
+            .select("pk_id,person_name,contact_phone,position_title,camp_code,wave,coupang_id,sub_account_info")
+            .limit(5000);
+
+          if(error)throw error;
+
+          return (data||[]).map(row=>normalizeDriverRow({
+            ...row,
+            __source:"maroowell_info_direct"
+          }));
+        }catch(e){
+          console.warn("[schedule] maroowell_info fallback load failed",e);
+          return [];
+        }
+      }
+
       function buildDriverAccounts(){
         state.driverAccounts=[];
         state.accountByDisplay.clear();
@@ -571,17 +652,21 @@
         state.accountById.clear();
         state.personColorMap.clear();
 
-        const drivers=state.driversRaw.map(r=>({
-          raw:r,
-          name:clean(r.person_name||r.name),
-          camp:clean(r.camp_code||r.camp),
-          wave:clean(r.wave_raw||r.wave),
-          coupangId:clean(r.coupang_id),
-          subAccounts:Array.isArray(r.sub_accounts)
-            ? r.sub_accounts.map(x=>typeof x==="object"?x:(parseSubAccounts(x)[0]||{id:clean(x),adminName:""}))
-            : parseSubAccounts(r.sub_account_info),
-          position:clean(r.position_title)
-        })).filter(d=>d.name).sort((a,b)=>{
+        const drivers=state.driversRaw.map(r=>{
+          const row=normalizeDriverRow(r);
+          return {
+            raw:row,
+            name:clean(row.person_name||row.name),
+            camp:clean(row.camp_code||row.camp),
+            wave:clean(row.wave_raw||row.wave),
+            coupangId:clean(row.coupang_id),
+            subAccounts:Array.isArray(row.sub_accounts)
+              ? row.sub_accounts.map(x=>typeof x==="object"?x:(parseSubAccounts(x)[0]||{id:clean(x),adminName:""}))
+              : parseSubAccounts(row.sub_account_info),
+            position:clean(row.position_title),
+            explicitSub:isSubAccountRole(row.position_title)
+          };
+        }).filter(d=>d.name||d.coupangId).sort((a,b)=>{
           const aw=waveMatches(a.wave,state.wave)?0:1,bw=waveMatches(b.wave,state.wave)?0:1;
           if(aw!==bw)return aw-bw;
           return sortText(a.name,b.name);
@@ -590,29 +675,39 @@
         const seen=new Set();
 
         for(const d of drivers){
-          const baseName=d.name;
+          const baseName=d.name || d.coupangId;
           assignColorKey(baseName);
 
           addAccount({
-            displayName:baseName,ownerName:baseName,exportName:baseName,exportId:d.coupangId,
-            accountType:"본계정",colorKey:baseName,camp:d.camp,wave:d.wave,
-            search:[baseName,d.coupangId,d.camp,d.wave,"본계정"].join(" ")
+            displayName:baseName,
+            ownerName:baseName,
+            exportName:baseName,
+            exportId:d.coupangId,
+            accountType:d.explicitSub ? "서브계정" : "본계정",
+            colorKey:baseName,
+            camp:d.camp,
+            wave:d.wave,
+            position:d.position,
+            search:[baseName,d.coupangId,d.camp,d.wave,d.position,d.explicitSub?"서브계정":"본계정"].join(" ")
           },seen);
 
-          d.subAccounts.forEach((sub,idx)=>{
-            const displayName=`${baseName}${idx+2}`;
-            addAccount({
-              displayName,
-              ownerName:baseName,
-              exportName:clean(sub.adminName)||baseName,
-              exportId:clean(sub.id),
-              accountType:"서브계정",
-              colorKey:baseName,
-              camp:d.camp,
-              wave:d.wave,
-              search:[displayName,baseName,clean(sub.adminName),clean(sub.id),d.camp,d.wave,"서브계정"].join(" ")
-            },seen);
-          });
+          if(!d.explicitSub){
+            d.subAccounts.forEach((sub,idx)=>{
+              const displayName=`${baseName}${idx+2}`;
+              addAccount({
+                displayName,
+                ownerName:baseName,
+                exportName:clean(sub.adminName)||baseName,
+                exportId:clean(sub.id),
+                accountType:"서브계정",
+                colorKey:baseName,
+                camp:d.camp,
+                wave:d.wave,
+                position:"서브계정",
+                search:[displayName,baseName,clean(sub.adminName),clean(sub.id),d.camp,d.wave,"서브계정"].join(" ")
+              },seen);
+            });
+          }
         }
 
         state.driverAccounts.sort((a,b)=>{
@@ -639,18 +734,55 @@
       }
 
       function addAccount(account,seen){
-        const k=keyOf(account.displayName);
-        if(!k||seen.has(k))return;
-        seen.add(k);
+        const uniqueKey=keyOf(account.exportId) || keyOf(account.displayName);
+        if(!uniqueKey)return;
+
+        const displayKey=keyOf(account.displayName);
+        const idKey=keyOf(account.exportId);
+        const comboKey=keyOf(`${account.displayName}|${account.exportId}|${account.accountType}`);
+
+        if(seen.has(comboKey))return;
+        seen.add(comboKey);
+
         state.driverAccounts.push(account);
+
+        if(displayKey&&!state.accountByDisplay.has(displayKey))state.accountByDisplay.set(displayKey,account);
+        if(idKey&&!state.accountById.has(idKey))state.accountById.set(idKey,account);
       }
 
       function resolveAccount(value){
         const raw=clean(value);
         if(!raw)return null;
         const k=keyOf(raw);
-        return state.accountByDisplay.get(k) || state.accountByExportName.get(k) || state.accountById.get(k) || {
-          displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw
+
+        const exact=
+          state.accountByDisplay.get(k) ||
+          state.accountByExportName.get(k) ||
+          state.accountById.get(k);
+
+        if(exact)return exact;
+
+        const found=state.driverAccounts.find(acc=>{
+          const keys=[
+            acc.displayName,
+            acc.ownerName,
+            acc.exportName,
+            acc.exportId
+          ].map(keyOf).filter(Boolean);
+
+          return keys.includes(k);
+        });
+
+        if(found)return found;
+
+        return {
+          displayName:raw,
+          ownerName:raw,
+          exportName:raw,
+          exportId:"",
+          accountType:"직접입력",
+          colorKey:raw,
+          search:raw
         };
       }
 
@@ -679,12 +811,38 @@
           const ck=keyOf(c);
 
           const found=state.driverAccounts.find(acc=>{
-            return [
+            const keys=[
               acc.displayName,
               acc.ownerName,
               acc.exportName,
               acc.exportId
-            ].map(keyOf).includes(ck);
+            ].map(keyOf).filter(Boolean);
+
+            return keys.includes(ck);
+          });
+
+          if(found) return found;
+        }
+
+        for(const c of candidates){
+          const ck=keyOf(c);
+          if(!ck)continue;
+
+          const found=state.driverAccounts.find(acc=>{
+            const display=keyOf(acc.displayName);
+            const owner=keyOf(acc.ownerName);
+            const exportName=keyOf(acc.exportName);
+            const exportId=keyOf(acc.exportId);
+
+            return (
+              display===ck ||
+              owner===ck ||
+              exportName===ck ||
+              exportId===ck ||
+              (display && ck.includes(display)) ||
+              (owner && ck.includes(owner)) ||
+              (exportName && ck.includes(exportName))
+            );
           });
 
           if(found) return found;
@@ -905,10 +1063,11 @@
         try{
           const params=new URLSearchParams({camp:state.camp,wave:state.wave,week_start:state.weekStart});
           const json=await apiFetch("/schedule/week?"+params.toString());
+          const fallbackDrivers=await fetchMaroowellInfoFallbackRows();
 
           state.routesRaw=json.routes||[];
           state.schedules=(json.schedules||[]).map(r=>({...r,wave:normalizeWave(r.wave),route_label:normalizeRouteLabel(r.route_label)}));
-          state.driversRaw=json.drivers||[];
+          state.driversRaw=mergeDriverRows(json.drivers||[],fallbackDrivers);
 
           buildDriverAccounts();
           makeScheduleMap();
@@ -916,7 +1075,7 @@
           render();
 
           setState("ok","READY");
-          setStatus(`조회 완료: 라우트 ${state.routeParents.filter(r=>!r.isOff).length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.driverAccounts.length}개 계정`);
+          setStatus(`조회 완료: 라우트 ${state.routeParents.filter(r=>!r.isOff).length}개 / 스케줄 ${state.schedules.length}개 / 계정 ${state.driverAccounts.length}개`);
         }catch(e){
           console.error(e);
           setState("err","ERROR");
@@ -1409,7 +1568,8 @@
                   finalValue,
                   parentLabel,
                   childLabel,
-                  finalSource
+                  finalSource,
+                  driverAccounts:state.driverAccounts
                 });
                 continue;
               }
@@ -1444,7 +1604,8 @@
               route,
               finalValue,
               parentLabel,
-              parentSource
+              parentSource,
+              driverAccounts:state.driverAccounts
             });
             continue;
           }

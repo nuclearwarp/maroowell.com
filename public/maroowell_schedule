@@ -1540,10 +1540,8 @@
           const key = `${r.schedule_date}||${normalizedWave}||${route}`;
           state.scheduleMap.set(key, r);
 
-          const displayName = clean(r.driver_display_name || r.driver_name);
-          if(displayName){
-            assignColorKey(resolveAccount(displayName)?.colorKey || displayName);
-          }
+          const colorKey = r.driver_owner_name || resolveAccount(r.driver_display_name || r.driver_name)?.colorKey || r.driver_name;
+          if(colorKey) assignColorKey(colorKey);
         }
       }
 
@@ -1589,7 +1587,7 @@
           render();
 
           setState("ok","READY");
-          setStatus(`조회 완료: 라우트 ${state.routeParents.length}개 / 스케줄 ${state.schedules.length}개 / 계정 ${state.driverAccounts.length}개`);
+          setStatus(`조회 완료: 라우트 ${state.routeParents.length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.driverAccounts.length}개 계정`);
         } catch(e){
           console.error(e);
           setState("err","ERROR");
@@ -1619,11 +1617,17 @@
         const dirtyKey = scheduleKey(date, normalized);
 
         if(state.dirty.has(dirtyKey)){
-          return state.dirty.get(dirtyKey).driver_display_name || state.dirty.get(dirtyKey).driver_name || "";
+          const d = state.dirty.get(dirtyKey);
+          return clean(d.driver_display_name || d.driver_name);
         }
 
         const found = state.scheduleMap.get(scheduleLookupKey(date, normalized));
         return clean(found?.driver_display_name || found?.driver_name);
+      }
+
+      function rowForCell(date, routeLabel){
+        const normalized = normalizeRouteLabel(routeLabel);
+        return state.dirty.get(scheduleKey(date, normalized)) || state.scheduleMap.get(scheduleLookupKey(date, normalized)) || null;
       }
 
       function renderTable(){
@@ -1771,20 +1775,22 @@
         const routeLabel = normalizeRouteLabel(input.dataset.route);
         const rowOrder = Number(input.dataset.rowOrder || 0);
         const value = clean(input.value);
+        const account = value ? resolveAccount(value) : null;
         const key = scheduleKey(date, routeLabel);
-        const account = resolveAccount(value);
 
         state.dirty.set(key, {
           schedule_date:date,
           camp:state.camp,
           wave:state.wave,
           route_label:routeLabel,
+
           driver_name:value || null,
           driver_display_name:value || null,
           driver_owner_name:account?.ownerName || value || null,
           driver_export_name:account?.exportName || value || null,
           driver_coupang_id:account?.exportId || null,
           driver_account_type:account?.accountType || null,
+
           memo:null,
           row_order:rowOrder,
           cell_color:value ? colorForValue(value) : null,
@@ -1874,4 +1880,600 @@
 
       function hideSuggest(){
         els.suggestBox.classList.remove("open");
-        els.suggestBox
+        els.suggestBox.innerHTML = "";
+        state.suggestInput = null;
+      }
+
+      function updatePills(){
+        els.rowPill.textContent = `라우트 ${state.displayRows.length}`;
+        els.dirtyPill.textContent = `미저장 ${state.dirty.size}`;
+      }
+
+      async function saveAll(){
+        if(!state.camp || !state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        if(state.dirty.size === 0){
+          alert("저장할 변경사항이 없습니다.");
+          return;
+        }
+
+        hideSuggest();
+
+        const records = Array.from(state.dirty.values()).map(item => ({
+          schedule_date:item.schedule_date,
+          route_label:normalizeRouteLabel(item.route_label),
+
+          driver_name:item.driver_name,
+          driver_display_name:item.driver_display_name,
+          driver_owner_name:item.driver_owner_name,
+          driver_export_name:item.driver_export_name,
+          driver_coupang_id:item.driver_coupang_id,
+          driver_account_type:item.driver_account_type,
+
+          memo:item.memo,
+          row_order:item.row_order,
+          cell_color:item.cell_color,
+          is_active:item.is_active
+        }));
+
+        setState("warn","SAVE");
+        setStatus(`저장 중: ${records.length}건`);
+        els.btnSave.disabled = true;
+
+        try{
+          const json = await apiFetch("/schedule/save", {
+            method:"POST",
+            body:JSON.stringify({
+              camp:state.camp,
+              wave:state.wave,
+              week_start:state.weekStart,
+              records
+            })
+          });
+
+          state.dirty.clear();
+          await loadAll();
+
+          setState("ok","READY");
+          setStatus(`저장 완료: ${json.saved || records.length}건`);
+        } catch(e){
+          console.error(e);
+          setState("err","ERROR");
+          setStatus("저장 실패: " + (e?.message || e));
+          alert("저장 실패: " + (e?.message || e));
+        } finally {
+          els.btnSave.disabled = false;
+        }
+      }
+
+      function metaCampName(camp){
+        const s = clean(camp);
+        const m = s.match(/^M_?(.+)$/i);
+        if(m) return "M_" + m[1];
+        return s;
+      }
+
+      function collectMetaRows(){
+        const grouped = new Map();
+        const labels = allRouteLabels();
+
+        for(const date of state.weekDates){
+          for(const routeLabel of labels){
+            const normalizedRoute = normalizeRouteLabel(routeLabel);
+            const displayName = valueForCell(date, normalizedRoute);
+            if(!displayName) continue;
+
+            const source = rowForCell(date, normalizedRoute) || {};
+            const account = resolveAccount(displayName);
+
+            const exportName = clean(
+              source.driver_export_name ||
+              account?.exportName ||
+              displayName
+            );
+
+            const exportId = clean(
+              source.driver_coupang_id ||
+              account?.exportId ||
+              ""
+            );
+
+            const groupKey = [date, exportName, exportId].join("||");
+
+            if(!grouped.has(groupKey)){
+              grouped.set(groupKey, {
+                date,
+                name:exportName,
+                id:exportId,
+                routes:[]
+              });
+            }
+
+            const row = grouped.get(groupKey);
+            if(normalizedRoute && !row.routes.includes(normalizedRoute)){
+              row.routes.push(normalizedRoute);
+            }
+          }
+        }
+
+        return Array.from(grouped.values())
+          .map(row => ({
+            ...row,
+            routes:row.routes.sort((a,b) => sortText(a,b))
+          }))
+          .sort((a,b) => {
+            if(a.date !== b.date) return a.date.localeCompare(b.date);
+
+            const nc = sortText(a.name, b.name);
+            if(nc !== 0) return nc;
+
+            return sortText(a.id, b.id);
+          });
+      }
+
+      function exportMetaExcel(){
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        if(!state.camp || !state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        hideSuggest();
+
+        const rows = collectMetaRows();
+
+        if(!rows.length){
+          alert("엑셀로 생성할 스케줄 데이터가 없습니다.");
+          return;
+        }
+
+        const header = [
+          "업무일",
+          "벤더명",
+          "사업자등록번호",
+          "캠프명",
+          "웨이브",
+          "이름",
+          "아이디",
+          "업무상태",
+          "회전",
+          "업무라우트"
+        ];
+
+        const aoa = [
+          header,
+          ...rows.map(r => [
+            r.date,
+            META_VENDOR_NAME,
+            META_BUSINESS_NO,
+            metaCampName(state.camp),
+            state.wave,
+            r.name,
+            r.id,
+            META_WORK_STATUS,
+            metaRotationByWave(state.wave),
+            r.routes.join(",")
+          ])
+        ];
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+        ws["!cols"] = [
+          { wch:12 },
+          { wch:14 },
+          { wch:16 },
+          { wch:12 },
+          { wch:10 },
+          { wch:12 },
+          { wch:18 },
+          { wch:10 },
+          { wch:16 },
+          { wch:34 }
+        ];
+
+        ws["!autofilter"] = {
+          ref:`A1:J${aoa.length}`
+        };
+
+        XLSX.utils.book_append_sheet(wb, ws, "Sheet0");
+
+        const fileName = `MetaAdmin_${metaCampName(state.camp)}_${state.wave}_${state.weekLabel}_${weekRangeLabel()}.xlsx`
+          .replace(/[\\/:*?"<>|]/g,"_")
+          .replace(/\s+/g," ");
+
+        XLSX.writeFile(wb, fileName);
+
+        setStatus(`엑셀 생성 완료: ${rows.length}행 / Sheet0`);
+      }
+
+      async function copyImage(){
+        if(!window.htmlToImage){
+          alert("이미지 변환 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        hideSuggest();
+
+        const clone = els.boardRoot.cloneNode(true);
+        clone.classList.add("export");
+
+        clone.querySelectorAll("input.cellEdit").forEach(input => {
+          const div = document.createElement("div");
+          div.textContent = input.value || "-";
+          div.style.cssText = input.getAttribute("style") || "";
+          div.style.minHeight = "42px";
+          div.style.display = "flex";
+          div.style.alignItems = "center";
+          div.style.justifyContent = "center";
+          div.style.fontSize = "13px";
+          div.style.fontWeight = "900";
+          div.style.padding = "5px 7px";
+          div.style.background = input.value ? (input.style.background || colorForValue(input.value)) : "#111827";
+          div.style.color = input.value ? "#0f172a" : "#94a3b8";
+          input.replaceWith(div);
+        });
+
+        clone.querySelectorAll("button").forEach(btn => {
+          if(btn.classList.contains("expander")){
+            const span = document.createElement("span");
+            span.textContent = btn.textContent || "";
+            span.style.display = "inline-flex";
+            span.style.alignItems = "center";
+            span.style.justifyContent = "center";
+            span.style.width = "24px";
+            span.style.height = "24px";
+            span.style.borderRadius = "999px";
+            span.style.background = "rgba(255,255,255,.65)";
+            span.style.color = "#111827";
+            span.style.fontWeight = "1000";
+            btn.replaceWith(span);
+          } else {
+            btn.remove();
+          }
+        });
+
+        const host = document.createElement("div");
+        host.className = "captureHost";
+        host.appendChild(clone);
+        document.body.appendChild(host);
+
+        setState("warn","IMAGE");
+        setStatus("이미지 생성 중입니다.");
+        els.btnCopyImage.disabled = true;
+
+        try{
+          const blob = await window.htmlToImage.toBlob(clone, {
+            cacheBust:true,
+            pixelRatio:2,
+            backgroundColor:"#0e1728",
+            width:clone.scrollWidth,
+            height:clone.scrollHeight,
+            style:{
+              transform:"none",
+              transformOrigin:"top left"
+            }
+          });
+
+          if(!blob) throw new Error("이미지 blob 생성 실패");
+
+          if(navigator.clipboard && window.ClipboardItem){
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png":blob })
+            ]);
+            setStatus("이미지 복사 완료");
+          } else {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `마루웰_스케줄_${state.camp}_${waveLabel(state.wave)}_${state.weekLabel}.png`.replace(/[\\/:*?"<>|]/g,"_");
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            setStatus("클립보드 복사가 지원되지 않아 PNG로 다운로드했습니다.");
+          }
+
+          setState("ok","READY");
+        } catch(e){
+          console.error(e);
+          setState("err","ERROR");
+          alert("이미지 복사 실패: " + (e?.message || e));
+        } finally {
+          host.remove();
+          els.btnCopyImage.disabled = false;
+        }
+      }
+
+      function resetFilters(){
+        hideSuggest();
+        els.campInput.value = "";
+        els.searchInput.value = "";
+        state.camp = "";
+        state.routesRaw = [];
+        state.routeParents = [];
+        state.displayRows = [];
+        state.schedules = [];
+        state.scheduleMap.clear();
+        state.dirty.clear();
+        renderHeader();
+        els.tableHost.innerHTML = `
+          <div class="emptyBoard">
+            캠프를 입력하고 불러오기를 누르면 라우트 스케줄 표가 표시됩니다.
+          </div>
+        `;
+        updatePills();
+        setStatus("초기화 완료");
+      }
+
+      function openWeekPicker(){
+        state.pickerMonth = state.pickerMonth || firstOfMonth(parseIso(state.weekStart) || new Date());
+        renderWeekPicker();
+        els.weekPopup.classList.add("open");
+      }
+
+      function closeWeekPicker(){
+        els.weekPopup.classList.remove("open");
+      }
+
+      function firstOfMonth(d){
+        return new Date(d.getFullYear(), d.getMonth(), 1);
+      }
+
+      function addMonths(d, months){
+        return new Date(d.getFullYear(), d.getMonth() + months, 1);
+      }
+
+      function sameIso(a,b){
+        return clean(a) === clean(b);
+      }
+
+      function renderWeekPicker(){
+        const month = state.pickerMonth || firstOfMonth(new Date());
+        const y = month.getFullYear();
+        const m = month.getMonth();
+
+        els.weekMonthTitle.textContent = `${y}년 ${m + 1}월`;
+
+        const first = new Date(y, m, 1);
+        const gridStart = new Date(first);
+        gridStart.setDate(first.getDate() - first.getDay());
+
+        const selectedStart = state.weekStart;
+        const today = todayIso();
+
+        let html = "";
+
+        DAYS.forEach(d => {
+          html += `<div class="weekDow">${esc(d)}</div>`;
+        });
+
+        for(let r = 0; r < 6; r++){
+          const rowStart = new Date(gridStart);
+          rowStart.setDate(gridStart.getDate() + r * 7);
+          const rowStartIso = toIso(rowStart);
+          const rowEndIso = addDays(rowStartIso, 6);
+          const isSelectedRow = sameIso(rowStartIso, selectedStart);
+
+          for(let c = 0; c < 7; c++){
+            const d = new Date(rowStart);
+            d.setDate(rowStart.getDate() + c);
+            const iso = toIso(d);
+            const other = d.getMonth() !== m;
+            const selected = isSelectedRow;
+            const isToday = iso === today;
+
+            html += `
+              <button
+                type="button"
+                class="weekDay ${other ? "other" : ""} ${isToday ? "today" : ""} ${selected ? "selected weekRowHighlight" : ""}"
+                data-week-start="${esc(rowStartIso)}"
+                data-week-end="${esc(rowEndIso)}"
+                title="${esc(mdLabel(rowStartIso) + " ~ " + mdLabel(rowEndIso))}"
+              >${d.getDate()}</button>
+            `;
+          }
+        }
+
+        els.weekGrid.innerHTML = html;
+
+        els.weekGrid.querySelectorAll(".weekDay").forEach(btn => {
+          btn.addEventListener("mouseenter", () => {
+            const ws = btn.dataset.weekStart;
+            els.weekGrid.querySelectorAll(`[data-week-start="${CSS.escape(ws)}"]`).forEach(x => x.classList.add("weekRowHighlight"));
+          });
+
+          btn.addEventListener("mouseleave", () => {
+            els.weekGrid.querySelectorAll(".weekDay").forEach(x => {
+              if(!x.classList.contains("selected")) x.classList.remove("weekRowHighlight");
+            });
+          });
+
+          btn.addEventListener("click", () => {
+            const ws = btn.dataset.weekStart;
+            state.baseDate = ws;
+            state.weekStart = ws;
+            state.weekDates = weekDatesFromStart(ws);
+            state.weekEnd = state.weekDates[6];
+
+            const w = isoWeekInfoFromMondayRef(ws);
+            state.isoYear = w.isoYear;
+            state.isoWeek = w.isoWeek;
+            state.weekLabel = w.weekLabel;
+
+            state.dirty.clear();
+            closeWeekPicker();
+            hideSuggest();
+
+            els.weekButtonText.textContent = weekRangeLabel();
+            els.weekPill.textContent = `${weekRangeLabel()} / ${state.weekLabel}`;
+            renderHeader();
+            updatePills();
+
+            if(state.camp){
+              loadAll();
+            }
+          });
+        });
+      }
+
+      function bind(){
+        els.waveSelect.value = state.wave;
+
+        els.btnLogout.addEventListener("click", async () => {
+          try{ await supabase.auth.signOut(); } catch {}
+          location.href = LOGIN_PATH;
+        });
+
+        els.btnLoad.addEventListener("click", loadAll);
+        els.btnSave.addEventListener("click", saveAll);
+        els.btnExportMeta.addEventListener("click", exportMetaExcel);
+        els.btnCopyImage.addEventListener("click", copyImage);
+        els.btnReset.addEventListener("click", resetFilters);
+
+        els.btnPrevWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart || state.baseDate, -7);
+          state.dirty.clear();
+          updateWeekState();
+          state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
+          renderHeader();
+          renderWeekPicker();
+          hideSuggest();
+          if(state.camp) loadAll();
+        });
+
+        els.btnNextWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart || state.baseDate, 7);
+          state.dirty.clear();
+          updateWeekState();
+          state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
+          renderHeader();
+          renderWeekPicker();
+          hideSuggest();
+          if(state.camp) loadAll();
+        });
+
+        els.weekButton.addEventListener("click", e => {
+          e.stopPropagation();
+          hideSuggest();
+          if(els.weekPopup.classList.contains("open")) closeWeekPicker();
+          else openWeekPicker();
+        });
+
+        els.btnPickerPrev.addEventListener("click", e => {
+          e.stopPropagation();
+          state.pickerMonth = addMonths(state.pickerMonth || new Date(), -1);
+          renderWeekPicker();
+        });
+
+        els.btnPickerNext.addEventListener("click", e => {
+          e.stopPropagation();
+          state.pickerMonth = addMonths(state.pickerMonth || new Date(), 1);
+          renderWeekPicker();
+        });
+
+        els.btnPickerToday.addEventListener("click", e => {
+          e.stopPropagation();
+          state.baseDate = todayIso();
+          updateWeekState();
+          state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
+          renderWeekPicker();
+          renderHeader();
+          hideSuggest();
+          if(state.camp) loadAll();
+        });
+
+        document.addEventListener("click", e => {
+          if(!e.target.closest(".weekPickerWrap")){
+            closeWeekPicker();
+          }
+
+          if(!e.target.closest(".suggestBox") && !e.target.closest(".cellEdit")){
+            hideSuggest();
+          }
+        });
+
+        document.addEventListener("keydown", e => {
+          if(e.key === "Escape"){
+            closeWeekPicker();
+            hideSuggest();
+          }
+        });
+
+        els.boardWrap.addEventListener("scroll", hideSuggest, { passive:true });
+        window.addEventListener("resize", hideSuggest);
+
+        els.waveSelect.addEventListener("change", () => {
+          state.wave = normalizeWave(els.waveSelect.value);
+          els.waveSelect.value = state.wave;
+          state.dirty.clear();
+          hideSuggest();
+          if(state.camp) loadAll();
+          else renderHeader();
+        });
+
+        els.campInput.addEventListener("keydown", e => {
+          if(e.key === "Enter") loadAll();
+        });
+
+        els.searchInput.addEventListener("input", () => {
+          render();
+        });
+
+        els.btnCollapseAll.addEventListener("click", () => {
+          state.expanded.clear();
+          render();
+        });
+
+        els.btnExpandAll.addEventListener("click", () => {
+          state.routeParents.forEach(p => {
+            if(p.children && p.children.length) state.expanded.add(p.key);
+          });
+          render();
+        });
+
+        window.addEventListener("beforeunload", e => {
+          if(state.dirty.size > 0){
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
+      }
+
+      async function boot(){
+        bind();
+        updateWeekState();
+        state.pickerMonth = firstOfMonth(parseIso(state.weekStart) || new Date());
+        renderWeekPicker();
+        renderHeader();
+        updatePills();
+
+        const authed = await ensureAuth();
+        if(!authed) return;
+
+        const ok = await checkAccess();
+        if(!ok) return;
+
+        document.documentElement.style.visibility = "visible";
+        setState("ok","READY");
+        els.apiPill.textContent = "Worker API";
+        setStatus("캠프와 주/야를 선택하고 불러오기를 누르세요.");
+      }
+
+      boot().catch(e => {
+        console.error(e);
+        document.documentElement.style.visibility = "visible";
+        setState("err","ERROR");
+        setStatus(e?.message || String(e));
+      });
+    })();
+  </script>
+</body>
+</html>

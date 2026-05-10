@@ -110,6 +110,16 @@
     .cellEdit:focus{box-shadow:inset 0 0 0 3px rgba(96,165,250,.65);background:#0b1220!important;color:#fff!important}
     .cellEdit.dirty{box-shadow:inset 0 -3px 0 rgba(245,158,11,.85)}
     .cellEdit.hasValue{color:#0f172a}
+    .cellEdit.offConflict{
+      background:#7f1d1d!important;
+      color:#fff!important;
+      box-shadow:inset 0 0 0 3px rgba(248,113,113,.95), inset 0 -3px 0 rgba(250,204,21,.95)!important;
+    }
+    .cellEdit.offConflict:focus{
+      background:#7f1d1d!important;
+      color:#fff!important;
+      box-shadow:inset 0 0 0 3px rgba(254,202,202,.95), inset 0 -3px 0 rgba(250,204,21,.95)!important;
+    }
     .cellEdit::placeholder{color:rgba(148,163,184,.8);font-weight:800}
 
     .emptyBoard{padding:48px 16px;text-align:center;color:#cbd5e1;font-weight:900;border:1px dashed var(--line2);border-radius:18px;background:rgba(255,255,255,.035)}
@@ -412,6 +422,61 @@
         return assignColorKey(key);
       }
       function textColorForBg(){return "#0f172a"}
+
+      function splitPersonNames(value){
+        return clean(value)
+          .split(/[,\n/、，]+/)
+          .map(v=>clean(v))
+          .filter(Boolean);
+      }
+
+      function personKeyCandidates(value){
+        const raw=clean(value);
+        if(!raw) return [];
+        const acc=resolveAccount(raw);
+        return [
+          raw,
+          acc?.displayName,
+          acc?.ownerName,
+          acc?.exportName,
+          acc?.exportId
+        ].map(keyOf).filter(Boolean);
+      }
+
+      function assignedPersonKeySetForDate(date){
+        const set=new Set();
+        const labels=allRouteLabels({includeOff:false});
+
+        for(const routeLabel of labels){
+          const value=valueForCell(date,routeLabel);
+          if(!value) continue;
+
+          personKeyCandidates(value).forEach(k=>set.add(k));
+        }
+
+        return set;
+      }
+
+      function offConflictNames(date,value){
+        const names=splitPersonNames(value);
+        if(!names.length) return [];
+
+        const assigned=assignedPersonKeySetForDate(date);
+        const conflicts=[];
+
+        for(const name of names){
+          const keys=personKeyCandidates(name);
+          if(keys.some(k=>assigned.has(k))){
+            conflicts.push(name);
+          }
+        }
+
+        return conflicts;
+      }
+
+      function offCellHasConflict(date,value){
+        return offConflictNames(date,value).length > 0;
+      }
 
       async function ensureAuth(){
         if(!supabase){
@@ -833,22 +898,28 @@
           state.weekDates.forEach(date=>{
             const val=valueForCell(date,row.label);
             const has=!!compact(val);
-            const bg=has?colorForValue(val):"";
-            const color=has?textColorForBg(bg):"";
+            const isOff=row.isOff;
+            const conflicts=isOff ? offConflictNames(date,val) : [];
+            const conflict=conflicts.length>0;
+            const bg=has&&!conflict?colorForValue(val):"";
+            const color=has&&!conflict?textColorForBg(bg):"";
             const dirty=state.dirty.has(scheduleKey(date,row.label));
+            const title=conflict
+              ? `확인 필요: 휴무자인 ${conflicts.join(", ")}이(가) 같은 날짜 배정에 남아 있습니다.`
+              : cellTitle(val);
 
             html+=`
               <td>
                 <input
-                  class="cellEdit ${has?"hasValue":""} ${dirty?"dirty":""}"
-                  style="${has?`background:${bg};color:${color};`:""}"
+                  class="cellEdit ${has?"hasValue":""} ${dirty?"dirty":""} ${conflict?"offConflict":""}"
+                  style="${has&&!conflict?`background:${bg};color:${color};`:""}"
                   value="${esc(val)}"
                   placeholder="-"
                   autocomplete="off"
                   data-date="${esc(date)}"
                   data-route="${esc(row.label)}"
                   data-row-order="${rowIndex}"
-                  title="${esc(cellTitle(val))}"
+                  title="${esc(title)}"
                 />
               </td>
             `;
@@ -918,6 +989,45 @@
         };
       }
 
+      function applyInputVisual(input,value){
+        const date=input.dataset.date;
+        const routeLabel=normalizeRouteLabel(input.dataset.route);
+        const has=!!compact(value);
+        const isOff=isOffRoute(routeLabel);
+        const conflicts=isOff ? offConflictNames(date,value) : [];
+        const conflict=conflicts.length>0;
+
+        input.classList.toggle("hasValue",has);
+        input.classList.toggle("offConflict",conflict);
+
+        if(!has){
+          input.style.background="";
+          input.style.color="";
+          input.title="";
+          return;
+        }
+
+        if(conflict){
+          input.style.background="";
+          input.style.color="";
+          input.title=`확인 필요: 휴무자인 ${conflicts.join(", ")}이(가) 같은 날짜 배정에 남아 있습니다.`;
+          return;
+        }
+
+        const bg=colorForValue(value);
+        input.style.background=bg;
+        input.style.color=textColorForBg(bg);
+        input.title=cellTitle(value);
+      }
+
+      function refreshOffConflictForDate(date){
+        const route=normalizeRouteLabel(OFF_ROUTE_LABEL);
+        const input=els.tableHost.querySelector(`.cellEdit[data-date="${CSS.escape(date)}"][data-route="${CSS.escape(route)}"]`);
+        if(input){
+          applyInputVisual(input,clean(input.value));
+        }
+      }
+
       function onCellInput(e){
         const input=e.currentTarget;
         const date=input.dataset.date;
@@ -928,17 +1038,10 @@
 
         state.dirty.set(key,makeDirtyRecord({date,routeLabel,value,rowOrder}));
 
-        if(value){
-          const bg=colorForValue(value);
-          input.classList.add("hasValue");
-          input.style.background=bg;
-          input.style.color=textColorForBg(bg);
-          input.title=cellTitle(value);
-        }else{
-          input.classList.remove("hasValue");
-          input.style.background="";
-          input.style.color="";
-          input.title="";
+        applyInputVisual(input,value);
+
+        if(!isOffRoute(routeLabel)){
+          refreshOffConflictForDate(date);
         }
 
         input.classList.add("dirty");
@@ -1272,8 +1375,9 @@
         clone.classList.add("export");
 
         clone.querySelectorAll("input.cellEdit").forEach(input=>{
+          const conflict=input.classList.contains("offConflict");
           const div=document.createElement("div");
-          div.textContent=input.value||"-";
+          div.textContent=input.value ? (conflict ? `${input.value} ⚠` : input.value) : "-";
           div.style.cssText=input.getAttribute("style")||"";
           div.style.minHeight="42px";
           div.style.display="flex";
@@ -1282,8 +1386,8 @@
           div.style.fontSize="13px";
           div.style.fontWeight="900";
           div.style.padding="5px 7px";
-          div.style.background=input.value?(input.style.background||colorForValue(input.value)):"#111827";
-          div.style.color=input.value?"#0f172a":"#94a3b8";
+          div.style.background=conflict ? "#7f1d1d" : (input.value?(input.style.background||colorForValue(input.value)):"#111827");
+          div.style.color=conflict ? "#fff" : (input.value?"#0f172a":"#94a3b8");
           input.replaceWith(div);
         });
 

@@ -379,6 +379,16 @@
       function mdLabel(iso){const d=parseIso(iso);return d?`${d.getMonth()+1}/${d.getDate()}`:iso}
       function weekRangeLabel(){return state.weekDates.length?`${mdLabel(state.weekDates[0])} ~ ${mdLabel(state.weekDates[6])}`:"-"}
 
+      function pddDateForScheduleDate(date){
+        return normalizeWave(state.wave)==="WAVE1" ? addDays(date,1) : date;
+      }
+
+      function pddTitleDate(iso){
+        const d=parseIso(iso);
+        if(!d)return iso;
+        return `${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+      }
+
       function normalizeDateInput(v){
         const raw=clean(v);
         if(!raw) return "";
@@ -472,10 +482,6 @@
         }
 
         return conflicts;
-      }
-
-      function offCellHasConflict(date,value){
-        return offConflictNames(date,value).length > 0;
       }
 
       async function ensureAuth(){
@@ -654,40 +660,68 @@
         state.routeLookup.clear();
 
         for(const r of rows){
+          const subSub=clean(r.sub_sub);
           const parentLabel=normalizeRouteLabel(clean(r.parent_route_label)||routeBaseLabel(r.route,r.sub)||clean(r.route_label));
-          const childLabel=normalizeRouteLabel(clean(r.route_label)||routeChildLabel(r.route,r.sub,r.sub_sub));
+          const childLabel=subSub
+            ? normalizeRouteLabel(clean(r.route_label)||routeChildLabel(r.route,r.sub,r.sub_sub))
+            : parentLabel;
+
           if(!parentLabel&&!childLabel)continue;
+
           const key=parentLabel||childLabel;
 
           if(!parentMap.has(key)){
             parentMap.set(key,{
-              key,route:String(r.route||""),sub:String(r.sub||""),label:key,
-              description:clean(r.description),memo:clean(r.memo),subPackage:clean(r.sub_package),
-              sortOrder:Number(r.sort_order||0),children:[]
+              key,
+              route:String(r.route||""),
+              sub:String(r.sub||""),
+              label:key,
+              description:clean(r.description),
+              memo:clean(r.memo),
+              subPackage:clean(r.sub_package),
+              sortOrder:Number(r.sort_order||0),
+              children:[]
             });
           }
 
           state.routeLookup.set(key,{label:key,parentKey:key,isChild:false});
 
           const parent=parentMap.get(key);
-          const subSub=clean(r.sub_sub);
-          const isChild=subSub&&childLabel&&childLabel!==key;
 
-          if(isChild){
-            const child={key:childLabel,route:String(r.route||""),sub:String(r.sub||""),subSub,label:childLabel,description:clean(r.description),memo:clean(r.memo),subPackage:clean(r.sub_package),sortOrder:Number(r.sort_order||0)};
+          if(subSub && childLabel && childLabel!==key){
+            const child={
+              key:childLabel,
+              route:String(r.route||""),
+              sub:String(r.sub||""),
+              subSub:normalizeRoutePart(subSub),
+              label:childLabel,
+              description:clean(r.description),
+              memo:clean(r.memo),
+              subPackage:clean(r.sub_package),
+              sortOrder:Number(r.sort_order||0)
+            };
+
             parent.children.push(child);
-            state.routeLookup.set(childLabel,{label:childLabel,parentKey:key,isChild:true,subSub});
+
+            state.routeLookup.set(childLabel,{
+              label:childLabel,
+              parentKey:key,
+              isChild:true,
+              subSub:normalizeRoutePart(subSub)
+            });
           }
         }
 
         state.routeParents=Array.from(parentMap.values()).map(p=>{
           const dedup=new Map();
-          for(const c of p.children){if(!dedup.has(c.key))dedup.set(c.key,c)}
+          for(const c of p.children){
+            if(!dedup.has(c.key))dedup.set(c.key,c);
+          }
           p.children=Array.from(dedup.values()).sort((a,b)=>sortText(a.subSub,b.subSub)||sortText(a.label,b.label));
           return p;
         });
 
-        state.routeParents.push({
+        state.routeParents.unshift({
           key:OFF_ROUTE_LABEL,
           label:OFF_ROUTE_LABEL,
           route:"",
@@ -695,18 +729,45 @@
           description:"휴무자",
           memo:"",
           subPackage:"",
-          sortOrder:999999,
+          sortOrder:-999999,
           children:[],
           isOff:true
         });
-        state.routeLookup.set(normalizeRouteLabel(OFF_ROUTE_LABEL),{label:OFF_ROUTE_LABEL,parentKey:OFF_ROUTE_LABEL,isChild:false,isOff:true});
+
+        state.routeLookup.set(normalizeRouteLabel(OFF_ROUTE_LABEL),{
+          label:OFF_ROUTE_LABEL,
+          parentKey:OFF_ROUTE_LABEL,
+          isChild:false,
+          isOff:true
+        });
 
         state.expanded.clear();
+
         for(const p of state.routeParents){
-          if(p.children && p.children.length) state.expanded.add(p.key);
+          if(!p.children || !p.children.length) continue;
+          if(childScheduleExistsInCurrentWeek(p)){
+            state.expanded.add(p.key);
+          }
         }
 
         buildDisplayRows();
+      }
+
+      function childScheduleExistsInCurrentWeek(parent){
+        if(!parent || !Array.isArray(parent.children) || !parent.children.length) return false;
+
+        for(const child of parent.children){
+          const childLabel=normalizeRouteLabel(child.label);
+
+          for(const date of state.weekDates){
+            const value=valueForCell(date,childLabel);
+            if(compact(value)){
+              return true;
+            }
+          }
+        }
+
+        return false;
       }
 
       function buildDisplayRows(){
@@ -790,7 +851,7 @@
           render();
 
           setState("ok","READY");
-          setStatus(`조회 완료: 라우트 ${state.routeParents.length-1}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.driverAccounts.length}개 계정`);
+          setStatus(`조회 완료: 라우트 ${state.routeParents.filter(r=>!r.isOff).length}개 / 스케줄 ${state.schedules.length}개 / 기사 ${state.driverAccounts.length}개 계정`);
         }catch(e){
           console.error(e);
           setState("err","ERROR");
@@ -1103,7 +1164,8 @@
       }
 
       function updatePills(){
-        els.rowPill.textContent=`라우트 ${Math.max(0,state.displayRows.length-1)}`;
+        const routeCount=state.displayRows.filter(r=>!r.isOff).length;
+        els.rowPill.textContent=`라우트 ${routeCount}`;
         els.dirtyPill.textContent=`미저장 ${state.dirty.size}`;
       }
 
@@ -1264,12 +1326,16 @@
           lines.push(`${id} ${route}`);
         }
 
-        const text=lines.join("\n");
-
-        if(!text){
+        if(!lines.length){
           alert(`${dateLabel(date)}에 공유할 PDD 데이터가 없습니다.`);
           return;
         }
+
+        const pddDate=pddDateForScheduleDate(date);
+        const text=[
+          `마루웰 / PDD ${pddTitleDate(pddDate)}`,
+          ...lines
+        ].join("\n");
 
         try{
           await navigator.clipboard.writeText(text);

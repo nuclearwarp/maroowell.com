@@ -379,7 +379,7 @@
         baseDate:todayIso(),weekStart:"",weekEnd:"",weekDates:[],isoYear:0,isoWeek:0,weekLabel:"",
         routesRaw:[],routeParents:[],displayRows:[],routeLookup:new Map(),
         schedules:[],scheduleMap:new Map(),
-        driversRaw:[],driverAccounts:[],accountByDisplay:new Map(),accountByExportName:new Map(),accountById:new Map(),personColorMap:new Map(),
+        driversRaw:[],driverAccounts:[],accountByDisplay:new Map(),accountByExportName:new Map(),accountById:new Map(),metaInfoAccountsByName:new Map(),personColorMap:new Map(),
         expanded:new Set(),dirty:new Map(),loading:false,suggestInput:null,dayClipboard:null,
         updateStatus:null
       };
@@ -1042,6 +1042,146 @@
         return !!clean(account?.exportId);
       }
 
+      function splitMetaNameNumber(value){
+        const raw=clean(value);
+        if(!raw)return {raw:"",base:"",number:0};
+        const m=raw.match(/^(.+?)(\d+)$/);
+        if(m && clean(m[1])){
+          return {raw,base:clean(m[1]),number:Number(m[2]||0)};
+        }
+        return {raw,base:raw,number:0};
+      }
+
+      function makeMetaInfoAccount({displayName,ownerName,exportName,exportId,accountType,camp,wave,position,aliases}){
+        const dn=clean(displayName);
+        const on=clean(ownerName)||dn;
+        const en=clean(exportName)||dn;
+        const id=clean(exportId);
+        return {
+          displayName:dn,
+          ownerName:on,
+          exportName:en,
+          exportId:id,
+          accountType:clean(accountType)||"본계정",
+          colorKey:on||dn||en||id,
+          camp:clean(camp),
+          wave:clean(wave),
+          position:clean(position),
+          globalSub:true,
+          aliases:Array.from(new Set((aliases||[]).map(clean).filter(Boolean))),
+          search:[dn,on,en,id,camp,wave,position,accountType,...(aliases||[])].join(" ")
+        };
+      }
+
+      function putMetaInfoAccount(account){
+        if(!account) return;
+        const keys=[
+          account.displayName,
+          account.ownerName,
+          account.exportName,
+          account.exportId,
+          ...(account.aliases||[])
+        ].map(keyOf).filter(Boolean);
+
+        for(const key of keys){
+          if(!state.metaInfoAccountsByName.has(key)){
+            state.metaInfoAccountsByName.set(key,account);
+          }
+        }
+      }
+
+      function indexMaroowellInfoRows(rows){
+        state.metaInfoAccountsByName.clear();
+
+        for(const original of rows || []){
+          const row=normalizeDriverRow(original || {});
+          const person=clean(row.person_name || row.name);
+          const mainId=clean(row.coupang_id);
+          const mainExportName=clean(row.coupang_admin_name) || person;
+          const camp=clean(row.camp_code || row.camp);
+          const wave=clean(row.wave_raw || row.wave);
+          const position=clean(row.position_title);
+          const subs=Array.isArray(original?.sub_accounts)
+            ? original.sub_accounts.map(x=>typeof x==="object"?x:(parseSubAccounts(x)[0]||{id:clean(x),adminName:""}))
+            : parseSubAccounts(row.sub_account_info);
+
+          if(person || mainId){
+            putMetaInfoAccount(makeMetaInfoAccount({
+              displayName:person || mainExportName || mainId,
+              ownerName:person || mainExportName || mainId,
+              exportName:mainExportName || person || mainId,
+              exportId:mainId,
+              accountType:isSubAccountRole(position) ? "서브계정" : "본계정",
+              camp,
+              wave,
+              position,
+              aliases:[person,mainExportName,mainId].filter(Boolean)
+            }));
+          }
+
+          subs.forEach((sub,idx)=>{
+            const rawSub=typeof sub==="object" ? sub : (parseSubAccounts(sub)[0] || {id:clean(sub),adminName:""});
+            const parsed=parseAccountToken(
+              clean(rawSub.id || rawSub.account_id || rawSub.coupang_id || rawSub.login_id || rawSub.text || rawSub.value),
+              clean(rawSub.adminName || rawSub.name || rawSub.person_name || rawSub.display_name)
+            );
+
+            const subId=clean(rawSub.id || rawSub.account_id || rawSub.coupang_id || rawSub.login_id || parsed.id);
+            const subName=clean(rawSub.adminName || rawSub.name || rawSub.person_name || rawSub.display_name || parsed.adminName);
+            const aliasNumber=idx+2;
+            const numberedAlias=person ? `${person}${aliasNumber}` : "";
+            const displayName=numberedAlias || subName || subId;
+
+            if(!displayName && !subId) return;
+
+            putMetaInfoAccount(makeMetaInfoAccount({
+              displayName:displayName || subId,
+              ownerName:person || subName || subId,
+              exportName:subName || displayName || subId,
+              exportId:subId,
+              accountType:"서브계정",
+              camp:clean(rawSub.camp || rawSub.camp_code || camp),
+              wave:clean(rawSub.wave || rawSub.wave_raw || wave),
+              position,
+              aliases:[numberedAlias,subName,subId,person].filter(Boolean)
+            }));
+          });
+        }
+      }
+
+      function resolveMetaInfoAccount(value){
+        const raw=clean(value);
+        if(!raw)return null;
+
+        const direct=state.metaInfoAccountsByName.get(keyOf(raw));
+        if(direct) return direct;
+
+        const parsed=splitMetaNameNumber(raw);
+        if(parsed.number){
+          const alias=parsed.base ? `${parsed.base}${parsed.number}` : raw;
+          const byAlias=state.metaInfoAccountsByName.get(keyOf(alias));
+          if(byAlias) return byAlias;
+
+          const byBase=state.metaInfoAccountsByName.get(keyOf(parsed.base));
+          if(byBase && parsed.number===1) return byBase;
+        }
+
+        const key=keyOf(raw);
+        for(const account of state.metaInfoAccountsByName.values()){
+          const keys=[
+            account.displayName,
+            account.ownerName,
+            account.exportName,
+            account.exportId,
+            ...(account.aliases||[])
+          ].map(keyOf).filter(Boolean);
+
+          if(keys.includes(key)) return account;
+        }
+
+        return null;
+      }
+
       function infoRowKey(row){
         const r=normalizeDriverRow(row || {});
         return keyOf([
@@ -1076,22 +1216,24 @@
 
       async function loadAllMaroowellInfoRowsForAccountLookup(){
         if(state._mwInfoAccountLookupLoaded) return 0;
-        state._mwInfoAccountLookupLoaded=true;
-
         if(!supabase) return 0;
 
         try{
           const { data, error } = await supabase
             .from("maroowell_info")
             .select("*")
-            .limit(10000);
+            .range(0,9999);
 
           if(error){
             console.warn("[MetaAdmin Excel] maroowell_info lookup failed", error);
             return 0;
           }
 
-          return appendInfoRowsToDrivers(data || []);
+          state._mwInfoAccountLookupLoaded=true;
+          state._mwInfoRowsForLookup=Array.isArray(data) ? data : [];
+          indexMaroowellInfoRows(state._mwInfoRowsForLookup);
+
+          return appendInfoRowsToDrivers(state._mwInfoRowsForLookup);
         }catch(e){
           console.warn("[MetaAdmin Excel] maroowell_info lookup failed", e);
           return 0;
@@ -1102,18 +1244,75 @@
         const targetNames=Array.from(new Set((names || []).flatMap(metaNameCandidates).map(clean).filter(Boolean)));
         if(!targetNames.length) return false;
 
-        const missingBefore=targetNames.filter(name=>!accountHasExportId(name));
-        if(!missingBefore.length) return false;
-
         const added=await loadAllMaroowellInfoRowsForAccountLookup();
         if(added>0) buildDriverAccounts();
 
-        const missingAfter=targetNames.filter(name=>!accountHasExportId(name));
-        if(missingAfter.length){
-          console.warn("[MetaAdmin Excel] ID not found after global lookup", missingAfter);
+        const missing=targetNames.filter(name=>{
+          const meta=resolveMetaInfoAccount(name);
+          if(meta && clean(meta.exportId)) return false;
+          return !accountHasExportId(name);
+        });
+
+        if(missing.length){
+          console.warn("[MetaAdmin Excel] ID not found after name lookup", missing);
         }
 
-        return added>0;
+        return true;
+      }
+
+      function resolveMetaAdminExportIdentity(displayName,source){
+        const raw=clean(displayName);
+        const directSourceId=clean(
+          source?.driver_coupang_id ||
+          source?.driver_export_id ||
+          source?.coupang_id ||
+          source?.export_id ||
+          ""
+        );
+
+        const candidates=[
+          raw,
+          source?.driver_display_name,
+          source?.driver_name,
+          source?.driver_owner_name,
+          source?.driver_export_name,
+          source?.driver_coupang_id
+        ].map(clean).filter(Boolean);
+
+        for(const candidate of candidates){
+          const meta=resolveMetaInfoAccount(candidate);
+          if(meta && clean(meta.exportId)){
+            return {
+              name:clean(meta.exportName || meta.displayName || raw),
+              id:clean(meta.exportId),
+              account:meta
+            };
+          }
+        }
+
+        const account=resolvePddAccount(raw,source);
+        const accountId=clean(account?.exportId);
+        if(accountId){
+          return {
+            name:clean(source?.driver_export_name || account?.exportName || raw),
+            id:accountId,
+            account
+          };
+        }
+
+        if(directSourceId){
+          return {
+            name:clean(source?.driver_export_name || raw),
+            id:directSourceId,
+            account:null
+          };
+        }
+
+        return {
+          name:clean(source?.driver_export_name || account?.exportName || raw),
+          id:"",
+          account:account || null
+        };
       }
 
       function buildRoutes(){
@@ -2186,16 +2385,9 @@
             if(!displayName)continue;
 
             const source=rowForCell(date,normalizedRoute)||{};
-            const account=resolvePddAccount(displayName,source);
-            const exportName=clean(source.driver_export_name||account?.exportName||displayName);
-            const exportId=clean(
-              source.driver_coupang_id ||
-              source.driver_export_id ||
-              source.coupang_id ||
-              source.export_id ||
-              account?.exportId ||
-              ""
-            );
+            const identity=resolveMetaAdminExportIdentity(displayName,source);
+            const exportName=identity.name;
+            const exportId=identity.id;
             const adminRoute=adminRouteLabel(normalizedRoute);
             if(!adminRoute)continue;
 

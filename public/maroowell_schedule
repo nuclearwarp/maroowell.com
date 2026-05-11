@@ -714,6 +714,20 @@
         return aliases.some(x=>raw===compact(x).toUpperCase()||raw.includes(compact(x).toUpperCase()));
       }
 
+      function isRetiredPosition(position){
+        const p=compact(position).toUpperCase();
+        return p.includes("퇴사") || p.includes("퇴직") || p.includes("퇴사자") || p.includes("RETIRED") || p.includes("RESIGNED") || p.includes("INACTIVE");
+      }
+
+      function isSubAccountRole(position){
+        const p=compact(position).toUpperCase();
+        return p.includes("서브") || p.includes("SUB");
+      }
+
+      function isExcludedDriverPosition(position){
+        return isRetiredPosition(position) || isSubAccountRole(position);
+      }
+
       function hasSelectedWaveContract(){
         if(!state.camp)return false;
 
@@ -722,9 +736,8 @@
           const camp=clean(r.camp_code || r.camp);
           const wave=clean(r.wave_raw || r.wave);
           const position=clean(r.position_title);
-          const isSubOnly=r.is_sub_account_row===true || isSubAccountRole(position);
 
-          if(isSubOnly)return false;
+          if(isExcludedDriverPosition(position))return false;
           if(!campMatches(camp,state.camp))return false;
 
           return explicitWaveMatches(wave,state.wave);
@@ -772,11 +785,6 @@
         }).filter(x=>x.id||x.adminName);
       }
 
-      function isSubAccountRole(position){
-        const p=compact(position).toUpperCase();
-        return p.includes("서브") || p.includes("SUB");
-      }
-
       function normalizeDriverRow(row){
         return {
           ...row,
@@ -818,7 +826,10 @@
             explicitSub:row.is_sub_account_row===true || isSubAccountRole(row.position_title),
             globalSub:row.is_global_sub_account===true
           };
-        }).filter(d=>d.name||d.coupangId).sort((a,b)=>{
+        })
+        .filter(d=>d.name||d.coupangId)
+        .filter(d=>!isExcludedDriverPosition(d.position))
+        .sort((a,b)=>{
           const aw=waveMatches(a.wave,state.wave)?0:1,bw=waveMatches(b.wave,state.wave)?0:1;
           if(aw!==bw)return aw-bw;
           return sortText(a.name,b.name);
@@ -839,37 +850,14 @@
             ownerName:baseName,
             exportName:mainExportName,
             exportId:mainId,
-            accountType:d.explicitSub ? "서브계정" : "본계정",
+            accountType:"본계정",
             colorKey:baseName,
             camp:d.camp || state.camp,
             wave:d.wave,
             position:d.position,
             globalSub:d.globalSub,
-            search:[baseName,mainExportName,mainId,d.camp,d.wave,d.position,d.explicitSub?"서브계정":"본계정"].join(" ")
+            search:[baseName,mainExportName,mainId,d.camp,d.wave,d.position,"본계정"].join(" ")
           },seen);
-
-          if(!d.explicitSub){
-            d.subAccounts.forEach((sub,idx)=>{
-              const parsed=parseAccountToken(sub.id,clean(sub.adminName)||baseName);
-              const subId=clean(parsed.id);
-              const subAdmin=clean(sub.adminName||parsed.adminName)||baseName;
-              const displayName=`${baseName}${idx+2}`;
-
-              addAccount({
-                displayName,
-                ownerName:baseName,
-                exportName:subAdmin,
-                exportId:subId,
-                accountType:"서브계정",
-                colorKey:baseName,
-                camp:d.camp || state.camp,
-                wave:d.wave,
-                position:"서브계정",
-                globalSub:false,
-                search:[displayName,baseName,subAdmin,subId,d.camp,d.wave,"서브계정"].join(" ")
-              },seen);
-            });
-          }
         }
 
         state.driverAccounts.sort((a,b)=>{
@@ -1659,11 +1647,15 @@
 
         let list=state.driverAccounts
           .filter(accountCampAllowed)
+          .filter(acc=>!isExcludedDriverPosition(acc.position))
+          .filter(acc=>acc.accountType !== "서브계정")
           .filter(acc=>!q||keyOf(acc.search).includes(q));
 
         if(!list.length&&q){
           list=state.driverAccounts
             .filter(accountCampAllowed)
+            .filter(acc=>!isExcludedDriverPosition(acc.position))
+            .filter(acc=>acc.accountType !== "서브계정")
             .filter(acc=>keyOf(acc.ownerName).includes(q)||keyOf(acc.displayName).includes(q)||keyOf(acc.exportName).includes(q)||keyOf(acc.exportId).includes(q));
         }
 

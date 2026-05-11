@@ -2015,15 +2015,31 @@
         updatePills();
       }
 
+      function isOffSuggestCandidate(acc){
+        if(!acc || !state.camp) return false;
+
+        const camp=clean(acc.camp);
+        const wave=clean(acc.wave);
+        const position=clean(acc.position);
+
+        // 휴무 추천은 "현재 캠프 / 현재 주야"에 실제 소속된 본계정만 대상으로 한다.
+        // 엑셀 ID 보정용 전역 계정, 서브계정, 퇴사자, 타 캠프 인원은 여기서 제외한다.
+        if(!camp || !campMatches(camp,state.camp)) return false;
+        if(!wave || !explicitWaveMatches(wave,state.wave)) return false;
+        if(isRetiredPosition(position)) return false;
+        if(isSubAccountRole(position)) return false;
+        if(acc.accountType === "서브계정") return false;
+
+        return true;
+      }
+
       function offSuggestAccountsForDate(date,q){
         const assigned=assignedPersonKeySetForDate(date);
         const out=[];
         const seen=new Set();
 
         for(const acc of state.driverAccounts){
-          if(!accountCampAllowed(acc)) continue;
-          if(isRetiredPosition(acc.position)) continue;
-          if(acc.accountType === "서브계정") continue;
+          if(!isOffSuggestCandidate(acc)) continue;
 
           const displayName=clean(acc.displayName || acc.ownerName || acc.exportName);
           if(!displayName) continue;

@@ -8,8 +8,12 @@ window.MARUWELL_CONFIG = {
   ADMIN_API_BASE: "https://admin-access.maroowell.com",
 
   PATHS: {
-    login: "/login.html",
-    index: "/index.html",
+    // login.html을 index.html로 바꿨으므로 기본 로그인 진입점은 루트
+    login: "/",
+
+    // 기존 index.html 우편번호 검색기를 public/zipcode_search로 옮겼으므로
+    index: "/zipcode_search",
+
     route: "/coupangRouteMap.html",
     dragon_car_index: "/dragon_car_index.html",
     maroowell_info: "/maroowell_info.html",

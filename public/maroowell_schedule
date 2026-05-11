@@ -1096,8 +1096,9 @@
         for(const original of rows || []){
           const row=normalizeDriverRow(original || {});
           const person=clean(row.person_name || row.name);
-          const mainId=clean(row.coupang_id);
-          const mainExportName=clean(row.coupang_admin_name) || person;
+          const mainParsed=parseAccountToken(row.coupang_id, person);
+          const mainId=clean(mainParsed.id);
+          const mainExportName=clean(row.coupang_admin_name || mainParsed.adminName) || person;
           const camp=clean(row.camp_code || row.camp);
           const wave=clean(row.wave_raw || row.wave);
           const position=clean(row.position_title);
@@ -1262,13 +1263,16 @@
 
       function resolveMetaAdminExportIdentity(displayName,source){
         const raw=clean(displayName);
-        const directSourceId=clean(
+        const directSourceRaw=clean(
           source?.driver_coupang_id ||
           source?.driver_export_id ||
           source?.coupang_id ||
           source?.export_id ||
           ""
         );
+        const directParsed=parseAccountToken(directSourceRaw, clean(source?.driver_export_name || raw));
+        const directSourceId=clean(directParsed.id);
+        const directSourceName=clean(source?.driver_export_name || directParsed.adminName || raw);
 
         const candidates=[
           raw,
@@ -1276,25 +1280,29 @@
           source?.driver_name,
           source?.driver_owner_name,
           source?.driver_export_name,
-          source?.driver_coupang_id
+          directSourceRaw,
+          directParsed.adminName,
+          directParsed.id
         ].map(clean).filter(Boolean);
 
         for(const candidate of candidates){
           const meta=resolveMetaInfoAccount(candidate);
           if(meta && clean(meta.exportId)){
+            const parsedMetaId=parseAccountToken(meta.exportId, clean(meta.exportName || meta.displayName || raw));
             return {
-              name:clean(meta.exportName || meta.displayName || raw),
-              id:clean(meta.exportId),
+              name:clean(meta.exportName || parsedMetaId.adminName || meta.displayName || raw),
+              id:clean(parsedMetaId.id),
               account:meta
             };
           }
         }
 
         const account=resolvePddAccount(raw,source);
-        const accountId=clean(account?.exportId);
+        const parsedAccountId=parseAccountToken(account?.exportId, clean(account?.exportName || raw));
+        const accountId=clean(parsedAccountId.id);
         if(accountId){
           return {
-            name:clean(source?.driver_export_name || account?.exportName || raw),
+            name:clean(source?.driver_export_name || account?.exportName || parsedAccountId.adminName || raw),
             id:accountId,
             account
           };
@@ -1302,7 +1310,7 @@
 
         if(directSourceId){
           return {
-            name:clean(source?.driver_export_name || raw),
+            name:directSourceName,
             id:directSourceId,
             account:null
           };
@@ -1314,6 +1322,7 @@
           account:account || null
         };
       }
+
 
       function buildRoutes(){
         const contracted=hasSelectedWaveContract();

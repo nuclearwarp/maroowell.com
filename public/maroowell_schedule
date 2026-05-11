@@ -2015,9 +2015,119 @@
         updatePills();
       }
 
-      function showSuggest(input){
-        if(input.disabled || isOffRoute(input.dataset.route)){
+      function offSuggestAccountsForDate(date,q){
+        const assigned=assignedPersonKeySetForDate(date);
+        const out=[];
+        const seen=new Set();
+
+        for(const acc of state.driverAccounts){
+          if(!accountCampAllowed(acc)) continue;
+          if(isRetiredPosition(acc.position)) continue;
+          if(acc.accountType === "서브계정") continue;
+
+          const displayName=clean(acc.displayName || acc.ownerName || acc.exportName);
+          if(!displayName) continue;
+
+          const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId,...(acc.aliases||[])].map(keyOf).filter(Boolean);
+          if(keys.some(k=>assigned.has(k))) continue;
+
+          const searchKey=keyOf([acc.displayName,acc.ownerName,acc.exportName,acc.exportId,...(acc.aliases||[]),acc.camp,acc.wave].join(" "));
+          if(q && !searchKey.includes(q)) continue;
+
+          const unique=keyOf(displayName);
+          if(!unique || seen.has(unique)) continue;
+          seen.add(unique);
+
+          out.push({
+            displayName,
+            exportId:clean(acc.exportId),
+            exportName:clean(acc.exportName),
+            camp:clean(acc.camp),
+            accountType:"휴무 후보"
+          });
+        }
+
+        return out.sort((a,b)=>sortText(a.displayName,b.displayName));
+      }
+
+      function showOffSuggest(input){
+        state.suggestInput=input;
+
+        const q=keyOf(input.value);
+        const date=input.dataset.date;
+        const list=offSuggestAccountsForDate(date,q).slice(0,40);
+
+        if(!list.length){
           hideSuggest();
+          return;
+        }
+
+        const items=list.map(acc=>({
+          display:acc.displayName,
+          title:acc.displayName,
+          type:"휴무 후보",
+          meta:`ID: ${acc.exportId||"-"} · 엑셀 이름: ${acc.exportName||"-"} · 캠프: ${acc.camp||"-"}`
+        }));
+
+        if(list.length>=2){
+          const combined=list.map(acc=>acc.displayName).join(",");
+          items.push({
+            display:combined,
+            title:combined,
+            type:"전체 추천",
+            meta:`${dateLabel(date)} 미배정자 ${list.length}명`
+          });
+        }
+
+        els.suggestBox.innerHTML=items.map((item,idx)=>`
+          <button class="suggestItem" type="button" data-idx="${idx}" data-display="${esc(item.display)}">
+            <div class="suggestTop">
+              <span>${esc(item.title)}</span>
+              <span class="suggestType">${esc(item.type)}</span>
+            </div>
+            <div class="suggestMeta">${esc(item.meta)}</div>
+          </button>
+        `).join("");
+
+        els.suggestBox.querySelectorAll(".suggestItem").forEach(btn=>{
+          btn.addEventListener("mousedown",e=>{
+            e.preventDefault();
+            const display=btn.getAttribute("data-display")||"";
+            const target=state.suggestInput;
+            if(target){
+              target.value=display;
+              onCellInput({currentTarget:target});
+              hideSuggest();
+              requestAnimationFrame(()=>{
+                target.focus();
+                const len=target.value.length;
+                try{target.setSelectionRange(len,len)}catch{}
+              });
+            }else{
+              hideSuggest();
+            }
+          });
+        });
+
+        const rect=input.getBoundingClientRect();
+        const width=Math.max(320,Math.min(460,rect.width+190));
+        let left=rect.left,top=rect.bottom+6;
+        if(left+width>window.innerWidth-8)left=window.innerWidth-width-8;
+        if(top+290>window.innerHeight-8)top=Math.max(8,rect.top-296);
+        els.suggestBox.style.left=`${Math.max(8,left)}px`;
+        els.suggestBox.style.top=`${top}px`;
+        els.suggestBox.style.width=`${width}px`;
+        els.suggestBox.classList.add("open");
+      }
+
+      function showSuggest(input){
+        if(input.disabled){
+          hideSuggest();
+          return;
+        }
+
+        if(isOffRoute(input.dataset.route)){
+          showOffSuggest(input);
           return;
         }
 
@@ -2485,7 +2595,7 @@
         ws["!autofilter"]={ref:`A1:J${aoa.length}`};
         XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
 
-        const fileName=`MetaAdmin_${metaCampName(state.camp)}_${state.wave}_${state.weekLabel}_${weekRangeLabel()}_from_${exportStartDate}`
+        const fileName=`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${weekRangeLabel()}`
           .replace(/[\\/:*?"<>|]/g,"_")
           .replace(/\s+/g," ");
 

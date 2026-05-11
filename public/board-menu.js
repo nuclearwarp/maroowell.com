@@ -8,10 +8,10 @@
 
   const PAGES = [
     {
-      key: "index",
+      key: "zipcode_search",
       label: "우편번호 검색기",
-      path: "/index.html",
-      aliases: ["/", "/index", "/index.html"],
+      path: "/zipcode_search",
+      aliases: ["/zipcode_search", "/zipcode_search.html"],
       public: true
     },
     {
@@ -278,8 +278,8 @@
 
   function pageSubtext(path) {
     switch (normalizePath(path)) {
-      case "/index.html":
-      case "/":
+      case "/zipcode_search":
+      case "/zipcode_search.html":
         return "우편번호 / 지도 조회";
 
       case "/coupangRouteMap":
@@ -662,8 +662,8 @@
     const old = document.getElementById("mwDeniedScreen");
     if (old) old.remove();
 
-    const homePath = window.MARUWELL_CONFIG?.PATHS?.index || "/index.html";
-    const loginPath = window.MARUWELL_CONFIG?.PATHS?.login || "/login.html";
+    const homePath = window.MARUWELL_CONFIG?.PATHS?.index || "/zipcode_search";
+    const loginPath = window.MARUWELL_CONFIG?.PATHS?.login || "/";
 
     const email = access?.email || "-";
     const roleLevel = Number(access?.max_role_level || 0);

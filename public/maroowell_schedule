@@ -1956,11 +1956,12 @@
         return s;
       }
 
-      function metaAdminDateObject(iso){
+      function excelDateSerial(iso){
         const normalized=normalizeDateInput(iso);
         const m=normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if(!m)return null;
-        return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]));
+        if(!m)return "";
+        const utc=Date.UTC(Number(m[1]),Number(m[2])-1,Number(m[3]));
+        return Math.floor((utc - Date.UTC(1899,11,30)) / 86400000);
       }
 
       function forceMetaAdminCellTypes(ws,rowCount){
@@ -1971,10 +1972,10 @@
           const c=`C${r}`;
           const aValue=clean(ws[a]?.v);
           const cValue=clean(ws[c]?.v);
-          const dateValue=metaAdminDateObject(aValue);
 
-          if(dateValue){
-            ws[a]={t:"d",v:dateValue,z:"mm-dd-yy"};
+          const serial=excelDateSerial(aValue);
+          if(serial){
+            ws[a]={t:"n",v:serial,z:"mm-dd-yy"};
           }
 
           const businessNo=Number(cValue);
@@ -2092,7 +2093,7 @@
         ];
 
         const wb=XLSX.utils.book_new();
-        const ws=XLSX.utils.aoa_to_sheet(aoa,{cellDates:true});
+        const ws=XLSX.utils.aoa_to_sheet(aoa);
 
         // CLS Quickflex Admin 업로드 양식과 동일하게 주요 컬럼 타입을 강제한다.
         // A열 업무일: 날짜 타입 / C열 사업자등록번호: 숫자 타입 / 나머지: 문자열 타입
@@ -2109,7 +2110,7 @@
         XLSX.writeFile(wb,`${fileName}.xlsx`,{
           bookType:"xlsx",
           bookSST:true,
-          cellDates:true
+          cellDates:false
         });
 
         setStatus(`엑셀 생성 완료: ${rows.length}행 / ${excelExportRuleText()}`);

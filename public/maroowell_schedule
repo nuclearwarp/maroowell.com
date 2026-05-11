@@ -1099,7 +1099,11 @@
 
       function isParentCellLocked(parent,date){
         if(!parent || parent.isOff || !Array.isArray(parent.children) || !parent.children.length)return false;
-        return state.expanded.has(parent.key) || parentHasAnyChildValueForDate(parent,date);
+
+        // 날짜별 잠금:
+        // 펼쳐져 있다는 이유로 월~토 전체 parent를 잠그지 않는다.
+        // 해당 날짜에 서서브 값이 하나라도 실제로 있을 때만 그 날짜 parent만 X 처리.
+        return parentHasAnyChildValueForDate(parent,date);
       }
 
       function isRouteParentLockedForDate(date,routeLabel){
@@ -1107,6 +1111,38 @@
         const p=state.routeParents.find(parent=>normalizeRouteLabel(parent.label)===n);
         if(!p)return false;
         return isParentCellLocked(p,date);
+      }
+
+      function syncParentClearForDate(date,parentKey){
+        const parent=state.routeParents.find(p=>p.key===parentKey);
+        if(!parent || !Array.isArray(parent.children) || !parent.children.length)return;
+
+        const parentLabel=normalizeRouteLabel(parent.label);
+        const dirtyKey=scheduleKey(date,parentLabel);
+        const hasChildValue=parentHasAnyChildValueForDate(parent,date);
+        const currentDirty=state.dirty.get(dirtyKey);
+
+        if(hasChildValue){
+          const source=state.scheduleMap.get(scheduleLookupKey(date,parentLabel)) || currentDirty || {};
+          const clearRecord=makeDirtyRecord({
+            date,
+            routeLabel:parentLabel,
+            value:"",
+            rowOrder:source.row_order || 0,
+            source
+          });
+
+          clearRecord._autoParentClear=true;
+          state.dirty.set(dirtyKey,clearRecord);
+          return;
+        }
+
+        // 해당 날짜의 서서브 값이 전부 지워지면,
+        // 자동으로 넣었던 parent 삭제 예약만 풀어준다.
+        // 사용자가 직접 parent를 수정한 dirty는 건드리지 않는다.
+        if(currentDirty && currentDirty._autoParentClear){
+          state.dirty.delete(dirtyKey);
+        }
       }
 
       function buildDisplayRows(){
@@ -1353,7 +1389,7 @@
           const isExpanded=state.expanded.has(row.key);
           const routeClass=row.type==="child"?"childRoute":"";
           const offClass=row.isOff?"off":"";
-          const lockedParentClass=(row.type==="parent" && hasChildren && state.expanded.has(row.key)) ? "lockedParent" : "";
+          const lockedParentClass=(row.type==="parent" && hasChildren && state.weekDates.some(date=>isParentCellLocked(row,date))) ? "lockedParent" : "";
 
           html+=`<tr class="${routeClass}">`;
 
@@ -1386,7 +1422,7 @@
             const color=!parentLocked&&has&&!conflict?textColorForBg(bg):"";
             const dirty=state.dirty.has(scheduleKey(date,row.label));
             const title=parentLocked
-              ? "서서브 입력 모드입니다. 서서브 값이 모두 삭제되고 접히면 서브 입력이 다시 가능합니다."
+              ? "해당 날짜에 서서브 배정이 있어 서브 입력이 잠겼습니다. 해당 날짜의 서서브 값을 모두 지우면 다시 입력 가능합니다."
               : conflict
                 ? `확인 필요: 휴무자인 ${conflicts.join(", ")}이(가) 같은 날짜 배정에 남아 있습니다.`
                 : cellTitle(rawVal);
@@ -1520,16 +1556,13 @@
         const parent=state.routeParents.find(p=>p.key===parentKey);
         if(!parent)return;
 
-        if(!parentHasAnyChildValueAcrossWeek(parent) && state.expanded.has(parent.key)){
-          state.expanded.delete(parent.key);
-          render();
-          return;
-        }
+        syncParentClearForDate(date,parentKey);
 
         const parentInput=els.tableHost.querySelector(`.cellEdit[data-date="${CSS.escape(date)}"][data-route="${CSS.escape(parent.label)}"]`);
         if(!parentInput)return;
 
         const locked=isParentCellLocked(parent,date);
+
         if(locked){
           parentInput.value="×";
           parentInput.disabled=true;
@@ -1537,14 +1570,20 @@
           parentInput.classList.remove("dirty","hasValue","offConflict");
           parentInput.style.background="";
           parentInput.style.color="";
-          parentInput.title="서서브 입력 모드입니다. 서서브 값이 모두 삭제되고 접히면 서브 입력이 다시 가능합니다.";
+          parentInput.title="해당 날짜에 서서브 배정이 있어 서브 입력이 잠겼습니다. 해당 날짜의 서서브 값을 모두 지우면 다시 입력 가능합니다.";
         }else{
           const val=valueForCell(date,parent.label);
+          const dirty=state.dirty.has(scheduleKey(date,parent.label));
+
           parentInput.disabled=false;
           parentInput.classList.remove("parentLocked");
+          parentInput.classList.toggle("dirty",dirty);
           parentInput.value=val;
+
           applyInputVisual(parentInput,val);
         }
+
+        updatePills();
       }
 
       function onCellInput(e){
@@ -1562,7 +1601,10 @@
         applyInputVisual(input,value);
 
         const info=state.routeLookup.get(routeLabel);
+
         if(info?.isChild && info.parentKey){
+          // 같은 요일에 서서브 값이 생기면 그 요일 parent만 X.
+          // 다른 요일은 child 값이 없으면 parent 입력 가능.
           refreshParentLockForChildInput(date,info.parentKey);
         }
 
@@ -1799,21 +1841,24 @@
           if(!parent || parent.isOff) continue;
 
           const parentLabel=normalizeRouteLabel(parent.label);
-          const parentLocked=isParentCellLocked(parent,date);
-          const parentValue=parentLocked ? "" : valueForCell(date,parentLabel);
+          const parentValue=valueForCell(date,parentLabel);
           const parentSource=rowForCell(date,parentLabel) || {};
           const children=Array.isArray(parent.children) ? parent.children : [];
 
           if(children.length){
+            const hasAnyChildValue=children.some(child=>!!compact(valueForCell(date,child.label)));
+
             for(const child of children){
               const childLabel=normalizeRouteLabel(child.label);
               const childValue=valueForCell(date,childLabel);
               const childSource=rowForCell(date,childLabel) || {};
 
-              const finalValue=clean(childValue || parentValue);
+              // 해당 날짜에 서서브 값이 하나라도 있으면 child 값만 사용.
+              // 해당 날짜에 서서브 값이 하나도 없으면 parent 값을 전체 child로 확장.
+              const finalValue=hasAnyChildValue ? clean(childValue) : clean(parentValue);
               if(!finalValue) continue;
 
-              const finalSource=childValue ? childSource : parentSource;
+              const finalSource=hasAnyChildValue ? childSource : parentSource;
               const route=childLabel;
 
               const directId=pddExportId(finalValue,finalSource);
@@ -1842,7 +1887,7 @@
                 route,
                 driver:finalValue,
                 parentRoute:parentLabel,
-                sourceRoute:childValue ? childLabel : parentLabel
+                sourceRoute:hasAnyChildValue ? childLabel : parentLabel
               });
             }
 

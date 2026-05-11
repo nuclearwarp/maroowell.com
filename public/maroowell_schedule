@@ -393,6 +393,7 @@
       function clean(v){return String(v ?? "").trim()}
       function compact(v){return clean(v).replace(/\s+/g,"")}
       function keyOf(v){return compact(v).toUpperCase()}
+      function campKey(v){return compact(v).replace(/_/g,"").toUpperCase()}
       function esc(v){return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 
       function normalizeWave(v){
@@ -502,22 +503,12 @@
 
       function excelExportStartScheduleDate(){
         const now = koreaNowParts();
-
-        /*
-          엑셀 생성 가능 기준:
-          - 15:00 전: 내일 스케줄부터 생성
-          - 15:00 이후: 모레 스케줄부터 생성
-
-          야간 WAVE1도 제외 판단은 "스케줄 등록 날짜" 기준으로 동일하게 처리한다.
-          단, 엑셀의 업무일은 기존처럼 스케줄 날짜 +1일로 생성된다.
-        */
         return addDays(now.date, now.hour >= 15 ? 2 : 1);
       }
 
       function isExcelExportAllowedScheduleDate(scheduleDate){
         const date = normalizeDateInput(scheduleDate);
         if(!date) return false;
-
         return date >= excelExportStartScheduleDate();
       }
 
@@ -525,7 +516,6 @@
         const now = koreaNowParts();
         const startDate = excelExportStartScheduleDate();
         const rule = now.hour >= 15 ? "15시 이후 기준" : "15시 전 기준";
-
         return `${rule}: ${dateLabel(startDate)} 스케줄부터 엑셀 생성`;
       }
 
@@ -702,9 +692,10 @@
       }
 
       function campMatches(infoCamp,selectedCamp){
-        const a=compact(infoCamp).toUpperCase(),b=compact(selectedCamp).toUpperCase();
+        const a=campKey(infoCamp);
+        const b=campKey(selectedCamp);
         if(!a||!b)return false;
-        return a===b||a.includes(b)||b.includes(a);
+        return a===b;
       }
 
       function waveMatches(infoWave,selectedWave){
@@ -713,6 +704,31 @@
         const selected=normalizeWave(selectedWave);
         const aliases=WAVE_ALIASES[selected]||[selected];
         return aliases.some(x=>raw===compact(x).toUpperCase()||raw.includes(compact(x).toUpperCase()));
+      }
+
+      function explicitWaveMatches(infoWave,selectedWave){
+        const raw=compact(infoWave).toUpperCase();
+        if(!raw || raw==="-" || raw==="전체" || raw==="ALL")return false;
+        const selected=normalizeWave(selectedWave);
+        const aliases=WAVE_ALIASES[selected]||[selected];
+        return aliases.some(x=>raw===compact(x).toUpperCase()||raw.includes(compact(x).toUpperCase()));
+      }
+
+      function hasSelectedWaveContract(){
+        if(!state.camp)return false;
+
+        return state.driversRaw.some(row=>{
+          const r=normalizeDriverRow(row);
+          const camp=clean(r.camp_code || r.camp);
+          const wave=clean(r.wave_raw || r.wave);
+          const position=clean(r.position_title);
+          const isSubOnly=r.is_sub_account_row===true || isSubAccountRole(position);
+
+          if(isSubOnly)return false;
+          if(!campMatches(camp,state.camp))return false;
+
+          return explicitWaveMatches(wave,state.wave);
+        });
       }
 
       function looksLikeId(v){
@@ -943,15 +959,26 @@
       }
 
       function buildRoutes(){
-        const rows=state.routesRaw.filter(r=>r.is_active!==false).filter(r=>campMatches(r.camp,state.camp)).sort((a,b)=>{
-          const so=Number(a.sort_order||0)-Number(b.sort_order||0);
-          if(so!==0)return so;
-          const aParent=clean(a.parent_route_label)||routeBaseLabel(a.route,a.sub);
-          const bParent=clean(b.parent_route_label)||routeBaseLabel(b.route,b.sub);
-          const pc=sortText(aParent,bParent);
-          if(pc!==0)return pc;
-          return sortText(clean(a.sub_sub),clean(b.sub_sub));
-        });
+        const contracted=hasSelectedWaveContract();
+
+        const rows=contracted
+          ? state.routesRaw
+              .filter(r=>r.is_active!==false)
+              .filter(r=>campMatches(r.camp,state.camp))
+              .sort((a,b)=>{
+                const aParent=normalizeRouteLabel(clean(a.parent_route_label)||routeBaseLabel(a.route,a.sub)||clean(a.route_label));
+                const bParent=normalizeRouteLabel(clean(b.parent_route_label)||routeBaseLabel(b.route,b.sub)||clean(b.route_label));
+                const pc=sortText(aParent,bParent);
+                if(pc!==0)return pc;
+
+                const aChild=normalizeRouteLabel(clean(a.route_label)||routeChildLabel(a.route,a.sub,a.sub_sub)||aParent);
+                const bChild=normalizeRouteLabel(clean(b.route_label)||routeChildLabel(b.route,b.sub,b.sub_sub)||bParent);
+                const cc=sortText(aChild,bChild);
+                if(cc!==0)return cc;
+
+                return Number(a.sort_order||0)-Number(b.sort_order||0);
+              })
+          : [];
 
         const parentMap=new Map();
         state.routeLookup.clear();
@@ -996,9 +1023,9 @@
           for(const c of p.children){
             if(!dedup.has(c.key))dedup.set(c.key,c);
           }
-          p.children=Array.from(dedup.values()).sort((a,b)=>sortText(a.subSub,b.subSub)||sortText(a.label,b.label));
+          p.children=Array.from(dedup.values()).sort((a,b)=>sortText(a.label,b.label)||sortText(a.subSub,b.subSub));
           return p;
-        });
+        }).sort((a,b)=>sortText(a.label,b.label)||Number(a.sortOrder||0)-Number(b.sortOrder||0));
 
         state.routeParents.unshift({
           key:OFF_ROUTE_LABEL,label:OFF_ROUTE_LABEL,route:"",sub:"",description:"휴무자",memo:"",subPackage:"",
@@ -1012,12 +1039,6 @@
         state.expanded.clear();
         for(const p of state.routeParents){
           if(!p.children || !p.children.length) continue;
-
-          /*
-            자동 펼침 조건:
-            서서브 행에 실제 입력값이 있는 라우트만 자동 펼친다.
-            서브 행에만 값이 있는 612A, 602B 같은 라우트는 자동 펼치지 않는다.
-          */
           if(childScheduleExistsInCurrentWeek(p)){
             state.expanded.add(p.key);
           }
@@ -1949,14 +1970,6 @@
         const exportStartDate=excelExportStartScheduleDate();
 
         for(const date of state.weekDates){
-          /*
-            엑셀 생성 제외 기준:
-            - KST 15:00 전: 오늘과 이전 날짜 제외, 내일 스케줄부터 생성
-            - KST 15:00 이후: 내일까지 제외, 모레 스케줄부터 생성
-
-            야간도 필터 기준은 스케줄 등록 날짜 date 그대로다.
-            엑셀에 들어가는 업무일만 WAVE1일 때 +1일 처리한다.
-          */
           if(date < exportStartDate) continue;
 
           for(const routeLabel of labels){

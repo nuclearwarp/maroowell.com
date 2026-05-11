@@ -827,8 +827,8 @@
             globalSub:row.is_global_sub_account===true
           };
         })
-        .filter(d=>d.name||d.coupangId)
-        .filter(d=>!isExcludedDriverPosition(d.position))
+        .filter(d=>d.name||d.coupangId||d.subAccounts.length)
+        .filter(d=>!isRetiredPosition(d.position))
         .sort((a,b)=>{
           const aw=waveMatches(a.wave,state.wave)?0:1,bw=waveMatches(b.wave,state.wave)?0:1;
           if(aw!==bw)return aw-bw;
@@ -842,22 +842,63 @@
           const mainParsed=parseAccountToken(d.coupangId,baseName);
           const mainId=clean(mainParsed.id);
           const mainExportName=clean(d.coupangAdminName||mainParsed.adminName)||baseName;
+          const isSubOnly=d.explicitSub || d.globalSub || isSubAccountRole(d.position);
 
           assignColorKey(baseName);
 
-          addAccount({
-            displayName:baseName,
-            ownerName:baseName,
-            exportName:mainExportName,
-            exportId:mainId,
-            accountType:"본계정",
-            colorKey:baseName,
-            camp:d.camp || state.camp,
-            wave:d.wave,
-            position:d.position,
-            globalSub:d.globalSub,
-            search:[baseName,mainExportName,mainId,d.camp,d.wave,d.position,"본계정"].join(" ")
-          },seen);
+          if(baseName || mainId){
+            addAccount({
+              displayName:baseName || mainExportName || mainId,
+              ownerName:baseName || mainExportName || mainId,
+              exportName:mainExportName || baseName || mainId,
+              exportId:mainId,
+              accountType:isSubOnly ? "서브계정" : "본계정",
+              colorKey:baseName || mainExportName || mainId,
+              camp:d.camp || state.camp,
+              wave:d.wave,
+              position:d.position,
+              globalSub:d.globalSub || isSubOnly,
+              aliases:[mainExportName,mainId].filter(Boolean),
+              search:[baseName,mainExportName,mainId,d.camp,d.wave,d.position,isSubOnly?"서브계정":"본계정"].join(" ")
+            },seen);
+          }
+
+          d.subAccounts.forEach((sub,idx)=>{
+            const rawSub=typeof sub==="object" ? sub : (parseSubAccounts(sub)[0] || {id:clean(sub),adminName:""});
+            const parsed=parseAccountToken(
+              clean(rawSub.id || rawSub.account_id || rawSub.coupang_id || rawSub.login_id || rawSub.text || rawSub.value),
+              clean(rawSub.adminName || rawSub.name || rawSub.person_name || rawSub.display_name)
+            );
+
+            const subId=clean(rawSub.id || rawSub.account_id || rawSub.coupang_id || rawSub.login_id || parsed.id);
+            const subName=clean(rawSub.adminName || rawSub.name || rawSub.person_name || rawSub.display_name || parsed.adminName);
+            const aliasNumber=idx+2;
+            const numberedAlias=baseName ? `${baseName}${aliasNumber}` : "";
+            const displayName=numberedAlias || subName || subId;
+            const ownerName=baseName || subName || subId;
+            const exportName=subName || displayName || subId;
+            const subCamp=clean(rawSub.camp || rawSub.camp_code || d.camp);
+            const subWave=clean(rawSub.wave || rawSub.wave_raw || d.wave);
+
+            if(!displayName && !subId) return;
+
+            assignColorKey(ownerName || displayName || subId);
+
+            addAccount({
+              displayName:displayName || subId,
+              ownerName:ownerName || displayName || subId,
+              exportName:exportName || displayName || subId,
+              exportId:subId,
+              accountType:"서브계정",
+              colorKey:ownerName || displayName || subId,
+              camp:subCamp || "",
+              wave:subWave || "",
+              position:d.position,
+              globalSub:true,
+              aliases:[subName,subId,numberedAlias].filter(Boolean),
+              search:[displayName,numberedAlias,subName,ownerName,exportName,subId,subCamp,subWave,d.position,"서브계정"].join(" ")
+            },seen);
+          });
         }
 
         state.driverAccounts.sort((a,b)=>{
@@ -867,7 +908,7 @@
         });
 
         for(const acc of state.driverAccounts){
-          const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId].map(keyOf).filter(Boolean);
+          const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId,...(acc.aliases||[])].map(keyOf).filter(Boolean);
           for(const k of keys){
             if(!state.accountByDisplay.has(k)) state.accountByDisplay.set(k,acc);
           }
@@ -881,11 +922,15 @@
         if(!uniqueKey)return;
         const displayKey=keyOf(account.displayName);
         const idKey=keyOf(account.exportId);
+        const aliasKeys=(account.aliases||[]).map(keyOf).filter(Boolean);
         const comboKey=keyOf(`${account.displayName}|${account.exportId}|${account.accountType}`);
         if(seen.has(comboKey))return;
         seen.add(comboKey);
         state.driverAccounts.push(account);
         if(displayKey&&!state.accountByDisplay.has(displayKey))state.accountByDisplay.set(displayKey,account);
+        for(const aliasKey of aliasKeys){
+          if(aliasKey&&!state.accountByDisplay.has(aliasKey))state.accountByDisplay.set(aliasKey,account);
+        }
         if(idKey&&!state.accountById.has(idKey))state.accountById.set(idKey,account);
       }
 
@@ -2015,9 +2060,16 @@
             if(!displayName)continue;
 
             const source=rowForCell(date,normalizedRoute)||{};
-            const account=resolveAccount(displayName);
+            const account=resolvePddAccount(displayName,source);
             const exportName=clean(source.driver_export_name||account?.exportName||displayName);
-            const exportId=clean(source.driver_coupang_id||account?.exportId||"");
+            const exportId=clean(
+              source.driver_coupang_id ||
+              source.driver_export_id ||
+              source.coupang_id ||
+              source.export_id ||
+              account?.exportId ||
+              ""
+            );
             const adminRoute=adminRouteLabel(normalizedRoute);
             if(!adminRoute)continue;
 

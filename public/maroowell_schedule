@@ -828,7 +828,6 @@
           };
         })
         .filter(d=>d.name||d.coupangId||d.subAccounts.length)
-        .filter(d=>!isRetiredPosition(d.position))
         .sort((a,b)=>{
           const aw=waveMatches(a.wave,state.wave)?0:1,bw=waveMatches(b.wave,state.wave)?0:1;
           if(aw!==bw)return aw-bw;
@@ -947,7 +946,7 @@
         const exact=state.accountByDisplay.get(k) || state.accountByExportName.get(k) || state.accountById.get(k);
         if(exact)return exact;
         const found=state.driverAccounts.find(acc=>{
-          const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId].map(keyOf).filter(Boolean);
+          const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId,...(acc.aliases||[])].map(keyOf).filter(Boolean);
           return keys.includes(k);
         });
         if(found)return found;
@@ -964,7 +963,7 @@
         for(const c of candidates){
           const ck=keyOf(c);
           const found=state.driverAccounts.find(acc=>{
-            const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId].map(keyOf).filter(Boolean);
+            const keys=[acc.displayName,acc.ownerName,acc.exportName,acc.exportId,...(acc.aliases||[])].map(keyOf).filter(Boolean);
             return keys.includes(ck);
           });
           if(found) return found;
@@ -977,7 +976,10 @@
             const owner=keyOf(acc.ownerName);
             const exportName=keyOf(acc.exportName);
             const exportId=keyOf(acc.exportId);
-            return display===ck || owner===ck || exportName===ck || exportId===ck || (display && ck.includes(display)) || (owner && ck.includes(owner)) || (exportName && ck.includes(exportName));
+            const aliasKeys=(acc.aliases||[]).map(keyOf).filter(Boolean);
+            return display===ck || owner===ck || exportName===ck || exportId===ck || aliasKeys.includes(ck) ||
+              (display && ck.includes(display)) || (owner && ck.includes(owner)) || (exportName && ck.includes(exportName)) ||
+              aliasKeys.some(alias=>alias && ck.includes(alias));
           });
           if(found) return found;
         }
@@ -989,6 +991,129 @@
         if(direct) return direct;
         const acc=resolvePddAccount(value,source);
         return clean(acc?.exportId);
+      }
+
+      function metaNameCandidates(value){
+        const out=[];
+        const names=splitPersonNames(value);
+        for(const name of names){
+          const raw=clean(name);
+          if(!raw) continue;
+          out.push(raw);
+
+          const m=raw.match(/^(.+?)(\d+)$/);
+          if(m && clean(m[1])){
+            out.push(clean(m[1]));
+          }
+        }
+        return Array.from(new Set(out.map(clean).filter(Boolean)));
+      }
+
+      function assignedNamesFromSchedules(){
+        const names=[];
+        for(const row of state.schedules || []){
+          [row.driver_display_name,row.driver_name,row.driver_owner_name,row.driver_export_name,row.driver_coupang_id]
+            .map(clean)
+            .filter(Boolean)
+            .forEach(value=>{
+              metaNameCandidates(value).forEach(name=>names.push(name));
+            });
+        }
+        return Array.from(new Set(names.map(clean).filter(Boolean)));
+      }
+
+      function metaDisplayNamesOnBoard(){
+        const names=[];
+        const labels=allRouteLabels({includeOff:false});
+        for(const date of state.weekDates || []){
+          for(const routeLabel of labels){
+            const normalizedRoute=normalizeRouteLabel(routeLabel);
+            if(isRouteLockedForDate(date,normalizedRoute)) continue;
+            const value=valueForCell(date,normalizedRoute);
+            if(!value) continue;
+            metaNameCandidates(value).forEach(name=>names.push(name));
+          }
+        }
+        return Array.from(new Set(names.map(clean).filter(Boolean)));
+      }
+
+      function accountHasExportId(value){
+        const account=resolvePddAccount(value,{});
+        return !!clean(account?.exportId);
+      }
+
+      function infoRowKey(row){
+        const r=normalizeDriverRow(row || {});
+        return keyOf([
+          row?.id || row?.pk_id || row?.seq || "",
+          r.person_name || r.name,
+          r.coupang_id,
+          r.coupang_admin_name,
+          r.sub_account_info,
+          r.camp_code || r.camp,
+          r.wave_raw || r.wave
+        ].join("|"));
+      }
+
+      function appendInfoRowsToDrivers(rows){
+        if(!Array.isArray(rows) || !rows.length) return 0;
+
+        const seen=new Set((state.driversRaw || []).map(infoRowKey).filter(Boolean));
+        let added=0;
+
+        for(const row of rows){
+          const normalized=normalizeDriverRow(row || {});
+          const key=infoRowKey(normalized);
+          if(!key || seen.has(key)) continue;
+
+          seen.add(key);
+          state.driversRaw.push(normalized);
+          added++;
+        }
+
+        return added;
+      }
+
+      async function loadAllMaroowellInfoRowsForAccountLookup(){
+        if(state._mwInfoAccountLookupLoaded) return 0;
+        state._mwInfoAccountLookupLoaded=true;
+
+        if(!supabase) return 0;
+
+        try{
+          const { data, error } = await supabase
+            .from("maroowell_info")
+            .select("*")
+            .limit(10000);
+
+          if(error){
+            console.warn("[MetaAdmin Excel] maroowell_info lookup failed", error);
+            return 0;
+          }
+
+          return appendInfoRowsToDrivers(data || []);
+        }catch(e){
+          console.warn("[MetaAdmin Excel] maroowell_info lookup failed", e);
+          return 0;
+        }
+      }
+
+      async function ensureGlobalInfoAccountsForNames(names){
+        const targetNames=Array.from(new Set((names || []).flatMap(metaNameCandidates).map(clean).filter(Boolean)));
+        if(!targetNames.length) return false;
+
+        const missingBefore=targetNames.filter(name=>!accountHasExportId(name));
+        if(!missingBefore.length) return false;
+
+        const added=await loadAllMaroowellInfoRowsForAccountLookup();
+        if(added>0) buildDriverAccounts();
+
+        const missingAfter=targetNames.filter(name=>!accountHasExportId(name));
+        if(missingAfter.length){
+          console.warn("[MetaAdmin Excel] ID not found after global lookup", missingAfter);
+        }
+
+        return added>0;
       }
 
       function buildRoutes(){
@@ -1326,6 +1451,7 @@
 
           renderUpdateStatus(json.update_status || null);
           buildDriverAccounts();
+          await ensureGlobalInfoAccountsForNames(assignedNamesFromSchedules());
           makeScheduleMap();
           buildRoutes();
           render();
@@ -2102,7 +2228,7 @@
         });
       }
 
-      function exportMetaExcel(){
+      async function exportMetaExcel(){
         if(!window.XLSX){
           alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
           return;
@@ -2114,6 +2240,9 @@
         }
 
         hideSuggest();
+
+        setStatus("엑셀 계정 정보를 확인하는 중입니다.");
+        await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
 
         const exportStartDate=excelExportStartScheduleDate();
         const rows=collectMetaRows();

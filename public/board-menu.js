@@ -99,6 +99,13 @@
       requireDragonCarAdmin: true
     },
     {
+      key: "dragon-schedule",
+      label: "용차 입차 스케줄",
+      path: "/dragon_car_schedule",
+      aliases: ["/dragon_car_schedule", "/dragon_car_schedule.html"],
+      requireTeamOrDragonCarAdmin: true
+    },
+    {
       key: "dragon-pay",
       label: "용차 정산서",
       path: "/dragon_car_pay",
@@ -209,6 +216,10 @@
       return isMaroowell && isAdmin && roleLevel >= 90;
     }
 
+    if (page.requireTeamOrDragonCarAdmin) {
+      return (isMaroowell && roleLevel >= 30) || isDragonCarAdmin;
+    }
+
     if (page.requireDragonCarAdmin) {
       return isDragonCarAdmin;
     }
@@ -229,6 +240,10 @@
 
     if (page.requireSuperAdmin) {
       return "최고관리자";
+    }
+
+    if (page.requireTeamOrDragonCarAdmin) {
+      return "팀장/용차";
     }
 
     if (page.requireDragonCarAdmin) {
@@ -255,6 +270,10 @@
 
     if (page.requireSuperAdmin) {
       return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
+    }
+
+    if (page.requireTeamOrDragonCarAdmin) {
+      return "마루웰 팀장 이상 또는 용차 관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상 또는 용차관리자 권한";
     }
 
     if (page.requireDragonCarAdmin) {
@@ -329,6 +348,10 @@
       case "/dragon_car_index":
       case "/dragon_car_index.html":
         return "용차 관리";
+
+      case "/dragon_car_schedule":
+      case "/dragon_car_schedule.html":
+        return "용차 기사 출근 / 휴무 스케줄";
 
       case "/dragon_car_pay":
       case "/dragon_car_pay.html":

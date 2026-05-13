@@ -5,7 +5,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="referrer" content="origin" />
-  <title>마루웰 용차 스케줄</title>
+  <title>마루웰</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

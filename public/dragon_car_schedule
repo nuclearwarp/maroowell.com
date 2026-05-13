@@ -159,7 +159,7 @@
 
     .toolbar{
       display:grid;
-      grid-template-columns:150px 170px 190px minmax(210px,1fr) auto auto auto auto;
+      grid-template-columns:190px 110px 160px minmax(210px,1fr) 78px 78px 92px 74px 74px;
       gap:10px;
       align-items:end;
       padding:12px 14px;
@@ -170,6 +170,17 @@
     }
 
     .toolbar.hidden{display:none}
+
+    .toolbar > .btn{
+      width:100%;
+      justify-self:stretch;
+    }
+
+    .btn.weekNav{
+      width:78px;
+      min-width:78px;
+      padding:0 8px;
+    }
 
     .field{
       display:flex;
@@ -195,6 +206,13 @@
       font-size:14px;
       font-weight:800;
       outline:none;
+    }
+
+    .select:disabled{
+      opacity:1;
+      color:#bfdbfe;
+      background:#111c30;
+      cursor:not-allowed;
     }
 
     .input:focus,.select:focus{
@@ -506,7 +524,7 @@
     .bottomBar .btn{flex:1}
 
     @media(max-width:1180px){
-      .toolbar{grid-template-columns:1fr 1fr 1fr}
+      .toolbar{grid-template-columns:1fr 110px 1fr}
       .toolbar > .btn{width:100%}
       .registerBox{grid-template-columns:1fr 1fr}
       .main{grid-template-columns:1fr}
@@ -600,8 +618,15 @@
 
     <section id="toolbar" class="toolbar">
       <div class="field">
-        <label>주차 기준일</label>
-        <input id="baseDateInput" class="input" type="date" />
+        <label>조회 주차</label>
+        <select id="weekSelect" class="select"></select>
+      </div>
+
+      <div class="field">
+        <label>주/야</label>
+        <select id="waveSelect" class="select" disabled>
+          <option value="WAVE2" selected>주간</option>
+        </select>
       </div>
 
       <div class="field">
@@ -614,8 +639,8 @@
         <input id="searchInput" class="input" type="text" placeholder="기사 / 전화번호 / 차량번호" autocomplete="off" />
       </div>
 
-      <button id="btnPrevWeek" class="btn" type="button">이전주</button>
-      <button id="btnNextWeek" class="btn" type="button">다음주</button>
+      <button id="btnPrevWeek" class="btn weekNav" type="button">이전주</button>
+      <button id="btnNextWeek" class="btn weekNav" type="button">다음주</button>
       <button id="btnLoad" class="btn primary" type="button">불러오기</button>
       <button id="btnSaveAll" class="btn ok" type="button">저장</button>
       <button id="btnReset" class="btn" type="button">초기화</button>
@@ -762,7 +787,8 @@
         toolbar: document.getElementById("toolbar"),
         registerPanel: document.getElementById("registerPanel"),
 
-        baseDateInput: document.getElementById("baseDateInput"),
+        weekSelect: document.getElementById("weekSelect"),
+        waveSelect: document.getElementById("waveSelect"),
         selectedDateSelect: document.getElementById("selectedDateSelect"),
         searchInput: document.getElementById("searchInput"),
         btnPrevWeek: document.getElementById("btnPrevWeek"),
@@ -928,6 +954,48 @@
         return `${mdLabel(state.weekDates[0])} ~ ${mdLabel(state.weekDates[6])}`;
       }
 
+      function weekSelectLabel(startIso){
+        const dates = weekDatesFromStart(startIso);
+        const info = isoWeekInfoFromMondayRef(startIso);
+        return `${info.weekLabel} (${mdLabel(dates[0])} ~ ${mdLabel(dates[6])})`;
+      }
+
+      function buildWeekOptions(centerStartIso){
+        const center = sundayOf(centerStartIso || todayIso());
+        const starts = [];
+
+        for(let i = -8; i <= 12; i++){
+          starts.push(addDays(center, i * 7));
+        }
+
+        if(!starts.includes(state.weekStart)){
+          starts.push(state.weekStart);
+        }
+
+        starts.sort();
+
+        els.weekSelect.innerHTML = starts.map(start => `
+          <option value="${esc(start)}">${esc(weekSelectLabel(start))}</option>
+        `).join("");
+
+        els.weekSelect.value = state.weekStart;
+      }
+
+      function syncWeekSelect(){
+        if(!els.weekSelect.querySelector(`option[value="${CSS.escape(state.weekStart)}"]`)){
+          const option = document.createElement("option");
+          option.value = state.weekStart;
+          option.textContent = weekSelectLabel(state.weekStart);
+          els.weekSelect.appendChild(option);
+
+          Array.from(els.weekSelect.options)
+            .sort((a,b) => String(a.value).localeCompare(String(b.value)))
+            .forEach(optionNode => els.weekSelect.appendChild(optionNode));
+        }
+
+        els.weekSelect.value = state.weekStart;
+      }
+
       function updateWeekState(){
         state.weekStart = sundayOf(state.baseDate);
         state.weekDates = weekDatesFromStart(state.weekStart);
@@ -942,9 +1010,9 @@
           state.selectedDate = state.weekDates[0];
         }
 
-        els.baseDateInput.value = state.baseDate;
+        syncWeekSelect();
         els.weekPill.textContent = `${weekRangeLabel()} / ${state.weekLabel}`;
-        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel}`;
+        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel} · 주간`;
         renderDateSelect();
       }
 
@@ -972,11 +1040,6 @@
       function isAdditionalDragonDriverName(name){
         const k = keyOf(name);
         return ADDITIONAL_DRAGON_NAMES.some(v => keyOf(v) === k);
-      }
-
-      function isTopDriver(driver){
-        const name = clean(driver?.person_name);
-        return TOP_DRIVER_ORDER.includes(name);
       }
 
       function topDriverRank(driver){
@@ -1099,7 +1162,6 @@
         if(error) throw error;
 
         const rows = Array.isArray(data) ? data : [];
-
         const seen = new Set();
 
         return rows
@@ -1343,7 +1405,7 @@
 
       function renderHeader(){
         els.boardTitle.textContent = "용차 / 주간 스케줄";
-        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel} · camp: ${DRAGON_CAMP}`;
+        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel} · 주간 · camp: ${DRAGON_CAMP}`;
         els.selectedDayTitle.textContent = `${dateLabel(state.selectedDate)} 여유인원`;
         els.selectedDayBadge.textContent = state.selectedDate || "-";
       }
@@ -1688,7 +1750,7 @@
       }
 
       async function loadAll(){
-        state.baseDate = clean(els.baseDateInput.value) || todayIso();
+        state.baseDate = state.weekStart || sundayOf(todayIso());
         updateWeekState();
 
         state.dirty.clear();
@@ -1781,8 +1843,11 @@
         els.btnMobileSave.addEventListener("click", saveAll);
         els.btnMobileLoad.addEventListener("click", loadAll);
 
-        els.baseDateInput.addEventListener("change", () => {
-          state.baseDate = clean(els.baseDateInput.value) || todayIso();
+        els.weekSelect.addEventListener("change", () => {
+          const selectedWeekStart = clean(els.weekSelect.value);
+          state.baseDate = selectedWeekStart || sundayOf(todayIso());
+          state.weekStart = sundayOf(state.baseDate);
+          state.selectedDate = state.weekStart;
           updateWeekState();
           loadAll();
         });
@@ -1797,12 +1862,16 @@
 
         els.btnPrevWeek.addEventListener("click", () => {
           state.baseDate = addDays(state.weekStart, -7);
+          state.weekStart = sundayOf(state.baseDate);
+          state.selectedDate = state.weekStart;
           updateWeekState();
           loadAll();
         });
 
         els.btnNextWeek.addEventListener("click", () => {
           state.baseDate = addDays(state.weekStart, 7);
+          state.weekStart = sundayOf(state.baseDate);
+          state.selectedDate = state.weekStart;
           updateWeekState();
           loadAll();
         });
@@ -1825,7 +1894,11 @@
       async function boot(){
         bind();
 
-        state.baseDate = todayIso();
+        state.baseDate = sundayOf(todayIso());
+        state.weekStart = sundayOf(state.baseDate);
+        state.selectedDate = state.weekStart;
+
+        buildWeekOptions(state.weekStart);
         updateWeekState();
 
         els.formDate.value = state.selectedDate;

@@ -1,836 +1,1857 @@
-(() => {
-  "use strict";
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="referrer" content="origin" />
+  <title>마루웰 용차 스케줄</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
 
-  if (window.__MW_BOARD_MENU_INIT__) return;
-  window.__MW_BOARD_MENU_INIT__ = true;
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/board-menu.js" defer></script>
 
-  const MENU_MODE = window.MW_BOARD_MENU_MODE || "public";
-
-  const PAGES = [
-    {
-      key: "zipcode_search",
-      label: "우편번호 검색기",
-      path: "/zipcode_search",
-      aliases: ["/zipcode_search", "/zipcode_search.html"],
-      public: true
-    },
-    {
-      key: "route",
-      label: "라우트 편집기",
-      path: "/coupangRouteMap.html",
-      aliases: ["/coupangRouteMap", "/coupangRouteMap.html"],
-      public: true
-    },
-    {
-      key: "coupang-camps",
-      label: "쿠팡 캠프 조회",
-      path: "/coupang_camp",
-      aliases: ["/coupang_camp", "/coupang_camp.html"],
-      public: true
-    },
-    {
-      key: "freshbag-view",
-      label: "프레시백 현황 조회",
-      path: "/coupang_freshbag",
-      aliases: ["/coupang_freshbag", "/coupang_freshbag.html"],
-      public: true
-    },
-    {
-      key: "freshbag-upload",
-      label: "프레시백 현황 업로드",
-      path: "/coupang_freshbag_upload",
-      aliases: ["/coupang_freshbag_upload", "/coupang_freshbag_upload.html"],
-      requireSuperAdmin: true
-    },
-    {
-      key: "info",
-      label: "마루웰 정보",
-      path: "/maroowell_info",
-      aliases: ["/maroowell_info", "/maroowell_info.html"],
-      requireRoleLevel: 30
-    },
-    {
-      key: "mw-route-info",
-      label: "마루웰 라우트정보",
-      path: "/maroowell_route_info",
-      aliases: ["/maroowell_route_info", "/maroowell_route_info.html"],
-      requireMaroowell: true
-    },
-    {
-      key: "mw-schedule",
-      label: "마루웰 입차 스케줄",
-      path: "/maroowell_schedule",
-      aliases: ["/maroowell_schedule", "/maroowell_schedule.html"],
-      requireRoleLevel: 30
-    },
-    {
-      key: "mw-freshbag-ratio",
-      label: "마루웰 회수율",
-      path: "/maroowell_freshbag_ratio",
-      aliases: ["/maroowell_freshbag_ratio", "/maroowell_freshbag_ratio.html"],
-      requireMaroowell: true
-    },
-    {
-      key: "mw-freshbag-ratio-upload",
-      label: "마루웰 회수율 업로드",
-      path: "/maroowell_freshbag_ratio_upload",
-      aliases: ["/maroowell_freshbag_ratio_upload", "/maroowell_freshbag_ratio_upload.html"],
-      requireSuperAdmin: true
-    },
-    {
-      key: "mw-route",
-      label: "마루웰 라우트 단가",
-      path: "/maroowell_route",
-      aliases: ["/maroowell_route", "/maroowell_route.html"],
-      requireRoleLevel: 60
-    },
-    {
-      key: "mw-payout",
-      label: "마루웰 정산",
-      path: "/maroowell_payout",
-      aliases: ["/maroowell_payout", "/maroowell_payout.html"],
-      requireSuperAdmin: true
-    },
-    {
-      key: "dragon-index",
-      label: "용차",
-      path: "/dragon_car_index",
-      aliases: ["/dragon_car_index", "/dragon_car_index.html"],
-      requireDragonCarAdmin: true
-    },
-    {
-      key: "dragon-schedule",
-      label: "용차스케줄",
-      path: "/dragon_car_schedule",
-      aliases: ["/dragon_car_schedule", "/dragon_car_schedule.html"],
-      requireTeamOrDragonCarAdmin: true
-    },
-    {
-      key: "dragon-pay",
-      label: "용차 정산서",
-      path: "/dragon_car_pay",
-      aliases: ["/dragon_car_pay", "/dragon_car_pay.html"],
-      requireDragonCarAdmin: true
-    },
-    {
-      key: "admin-access",
-      label: "관리자 권한 관리",
-      path: "/admin_access.html",
-      aliases: ["/admin_access", "/admin_access.html", "/maroowell_access"],
-      requireSuperAdmin: true
+  <style>
+    html{visibility:hidden}
+    :root{
+      --bg:#081120;
+      --panel:#101b2f;
+      --panel2:#0c1628;
+      --line:rgba(255,255,255,.11);
+      --line2:rgba(255,255,255,.18);
+      --txt:#eaf2ff;
+      --muted:#9fb0d0;
+      --blue:#2563eb;
+      --green:#16a34a;
+      --red:#b91c1c;
+      --yellow:#f59e0b;
+      --cyan:#0891b2;
+      --cell:#111827;
+      --head:#26364f;
+      --free:#0f766e;
+      --work:#1d4ed8;
+      --off:#b91c1c;
+      --assigned:#7c3aed;
+      --record:#ea580c;
+      --warn:#facc15;
     }
-  ];
 
-  function normalizePath(path) {
-    let p = String(path || "").trim();
-    if (!p) return "/";
+    *{box-sizing:border-box}
 
-    if (p.startsWith("http://") || p.startsWith("https://")) {
-      try {
-        p = new URL(p).pathname || "/";
-      } catch {
-        return "/";
+    html,body{
+      margin:0;
+      min-height:100%;
+      background:var(--bg);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    body{overflow:hidden}
+
+    button,input,select,textarea{font-family:inherit}
+
+    .app{
+      height:100vh;
+      height:100dvh;
+      display:grid;
+      grid-template-rows:auto auto auto 1fr auto;
+      background:linear-gradient(180deg,#081120,#050a13);
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:11px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,#0b1424,#07101d);
+    }
+
+    .logoButton{
+      width:34px;
+      height:34px;
+      border:1px solid transparent;
+      border-radius:12px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      flex:0 0 auto;
+      cursor:pointer;
+      background:rgba(255,255,255,.03);
+    }
+
+    .logoButton:hover{
+      background:rgba(255,255,255,.10);
+      border-color:rgba(255,255,255,.18);
+    }
+
+    .logoButton img{
+      width:27px;
+      height:27px;
+      display:block;
+    }
+
+    .titleBox{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap:3px;
+    }
+
+    .titleBox h1{
+      margin:0;
+      font-size:21px;
+      line-height:1.05;
+      letter-spacing:-.04em;
+    }
+
+    .titleBox p{
+      margin:0;
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .spacer{flex:1}
+
+    .userBadge{
+      display:inline-flex;
+      align-items:center;
+      min-height:34px;
+      max-width:220px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.05);
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .btn{
+      height:38px;
+      padding:0 13px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.07);
+      color:var(--txt);
+      font-size:13px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+      touch-action:manipulation;
+    }
+
+    .btn:hover{background:rgba(255,255,255,.11)}
+    .btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}
+    .btn.ok{background:rgba(22,163,74,.58);border-color:rgba(134,239,172,.35)}
+    .btn.warn{background:rgba(245,158,11,.34);border-color:rgba(253,230,138,.35)}
+    .btn.copy{background:rgba(8,145,178,.48);border-color:rgba(103,232,249,.35)}
+    .btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+
+    .toolbar{
+      display:grid;
+      grid-template-columns:150px 170px 190px minmax(210px,1fr) auto auto auto auto;
+      gap:10px;
+      align-items:end;
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      background:var(--panel2);
+      position:relative;
+      z-index:10;
+    }
+
+    .toolbar.hidden{display:none}
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:5px;
+      min-width:0;
+    }
+
+    .field label{
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .input,.select{
+      width:100%;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line2);
+      background:#0b1220;
+      color:var(--txt);
+      padding:0 12px;
+      font-size:14px;
+      font-weight:800;
+      outline:none;
+    }
+
+    .input:focus,.select:focus{
+      border-color:rgba(96,165,250,.75);
+      box-shadow:0 0 0 3px rgba(96,165,250,.12);
+    }
+
+    .metaLine{
+      grid-column:1 / -1;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+      min-height:24px;
+      color:#b7c7e6;
+      font-size:12px;
+      font-weight:800;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:5px 10px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.06);
+      color:#dbeafe;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .pill.ok{color:#bbf7d0}
+    .pill.warn{color:#fde68a}
+    .pill.err{color:#fecaca}
+
+    .registerPanel{
+      border-bottom:1px solid var(--line);
+      background:#0b1424;
+      padding:12px 14px;
+    }
+
+    .registerPanel.hidden{display:none}
+
+    .registerBox{
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.04);
+      border-radius:18px;
+      padding:12px;
+      display:grid;
+      grid-template-columns:150px 1fr 140px minmax(220px,1fr) auto auto;
+      gap:10px;
+      align-items:end;
+    }
+
+    .registerHelp{
+      grid-column:1 / -1;
+      color:#9fb0d0;
+      font-size:12px;
+      font-weight:800;
+      line-height:1.45;
+    }
+
+    .main{
+      min-height:0;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 320px;
+      overflow:hidden;
+    }
+
+    .boardWrap{
+      min-width:0;
+      min-height:0;
+      overflow:auto;
+      padding:14px;
+      background:#08101d;
+    }
+
+    .sidePanel{
+      min-height:0;
+      overflow:auto;
+      border-left:1px solid var(--line);
+      background:#0a1322;
+      padding:14px;
+    }
+
+    .card{
+      border:1px solid var(--line2);
+      border-radius:18px;
+      background:rgba(255,255,255,.045);
+      overflow:hidden;
+    }
+
+    .card + .card{margin-top:12px}
+
+    .cardHead{
+      padding:13px 14px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+    }
+
+    .cardHead h2,.cardHead h3{
+      margin:0;
+      font-size:16px;
+      letter-spacing:-.03em;
+    }
+
+    .cardBody{padding:12px}
+
+    .summaryGrid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+    }
+
+    .summaryItem{
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      padding:10px;
+      background:rgba(255,255,255,.04);
+    }
+
+    .summaryLabel{
+      color:var(--muted);
+      font-size:11px;
+      font-weight:900;
+    }
+
+    .summaryValue{
+      margin-top:4px;
+      font-size:22px;
+      font-weight:1000;
+      line-height:1;
+    }
+
+    .freeList{
+      display:grid;
+      gap:8px;
+    }
+
+    .freeItem{
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:14px;
+      padding:10px;
+      background:rgba(15,118,110,.18);
+    }
+
+    .freeItem b{
+      display:block;
+      font-size:14px;
+    }
+
+    .freeItem span{
+      display:block;
+      margin-top:4px;
+      color:#cbd5e1;
+      font-size:11px;
+      font-weight:800;
+      word-break:break-all;
+    }
+
+    .emptyText{
+      padding:18px 12px;
+      border:1px dashed var(--line2);
+      border-radius:14px;
+      color:#94a3b8;
+      font-size:13px;
+      font-weight:900;
+      text-align:center;
+      line-height:1.45;
+    }
+
+    .scheduleBoard{
+      min-width:960px;
+      border:1px solid var(--line2);
+      border-radius:18px;
+      overflow:hidden;
+      background:#0e1728;
+      box-shadow:0 16px 42px rgba(0,0,0,.28);
+    }
+
+    .boardHeader{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap:12px;
+      padding:14px 16px;
+      background:linear-gradient(180deg,#17233a,#111c30);
+      border-bottom:1px solid var(--line);
+    }
+
+    .boardTitle h2{
+      margin:0;
+      font-size:22px;
+      line-height:1.15;
+      letter-spacing:-.04em;
+    }
+
+    .boardTitle p{
+      margin:6px 0 0;
+      color:#bfdbfe;
+      font-size:13px;
+      font-weight:900;
+    }
+
+    .tableWrap{overflow:auto}
+
+    table.scheduleTable{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      table-layout:fixed;
+      background:#0f1728;
+    }
+
+    .scheduleTable th,.scheduleTable td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      text-align:center;
+      vertical-align:middle;
+    }
+
+    .scheduleTable th:last-child,.scheduleTable td:last-child{border-right:none}
+    .scheduleTable tr:last-child td{border-bottom:none}
+
+    .scheduleTable th{
+      min-height:54px;
+      padding:8px 6px;
+      background:var(--head);
+      color:#fff;
+      font-size:13px;
+      font-weight:1000;
+      line-height:1.15;
+      white-space:nowrap;
+    }
+
+    .scheduleTable th.sun{color:#ff4444}
+
+    .driverCell{
+      background:#dbeafe!important;
+      color:#0f172a;
+      padding:8px;
+      text-align:left!important;
+    }
+
+    .driverName{
+      font-size:14px;
+      font-weight:1000;
+      line-height:1.2;
+    }
+
+    .driverMeta{
+      margin-top:4px;
+      font-size:11px;
+      font-weight:800;
+      color:#475569;
+      word-break:break-all;
+      line-height:1.35;
+    }
+
+    .statusBtn{
+      width:100%;
+      min-height:46px;
+      border:0;
+      border-radius:0;
+      color:#fff;
+      font-size:13px;
+      font-weight:1000;
+      cursor:pointer;
+      padding:6px;
+      white-space:normal;
+      line-height:1.25;
+    }
+
+    .statusBtn.free{background:rgba(15,118,110,.45);color:#ccfbf1}
+    .statusBtn.work{background:rgba(29,78,216,.78)}
+    .statusBtn.off{background:rgba(185,28,28,.74)}
+    .statusBtn.assigned{background:rgba(124,58,237,.72)}
+    .statusBtn.record{background:rgba(234,88,12,.76)}
+    .statusBtn.warn{background:rgba(127,29,29,.85);color:#fef08a}
+    .statusBtn.dirty{box-shadow:inset 0 -4px 0 rgba(250,204,21,.95)}
+
+    .statusSub{
+      display:block;
+      margin-top:3px;
+      font-size:10px;
+      font-weight:900;
+      opacity:.9;
+    }
+
+    .selectedDay{
+      outline:3px solid rgba(96,165,250,.65);
+      outline-offset:-3px;
+    }
+
+    .bottomBar{
+      display:none;
+      gap:8px;
+      padding:10px;
+      border-top:1px solid var(--line);
+      background:#07101d;
+    }
+
+    .bottomBar .btn{flex:1}
+
+    @media(max-width:1180px){
+      .toolbar{grid-template-columns:1fr 1fr 1fr}
+      .toolbar > .btn{width:100%}
+      .registerBox{grid-template-columns:1fr 1fr}
+      .main{grid-template-columns:1fr}
+      .sidePanel{
+        border-left:0;
+        border-top:1px solid var(--line);
+        max-height:280px;
       }
     }
 
-    p = p.replace(/[?#].*$/, "");
-    if (!p.startsWith("/")) p = "/" + p;
-    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    @media(max-width:720px){
+      body{overflow:auto}
 
-    return p || "/";
-  }
-
-  function getCurrentPath() {
-    return normalizePath(location.pathname || "/");
-  }
-
-  function pathVariants(path) {
-    const p = normalizePath(path);
-    const set = new Set([p]);
-
-    if (p === "/") {
-      set.add("/index");
-      set.add("/index.html");
-    } else if (p === "/index" || p === "/index.html") {
-      set.add("/");
-      set.add("/index");
-      set.add("/index.html");
-    } else if (p.endsWith(".html")) {
-      set.add(p.slice(0, -5));
-    } else if (p !== "/" && !p.endsWith(".html")) {
-      set.add(p + ".html");
-    }
-
-    return Array.from(set);
-  }
-
-  function isCurrentPage(page) {
-    const current = getCurrentPath();
-    const currentVariants = new Set(pathVariants(current));
-    const pagePaths = [page.path, ...(page.aliases || [])];
-
-    for (const item of pagePaths) {
-      for (const variant of pathVariants(item)) {
-        if (currentVariants.has(variant)) return true;
+      .app{
+        min-height:100dvh;
+        height:auto;
+        display:block;
       }
-    }
 
-    return false;
-  }
-
-  function findCurrentPage() {
-    return PAGES.find(page => isCurrentPage(page)) || null;
-  }
-
-  function escapeHtml(v) {
-    return String(v ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function defaultAccess() {
-    return {
-      user_id: "",
-      email: "",
-      is_maroowell: false,
-      is_admin: false,
-      max_role_level: 0,
-      is_dragon_car_admin: false,
-      signed_in: false
-    };
-  }
-
-  function canAccessPage(page, access) {
-    if (!page) return true;
-    if (page.public) return true;
-
-    const isMaroowell = access?.is_maroowell === true;
-    const isAdmin = access?.is_admin === true;
-    const roleLevel = Number(access?.max_role_level || 0);
-    const isDragonCarAdmin = access?.is_dragon_car_admin === true;
-
-    if (page.requireSuperAdmin) {
-      return isMaroowell && isAdmin && roleLevel >= 90;
-    }
-
-    if (page.requireTeamOrDragonCarAdmin) {
-      return (isMaroowell && roleLevel >= 30) || isDragonCarAdmin;
-    }
-
-    if (page.requireDragonCarAdmin) {
-      return isDragonCarAdmin;
-    }
-
-    if (page.requireMaroowell) {
-      return isMaroowell;
-    }
-
-    if (page.requireRoleLevel) {
-      return isMaroowell && roleLevel >= Number(page.requireRoleLevel);
-    }
-
-    return true;
-  }
-
-  function pageBadge(page) {
-    if (page.public) return "";
-
-    if (page.requireSuperAdmin) {
-      return "최고관리자";
-    }
-
-    if (page.requireTeamOrDragonCarAdmin) {
-      return "팀장/용차";
-    }
-
-    if (page.requireDragonCarAdmin) {
-      return "용차관리자";
-    }
-
-    if (page.requireMaroowell) {
-      return "마루웰";
-    }
-
-    if (Number(page.requireRoleLevel) >= 60) {
-      return "관리자";
-    }
-
-    if (Number(page.requireRoleLevel) >= 30) {
-      return "팀장";
-    }
-
-    return "권한";
-  }
-
-  function requirementText(page) {
-    if (!page) return "접근 권한이 없습니다.";
-
-    if (page.requireSuperAdmin) {
-      return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
-    }
-
-    if (page.requireTeamOrDragonCarAdmin) {
-      return "마루웰 팀장 이상 또는 용차 관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상 또는 용차관리자 권한";
-    }
-
-    if (page.requireDragonCarAdmin) {
-      return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
-    }
-
-    if (page.requireMaroowell) {
-      return "마루웰 소속 권한이 필요합니다.\n조건: user_access.is_maroowell = true";
-    }
-
-    if (Number(page.requireRoleLevel) >= 60) {
-      return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
-    }
-
-    if (Number(page.requireRoleLevel) >= 30) {
-      return "팀장 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
-    }
-
-    return "접근 권한이 없습니다.";
-  }
-
-  function pageSubtext(path) {
-    switch (normalizePath(path)) {
-      case "/zipcode_search":
-      case "/zipcode_search.html":
-        return "우편번호 / 지도 조회";
-
-      case "/coupangRouteMap":
-      case "/coupangRouteMap.html":
-        return "라우트 / 벤더 / 입차지 편집";
-
-      case "/coupang_camp":
-      case "/coupang_camp.html":
-        return "쿠팡 캠프 / 주소조회";
-
-      case "/coupang_freshbag":
-      case "/coupang_freshbag.html":
-        return "프레시백 가중요인 현황 조회";
-
-      case "/coupang_freshbag_upload":
-      case "/coupang_freshbag_upload.html":
-        return "프레시백 엑셀 업로드";
-
-      case "/maroowell_info":
-      case "/maroowell_info.html":
-        return "마루웰 기본 정보";
-
-      case "/maroowell_route_info":
-      case "/maroowell_route_info.html":
-        return "마루웰 라우트 정보 조회";
-
-      case "/maroowell_schedule":
-      case "/maroowell_schedule.html":
-        return "마루웰 입차 스케줄";
-
-      case "/maroowell_freshbag_ratio":
-      case "/maroowell_freshbag_ratio.html":
-        return "마루웰 프레시백 회수율 조회";
-
-      case "/maroowell_freshbag_ratio_upload":
-      case "/maroowell_freshbag_ratio_upload.html":
-        return "마루웰 회수율 엑셀 업로드";
-
-      case "/maroowell_route":
-      case "/maroowell_route.html":
-        return "라우트 단가 / 주소 / 원청 관리";
-
-      case "/maroowell_payout":
-      case "/maroowell_payout.html":
-        return "마루웰 정산 관리";
-
-      case "/dragon_car_index":
-      case "/dragon_car_index.html":
-        return "용차 관리";
-
-      case "/dragon_car_schedule":
-      case "/dragon_car_schedule.html":
-        return "용차 기사 출근 / 휴무 스케줄";
-
-      case "/dragon_car_pay":
-      case "/dragon_car_pay.html":
-        return "용차 정산서";
-
-      case "/admin_access":
-      case "/admin_access.html":
-        return "사용자 / 관리자 권한 관리";
-
-      default:
-        return "";
-    }
-  }
-
-  async function loadAccess() {
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
-    const out = defaultAccess();
-
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) {
-      return out;
-    }
-
-    const authStorage = (() => {
-      try {
-        return window.sessionStorage;
-      } catch {
-        return undefined;
+      .topbar{
+        position:sticky;
+        top:0;
+        z-index:30;
+        padding:9px 10px;
       }
-    })();
 
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        persistSession: !!authStorage,
-        storage: authStorage,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    });
+      .titleBox h1{font-size:18px}
+      .titleBox p{display:none}
+      .userBadge{display:none}
 
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session;
-      const uid = session?.user?.id;
-
-      if (!uid) return out;
-
-      out.signed_in = true;
-      out.user_id = uid;
-      out.email = session?.user?.email || "";
-
-      const { data, error } = await supabase
-        .rpc("mw_my_access")
-        .maybeSingle();
-
-      if (error || !data) return out;
-
-      return {
-        signed_in: true,
-        user_id: data.user_id || uid,
-        email: data.email || session?.user?.email || "",
-        is_maroowell: data.is_maroowell === true,
-        is_admin: data.is_admin === true,
-        max_role_level: Number(data.max_role_level || 0),
-        is_dragon_car_admin: data.is_dragon_car_admin === true
-      };
-    } catch {
-      return out;
-    }
-  }
-
-  function injectStyles() {
-    if (document.getElementById("mw-board-menu-style")) return;
-
-    const style = document.createElement("style");
-    style.id = "mw-board-menu-style";
-    style.textContent = `
-      .mw-board-backdrop{
-        position:fixed;
-        inset:0;
-        background:rgba(0,0,0,.42);
-        backdrop-filter:blur(2px);
-        z-index:99990;
-        display:none;
-      }
-      .mw-board-backdrop.open{display:block}
-
-      .mw-board-panel{
-        position:fixed;
-        top:18px;
-        left:18px;
-        width:min(380px, calc(100vw - 36px));
-        max-height:min(78vh, 720px);
-        overflow:auto;
-        border-radius:20px;
-        border:1px solid rgba(255,255,255,.12);
-        background:linear-gradient(180deg, rgba(15,26,45,.98), rgba(8,14,26,.98));
-        box-shadow:0 22px 80px rgba(0,0,0,.45);
-        z-index:99991;
-        display:none;
-      }
-      .mw-board-panel.open{display:block}
-
-      .mw-board-head{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        padding:14px 16px 12px;
-        border-bottom:1px solid rgba(255,255,255,.08);
-      }
-      .mw-board-title{
-        font-size:16px;
-        font-weight:900;
-        color:#eef4ff;
-        letter-spacing:.2px;
-      }
-      .mw-board-close{
+      .topbar .btn{
         height:34px;
-        min-width:34px;
-        padding:0 12px;
-        border-radius:999px;
-        border:1px solid rgba(255,255,255,.12);
-        background:rgba(255,255,255,.06);
-        color:#d7e4ff;
-        font-weight:900;
-        cursor:pointer;
-      }
-      .mw-board-close:hover{background:rgba(255,255,255,.12)}
-
-      .mw-board-body{padding:12px}
-      .mw-board-desc{
-        color:rgba(230,238,252,.68);
+        padding:0 10px;
         font-size:12px;
-        line-height:1.5;
-        margin:0 2px 10px;
-      }
-      .mw-board-list{display:grid;gap:10px}
-
-      .mw-board-item{
-        border:1px solid rgba(255,255,255,.10);
-        background:rgba(255,255,255,.04);
-        border-radius:16px;
-        padding:14px 14px;
-        color:#fff;
-        cursor:pointer;
-        text-align:left;
-        width:100%;
-        text-decoration:none;
-      }
-      .mw-board-item:hover{
-        background:rgba(255,255,255,.08);
-        border-color:rgba(255,255,255,.18);
-      }
-      .mw-board-item.current{
-        border-color:rgba(96,165,250,.55);
-        background:rgba(59,130,246,.14);
-        box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
-      }
-      .mw-board-item-title{
-        font-size:15px;
-        font-weight:900;
-        line-height:1.2;
-        margin-bottom:6px;
-      }
-      .mw-board-item-sub{
-        font-size:12px;
-        color:rgba(230,238,252,.66);
-        line-height:1.45;
-      }
-      .mw-board-badge{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        margin-left:8px;
-        padding:3px 8px;
-        border-radius:999px;
-        border:1px solid rgba(255,255,255,.14);
-        background:rgba(255,255,255,.06);
-        color:#dbe7ff;
-        font-size:11px;
-        font-weight:900;
-        vertical-align:middle;
       }
 
-      .mw-denied-screen{
-        position:fixed;
-        inset:0;
-        z-index:2147483000;
+      .toolbar{
+        position:sticky;
+        top:53px;
+        z-index:25;
+        grid-template-columns:1fr;
+        padding:10px;
+      }
+
+      .registerPanel{padding:10px}
+      .registerBox{grid-template-columns:1fr}
+
+      .main{overflow:visible}
+
+      .boardWrap{
+        padding:10px;
+        overflow:auto;
+      }
+
+      .sidePanel{
+        padding:10px;
+        max-height:none;
+      }
+
+      .scheduleBoard{min-width:860px}
+
+      .boardHeader{padding:12px}
+      .boardTitle h2{font-size:19px}
+
+      .bottomBar{
+        position:sticky;
+        bottom:0;
+        z-index:40;
         display:flex;
-        align-items:center;
-        justify-content:center;
-        padding:20px;
-        background:linear-gradient(180deg, rgba(11,18,32,.98), rgba(7,11,19,.99));
-        color:#e6eefc;
-        font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
       }
-      .mw-denied-card{
-        width:min(560px, calc(100vw - 28px));
-        border:1px solid rgba(255,255,255,.12);
-        border-radius:22px;
-        background:#101827;
-        box-shadow:0 24px 70px rgba(0,0,0,.46);
-        padding:24px;
-      }
-      .mw-denied-card h2{
-        margin:0 0 10px;
-        font-size:24px;
-        line-height:1.2;
-      }
-      .mw-denied-card p{
-        margin:0;
-        color:#b8c3d9;
-        line-height:1.65;
-        white-space:pre-wrap;
-        font-size:14px;
-      }
-      .mw-denied-meta{
-        margin-top:14px;
-        padding:12px 14px;
-        border-radius:14px;
-        border:1px solid rgba(255,255,255,.10);
-        background:rgba(255,255,255,.04);
-        color:#e6eefc;
-        font-size:13px;
-        font-weight:800;
-        line-height:1.6;
-        word-break:break-word;
-      }
-      .mw-denied-actions{
-        margin-top:18px;
-        display:flex;
-        gap:10px;
-        justify-content:flex-end;
-        flex-wrap:wrap;
-      }
-      .mw-denied-btn{
-        height:40px;
-        padding:0 14px;
-        border-radius:999px;
-        border:1px solid rgba(255,255,255,.14);
-        background:#162744;
-        color:#e6eefc;
-        cursor:pointer;
-        font-weight:900;
-      }
-      .mw-denied-btn:hover{background:#1a2f55}
-      .mw-denied-btn.danger{
-        background:rgba(107,27,27,.35);
-        border-color:rgba(255,60,60,.22);
-        color:#ffccd3;
-      }
-    `;
-    document.head.appendChild(style);
-  }
+    }
+  </style>
+</head>
 
-  function createMenuShell() {
-    const backdrop = document.createElement("div");
-    backdrop.className = "mw-board-backdrop";
-    backdrop.id = "mwBoardBackdrop";
-
-    const panel = document.createElement("div");
-    panel.className = "mw-board-panel";
-    panel.id = "mwBoardPanel";
-
-    panel.innerHTML = `
-      <div class="mw-board-head">
-        <div class="mw-board-title">게시판</div>
-        <button type="button" class="mw-board-close" id="mwBoardCloseBtn">닫기</button>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기">
+        <img src="/favicon.ico" alt="Maroowell" />
+      </a>
+      <div class="titleBox">
+        <h1>마루웰 용차 스케줄</h1>
+        <p>용차 기사 출근 / 휴무 / 여유인원 조회</p>
       </div>
-      <div class="mw-board-body">
-        <div class="mw-board-desc">권한이 있는 페이지까지만 표시됩니다.</div>
-        <div class="mw-board-list" id="mwBoardList"></div>
+      <div class="spacer"></div>
+      <div id="userBadge" class="userBadge">-</div>
+      <button id="btnToggleToolbar" class="btn" type="button">메뉴 숨김</button>
+      <button id="btnToggleRegister" class="btn copy" type="button">등록 닫기</button>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </header>
+
+    <section id="toolbar" class="toolbar">
+      <div class="field">
+        <label>주차 기준일</label>
+        <input id="baseDateInput" class="input" type="date" />
       </div>
-    `;
 
-    document.body.appendChild(backdrop);
-    document.body.appendChild(panel);
+      <div class="field">
+        <label>선택 일자</label>
+        <select id="selectedDateSelect" class="select"></select>
+      </div>
 
-    return {
-      backdrop,
-      panel,
-      list: panel.querySelector("#mwBoardList"),
-      closeBtn: panel.querySelector("#mwBoardCloseBtn")
-    };
-  }
+      <div class="field">
+        <label>검색</label>
+        <input id="searchInput" class="input" type="text" placeholder="기사 / 전화번호 / 차량번호" autocomplete="off" />
+      </div>
 
-  function findTrigger() {
-    return (
-      document.getElementById("mwBoardMenuToggle") ||
-      document.querySelector("[data-mw-board-toggle]") ||
-      null
-    );
-  }
+      <button id="btnPrevWeek" class="btn" type="button">이전주</button>
+      <button id="btnNextWeek" class="btn" type="button">다음주</button>
+      <button id="btnLoad" class="btn primary" type="button">불러오기</button>
+      <button id="btnSaveAll" class="btn ok" type="button">저장</button>
+      <button id="btnReset" class="btn" type="button">초기화</button>
 
-  function safeSetTrigger(trigger) {
-    if (!trigger) return;
-    trigger.setAttribute("href", "#");
-    trigger.setAttribute("role", "button");
-    trigger.setAttribute("aria-haspopup", "dialog");
-    trigger.style.cursor = "pointer";
-  }
+      <div class="metaLine">
+        <span id="statePill" class="pill ok">READY</span>
+        <span id="weekPill" class="pill">-</span>
+        <span id="driverPill" class="pill">기사 0</span>
+        <span id="dirtyPill" class="pill">미저장 0</span>
+        <span id="statusText">여유 셀을 누르면 휴무로 임시 변경됩니다. 저장을 눌러 DB에 반영하세요.</span>
+      </div>
+    </section>
 
-  function buildMenuHtml(access) {
-    const items = PAGES.filter(page => canAccessPage(page, access));
+    <section id="registerPanel" class="registerPanel">
+      <div class="registerBox">
+        <div class="field">
+          <label>등록 일자</label>
+          <input id="formDate" class="input" type="date" />
+        </div>
 
-    return items.map(page => {
-      const current = isCurrentPage(page);
-      const badgeText = pageBadge(page);
-      const badge = badgeText ? `<span class="mw-board-badge">${escapeHtml(badgeText)}</span>` : "";
+        <div class="field">
+          <label>용차 기사</label>
+          <select id="formDriver" class="select"></select>
+        </div>
 
-      return `
-        <button
-          type="button"
-          class="mw-board-item ${current ? "current" : ""}"
-          data-path="${escapeHtml(page.path)}"
-        >
-          <div class="mw-board-item-title">
-            ${escapeHtml(page.label)} ${badge}
+        <div class="field">
+          <label>상태</label>
+          <select id="formStatus" class="select">
+            <option value="출근">출근</option>
+            <option value="휴무">휴무</option>
+            <option value="">등록 삭제</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>메모</label>
+          <input id="formMemo" class="input" type="text" placeholder="선택 입력" autocomplete="off" />
+        </div>
+
+        <button id="btnSaveOne" class="btn ok" type="button">선택 저장</button>
+        <button id="btnClearOne" class="btn danger" type="button">등록 삭제</button>
+
+        <div class="registerHelp">
+          표에서 여유를 누르면 바로 휴무로 바뀝니다. 휴무/출근/휴무충돌을 누르면 등록 삭제로 바뀝니다. 배차/실적 셀은 수동 변경 보호를 위해 등록창만 세팅됩니다.
+        </div>
+      </div>
+    </section>
+
+    <main class="main">
+      <section class="boardWrap">
+        <div class="scheduleBoard">
+          <div class="boardHeader">
+            <div class="boardTitle">
+              <h2 id="boardTitle">용차 / 주간 조회</h2>
+              <p id="boardSubTitle">-</p>
+            </div>
+            <button id="btnCopyFree" class="btn warn" type="button">여유인원 복사</button>
           </div>
-          <div class="mw-board-item-sub">${escapeHtml(pageSubtext(page.path))}</div>
-        </button>
-      `;
-    }).join("");
-  }
-
-  function showAccessDenied(page, access) {
-    injectStyles();
-
-    document.documentElement.style.visibility = "visible";
-
-    const old = document.getElementById("mwDeniedScreen");
-    if (old) old.remove();
-
-    const homePath = window.MARUWELL_CONFIG?.PATHS?.index || "/zipcode_search";
-    const loginPath = window.MARUWELL_CONFIG?.PATHS?.login || "/";
-
-    const email = access?.email || "-";
-    const roleLevel = Number(access?.max_role_level || 0);
-    const isMaroowell = access?.is_maroowell === true;
-    const isAdmin = access?.is_admin === true;
-    const isDragon = access?.is_dragon_car_admin === true;
-
-    const screen = document.createElement("div");
-    screen.id = "mwDeniedScreen";
-    screen.className = "mw-denied-screen";
-    screen.innerHTML = `
-      <div class="mw-denied-card">
-        <h2>접근 권한 없음</h2>
-        <p>${escapeHtml(requirementText(page))}</p>
-        <div class="mw-denied-meta">
-          현재 계정: ${escapeHtml(email)}<br>
-          마루웰: ${isMaroowell ? "O" : "X"} /
-          관리자: ${isAdmin ? "O" : "X"} /
-          role_level: ${roleLevel} /
-          용차관리자: ${isDragon ? "O" : "X"}
+          <div id="tableHost" class="tableWrap">
+            <div class="emptyText">불러오기를 누르면 용차 기사 주간 스케줄이 표시됩니다.</div>
+          </div>
         </div>
-        <div class="mw-denied-actions">
-          <button type="button" class="mw-denied-btn" id="mwDeniedHomeBtn">홈으로</button>
-          <button type="button" class="mw-denied-btn danger" id="mwDeniedLoginBtn">${access?.signed_in ? "로그아웃" : "로그인"}</button>
+      </section>
+
+      <aside class="sidePanel">
+        <div class="card">
+          <div class="cardHead">
+            <h3 id="selectedDayTitle">선택 일자</h3>
+            <span id="selectedDayBadge" class="pill">-</span>
+          </div>
+          <div class="cardBody">
+            <div class="summaryGrid">
+              <div class="summaryItem">
+                <div class="summaryLabel">여유</div>
+                <div id="sumFree" class="summaryValue">0</div>
+              </div>
+              <div class="summaryItem">
+                <div class="summaryLabel">출근</div>
+                <div id="sumWork" class="summaryValue">0</div>
+              </div>
+              <div class="summaryItem">
+                <div class="summaryLabel">휴무</div>
+                <div id="sumOff" class="summaryValue">0</div>
+              </div>
+              <div class="summaryItem">
+                <div class="summaryLabel">배차/실적</div>
+                <div id="sumAssigned" class="summaryValue">0</div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    `;
 
-    document.body.appendChild(screen);
-    document.body.style.overflow = "hidden";
+        <div class="card">
+          <div class="cardHead">
+            <h3>여유 인원</h3>
+            <span id="freeCountBadge" class="pill ok">0명</span>
+          </div>
+          <div id="freeList" class="cardBody freeList">
+            <div class="emptyText">선택 일자의 여유 인원이 여기에 표시됩니다.</div>
+          </div>
+        </div>
+      </aside>
+    </main>
 
-    screen.querySelector("#mwDeniedHomeBtn")?.addEventListener("click", () => {
-      location.href = homePath;
-    });
+    <div class="bottomBar">
+      <button id="btnMobileRegister" class="btn copy" type="button">등록</button>
+      <button id="btnMobileSave" class="btn ok" type="button">저장</button>
+      <button id="btnMobileLoad" class="btn primary" type="button">불러오기</button>
+    </div>
+  </div>
 
-    screen.querySelector("#mwDeniedLoginBtn")?.addEventListener("click", async () => {
-      try {
-        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
+  <script>
+    (async function(){
+      "use strict";
 
-        if (access?.signed_in && SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient) {
-          const authStorage = (() => {
-            try {
-              return window.sessionStorage;
-            } catch {
-              return undefined;
-            }
-          })();
+      const CONFIG = window.MARUWELL_CONFIG || {};
+      const SUPABASE_URL = CONFIG.SUPABASE_URL;
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY;
+      const LOGIN_PATH = CONFIG.PATHS?.login || "/login.html";
 
-          const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      const TABLE_INFO = "maroowell_info";
+      const TABLE_SCHEDULE = "maroowell_schedule";
+      const TABLE_DRAGON_CAR = "dragon_car";
+
+      const DRAGON_CAMP = "용차";
+      const DRAGON_WAVE = "WAVE2";
+      const STATUS_WORK = "출근";
+      const STATUS_OFF = "휴무";
+
+      const ADDITIONAL_DRAGON_NAMES = ["이우람", "장세인", "김용준"];
+      const TOP_DRIVER_ORDER = ["이우람", "장세인"];
+      const DISPLAY_NAME_MAP = {
+        "이우람": "이대표",
+        "장세인": "장이사"
+      };
+
+      const DAYS = ["일","월","화","수","목","금","토"];
+
+      const els = {
+        userBadge: document.getElementById("userBadge"),
+        btnLogout: document.getElementById("btnLogout"),
+        btnToggleToolbar: document.getElementById("btnToggleToolbar"),
+        btnToggleRegister: document.getElementById("btnToggleRegister"),
+        toolbar: document.getElementById("toolbar"),
+        registerPanel: document.getElementById("registerPanel"),
+
+        baseDateInput: document.getElementById("baseDateInput"),
+        selectedDateSelect: document.getElementById("selectedDateSelect"),
+        searchInput: document.getElementById("searchInput"),
+        btnPrevWeek: document.getElementById("btnPrevWeek"),
+        btnNextWeek: document.getElementById("btnNextWeek"),
+        btnLoad: document.getElementById("btnLoad"),
+        btnSaveAll: document.getElementById("btnSaveAll"),
+        btnReset: document.getElementById("btnReset"),
+
+        statePill: document.getElementById("statePill"),
+        weekPill: document.getElementById("weekPill"),
+        driverPill: document.getElementById("driverPill"),
+        dirtyPill: document.getElementById("dirtyPill"),
+        statusText: document.getElementById("statusText"),
+
+        formDate: document.getElementById("formDate"),
+        formDriver: document.getElementById("formDriver"),
+        formStatus: document.getElementById("formStatus"),
+        formMemo: document.getElementById("formMemo"),
+        btnSaveOne: document.getElementById("btnSaveOne"),
+        btnClearOne: document.getElementById("btnClearOne"),
+
+        boardTitle: document.getElementById("boardTitle"),
+        boardSubTitle: document.getElementById("boardSubTitle"),
+        tableHost: document.getElementById("tableHost"),
+        btnCopyFree: document.getElementById("btnCopyFree"),
+
+        selectedDayTitle: document.getElementById("selectedDayTitle"),
+        selectedDayBadge: document.getElementById("selectedDayBadge"),
+        sumFree: document.getElementById("sumFree"),
+        sumWork: document.getElementById("sumWork"),
+        sumOff: document.getElementById("sumOff"),
+        sumAssigned: document.getElementById("sumAssigned"),
+        freeCountBadge: document.getElementById("freeCountBadge"),
+        freeList: document.getElementById("freeList"),
+
+        btnMobileRegister: document.getElementById("btnMobileRegister"),
+        btnMobileSave: document.getElementById("btnMobileSave"),
+        btnMobileLoad: document.getElementById("btnMobileLoad")
+      };
+
+      const state = {
+        session: null,
+        user: null,
+        access: null,
+
+        baseDate: todayIso(),
+        weekStart: "",
+        weekEnd: "",
+        weekDates: [],
+        isoYear: 0,
+        isoWeek: 0,
+        weekLabel: "",
+        selectedDate: "",
+
+        drivers: [],
+        manualSchedules: [],
+        normalSchedules: [],
+        dragonRecords: [],
+
+        manualMap: new Map(),
+        assignmentMap: new Map(),
+        dragonRecordMap: new Map(),
+        dirty: new Map()
+      };
+
+      const supabase = SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: {
-              persistSession: !!authStorage,
-              storage: authStorage,
+              storage: window.sessionStorage,
+              persistSession: true,
               autoRefreshToken: true,
               detectSessionInUrl: true
             }
-          });
+          })
+        : null;
 
-          await supabase.auth.signOut();
-        }
-      } catch {}
-
-      location.href = loginPath;
-    });
-  }
-
-  async function init() {
-    injectStyles();
-
-    const access = await loadAccess();
-    const currentPage = findCurrentPage();
-
-    document.documentElement.style.visibility = "visible";
-
-    if (currentPage && !canAccessPage(currentPage, access)) {
-      showAccessDenied(currentPage, access);
-      return;
-    }
-
-    const trigger = findTrigger();
-    if (!trigger) return;
-
-    if (MENU_MODE === "admin" && !canAccessPage(PAGES.find(p => p.key === "admin-access"), access)) {
-      return;
-    }
-
-    safeSetTrigger(trigger);
-
-    const ui = createMenuShell();
-    ui.list.innerHTML = buildMenuHtml(access);
-
-    let opened = false;
-
-    function openMenu() {
-      if (opened) return;
-      opened = true;
-      ui.backdrop.classList.add("open");
-      ui.panel.classList.add("open");
-      document.body.style.overflow = "hidden";
-    }
-
-    function closeMenu() {
-      if (!opened) return;
-      opened = false;
-      ui.backdrop.classList.remove("open");
-      ui.panel.classList.remove("open");
-      document.body.style.overflow = "";
-    }
-
-    trigger.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (opened) closeMenu();
-      else openMenu();
-    });
-
-    ui.closeBtn.addEventListener("click", closeMenu);
-    ui.backdrop.addEventListener("click", closeMenu);
-
-    ui.list.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-path]");
-      if (!btn) return;
-
-      const path = btn.getAttribute("data-path") || "/";
-      const page = PAGES.find(item => item.path === path);
-
-      if (page && isCurrentPage(page)) {
-        closeMenu();
-        return;
+      function clean(v){
+        return String(v ?? "").trim();
       }
 
-      closeMenu();
+      function compact(v){
+        return clean(v).replace(/\s+/g,"");
+      }
 
-      setTimeout(() => {
-        location.href = path;
-      }, 80);
-    });
+      function keyOf(v){
+        return compact(v).toUpperCase();
+      }
 
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeMenu();
-    });
-  }
+      function esc(v){
+        return String(v ?? "")
+          .replace(/&/g,"&amp;")
+          .replace(/</g,"&lt;")
+          .replace(/>/g,"&gt;")
+          .replace(/"/g,"&quot;")
+          .replace(/'/g,"&#39;");
+      }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
-  } else {
-    init();
-  }
-})();
+      function todayIso(){
+        return toIso(new Date());
+      }
+
+      function toIso(d){
+        if(!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      }
+
+      function parseIso(v){
+        const m = clean(v).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(!m) return null;
+        return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+      }
+
+      function addDays(iso, days){
+        const d = parseIso(iso) || new Date();
+        d.setDate(d.getDate() + days);
+        return toIso(d);
+      }
+
+      function sundayOf(iso){
+        const d = parseIso(iso) || new Date();
+        d.setDate(d.getDate() - d.getDay());
+        return toIso(d);
+      }
+
+      function weekDatesFromStart(startIso){
+        return Array.from({length:7}, (_,i) => addDays(startIso, i));
+      }
+
+      function isoWeekInfoFromMondayRef(startIso){
+        const sunday = parseIso(startIso) || new Date();
+        const ref = new Date(sunday);
+        ref.setDate(ref.getDate() + 1);
+
+        const target = new Date(Date.UTC(ref.getFullYear(), ref.getMonth(), ref.getDate()));
+        const dayNum = target.getUTCDay() || 7;
+        target.setUTCDate(target.getUTCDate() + 4 - dayNum);
+
+        const isoYear = target.getUTCFullYear();
+        const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+        const isoWeek = Math.ceil((((target - yearStart) / 86400000) + 1) / 7);
+
+        return {
+          isoYear,
+          isoWeek,
+          weekLabel: `${isoYear} - ${isoWeek}W`
+        };
+      }
+
+      function dateLabel(iso){
+        const d = parseIso(iso);
+        if(!d) return iso;
+        return `${d.getMonth()+1}/${d.getDate()} ${DAYS[d.getDay()]}`;
+      }
+
+      function mdLabel(iso){
+        const d = parseIso(iso);
+        if(!d) return iso;
+        return `${d.getMonth()+1}/${d.getDate()}`;
+      }
+
+      function weekRangeLabel(){
+        if(!state.weekDates.length) return "-";
+        return `${mdLabel(state.weekDates[0])} ~ ${mdLabel(state.weekDates[6])}`;
+      }
+
+      function updateWeekState(){
+        state.weekStart = sundayOf(state.baseDate);
+        state.weekDates = weekDatesFromStart(state.weekStart);
+        state.weekEnd = state.weekDates[6];
+
+        const info = isoWeekInfoFromMondayRef(state.weekStart);
+        state.isoYear = info.isoYear;
+        state.isoWeek = info.isoWeek;
+        state.weekLabel = info.weekLabel;
+
+        if(!state.selectedDate || state.selectedDate < state.weekStart || state.selectedDate > state.weekEnd){
+          state.selectedDate = state.weekDates[0];
+        }
+
+        els.baseDateInput.value = state.baseDate;
+        els.weekPill.textContent = `${weekRangeLabel()} / ${state.weekLabel}`;
+        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel}`;
+        renderDateSelect();
+      }
+
+      function renderDateSelect(){
+        els.selectedDateSelect.innerHTML = state.weekDates.map(d => `
+          <option value="${esc(d)}" ${d === state.selectedDate ? "selected" : ""}>${esc(dateLabel(d))}</option>
+        `).join("");
+        els.formDate.value = state.selectedDate;
+      }
+
+      function setState(kind, text){
+        els.statePill.className = `pill ${kind || "ok"}`;
+        els.statePill.textContent = text || "READY";
+      }
+
+      function setStatus(text){
+        els.statusText.textContent = text || "";
+      }
+
+      function displayDriverName(driver){
+        const name = clean(driver?.person_name);
+        return DISPLAY_NAME_MAP[name] || name;
+      }
+
+      function isAdditionalDragonDriverName(name){
+        const k = keyOf(name);
+        return ADDITIONAL_DRAGON_NAMES.some(v => keyOf(v) === k);
+      }
+
+      function isTopDriver(driver){
+        const name = clean(driver?.person_name);
+        return TOP_DRIVER_ORDER.includes(name);
+      }
+
+      function topDriverRank(driver){
+        const name = clean(driver?.person_name);
+        const idx = TOP_DRIVER_ORDER.indexOf(name);
+        return idx >= 0 ? idx : 999;
+      }
+
+      function isRetiredPosition(position){
+        const p = compact(position).toUpperCase();
+        return p.includes("퇴사") || p.includes("퇴직") || p.includes("퇴사자") || p.includes("RETIRED") || p.includes("RESIGNED") || p.includes("INACTIVE");
+      }
+
+      function isSubAccountRole(position){
+        const p = compact(position).toUpperCase();
+        return p.includes("서브") || p.includes("SUB");
+      }
+
+      function isExcludedPerson(row){
+        return isRetiredPosition(row.position_title) || isSubAccountRole(row.position_title);
+      }
+
+      function driverKey(driver){
+        return `DRAGON${driver.pk_id}`;
+      }
+
+      function driverMatchKeys(driver){
+        return [
+          driver.person_name,
+          displayDriverName(driver),
+          driver.coupang_id,
+          driver.contact_phone
+        ].map(keyOf).filter(Boolean);
+      }
+
+      function scheduleMatchKeys(row){
+        return [
+          row.driver_name,
+          row.driver_display_name,
+          row.driver_owner_name,
+          row.driver_export_name,
+          row.driver_coupang_id
+        ].map(keyOf).filter(Boolean);
+      }
+
+      function dragonRecordMatchKeys(row){
+        return [
+          row.delivery_driver,
+          row.order_name,
+          row.dragon_car_id
+        ].map(keyOf).filter(Boolean);
+      }
+
+      function hasIntersection(a,b){
+        const set = new Set(a);
+        return b.some(x => set.has(x));
+      }
+
+      function normalizeManualStatus(row){
+        const raw = clean(row.driver_account_type || row.memo);
+        if(raw.includes("휴무")) return STATUS_OFF;
+        if(raw.includes("출근")) return STATUS_WORK;
+        return STATUS_WORK;
+      }
+
+      async function ensureAuth(){
+        if(!supabase){
+          document.documentElement.style.visibility = "visible";
+          alert("Supabase 설정을 찾을 수 없습니다.");
+          return false;
+        }
+
+        const { data } = await supabase.auth.getSession();
+        const session = data?.session || null;
+
+        if(!session){
+          location.href = LOGIN_PATH;
+          return false;
+        }
+
+        state.session = session;
+        state.user = session.user;
+        els.userBadge.textContent = session.user?.email || "로그인";
+
+        return true;
+      }
+
+      async function loadAccess(){
+        const { data, error } = await supabase.rpc("mw_my_access").maybeSingle();
+
+        if(error || !data){
+          throw new Error("권한 정보를 불러오지 못했습니다.");
+        }
+
+        state.access = data;
+
+        const isMaroowell = data.is_maroowell === true;
+        const isAdmin = data.is_admin === true;
+        const role = Number(data.max_role_level || 0);
+        const isDragon = data.is_dragon_car_admin === true;
+
+        const allowed = isDragon || (isMaroowell && role >= 30) || (isMaroowell && isAdmin);
+
+        if(!allowed){
+          document.documentElement.style.visibility = "visible";
+          alert("마루웰 팀장 이상 또는 용차 관리자 권한이 필요합니다.");
+          location.href = "/";
+          return false;
+        }
+
+        return true;
+      }
+
+      async function fetchDrivers(){
+        const { data, error } = await supabase
+          .from(TABLE_INFO)
+          .select("pk_id,person_name,contact_phone,position_title,camp_code,wave,coupang_id,vehicle_plate_number,dragon_car_commission")
+          .order("person_name", { ascending:true });
+
+        if(error) throw error;
+
+        const rows = Array.isArray(data) ? data : [];
+
+        const seen = new Set();
+
+        return rows
+          .map(r => ({
+            pk_id: r.pk_id,
+            person_name: clean(r.person_name),
+            contact_phone: clean(r.contact_phone),
+            position_title: clean(r.position_title),
+            camp_code: clean(r.camp_code),
+            wave: clean(r.wave),
+            coupang_id: clean(r.coupang_id),
+            vehicle_plate_number: clean(r.vehicle_plate_number),
+            dragon_car_commission: clean(r.dragon_car_commission)
+          }))
+          .filter(r => r.person_name)
+          .filter(r => compact(r.camp_code) === compact(DRAGON_CAMP) || isAdditionalDragonDriverName(r.person_name))
+          .filter(r => !isExcludedPerson(r))
+          .filter(r => {
+            const k = clean(r.pk_id) || keyOf(r.person_name);
+            if(seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          })
+          .sort((a,b) => {
+            const ar = topDriverRank(a);
+            const br = topDriverRank(b);
+
+            if(ar !== br) return ar - br;
+
+            return String(displayDriverName(a)).localeCompare(String(displayDriverName(b)), "ko", {
+              numeric:true,
+              sensitivity:"base"
+            });
+          });
+      }
+
+      async function fetchManualSchedules(){
+        const { data, error } = await supabase
+          .from(TABLE_SCHEDULE)
+          .select("id,schedule_date,iso_year,iso_week,week_label,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_export_name,driver_coupang_id,driver_account_type,memo,row_order,cell_color,is_active,created_at,updated_at")
+          .eq("camp", DRAGON_CAMP)
+          .eq("wave", DRAGON_WAVE)
+          .gte("schedule_date", state.weekStart)
+          .lte("schedule_date", state.weekEnd)
+          .eq("is_active", true)
+          .order("schedule_date", { ascending:true })
+          .order("row_order", { ascending:true });
+
+        if(error) throw error;
+        return Array.isArray(data) ? data : [];
+      }
+
+      async function fetchNormalSchedules(){
+        const { data, error } = await supabase
+          .from(TABLE_SCHEDULE)
+          .select("id,schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_export_name,driver_coupang_id,driver_account_type,memo,is_active")
+          .gte("schedule_date", state.weekStart)
+          .lte("schedule_date", state.weekEnd)
+          .eq("is_active", true)
+          .order("schedule_date", { ascending:true });
+
+        if(error) throw error;
+
+        return (Array.isArray(data) ? data : [])
+          .filter(r => compact(r.camp) !== compact(DRAGON_CAMP));
+      }
+
+      async function fetchDragonCarRecords(){
+        const { data, error } = await supabase
+          .from(TABLE_DRAGON_CAR)
+          .select("id,order_date,order_name,order_vendor,camp,wave,route,delivery_driver,parcel,return_count,amount,dragon_car_id,payment_confirm,tax_invoice,dragon_car_note")
+          .gte("order_date", state.weekStart)
+          .lte("order_date", state.weekEnd)
+          .order("order_date", { ascending:true });
+
+        if(error) throw error;
+        return Array.isArray(data) ? data : [];
+      }
+
+      function rebuildMaps(){
+        state.manualMap.clear();
+        state.assignmentMap.clear();
+        state.dragonRecordMap.clear();
+
+        for(const row of state.manualSchedules){
+          const key = `${row.schedule_date}||${clean(row.route_label)}`;
+          state.manualMap.set(key, {
+            ...row,
+            status: normalizeManualStatus(row)
+          });
+        }
+
+        for(const driver of state.drivers){
+          const dKeys = driverMatchKeys(driver);
+          const dKey = driverKey(driver);
+
+          for(const row of state.normalSchedules){
+            const rKeys = scheduleMatchKeys(row);
+            if(!hasIntersection(dKeys, rKeys)) continue;
+
+            const key = `${row.schedule_date}||${dKey}`;
+            if(!state.assignmentMap.has(key)) state.assignmentMap.set(key, []);
+            state.assignmentMap.get(key).push(row);
+          }
+
+          for(const row of state.dragonRecords){
+            const rKeys = dragonRecordMatchKeys(row);
+            if(!hasIntersection(dKeys, rKeys)) continue;
+
+            const key = `${row.order_date}||${dKey}`;
+            if(!state.dragonRecordMap.has(key)) state.dragonRecordMap.set(key, []);
+            state.dragonRecordMap.get(key).push(row);
+          }
+        }
+      }
+
+      function manualFor(driver, date){
+        const dKey = driverKey(driver);
+        const dirty = state.dirty.get(`${date}||${dKey}`);
+
+        if(dirty){
+          return dirty.deleted ? null : dirty;
+        }
+
+        return state.manualMap.get(`${date}||${dKey}`) || null;
+      }
+
+      function assignmentsFor(driver, date){
+        return state.assignmentMap.get(`${date}||${driverKey(driver)}`) || [];
+      }
+
+      function recordsFor(driver, date){
+        return state.dragonRecordMap.get(`${date}||${driverKey(driver)}`) || [];
+      }
+
+      function finalStatus(driver, date){
+        const manual = manualFor(driver, date);
+        const assignments = assignmentsFor(driver, date);
+        const records = recordsFor(driver, date);
+
+        const hasAssigned = assignments.length > 0;
+        const hasRecord = records.length > 0;
+
+        if(manual?.status === STATUS_OFF){
+          if(hasAssigned || hasRecord){
+            return {
+              type:"warn",
+              label:"휴무 충돌",
+              sub: hasAssigned ? `${assignments[0].camp} ${assignments[0].route_label || ""}` : "용차 실적 있음",
+              manual,
+              assignments,
+              records
+            };
+          }
+
+          return {
+            type:"off",
+            label:"휴무",
+            sub: manual.memo || "",
+            manual,
+            assignments,
+            records
+          };
+        }
+
+        if(manual?.status === STATUS_WORK){
+          return {
+            type:"work",
+            label:"출근",
+            sub: manual.memo || "",
+            manual,
+            assignments,
+            records
+          };
+        }
+
+        if(hasAssigned){
+          return {
+            type:"assigned",
+            label:"배차",
+            sub: `${assignments[0].camp || "-"} ${assignments[0].route_label || ""}`,
+            manual:null,
+            assignments,
+            records
+          };
+        }
+
+        if(hasRecord){
+          const totalParcel = records.reduce((sum,r) => sum + Number(r.parcel || 0), 0);
+          return {
+            type:"record",
+            label:"실적",
+            sub: totalParcel ? `${totalParcel}건` : (records[0].route || ""),
+            manual:null,
+            assignments,
+            records
+          };
+        }
+
+        return {
+          type:"free",
+          label:"여유",
+          sub:"",
+          manual:null,
+          assignments,
+          records
+        };
+      }
+
+      function getFilteredDrivers(){
+        const q = keyOf(els.searchInput.value);
+
+        if(!q) return state.drivers;
+
+        return state.drivers.filter(d => {
+          const hay = keyOf([
+            d.person_name,
+            displayDriverName(d),
+            d.contact_phone,
+            d.vehicle_plate_number,
+            d.position_title
+          ].join(" "));
+          return hay.includes(q);
+        });
+      }
+
+      function renderDriverSelect(){
+        els.formDriver.innerHTML = state.drivers.map(d => `
+          <option value="${esc(driverKey(d))}">
+            ${esc(displayDriverName(d))}
+          </option>
+        `).join("");
+      }
+
+      function render(){
+        renderHeader();
+        renderTable();
+        renderSelectedDayPanel();
+        updatePills();
+      }
+
+      function renderHeader(){
+        els.boardTitle.textContent = "용차 / 주간 스케줄";
+        els.boardSubTitle.textContent = `${weekRangeLabel()} · ${state.weekLabel} · camp: ${DRAGON_CAMP}`;
+        els.selectedDayTitle.textContent = `${dateLabel(state.selectedDate)} 여유인원`;
+        els.selectedDayBadge.textContent = state.selectedDate || "-";
+      }
+
+      function renderTable(){
+        const drivers = getFilteredDrivers();
+
+        if(!drivers.length){
+          els.tableHost.innerHTML = `<div class="emptyText">표시할 용차 기사가 없습니다.</div>`;
+          return;
+        }
+
+        let html = `
+          <table class="scheduleTable">
+            <colgroup>
+              <col style="width:180px">
+              ${state.weekDates.map(() => `<col style="width:118px">`).join("")}
+            </colgroup>
+            <thead>
+              <tr>
+                <th>용차 기사</th>
+                ${state.weekDates.map((date,idx) => `
+                  <th class="${idx === 0 ? "sun" : ""} ${date === state.selectedDate ? "selectedDay" : ""}">
+                    ${esc(dateLabel(date))}
+                  </th>
+                `).join("")}
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        for(const driver of drivers){
+          const metaLines = [
+            driver.contact_phone ? esc(driver.contact_phone) : "",
+            driver.vehicle_plate_number ? esc(driver.vehicle_plate_number) : ""
+          ].filter(Boolean);
+
+          html += `
+            <tr>
+              <td class="driverCell">
+                <div class="driverName">${esc(displayDriverName(driver))}</div>
+                <div class="driverMeta">${metaLines.join("<br>")}</div>
+              </td>
+          `;
+
+          for(const date of state.weekDates){
+            const st = finalStatus(driver, date);
+            const dKey = driverKey(driver);
+            const isDirty = state.dirty.has(`${date}||${dKey}`);
+
+            html += `
+              <td class="${date === state.selectedDate ? "selectedDay" : ""}">
+                <button
+                  type="button"
+                  class="statusBtn ${esc(st.type)} ${isDirty ? "dirty" : ""}"
+                  data-date="${esc(date)}"
+                  data-driver-key="${esc(dKey)}"
+                  data-status-type="${esc(st.type)}"
+                  title="${esc(cellTitle(st))}"
+                >
+                  ${esc(st.label)}
+                  ${st.sub ? `<span class="statusSub">${esc(st.sub)}</span>` : ""}
+                </button>
+              </td>
+            `;
+          }
+
+          html += `</tr>`;
+        }
+
+        html += `</tbody></table>`;
+        els.tableHost.innerHTML = html;
+
+        els.tableHost.querySelectorAll(".statusBtn").forEach(btn => {
+          btn.addEventListener("click", () => {
+            handleStatusCellClick(btn.dataset.date, btn.dataset.driverKey);
+          });
+        });
+      }
+
+      function cellTitle(status){
+        const lines = [];
+
+        lines.push(status.label);
+
+        if(status.manual){
+          lines.push(`수동등록: ${status.manual.status || "-"}`);
+          if(status.manual.memo) lines.push(`메모: ${status.manual.memo}`);
+        }
+
+        if(status.assignments?.length){
+          lines.push("마루웰 스케줄:");
+          for(const row of status.assignments.slice(0,4)){
+            lines.push(`- ${row.camp || "-"} / ${row.wave || "-"} / ${row.route_label || "-"}`);
+          }
+        }
+
+        if(status.records?.length){
+          lines.push("dragon_car 실적:");
+          for(const row of status.records.slice(0,4)){
+            lines.push(`- ${row.camp || "-"} / ${row.route || "-"} / ${row.parcel || 0}건`);
+          }
+        }
+
+        return lines.join("\n");
+      }
+
+      function renderSelectedDayPanel(){
+        const counts = {
+          free:0,
+          work:0,
+          off:0,
+          assigned:0
+        };
+
+        const freeDrivers = [];
+
+        for(const driver of state.drivers){
+          const st = finalStatus(driver, state.selectedDate);
+
+          if(st.type === "free"){
+            counts.free++;
+            freeDrivers.push(driver);
+          }else if(st.type === "off"){
+            counts.off++;
+          }else if(st.type === "assigned" || st.type === "record"){
+            counts.assigned++;
+          }else{
+            counts.work++;
+          }
+        }
+
+        els.sumFree.textContent = counts.free;
+        els.sumWork.textContent = counts.work;
+        els.sumOff.textContent = counts.off;
+        els.sumAssigned.textContent = counts.assigned;
+        els.freeCountBadge.textContent = `${freeDrivers.length}명`;
+
+        if(!freeDrivers.length){
+          els.freeList.innerHTML = `<div class="emptyText">선택 일자에 여유 인원이 없습니다.</div>`;
+          return;
+        }
+
+        els.freeList.innerHTML = freeDrivers.map(d => {
+          const meta = [
+            d.contact_phone ? esc(d.contact_phone) : "",
+            d.vehicle_plate_number ? esc(d.vehicle_plate_number) : ""
+          ].filter(Boolean).join(" · ");
+
+          return `
+            <div class="freeItem">
+              <b>${esc(displayDriverName(d))}</b>
+              <span>${meta || "-"}</span>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function updatePills(){
+        els.driverPill.textContent = `기사 ${state.drivers.length}`;
+        els.dirtyPill.textContent = `미저장 ${state.dirty.size}`;
+      }
+
+      function setFormFor(date, dKey, status, memo){
+        const driver = state.drivers.find(d => driverKey(d) === dKey);
+
+        if(!driver) return;
+
+        state.selectedDate = date;
+        els.selectedDateSelect.value = date;
+
+        els.formDate.value = date;
+        els.formDriver.value = dKey;
+        els.formStatus.value = status || "";
+        els.formMemo.value = memo || "";
+      }
+
+      function handleStatusCellClick(date, dKey){
+        const driver = state.drivers.find(d => driverKey(d) === dKey);
+
+        if(!driver) return;
+
+        const st = finalStatus(driver, date);
+
+        state.selectedDate = date;
+        els.selectedDateSelect.value = date;
+
+        if(st.type === "free"){
+          stageRecord(date, driver, STATUS_OFF, "", false);
+          setFormFor(date, dKey, STATUS_OFF, "");
+          setStatus(`${dateLabel(date)} / ${displayDriverName(driver)} 휴무 변경사항이 임시 반영되었습니다. 저장을 눌러 DB에 반영하세요.`);
+          render();
+          return;
+        }
+
+        if(st.type === "off" || st.type === "work" || st.type === "warn"){
+          stageRecord(date, driver, "", "", true);
+          setFormFor(date, dKey, "", "");
+          setStatus(`${dateLabel(date)} / ${displayDriverName(driver)} 등록 삭제 변경사항이 임시 반영되었습니다. 저장을 눌러 DB에 반영하세요.`);
+          render();
+          return;
+        }
+
+        setFormFor(date, dKey, STATUS_WORK, "");
+        setStatus(`${dateLabel(date)} / ${displayDriverName(driver)}은 이미 ${st.label} 상태입니다. 필요한 경우 등록창에서 직접 수정하세요.`);
+        render();
+      }
+
+      function makeDirtyRecord(date, driver, status, memo, deleted){
+        return {
+          schedule_date: date,
+          camp: DRAGON_CAMP,
+          wave: DRAGON_WAVE,
+          route_label: driverKey(driver),
+
+          driver_name: deleted ? null : driver.person_name,
+          driver_display_name: deleted ? null : driver.person_name,
+          driver_owner_name: deleted ? null : driver.person_name,
+          driver_export_name: deleted ? null : driver.person_name,
+          driver_coupang_id: deleted ? null : (driver.coupang_id || null),
+          driver_account_type: deleted ? null : status,
+
+          memo: deleted ? null : (memo || null),
+          row_order: Number(driver.pk_id || 0),
+          cell_color: null,
+          is_active: !deleted,
+          deleted: !!deleted,
+          status: status || ""
+        };
+      }
+
+      function stageRecord(date, driver, status, memo, deleted){
+        const dKey = driverKey(driver);
+        const rec = makeDirtyRecord(date, driver, status, memo, deleted || !status);
+        state.dirty.set(`${date}||${dKey}`, rec);
+      }
+
+      function stageFormRecord(deleted){
+        const date = clean(els.formDate.value);
+        const dKey = clean(els.formDriver.value);
+        const driver = state.drivers.find(d => driverKey(d) === dKey);
+
+        if(!date){
+          alert("등록 일자를 선택하세요.");
+          return;
+        }
+
+        if(!driver){
+          alert("용차 기사를 선택하세요.");
+          return;
+        }
+
+        const status = deleted ? "" : clean(els.formStatus.value);
+        const memo = clean(els.formMemo.value);
+
+        stageRecord(date, driver, status, memo, deleted || !status);
+
+        state.selectedDate = date;
+        els.selectedDateSelect.value = date;
+
+        render();
+
+        setStatus(`${dateLabel(date)} / ${displayDriverName(driver)} ${deleted || !status ? "삭제" : status} 변경사항이 임시 반영되었습니다. 저장을 눌러 DB에 반영하세요.`);
+      }
+
+      async function saveAll(){
+        if(!state.dirty.size){
+          alert("저장할 변경사항이 없습니다.");
+          return;
+        }
+
+        const rows = Array.from(state.dirty.values()).map(r => ({
+          schedule_date: r.schedule_date,
+          iso_year: state.isoYear,
+          iso_week: state.isoWeek,
+          week_label: state.weekLabel,
+          camp: r.camp,
+          wave: r.wave,
+          route_label: r.route_label,
+          driver_name: r.driver_name,
+          driver_display_name: r.driver_display_name,
+          driver_owner_name: r.driver_owner_name,
+          driver_export_name: r.driver_export_name,
+          driver_coupang_id: r.driver_coupang_id,
+          driver_account_type: r.driver_account_type,
+          memo: r.memo,
+          row_order: r.row_order,
+          cell_color: r.cell_color,
+          is_active: r.is_active,
+          updated_at: new Date().toISOString()
+        }));
+
+        setState("warn","SAVE");
+        setStatus(`저장 중: ${rows.length}건`);
+        toggleBusy(true);
+
+        try{
+          let error = null;
+
+          const result1 = await supabase
+            .from(TABLE_SCHEDULE)
+            .upsert(rows, { onConflict:"schedule_date,camp,wave,route_label" });
+
+          error = result1.error;
+
+          if(error){
+            const result2 = await supabase
+              .from(TABLE_SCHEDULE)
+              .upsert(rows, { onConflict:"schedule_date,camp,route_label" });
+
+            error = result2.error;
+          }
+
+          if(error) throw error;
+
+          state.dirty.clear();
+          await loadAll();
+
+          setState("ok","READY");
+          setStatus(`저장 완료: ${rows.length}건`);
+        }catch(err){
+          console.error(err);
+          setState("err","ERROR");
+          setStatus("저장 실패: " + (err.message || err));
+          alert("저장 실패: " + (err.message || err));
+        }finally{
+          toggleBusy(false);
+        }
+      }
+
+      function toggleBusy(flag){
+        [
+          els.btnLoad,
+          els.btnSaveAll,
+          els.btnSaveOne,
+          els.btnClearOne,
+          els.btnPrevWeek,
+          els.btnNextWeek
+        ].forEach(btn => {
+          if(btn) btn.disabled = !!flag;
+        });
+      }
+
+      async function loadAll(){
+        state.baseDate = clean(els.baseDateInput.value) || todayIso();
+        updateWeekState();
+
+        state.dirty.clear();
+
+        setState("warn","LOAD");
+        setStatus("용차 스케줄 데이터를 불러오는 중입니다.");
+        toggleBusy(true);
+
+        try{
+          const [drivers, manual, normal, dragon] = await Promise.all([
+            fetchDrivers(),
+            fetchManualSchedules(),
+            fetchNormalSchedules(),
+            fetchDragonCarRecords()
+          ]);
+
+          state.drivers = drivers;
+          state.manualSchedules = manual;
+          state.normalSchedules = normal;
+          state.dragonRecords = dragon;
+
+          rebuildMaps();
+          renderDriverSelect();
+          render();
+
+          setState("ok","READY");
+          setStatus(`조회 완료: 용차 기사 ${drivers.length}명 / 수동등록 ${manual.length}건 / 마루웰 배차 ${normal.length}건 / 용차실적 ${dragon.length}건`);
+        }catch(err){
+          console.error(err);
+          setState("err","ERROR");
+          setStatus("불러오기 실패: " + (err.message || err));
+          alert("불러오기 실패: " + (err.message || err));
+        }finally{
+          toggleBusy(false);
+        }
+      }
+
+      function resetPage(){
+        state.dirty.clear();
+        els.searchInput.value = "";
+        render();
+        setStatus("화면 필터를 초기화했습니다.");
+      }
+
+      async function copyFreeList(){
+        const free = state.drivers.filter(d => finalStatus(d, state.selectedDate).type === "free");
+
+        const text = [
+          `마루웰 용차 여유인원 / ${dateLabel(state.selectedDate)}`,
+          ...free.map(d => {
+            const parts = [displayDriverName(d)];
+            if(d.contact_phone) parts.push(d.contact_phone);
+            if(d.vehicle_plate_number) parts.push(d.vehicle_plate_number);
+            return parts.join(" / ");
+          })
+        ].join("\n");
+
+        try{
+          await navigator.clipboard.writeText(text);
+          alert(`${dateLabel(state.selectedDate)} 여유인원 ${free.length}명이 복사되었습니다.\n\n${text}`);
+        }catch{
+          prompt("아래 내용을 복사하세요.", text);
+        }
+      }
+
+      function bind(){
+        els.btnLogout.addEventListener("click", async () => {
+          try{ await supabase.auth.signOut(); }catch{}
+          location.href = LOGIN_PATH;
+        });
+
+        els.btnToggleToolbar.addEventListener("click", () => {
+          const hidden = els.toolbar.classList.toggle("hidden");
+          els.btnToggleToolbar.textContent = hidden ? "메뉴 열기" : "메뉴 숨김";
+        });
+
+        els.btnToggleRegister.addEventListener("click", () => {
+          const hidden = els.registerPanel.classList.toggle("hidden");
+          els.btnToggleRegister.textContent = hidden ? "등록 열기" : "등록 닫기";
+        });
+
+        els.btnMobileRegister.addEventListener("click", () => {
+          const hidden = els.registerPanel.classList.toggle("hidden");
+          els.btnToggleRegister.textContent = hidden ? "등록 열기" : "등록 닫기";
+          if(!hidden){
+            els.registerPanel.scrollIntoView({behavior:"smooth", block:"start"});
+          }
+        });
+
+        els.btnMobileSave.addEventListener("click", saveAll);
+        els.btnMobileLoad.addEventListener("click", loadAll);
+
+        els.baseDateInput.addEventListener("change", () => {
+          state.baseDate = clean(els.baseDateInput.value) || todayIso();
+          updateWeekState();
+          loadAll();
+        });
+
+        els.selectedDateSelect.addEventListener("change", () => {
+          state.selectedDate = els.selectedDateSelect.value;
+          els.formDate.value = state.selectedDate;
+          render();
+        });
+
+        els.searchInput.addEventListener("input", render);
+
+        els.btnPrevWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart, -7);
+          updateWeekState();
+          loadAll();
+        });
+
+        els.btnNextWeek.addEventListener("click", () => {
+          state.baseDate = addDays(state.weekStart, 7);
+          updateWeekState();
+          loadAll();
+        });
+
+        els.btnLoad.addEventListener("click", loadAll);
+        els.btnSaveAll.addEventListener("click", saveAll);
+        els.btnReset.addEventListener("click", resetPage);
+        els.btnSaveOne.addEventListener("click", () => stageFormRecord(false));
+        els.btnClearOne.addEventListener("click", () => stageFormRecord(true));
+        els.btnCopyFree.addEventListener("click", copyFreeList);
+
+        window.addEventListener("beforeunload", e => {
+          if(state.dirty.size > 0){
+            e.preventDefault();
+            e.returnValue = "";
+          }
+        });
+      }
+
+      async function boot(){
+        bind();
+
+        state.baseDate = todayIso();
+        updateWeekState();
+
+        els.formDate.value = state.selectedDate;
+
+        const ok = await ensureAuth();
+        if(!ok) return;
+
+        const accessOk = await loadAccess();
+        if(!accessOk) return;
+
+        document.documentElement.style.visibility = "visible";
+
+        setState("ok","READY");
+        setStatus("여유 셀을 누르면 휴무로 임시 변경됩니다. 저장을 눌러 DB에 반영하세요.");
+
+        await loadAll();
+      }
+
+      boot().catch(err => {
+        console.error(err);
+        document.documentElement.style.visibility = "visible";
+        setState("err","ERROR");
+        setStatus(err.message || String(err));
+        alert(err.message || String(err));
+      });
+    })();
+  </script>
+</body>
+</html>

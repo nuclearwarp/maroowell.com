@@ -100,7 +100,7 @@
     },
     {
       key: "dragon-schedule",
-      label: "용차 입차 스케줄",
+      label: "용차스케줄",
       path: "/dragon_car_schedule",
       aliases: ["/dragon_car_schedule", "/dragon_car_schedule.html"],
       requireTeamOrDragonCarAdmin: true

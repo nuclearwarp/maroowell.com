@@ -194,6 +194,74 @@
       .boardHeader{align-items:flex-start;flex-direction:column}.boardActions{width:100%;display:grid;grid-template-columns:1fr}.boardActions .btn{width:100%}
       .suggestBox{width:calc(100vw - 20px)}
     }
+
+    /* ===== mobile toolbar toggle / mobile optimization ===== */
+    .toolbar.toolbarHidden{display:none!important}
+    .toolbarToggle{background:rgba(14,116,144,.55);border-color:rgba(103,232,249,.35)}
+    .boardWrap{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+    .scheduleBoard{touch-action:pan-x pan-y}
+    .scheduleTable{user-select:none}
+    .cellEdit{user-select:text}
+
+    @media(max-width:1080px){
+      body{overflow:auto!important}
+      .app{min-height:100dvh!important;height:auto!important;display:block!important}
+      .topbar{position:sticky!important;top:0!important;z-index:50!important;padding:9px 10px!important}
+      .brand{flex:1;min-width:0}
+      .brandText h1{font-size:18px!important}
+      .brandText p{display:none!important}
+      .userBadge{display:none!important}
+      .topbar .btn{height:34px;padding:0 10px;font-size:12px}
+      .toolbar{position:sticky!important;top:53px!important;z-index:45!important;grid-template-columns:1fr 1fr!important;gap:8px!important;padding:10px!important;max-height:calc(100dvh - 54px);overflow:auto;border-bottom:1px solid rgba(255,255,255,.14);box-shadow:0 12px 28px rgba(0,0,0,.28)}
+      .toolbar.toolbarHidden{display:none!important}
+      .toolbar>.field,.toolbar>.updateEditor,.toolbar>.weekBtns,.toolbar>.btn{min-width:0}
+      .toolbar>.btn{width:100%}
+      .weekBtns{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px;width:100%}
+      .weekBtns .btn{width:100%}
+      .updateEditor{grid-column:1 / -1;height:auto;grid-template-columns:1fr 1fr 58px}
+      .metaLine{grid-column:1 / -1;font-size:11px;gap:6px}
+      .pill{padding:4px 8px;font-size:11px}
+      .main{display:block!important;overflow:visible!important;min-height:0}
+      .boardWrap{height:auto!important;min-height:calc(100dvh - 64px);overflow:auto!important;padding:10px!important}
+      .scheduleBoard{min-width:920px!important;width:max-content;max-width:none;border-radius:14px}
+      .boardHeader{padding:12px!important}
+      .boardTitle h2{font-size:19px!important}
+      .boardTitle p{font-size:12px!important}
+      .boardActions{gap:6px}
+      .boardActions .btn{height:34px;padding:0 10px;font-size:12px}
+      .scheduleTable th{min-height:48px;padding:6px 4px;font-size:12px}
+      .weekCell{width:104px!important;font-size:14px!important}
+      .campCell{width:96px!important;font-size:15px!important}
+      .routeHead,.routeCell{width:136px!important}
+      .routeInner{min-height:38px;padding:5px 7px}
+      .routeLabel{font-size:13px}
+      .cellEdit{height:38px;min-height:38px;font-size:12px;padding:4px 5px}
+      .dayActions{gap:3px}
+      .dayBtn{height:20px;padding:0 5px;font-size:10px}
+      .suggestBox{width:min(340px, calc(100vw - 20px));max-height:45dvh}
+    }
+
+    @media(max-width:560px){
+      .topbar{gap:7px!important}
+      .logoButton{width:31px!important;height:31px!important;border-radius:10px!important}
+      .logoButton img{width:24px!important;height:24px!important}
+      .brandText h1{font-size:17px!important;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .topbar .btn{height:32px;padding:0 8px;font-size:11px}
+      .toolbar{top:50px!important;grid-template-columns:1fr!important;padding:9px!important}
+      .field label{font-size:11px}
+      .input,.select,.weekButton{height:39px;font-size:13px;border-radius:11px}
+      .updateEditor{grid-template-columns:1fr!important;gap:7px}
+      .dateMini{grid-template-columns:42px 1fr}
+      .btnMini{width:100%;height:34px}
+      .weekPopup{position:fixed!important;left:10px!important;right:10px!important;top:62px!important;width:auto!important;max-width:none!important;max-height:calc(100dvh - 80px);overflow:auto}
+      .boardWrap{padding:8px!important}
+      .scheduleBoard{min-width:860px!important;border-radius:12px}
+      .boardHeader{align-items:flex-start!important;flex-direction:column!important;gap:9px}
+      .boardActions{width:100%;display:grid!important;grid-template-columns:1fr}
+      .boardActions .btn{width:100%}
+      .emptyBoard{padding:32px 12px;font-size:13px}
+    }
+
   </style>
 </head>
 
@@ -211,10 +279,11 @@
       </div>
       <div class="topSpacer"></div>
       <div id="userBadge" class="userBadge">-</div>
+      <button id="btnToggleToolbar" class="btn copy toolbarToggle" type="button">메뉴 숨김</button>
       <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </header>
 
-    <section class="toolbar">
+    <section id="toolbar" class="toolbar">
       <div class="field">
         <label for="campInput">Camp</label>
         <input id="campInput" class="input" type="text" placeholder="예: M익산1, 대구3" autocomplete="off" />
@@ -338,6 +407,8 @@
       const els = {
         userBadge:document.getElementById("userBadge"),
         btnLogout:document.getElementById("btnLogout"),
+        btnToggleToolbar:document.getElementById("btnToggleToolbar"),
+        toolbar:document.getElementById("toolbar"),
         campInput:document.getElementById("campInput"),
         waveSelect:document.getElementById("waveSelect"),
         weekButton:document.getElementById("weekButton"),
@@ -2739,7 +2810,37 @@
       }
       function closeWeekPicker(){els.weekPopup.classList.remove("open")}
 
+
+      function setToolbarHidden(hidden){
+        if(!els.toolbar || !els.btnToggleToolbar) return;
+
+        els.toolbar.classList.toggle("toolbarHidden", !!hidden);
+        els.btnToggleToolbar.textContent = hidden ? "메뉴 열기" : "메뉴 숨김";
+
+        try{
+          localStorage.setItem("mw_schedule_toolbar_hidden", hidden ? "1" : "0");
+        }catch{}
+      }
+
+      function restoreToolbarState(){
+        let hidden = false;
+
+        try{
+          hidden = localStorage.getItem("mw_schedule_toolbar_hidden") === "1";
+        }catch{}
+
+        setToolbarHidden(hidden);
+      }
+
       function bind(){
+
+        if(els.btnToggleToolbar){
+          els.btnToggleToolbar.addEventListener("click",()=>{
+            const hidden = !els.toolbar.classList.contains("toolbarHidden");
+            setToolbarHidden(hidden);
+          });
+        }
+
         els.waveSelect.value=state.wave;
 
         els.btnLogout.addEventListener("click",async()=>{
@@ -2834,6 +2935,7 @@
 
       async function boot(){
         bind();
+        restoreToolbarState();
         updateWeekState();
         renderWeekOptions();
         renderHeader();

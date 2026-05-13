@@ -9,6 +9,7 @@
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
   <script src="/board-menu.js" defer></script>
 
   <style>
@@ -348,10 +349,18 @@
     }
 
     .freeItem{
+      display:block;
+      text-decoration:none;
+      color:inherit;
       border:1px solid rgba(255,255,255,.12);
       border-radius:14px;
       padding:10px;
       background:rgba(15,118,110,.18);
+    }
+
+    .freeItem:hover{
+      background:rgba(15,118,110,.28);
+      border-color:rgba(94,234,212,.30);
     }
 
     .freeItem b{
@@ -452,10 +461,26 @@
     }
 
     .scheduleTable th.sun{color:#ff4444}
-    .scheduleTable th.dateSelectedHeader{
-      outline:3px solid rgba(96,165,250,.85);
-      outline-offset:-3px;
-      background:#1d3b66;
+
+    .dateHeaderButton{
+      width:100%;
+      min-height:32px;
+      border:0;
+      border-radius:10px;
+      background:transparent;
+      color:inherit;
+      font-size:13px;
+      font-weight:1000;
+      cursor:pointer;
+    }
+
+    .dateHeaderButton:hover{
+      background:rgba(255,255,255,.10);
+    }
+
+    .dateHeaderButton.selected{
+      background:rgba(37,99,235,.72);
+      box-shadow:inset 0 0 0 2px rgba(147,197,253,.45);
     }
 
     .driverCell{
@@ -534,6 +559,12 @@
     }
 
     .bottomBar .btn{flex:1}
+
+    .captureMode{
+      box-shadow:none!important;
+      border-radius:18px!important;
+      background:#0e1728!important;
+    }
 
     @media(max-width:1180px){
       .toolbar{grid-template-columns:1fr 110px 1fr}
@@ -624,13 +655,12 @@
         <img src="/favicon.ico" alt="Maroowell" />
       </a>
       <div class="titleBox">
-        <h1>마루웰 용차 스케줄</h1>
-        <p>용차 기사 출근 / 휴무 / 여유인원 조회</p>
+        <h1>용차 스케줄</h1>
       </div>
       <div class="spacer"></div>
       <div id="userBadge" class="userBadge">-</div>
       <button id="btnToggleToolbar" class="btn" type="button">메뉴 숨김</button>
-      <button id="btnToggleRegister" class="btn copy" type="button">등록 닫기</button>
+      <button id="btnToggleRegister" class="btn copy" type="button">등록 열기</button>
       <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </header>
 
@@ -668,11 +698,11 @@
         <span id="weekPill" class="pill">-</span>
         <span id="driverPill" class="pill">기사 0</span>
         <span id="dirtyPill" class="pill">미저장 0</span>
-        <span id="statusText">여유 셀을 누르면 상태 선택창이 표시됩니다. 저장을 눌러 DB에 반영하세요.</span>
+        <span id="statusText">표에서 여유를 누르면 상태 선택창이 나옵니다. ESC를 누르면 선택 일자가 해제됩니다.</span>
       </div>
     </section>
 
-    <section id="registerPanel" class="registerPanel">
+    <section id="registerPanel" class="registerPanel hidden">
       <div class="registerBox">
         <div class="field">
           <label>등록 일자</label>
@@ -702,7 +732,7 @@
         <button id="btnClearOne" class="btn danger" type="button">등록 삭제</button>
 
         <div class="registerHelp">
-          표에서 여유를 누르면 상태 선택창이 나옵니다. 배차/용차 셀은 수동 변경 보호를 위해 등록창만 세팅됩니다. ESC를 누르면 선택 일자가 해제됩니다.
+          기본 등록창은 숨김입니다. 표에서 여유/휴무/출근 셀을 누르면 셀 안에서 상태를 바로 고를 수 있습니다. 배차/용차 셀은 수동 변경 보호를 위해 등록창만 세팅됩니다.
         </div>
       </div>
     </section>
@@ -760,7 +790,7 @@
             <span id="freeCountBadge" class="pill ok">0명</span>
           </div>
           <div id="freeList" class="cardBody freeList">
-            <div class="emptyText">선택 일자의 여유 인원이 여기에 표시됩니다.</div>
+            <div class="emptyText">상단에서 일자를 선택하면 여유 인원이 표시됩니다.</div>
           </div>
         </div>
       </aside>
@@ -896,9 +926,17 @@
           })
         : null;
 
-      function clean(v){ return String(v ?? "").trim(); }
-      function compact(v){ return clean(v).replace(/\s+/g,""); }
-      function keyOf(v){ return compact(v).toUpperCase(); }
+      function clean(v){
+        return String(v ?? "").trim();
+      }
+
+      function compact(v){
+        return clean(v).replace(/\s+/g,"");
+      }
+
+      function keyOf(v){
+        return compact(v).toUpperCase();
+      }
 
       function esc(v){
         return String(v ?? "")
@@ -909,7 +947,9 @@
           .replace(/'/g,"&#39;");
       }
 
-      function todayIso(){ return toIso(new Date()); }
+      function todayIso(){
+        return toIso(new Date());
+      }
 
       function toIso(d){
         if(!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
@@ -1055,7 +1095,9 @@
         els.statePill.textContent = text || "READY";
       }
 
-      function setStatus(text){ els.statusText.textContent = text || ""; }
+      function setStatus(text){
+        els.statusText.textContent = text || "";
+      }
 
       function displayDriverName(driver){
         const name = clean(driver?.person_name);
@@ -1087,7 +1129,9 @@
         return isRetiredPosition(row.position_title) || isSubAccountRole(row.position_title);
       }
 
-      function driverKey(driver){ return `DRAGON${driver.pk_id}`; }
+      function driverKey(driver){
+        return `DRAGON${driver.pk_id}`;
+      }
 
       function driverMatchKeys(driver){
         return [
@@ -1497,8 +1541,15 @@
               <tr>
                 <th>용차 기사</th>
                 ${state.weekDates.map((date,idx) => `
-                  <th class="${idx === 0 ? "sun" : ""} ${date === state.selectedDate ? "dateSelectedHeader" : ""}">
-                    ${esc(dateLabel(date))}
+                  <th class="${idx === 0 ? "sun" : ""}">
+                    <button
+                      type="button"
+                      class="dateHeaderButton ${date === state.selectedDate ? "selected" : ""}"
+                      data-date="${esc(date)}"
+                      title="${esc(dateLabel(date))} 선택"
+                    >
+                      ${esc(dateLabel(date))}
+                    </button>
                   </th>
                 `).join("")}
               </tr>
@@ -1562,6 +1613,12 @@
 
         html += `</tbody></table>`;
         els.tableHost.innerHTML = html;
+
+        els.tableHost.querySelectorAll(".dateHeaderButton").forEach(btn => {
+          btn.addEventListener("click", () => {
+            selectDay(btn.dataset.date);
+          });
+        });
 
         els.tableHost.querySelectorAll(".statusBtn").forEach(btn => {
           btn.addEventListener("click", () => {
@@ -1653,17 +1710,23 @@
         }
 
         els.freeList.innerHTML = freeDrivers.map(d => {
+          const phone = clean(d.contact_phone);
+          const tel = phone.replace(/[^0-9+]/g, "");
           const meta = [
-            d.contact_phone ? esc(d.contact_phone) : "",
+            phone ? esc(phone) : "",
             d.vehicle_plate_number ? esc(d.vehicle_plate_number) : ""
           ].filter(Boolean).join(" · ");
 
-          return `
-            <div class="freeItem">
-              <b>${esc(displayDriverName(d))}</b>
-              <span>${meta || "-"}</span>
-            </div>
+          const body = `
+            <b>${esc(displayDriverName(d))}</b>
+            <span>${meta || "-"}</span>
           `;
+
+          if(tel){
+            return `<a class="freeItem" href="tel:${esc(tel)}">${body}</a>`;
+          }
+
+          return `<div class="freeItem">${body}</div>`;
         }).join("");
       }
 
@@ -1672,12 +1735,18 @@
         els.dirtyPill.textContent = `미저장 ${state.dirty.size}`;
       }
 
+      function selectDay(date){
+        state.selectedDate = date || "";
+        state.editCellKey = "";
+        els.selectedDateSelect.value = state.selectedDate;
+        els.formDate.value = state.selectedDate || state.weekDates[0] || "";
+        render();
+        setStatus(state.selectedDate ? `${dateLabel(state.selectedDate)} 일자를 선택했습니다.` : "일자 선택을 해제했습니다.");
+      }
+
       function setFormFor(date, dKey, status, memo){
         const driver = state.drivers.find(d => driverKey(d) === dKey);
         if(!driver) return;
-
-        state.selectedDate = date;
-        els.selectedDateSelect.value = date;
 
         els.formDate.value = date;
         els.formDriver.value = dKey;
@@ -1690,9 +1759,6 @@
         if(!driver) return;
 
         const st = finalStatus(driver, date);
-
-        state.selectedDate = date;
-        els.selectedDateSelect.value = date;
         setFormFor(date, dKey, st.type === "off" ? STATUS_OFF : STATUS_WORK, "");
 
         if(["free","off","work","warn"].includes(st.type)){
@@ -1780,8 +1846,6 @@
 
         stageRecord(date, driver, status, memo, deleted || !status);
 
-        state.selectedDate = date;
-        els.selectedDateSelect.value = date;
         state.editCellKey = "";
 
         render();
@@ -1965,96 +2029,110 @@
 
       async function copyTableImage(){
         const target = els.captureTarget;
+
         if(!target){
           alert("복사할 표를 찾지 못했습니다.");
           return;
         }
 
+        if(!window.htmlToImage){
+          alert("이미지 복사 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.");
+          return;
+        }
+
+        const previousScrollLeft = els.tableHost.scrollLeft;
+        const previousScrollTop = els.tableHost.scrollTop;
+
         try{
-          const clone = target.cloneNode(true);
-          clone.querySelectorAll("button,select,input").forEach(el => {
-            if(el.tagName === "BUTTON"){
-              const span = document.createElement("div");
-              span.className = el.className;
-              span.textContent = el.innerText || el.textContent || "";
-              span.style.display = "flex";
-              span.style.alignItems = "center";
-              span.style.justifyContent = "center";
-              span.style.width = "100%";
-              span.style.height = "100%";
-              span.style.minHeight = getComputedStyle(el).minHeight || "46px";
-              span.style.background = getComputedStyle(el).background;
-              span.style.color = getComputedStyle(el).color;
-              span.style.fontWeight = getComputedStyle(el).fontWeight;
-              el.replaceWith(span);
-            }else{
-              el.remove();
+          setState("warn","COPY");
+          setStatus("표 이미지를 생성하는 중입니다.");
+
+          els.tableHost.scrollLeft = 0;
+          els.tableHost.scrollTop = 0;
+          target.classList.add("captureMode");
+
+          const width = Math.ceil(Math.max(target.scrollWidth, target.getBoundingClientRect().width));
+          const height = Math.ceil(Math.max(target.scrollHeight, target.getBoundingClientRect().height));
+
+          const blob = await window.htmlToImage.toBlob(target, {
+            backgroundColor:"#081120",
+            cacheBust:true,
+            pixelRatio:2,
+            width,
+            height,
+            style:{
+              width:`${width}px`,
+              height:`${height}px`,
+              maxWidth:"none",
+              transform:"none",
+              overflow:"visible"
+            },
+            filter(node){
+              if(node && node.classList && node.classList.contains("cellSelect")){
+                return false;
+              }
+              return true;
             }
           });
 
-          const rect = target.getBoundingClientRect();
-          const width = Math.ceil(Math.max(target.scrollWidth, rect.width));
-          const height = Math.ceil(Math.max(target.scrollHeight, rect.height));
-
-          const wrapper = document.createElement("div");
-          wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-          wrapper.style.width = `${width}px`;
-          wrapper.style.minHeight = `${height}px`;
-          wrapper.style.background = "#081120";
-          wrapper.style.color = "#eaf2ff";
-          wrapper.style.fontFamily = `system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif`;
-          wrapper.appendChild(clone);
-
-          const svg = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-              <foreignObject width="100%" height="100%">
-                ${new XMLSerializer().serializeToString(wrapper)}
-              </foreignObject>
-            </svg>
-          `;
-
-          const blob = new Blob([svg], {type:"image/svg+xml;charset=utf-8"});
-          const url = URL.createObjectURL(blob);
-          const img = new Image();
-
-          await new Promise((resolve, reject) => {
-            img.onload = resolve;
-            img.onerror = reject;
-            img.src = url;
-          });
-
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-
-          const ctx = canvas.getContext("2d");
-          ctx.fillStyle = "#081120";
-          ctx.fillRect(0,0,width,height);
-          ctx.drawImage(img,0,0);
-
-          URL.revokeObjectURL(url);
-
-          const pngBlob = await new Promise(resolve => canvas.toBlob(resolve, "image/png"));
-
-          if(!pngBlob) throw new Error("이미지 생성 실패");
+          if(!blob){
+            throw new Error("이미지 생성 실패");
+          }
 
           if(navigator.clipboard && window.ClipboardItem){
             await navigator.clipboard.write([
-              new ClipboardItem({"image/png":pngBlob})
+              new ClipboardItem({"image/png": blob})
             ]);
             alert("표 이미지가 클립보드에 복사되었습니다.");
           }else{
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(pngBlob);
-            a.download = `dragon_car_schedule_${state.weekStart}.png`;
-            a.click();
-            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            downloadBlob(blob, `dragon_car_schedule_${state.weekStart}.png`);
             alert("브라우저가 이미지 클립보드 복사를 지원하지 않아 PNG로 내려받았습니다.");
           }
+
+          setState("ok","READY");
+          setStatus("표 이미지 복사가 완료되었습니다.");
         }catch(err){
           console.error(err);
+
+          try{
+            const fallbackBlob = await window.htmlToImage.toBlob(target, {
+              backgroundColor:"#081120",
+              cacheBust:true,
+              pixelRatio:1,
+              skipFonts:true
+            });
+
+            if(fallbackBlob){
+              downloadBlob(fallbackBlob, `dragon_car_schedule_${state.weekStart}.png`);
+              alert("클립보드 복사는 실패했지만 PNG 파일로 내려받았습니다.");
+              setState("ok","READY");
+              setStatus("표 이미지를 PNG로 내려받았습니다.");
+              return;
+            }
+          }catch(fallbackErr){
+            console.error(fallbackErr);
+          }
+
+          setState("err","ERROR");
+          setStatus("표 이미지 복사 실패: " + (err.message || err));
           alert("표 이미지 복사 실패: " + (err.message || err));
+        }finally{
+          target.classList.remove("captureMode");
+          els.tableHost.scrollLeft = previousScrollLeft;
+          els.tableHost.scrollTop = previousScrollTop;
         }
+      }
+
+      function downloadBlob(blob, filename){
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
 
       function clearSelectedDate(){
@@ -2169,7 +2247,7 @@
         document.documentElement.style.visibility = "visible";
 
         setState("ok","READY");
-        setStatus("여유 셀을 누르면 상태 선택창이 표시됩니다. 저장을 눌러 DB에 반영하세요.");
+        setStatus("표에서 여유를 누르면 상태 선택창이 나옵니다. ESC를 누르면 선택 일자가 해제됩니다.");
 
         await loadAll();
       }

@@ -1,1 +1,1150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="referrer" content="origin" />
+  <title>정산 업로드</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="/board-menu.js" defer></script>
 
+  <style>
+    :root{
+      --bg:#081120;
+      --panel:#101b2f;
+      --panel2:#0d1728;
+      --line:rgba(255,255,255,.11);
+      --line2:rgba(255,255,255,.18);
+      --txt:#eaf2ff;
+      --muted:#9fb0d0;
+      --blue:#2563eb;
+      --green:#16a34a;
+      --red:#b91c1c;
+      --yellow:#f59e0b;
+      --cyan:#0891b2;
+      --shadow:0 16px 42px rgba(0,0,0,.28);
+    }
+
+    *{box-sizing:border-box}
+
+    html,body{
+      margin:0;
+      min-height:100%;
+      background:var(--bg);
+      color:var(--txt);
+      font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+    }
+
+    body{overflow:auto}
+    button,input,select,textarea{font-family:inherit}
+
+    .app{
+      min-height:100vh;
+      min-height:100dvh;
+      background:linear-gradient(180deg,var(--bg),#060b13);
+    }
+
+    .topbar{
+      position:sticky;
+      top:0;
+      z-index:40;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      background:linear-gradient(180deg,#0b1424,#07101d);
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .logoButton{
+      width:34px;
+      height:34px;
+      border:1px solid transparent;
+      border-radius:12px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      flex:0 0 auto;
+      cursor:pointer;
+      background:rgba(255,255,255,.03);
+      transition:.15s;
+    }
+
+    .logoButton:hover{
+      background:rgba(255,255,255,.10);
+      border-color:rgba(255,255,255,.18);
+      transform:translateY(-1px);
+    }
+
+    .logoButton img{
+      width:28px;
+      height:28px;
+      display:block;
+    }
+
+    .brandText{min-width:0}
+
+    .brandText h1{
+      margin:0;
+      font-size:22px;
+      line-height:1.05;
+      letter-spacing:-.04em;
+    }
+
+    .brandText p{
+      margin:4px 0 0;
+      color:var(--muted);
+      font-size:12px;
+      font-weight:800;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .topSpacer{flex:1}
+
+    .userBadge{
+      display:inline-flex;
+      align-items:center;
+      min-height:34px;
+      max-width:260px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.05);
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .btn{
+      height:38px;
+      padding:0 13px;
+      border-radius:999px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.07);
+      color:var(--txt);
+      font-size:13px;
+      font-weight:900;
+      cursor:pointer;
+      white-space:nowrap;
+      touch-action:manipulation;
+    }
+
+    .btn:hover{background:rgba(255,255,255,.11)}
+    .btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}
+    .btn.ok{background:rgba(22,163,74,.55);border-color:rgba(134,239,172,.35)}
+    .btn.warn{background:rgba(245,158,11,.34);border-color:rgba(253,230,138,.35)}
+    .btn.copy{background:rgba(14,116,144,.55);border-color:rgba(103,232,249,.35)}
+    .btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+
+    .wrap{
+      max-width:1520px;
+      margin:0 auto;
+      padding:16px 14px 44px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns:420px minmax(0,1fr);
+      gap:14px;
+      align-items:start;
+    }
+
+    .card{
+      border:1px solid var(--line2);
+      border-radius:18px;
+      background:rgba(16,27,47,.88);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      margin-bottom:14px;
+    }
+
+    .cardHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:14px 16px;
+      border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,.04);
+    }
+
+    .cardHead h2{
+      margin:0;
+      font-size:17px;
+      letter-spacing:-.03em;
+    }
+
+    .cardBody{padding:16px}
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      margin-bottom:12px;
+      min-width:0;
+    }
+
+    .field label{
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:900;
+    }
+
+    .input,.select{
+      width:100%;
+      height:42px;
+      border-radius:12px;
+      border:1px solid var(--line2);
+      background:#0b1220;
+      color:var(--txt);
+      padding:0 12px;
+      font-size:14px;
+      font-weight:800;
+      outline:none;
+    }
+
+    .input[type=file]{
+      height:auto;
+      padding:10px 12px;
+    }
+
+    .input:focus,.select:focus{
+      border-color:rgba(96,165,250,.75);
+      box-shadow:0 0 0 3px rgba(96,165,250,.12);
+    }
+
+    .row{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+
+    .row .btn{flex:1}
+
+    .checkLine{
+      display:flex;
+      align-items:flex-start;
+      gap:8px;
+      padding:10px 11px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      background:rgba(255,255,255,.035);
+      color:#cbd5e1;
+      font-size:12px;
+      font-weight:800;
+      line-height:1.5;
+      margin:12px 0;
+    }
+
+    .checkLine input{
+      width:16px;
+      height:16px;
+      margin-top:2px;
+      flex:0 0 auto;
+    }
+
+    .status{
+      min-height:24px;
+      margin-top:12px;
+      color:#b7c7e6;
+      font-size:13px;
+      font-weight:800;
+      line-height:1.55;
+      white-space:pre-wrap;
+    }
+
+    .status.ok{color:#bbf7d0}
+    .status.warn{color:#fde68a}
+    .status.err{color:#fecaca}
+
+    .muted{
+      color:var(--muted);
+      font-size:13px;
+      font-weight:750;
+      line-height:1.6;
+    }
+
+    .pillGrid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+      margin-top:12px;
+    }
+
+    .pill{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      min-height:42px;
+      padding:9px 11px;
+      border-radius:14px;
+      border:1px solid var(--line2);
+      background:rgba(255,255,255,.055);
+      color:#dbeafe;
+      font-size:12px;
+      font-weight:900;
+      min-width:0;
+    }
+
+    .pill b{
+      color:#fff;
+      font-size:16px;
+      white-space:nowrap;
+    }
+
+    .logBox{
+      white-space:pre-wrap;
+      word-break:break-word;
+      background:rgba(0,0,0,.26);
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:12px;
+      max-height:320px;
+      overflow:auto;
+      font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      color:#dbeafe;
+      margin:0;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      border:1px solid var(--line);
+      border-radius:16px;
+      background:rgba(0,0,0,.18);
+      max-height:680px;
+    }
+
+    table{
+      width:100%;
+      min-width:1280px;
+      border-collapse:separate;
+      border-spacing:0;
+      font-size:12px;
+    }
+
+    th,td{
+      border-right:1px solid rgba(255,255,255,.12);
+      border-bottom:1px solid rgba(255,255,255,.12);
+      padding:7px 9px;
+      text-align:center;
+      white-space:nowrap;
+      vertical-align:middle;
+    }
+
+    th{
+      position:sticky;
+      top:0;
+      z-index:5;
+      background:#263247;
+      color:#fff;
+      font-size:12px;
+      font-weight:1000;
+    }
+
+    td{background:rgba(255,255,255,.025)}
+    td.left{text-align:left}
+    td.money{font-weight:950;color:#bbf7d0}
+    td.warn{font-weight:950;color:#fde68a}
+    td.err{font-weight:950;color:#fecaca}
+
+    .emptyBox{
+      padding:48px 16px;
+      text-align:center;
+      color:#94a3b8;
+      font-size:13px;
+      font-weight:900;
+      line-height:1.5;
+    }
+
+    .accessDenied{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:linear-gradient(180deg, rgba(11,18,32,.96), rgba(11,18,32,.98));
+      z-index:99999;
+    }
+
+    .accessDenied.show{display:flex}
+
+    .accessCard{
+      width:min(560px, calc(100vw - 28px));
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:22px;
+      background:#101827;
+      box-shadow:0 24px 70px rgba(0,0,0,.46);
+      padding:24px;
+    }
+
+    .accessCard h2{
+      margin:0 0 10px;
+      font-size:24px;
+      line-height:1.2;
+    }
+
+    .accessCard p{
+      margin:0;
+      color:#b8c3d9;
+      line-height:1.65;
+      white-space:pre-wrap;
+      font-size:14px;
+    }
+
+    .accessMeta{
+      margin-top:14px;
+      padding:12px 14px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.04);
+      color:#e6eefc;
+      font-size:13px;
+      font-weight:800;
+      line-height:1.6;
+      word-break:break-word;
+    }
+
+    .accessActions{
+      margin-top:18px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      flex-wrap:wrap;
+    }
+
+    @media(max-width:980px){
+      .brandText h1{font-size:19px}
+      .brandText p{display:none}
+      .userBadge{display:none}
+      .grid{grid-template-columns:1fr}
+      .wrap{padding:12px 10px 34px}
+      .row .btn{flex:1 1 100%}
+    }
+
+    @media(max-width:560px){
+      .topbar{padding:10px;gap:7px}
+      .logoButton{width:31px;height:31px;border-radius:10px}
+      .logoButton img{width:24px;height:24px}
+      .brandText h1{font-size:17px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .topbar .btn{height:32px;padding:0 8px;font-size:11px}
+      .cardBody{padding:12px}
+      .pillGrid{grid-template-columns:1fr}
+      table{min-width:1160px}
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기">
+          <img src="/favicon.ico" alt="Maroowell" />
+        </a>
+        <div class="brandText">
+          <h1>정산 업로드</h1>
+          <p>정산서 파일의 정산Raw 시트만 읽어 maroowell_account에 저장합니다.</p>
+        </div>
+      </div>
+      <div class="topSpacer"></div>
+      <div id="userBadge" class="userBadge">세션 확인 중</div>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </header>
+
+    <main class="wrap">
+      <div class="grid">
+        <section>
+          <div class="card">
+            <div class="cardHead">
+              <h2>정산Raw 업로드</h2>
+            </div>
+            <div class="cardBody">
+              <div class="field">
+                <label for="fileInput">정산서 파일</label>
+                <input id="fileInput" class="input" type="file" accept=".xlsx,.xls" />
+              </div>
+
+              <div class="checkLine">
+                <input id="maroowellOnlyCheck" type="checkbox" checked />
+                <div>
+                  업체명이 <b>마루웰</b>인 행만 업로드합니다.<br>
+                  업체명 컬럼이 비어 있으면 행은 유지합니다.
+                </div>
+              </div>
+
+              <div class="checkLine">
+                <input id="deleteAllCheck" type="checkbox" />
+                <div>
+                  업로드 전 <b>maroowell_account 전체 데이터 삭제</b><br>
+                  같은 파일 재업로드 때만 사용하세요.
+                </div>
+              </div>
+
+              <div class="row">
+                <button id="btnParse" class="btn primary" type="button">정산Raw 읽기</button>
+                <button id="btnUpload" class="btn ok" type="button" disabled>DB 업로드</button>
+                <button id="btnReset" class="btn" type="button">초기화</button>
+              </div>
+
+              <div id="statusText" class="status">정산서 파일을 선택하고 정산Raw 읽기를 누르세요.</div>
+
+              <div class="pillGrid">
+                <div class="pill"><span>추출 행</span><b id="countRows">0</b></div>
+                <div class="pill"><span>배송 행</span><b id="countDelivery">0</b></div>
+                <div class="pill"><span>프백 행</span><b id="countFreshbag">0</b></div>
+                <div class="pill"><span>스킵 행</span><b id="countSkipped">0</b></div>
+                <div class="pill"><span>배송금액</span><b id="sumDefault">0</b></div>
+                <div class="pill"><span>프백금액</span><b id="sumFreshbag">0</b></div>
+                <div class="pill"><span>총금액</span><b id="sumTotal">0</b></div>
+                <div class="pill"><span>날짜 수</span><b id="countDates">0</b></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="cardHead">
+              <h2>매핑 기준</h2>
+            </div>
+            <div class="cardBody muted">
+              읽는 시트: <b>정산Raw</b><br><br>
+              구분 → classify<br>
+              ID → id<br>
+              Route → route<br>
+              배송일자 → delivery_date<br>
+              캠프명 → camp<br>
+              배송유형 → wave<br>
+              배송건수 → parcel<br>
+              반품 → return<br>
+              단가 → price<br>
+              총금액 → default_price / total_price<br>
+              프레시백 회수 인센티브 → freshbag_incentive / freshbag_incentive_price<br><br>
+              분실파손List 시트는 이번 버전에서 무시합니다.
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="cardHead">
+              <h2>로그</h2>
+            </div>
+            <div class="cardBody">
+              <pre id="logOutput" class="logBox">대기 중</pre>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="card">
+            <div class="cardHead">
+              <h2>미리보기</h2>
+              <span class="muted" id="previewNote">최대 300행 표시</span>
+            </div>
+            <div class="tableWrap">
+              <table id="previewTable">
+                <thead></thead>
+                <tbody>
+                  <tr><td><div class="emptyBox">아직 추출된 데이터가 없습니다.</div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div id="accessDenied" class="accessDenied">
+    <div class="accessCard">
+      <h2>접근 권한 없음</h2>
+      <p id="accessDeniedText">최고관리자 권한이 필요합니다.</p>
+      <div id="accessDeniedEmail" class="accessMeta"></div>
+      <div class="accessActions">
+        <button id="deniedHomeBtn" class="btn" type="button">홈으로</button>
+        <button id="deniedLogoutBtn" class="btn danger" type="button">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (async function(){
+      "use strict";
+
+      const CONFIG = window.MARUWELL_CONFIG || {};
+      const SUPABASE_URL = CONFIG.SUPABASE_URL;
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY;
+      const LOGIN_PATH = CONFIG.PATHS?.login || "/login.html";
+      const HOME_PATH = CONFIG.PATHS?.index || "/zipcode_search";
+      const TABLE_NAME = "maroowell_account";
+      const REQUIRED_SHEET_NAME = "정산Raw";
+      const INSERT_CHUNK_SIZE = 500;
+
+      const els = {
+        userBadge: document.getElementById("userBadge"),
+        btnLogout: document.getElementById("btnLogout"),
+        fileInput: document.getElementById("fileInput"),
+        maroowellOnlyCheck: document.getElementById("maroowellOnlyCheck"),
+        deleteAllCheck: document.getElementById("deleteAllCheck"),
+        btnParse: document.getElementById("btnParse"),
+        btnUpload: document.getElementById("btnUpload"),
+        btnReset: document.getElementById("btnReset"),
+        statusText: document.getElementById("statusText"),
+        logOutput: document.getElementById("logOutput"),
+        previewTable: document.getElementById("previewTable"),
+        previewNote: document.getElementById("previewNote"),
+        countRows: document.getElementById("countRows"),
+        countDelivery: document.getElementById("countDelivery"),
+        countFreshbag: document.getElementById("countFreshbag"),
+        countSkipped: document.getElementById("countSkipped"),
+        countDates: document.getElementById("countDates"),
+        sumDefault: document.getElementById("sumDefault"),
+        sumFreshbag: document.getElementById("sumFreshbag"),
+        sumTotal: document.getElementById("sumTotal"),
+        accessDenied: document.getElementById("accessDenied"),
+        accessDeniedText: document.getElementById("accessDeniedText"),
+        accessDeniedEmail: document.getElementById("accessDeniedEmail"),
+        deniedHomeBtn: document.getElementById("deniedHomeBtn"),
+        deniedLogoutBtn: document.getElementById("deniedLogoutBtn")
+      };
+
+      const state = {
+        session:null,
+        user:null,
+        access:null,
+        rows:[],
+        skipped:[],
+        fileName:""
+      };
+
+      const supabaseClient = SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase
+        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth:{
+              storage: window.sessionStorage,
+              persistSession: true,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          })
+        : null;
+
+      function setStatus(text, type){
+        els.statusText.textContent = text || "";
+        els.statusText.className = type ? `status ${type}` : "status";
+      }
+
+      function log(value){
+        els.logOutput.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      }
+
+      function clean(v){
+        return String(v ?? "").trim();
+      }
+
+      function esc(v){
+        return String(v ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function money(v){
+        const n = Number(v || 0);
+        return Number.isFinite(n) ? n.toLocaleString("ko-KR") : "0";
+      }
+
+      function toNumber(v, fallback = 0){
+        if(v === null || v === undefined || v === "") return fallback;
+        if(typeof v === "number" && Number.isFinite(v)) return v;
+
+        const s = clean(v).replace(/,/g, "").replace(/원/g, "").replace(/[^0-9.\-]/g, "");
+        if(!s || s === "-" || s === ".") return fallback;
+
+        const n = Number(s);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function toInteger(v, fallback = 0){
+        const n = toNumber(v, fallback);
+        return Number.isFinite(n) ? Math.trunc(n) : fallback;
+      }
+
+      function excelSerialToIso(serial){
+        const n = Number(serial);
+        if(!Number.isFinite(n)) return null;
+
+        const utcDays = Math.floor(n - 25569);
+        const utcValue = utcDays * 86400;
+        const date = new Date(utcValue * 1000);
+
+        if(Number.isNaN(date.getTime())) return null;
+
+        const y = date.getUTCFullYear();
+        const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+        const d = String(date.getUTCDate()).padStart(2, "0");
+        return `${y}-${m}-${d}`;
+      }
+
+      function parseDateValue(v){
+        if(v === null || v === undefined || v === "") return null;
+
+        if(v instanceof Date && !Number.isNaN(v.getTime())){
+          const y = v.getFullYear();
+          const m = String(v.getMonth() + 1).padStart(2, "0");
+          const d = String(v.getDate()).padStart(2, "0");
+          return `${y}-${m}-${d}`;
+        }
+
+        if(typeof v === "number") return excelSerialToIso(v);
+
+        const s = clean(v);
+        if(!s) return null;
+        if(/^\d{5}(\.\d+)?$/.test(s)) return excelSerialToIso(Number(s));
+
+        let m = s.match(/(20\d{2})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/);
+        if(m) return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+
+        return null;
+      }
+
+      function normalizeHeader(v){
+        return clean(v)
+          .replace(/\s+/g, "")
+          .replace(/[()（）\[\]{}]/g, "")
+          .replace(/_/g, "")
+          .toLowerCase();
+      }
+
+      function findHeaderRow(rows){
+        for(let r = 0; r < Math.min(rows.length, 30); r++){
+          const keys = (rows[r] || []).map(normalizeHeader);
+          const joined = keys.join("|");
+
+          if(
+            joined.includes("구분") &&
+            joined.includes("id") &&
+            joined.includes("route") &&
+            joined.includes("배송일자")
+          ){
+            return r;
+          }
+        }
+        return 0;
+      }
+
+      function findColumn(headers, candidates, fallbackIndex){
+        const keys = headers.map(normalizeHeader);
+
+        for(const candidate of candidates){
+          const key = normalizeHeader(candidate);
+          const idx = keys.findIndex(item => item === key || item.includes(key));
+          if(idx >= 0) return idx;
+        }
+
+        return fallbackIndex;
+      }
+
+      function isFreshbagClassify(v){
+        const s = clean(v).replace(/\s+/g, "");
+        return /프레|프레쉬|프레시|fresh/i.test(s);
+      }
+
+      function isBlankDataRow(row){
+        return row.every(cell => clean(cell) === "");
+      }
+
+      function convertRow(row, col, rowNo){
+        const classify = clean(row[col.classify]);
+        const driverId = clean(row[col.id]);
+        const route = clean(row[col.route]);
+        const deliveryDate = parseDateValue(row[col.deliveryDate]);
+        const camp = clean(row[col.camp]);
+        const wave = clean(row[col.wave]);
+        const vendor = clean(row[col.vendor]);
+        const parcel = toInteger(row[col.parcel], 0);
+        const returnCount = toInteger(row[col.returnCount], 0);
+        const price = toNumber(row[col.price], 0);
+        const rawTotalPrice = toNumber(row[col.totalPrice], 0);
+        const rawFreshbagPrice = toNumber(row[col.freshbagIncentive], 0);
+
+        if(!classify && !driverId && !route && !deliveryDate && !camp && !wave){
+          return { skip:true, reason:"빈 행", rowNo };
+        }
+
+        if(els.maroowellOnlyCheck.checked && vendor && vendor !== "마루웰"){
+          return { skip:true, reason:`업체명 제외: ${vendor}`, rowNo };
+        }
+
+        const isFreshbag = isFreshbagClassify(classify);
+        const defaultPrice = isFreshbag ? 0 : rawTotalPrice;
+        const freshbagPrice = rawFreshbagPrice;
+        const totalPrice = defaultPrice + freshbagPrice;
+
+        return {
+          skip:false,
+          data:{
+            classify: classify || null,
+            id: driverId || null,
+            route: route || null,
+            delivery_date: deliveryDate,
+            camp: camp || null,
+            wave: wave || null,
+            parcel,
+            "return": returnCount,
+            price,
+            freshbag_incentive: freshbagPrice,
+            default_price: defaultPrice,
+            freshbag_incentive_price: freshbagPrice,
+            total_price: totalPrice,
+            freshbag_return: 0
+          },
+          meta:{
+            rowNo,
+            vendor,
+            isFreshbag
+          }
+        };
+      }
+
+      async function parseFile(){
+        const file = els.fileInput.files?.[0];
+
+        if(!file){
+          setStatus("정산서 파일을 먼저 선택하세요.", "warn");
+          return;
+        }
+
+        state.rows = [];
+        state.skipped = [];
+        state.fileName = file.name;
+        els.btnUpload.disabled = true;
+
+        setStatus("파일을 읽는 중입니다...", "");
+
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, {
+          type:"array",
+          cellDates:false,
+          raw:true
+        });
+
+        const sheetName = workbook.SheetNames.find(name => clean(name) === REQUIRED_SHEET_NAME)
+          || workbook.SheetNames.find(name => clean(name).replace(/\s+/g, "") === REQUIRED_SHEET_NAME);
+
+        if(!sheetName){
+          throw new Error(`'${REQUIRED_SHEET_NAME}' 시트를 찾지 못했습니다. 현재 시트: ${workbook.SheetNames.join(", ")}`);
+        }
+
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header:1,
+          raw:true,
+          defval:null,
+          blankrows:false
+        });
+
+        if(!rows.length){
+          throw new Error("정산Raw 시트에 데이터가 없습니다.");
+        }
+
+        const headerRowIndex = findHeaderRow(rows);
+        const headers = rows[headerRowIndex] || [];
+
+        const col = {
+          classify: findColumn(headers, ["구분"], 0),
+          id: findColumn(headers, ["ID", "아이디"], 1),
+          route: findColumn(headers, ["Route", "라우트"], 2),
+          deliveryDate: findColumn(headers, ["배송일자", "배송일", "일자"], 3),
+          camp: findColumn(headers, ["캠프명", "캠프", "Camp"], 4),
+          wave: findColumn(headers, ["배송유형", "주간심야", "주야", "Wave"], 5),
+          vendor: findColumn(headers, ["업체명", "업체", "Vendor"], 6),
+          parcel: findColumn(headers, ["배송건수", "파슬", "parcel"], 7),
+          returnCount: findColumn(headers, ["반품", "운송장", "return"], 8),
+          price: findColumn(headers, ["단가", "반품동일", "price"], 9),
+          totalPrice: findColumn(headers, ["총금액", "total"], 10),
+          freshbagIncentive: findColumn(headers, ["프레시백회수인센티브", "프레쉬백회수인센티브", "프백", "freshbag"], 11)
+        };
+
+        for(let r = headerRowIndex + 1; r < rows.length; r++){
+          const row = rows[r] || [];
+          if(isBlankDataRow(row)) continue;
+
+          const converted = convertRow(row, col, r + 1);
+
+          if(converted.skip){
+            state.skipped.push(converted);
+          }else{
+            state.rows.push(converted);
+          }
+        }
+
+        renderSummary();
+        renderPreview();
+
+        if(!state.rows.length){
+          setStatus("업로드 가능한 정산Raw 데이터가 없습니다.", "warn");
+          els.btnUpload.disabled = true;
+        }else{
+          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 미리보기 확인 후 DB 업로드를 누르세요.`, "ok");
+          els.btnUpload.disabled = false;
+        }
+
+        log({
+          file:file.name,
+          sheet:sheetName,
+          header_row:headerRowIndex + 1,
+          total_excel_rows:rows.length,
+          parsed_rows:state.rows.length,
+          skipped_rows:state.skipped.length,
+          skipped_sample:state.skipped.slice(0, 20),
+          columns:col,
+          headers
+        });
+      }
+
+      function renderSummary(){
+        const dataRows = state.rows.map(item => item.data);
+        const deliveryCount = dataRows.filter(row => !isFreshbagClassify(row.classify)).length;
+        const freshbagCount = dataRows.filter(row => isFreshbagClassify(row.classify)).length;
+        const dateCount = new Set(dataRows.map(row => row.delivery_date).filter(Boolean)).size;
+        const defaultSum = dataRows.reduce((sum, row) => sum + Number(row.default_price || 0), 0);
+        const freshbagSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive_price || 0), 0);
+        const totalSum = dataRows.reduce((sum, row) => sum + Number(row.total_price || 0), 0);
+
+        els.countRows.textContent = state.rows.length.toLocaleString("ko-KR");
+        els.countDelivery.textContent = deliveryCount.toLocaleString("ko-KR");
+        els.countFreshbag.textContent = freshbagCount.toLocaleString("ko-KR");
+        els.countSkipped.textContent = state.skipped.length.toLocaleString("ko-KR");
+        els.countDates.textContent = dateCount.toLocaleString("ko-KR");
+        els.sumDefault.textContent = money(defaultSum);
+        els.sumFreshbag.textContent = money(freshbagSum);
+        els.sumTotal.textContent = money(totalSum);
+      }
+
+      function renderPreview(){
+        const headers = [
+          "No", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
+          "배송", "반품", "단가", "기본금액", "프백금액", "총금액"
+        ];
+
+        els.previewTable.querySelector("thead").innerHTML = `<tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr>`;
+
+        const shown = state.rows.slice(0, 300);
+
+        if(!shown.length){
+          els.previewTable.querySelector("tbody").innerHTML = `<tr><td colspan="${headers.length}"><div class="emptyBox">아직 추출된 데이터가 없습니다.</div></td></tr>`;
+          els.previewNote.textContent = "최대 300행 표시";
+          return;
+        }
+
+        els.previewTable.querySelector("tbody").innerHTML = shown.map((item, idx) => {
+          const row = item.data;
+          const isFreshbag = isFreshbagClassify(row.classify);
+
+          return `
+            <tr>
+              <td>${idx + 1}</td>
+              <td class="${isFreshbag ? "warn" : ""}">${esc(row.classify)}</td>
+              <td class="left">${esc(row.id)}</td>
+              <td>${esc(row.route)}</td>
+              <td>${esc(row.delivery_date)}</td>
+              <td>${esc(row.camp)}</td>
+              <td>${esc(row.wave)}</td>
+              <td>${money(row.parcel)}</td>
+              <td>${money(row["return"])}</td>
+              <td>${money(row.price)}</td>
+              <td class="money">${money(row.default_price)}</td>
+              <td class="warn">${money(row.freshbag_incentive_price)}</td>
+              <td class="money">${money(row.total_price)}</td>
+            </tr>
+          `;
+        }).join("");
+
+        els.previewNote.textContent = `최대 300행 표시 / 전체 ${state.rows.length.toLocaleString("ko-KR")}행`;
+      }
+
+      async function deleteAllRows(){
+        const { error } = await supabaseClient
+          .from(TABLE_NAME)
+          .delete()
+          .gte("row_id", 0);
+
+        if(error) throw error;
+      }
+
+      async function uploadRows(){
+        if(!state.rows.length){
+          setStatus("업로드할 데이터가 없습니다.", "warn");
+          return;
+        }
+
+        if(!confirm(`${state.rows.length.toLocaleString("ko-KR")}행을 DB에 업로드할까요?`)) return;
+
+        els.btnUpload.disabled = true;
+        els.btnParse.disabled = true;
+        setStatus("DB 업로드 중입니다...", "");
+
+        try{
+          if(els.deleteAllCheck.checked){
+            const ok = confirm("주의: maroowell_account 전체 데이터를 먼저 삭제합니다. 계속할까요?");
+            if(!ok) return;
+
+            setStatus("기존 전체 데이터를 삭제하는 중입니다...", "warn");
+            await deleteAllRows();
+          }
+
+          const records = state.rows.map(item => item.data);
+          let inserted = 0;
+
+          for(let i = 0; i < records.length; i += INSERT_CHUNK_SIZE){
+            const chunk = records.slice(i, i + INSERT_CHUNK_SIZE);
+            const { error } = await supabaseClient
+              .from(TABLE_NAME)
+              .insert(chunk);
+
+            if(error) throw error;
+
+            inserted += chunk.length;
+            setStatus(`DB 업로드 중... ${inserted.toLocaleString("ko-KR")} / ${records.length.toLocaleString("ko-KR")}행`, "");
+          }
+
+          setStatus(`업로드 완료: ${inserted.toLocaleString("ko-KR")}행`, "ok");
+          log({
+            result:"success",
+            file:state.fileName,
+            inserted_rows:inserted,
+            delete_all_before_upload:els.deleteAllCheck.checked
+          });
+        }catch(err){
+          console.error(err);
+          setStatus(`업로드 실패: ${err.message || err}`, "err");
+          log({ result:"error", message:err.message || String(err), details:err });
+        }finally{
+          els.btnUpload.disabled = !state.rows.length;
+          els.btnParse.disabled = false;
+        }
+      }
+
+      function resetPage(){
+        state.rows = [];
+        state.skipped = [];
+        state.fileName = "";
+        els.fileInput.value = "";
+        els.btnUpload.disabled = true;
+        setStatus("정산서 파일을 선택하고 정산Raw 읽기를 누르세요.", "");
+        log("대기 중");
+        renderSummary();
+        renderPreview();
+      }
+
+      function showAccessDenied(message){
+        els.accessDeniedText.textContent = message || "최고관리자 권한이 필요합니다.";
+        els.accessDeniedEmail.textContent = state.user?.email
+          ? `현재 계정: ${state.user.email}`
+          : "로그인 계정을 확인할 수 없습니다.";
+        els.accessDenied.classList.add("show");
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function logout(){
+        try{
+          if(supabaseClient) await supabaseClient.auth.signOut();
+        }catch{}
+        location.href = LOGIN_PATH;
+      }
+
+      async function checkAccess(){
+        if(!supabaseClient){
+          showAccessDenied("Supabase 설정을 찾지 못했습니다. config.js를 확인하세요.");
+          return false;
+        }
+
+        const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+        if(sessionError) throw sessionError;
+
+        state.session = sessionData?.session || null;
+        state.user = state.session?.user || null;
+
+        if(!state.user){
+          location.href = `${LOGIN_PATH}?next=${encodeURIComponent(location.pathname)}`;
+          return false;
+        }
+
+        els.userBadge.textContent = state.user.email || state.user.id || "로그인";
+
+        const { data, error } = await supabaseClient.rpc("mw_my_access").maybeSingle();
+        if(error) throw error;
+
+        state.access = data || null;
+
+        const isSuperAdmin =
+          data?.is_maroowell === true &&
+          data?.is_admin === true &&
+          Number(data?.max_role_level || 0) >= 90;
+
+        if(!isSuperAdmin){
+          showAccessDenied("최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상");
+          return false;
+        }
+
+        document.documentElement.style.visibility = "visible";
+        return true;
+      }
+
+      function bind(){
+        els.btnLogout.addEventListener("click", logout);
+        els.deniedLogoutBtn.addEventListener("click", logout);
+        els.deniedHomeBtn.addEventListener("click", () => { location.href = HOME_PATH; });
+
+        els.btnParse.addEventListener("click", async () => {
+          try{
+            await parseFile();
+          }catch(err){
+            console.error(err);
+            setStatus(`분석 실패: ${err.message || err}`, "err");
+            log({ result:"error", message:err.message || String(err), details:err });
+          }
+        });
+
+        els.btnUpload.addEventListener("click", uploadRows);
+        els.btnReset.addEventListener("click", resetPage);
+      }
+
+      async function boot(){
+        bind();
+        renderSummary();
+        renderPreview();
+
+        try{
+          await checkAccess();
+        }catch(err){
+          console.error(err);
+          showAccessDenied(err.message || String(err));
+        }
+      }
+
+      await boot();
+    })();
+  </script>
+</body>
+</html>

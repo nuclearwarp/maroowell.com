@@ -2588,32 +2588,119 @@
         els.dirtyPill.textContent=`미저장 ${state.dirty.size}`;
       }
 
+      function makeSupabaseScheduleSaveRow(item){
+        const active=item?.is_active!==false;
+        const driverDisplay=active ? clean(item?.driver_display_name || item?.driver_name) : "";
+
+        return {
+          schedule_date:item.schedule_date,
+          iso_year:state.isoYear || null,
+          iso_week:state.isoWeek || null,
+          week_label:state.weekLabel || null,
+          camp:state.camp,
+          wave:state.wave,
+          route_label:normalizeRouteLabel(item.route_label),
+          driver_name:driverDisplay || null,
+          driver_display_name:driverDisplay || null,
+          driver_owner_name:active ? (clean(item?.driver_owner_name) || null) : null,
+          driver_export_name:active ? (clean(item?.driver_export_name) || null) : null,
+          driver_coupang_id:active ? (clean(item?.driver_coupang_id) || null) : null,
+          driver_account_type:active ? (clean(item?.driver_account_type) || null) : null,
+          memo:active ? (clean(item?.memo) || null) : null,
+          row_order:Number(item?.row_order || 0),
+          cell_color:active ? (clean(item?.cell_color) || null) : null,
+          is_active:active && !!driverDisplay
+        };
+      }
+
+      async function saveScheduleRowsOneByOne(payload,upsertError){
+        let saved=0;
+        let skipped=0;
+
+        if(upsertError){
+          console.warn("[maroowell_schedule] batch upsert failed. fallback to row-by-row save.",upsertError);
+        }
+
+        for(const row of payload){
+          const {data:found,error:findError}=await supabase
+            .from("maroowell_schedule")
+            .select("id")
+            .eq("schedule_date",row.schedule_date)
+            .eq("camp",row.camp)
+            .eq("wave",row.wave)
+            .eq("route_label",row.route_label)
+            .order("updated_at",{ascending:false})
+            .limit(1);
+
+          if(findError)throw findError;
+
+          const existingId=found?.[0]?.id || "";
+
+          if(existingId){
+            const {error:updateError}=await supabase
+              .from("maroowell_schedule")
+              .update(row)
+              .eq("id",existingId);
+
+            if(updateError)throw updateError;
+            saved++;
+            continue;
+          }
+
+          if(row.is_active===false && !clean(row.driver_name) && !clean(row.driver_display_name)){
+            skipped++;
+            continue;
+          }
+
+          const {error:insertError}=await supabase
+            .from("maroowell_schedule")
+            .insert(row);
+
+          if(insertError)throw insertError;
+          saved++;
+        }
+
+        return {saved,skipped,mode:"row_by_row"};
+      }
+
+      async function saveScheduleRowsDirect(items){
+        if(!supabase)throw new Error("Supabase 설정을 찾을 수 없습니다.");
+
+        const payload=items
+          .map(makeSupabaseScheduleSaveRow)
+          .filter(row=>row.schedule_date && row.camp && row.wave && row.route_label);
+
+        if(!payload.length)return {saved:0,skipped:0,mode:"empty"};
+
+        const {error}=await supabase
+          .from("maroowell_schedule")
+          .upsert(payload,{
+            onConflict:"schedule_date,camp,wave,route_label"
+          });
+
+        if(!error)return {saved:payload.length,skipped:0,mode:"upsert"};
+
+        return saveScheduleRowsOneByOne(payload,error);
+      }
+
       async function saveAll(){
         if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
         if(state.dirty.size===0){alert("저장할 변경사항이 없습니다.");return}
 
         hideSuggest();
 
-        const records=Array.from(state.dirty.values()).map(item=>({
-          schedule_date:item.schedule_date,
-          route_label:normalizeRouteLabel(item.route_label),
-          driver_name:item.driver_display_name||item.driver_name,
-          memo:item.memo,
-          row_order:item.row_order,
-          cell_color:item.cell_color,
-          is_active:item.is_active
-        }));
+        const dirtyItems=Array.from(state.dirty.values());
 
         setState("warn","SAVE");
-        setStatus(`저장 중: ${records.length}건`);
+        setStatus(`저장 중: ${dirtyItems.length}건`);
         els.btnSave.disabled=true;
 
         try{
-          const json=await apiFetch("/schedule/save",{method:"POST",body:JSON.stringify({camp:state.camp,wave:state.wave,week_start:state.weekStart,records})});
+          const result=await saveScheduleRowsDirect(dirtyItems);
           state.dirty.clear();
           await loadAll();
           setState("ok","READY");
-          setStatus(`저장 완료: ${json.saved||records.length}건`);
+          setStatus(`저장 완료: ${result.saved||dirtyItems.length}건`);
         }catch(e){
           console.error(e);
           setState("err","ERROR");

@@ -515,7 +515,7 @@
         </a>
         <div class="brandText">
           <h1>정산 업로드</h1>
-          <p>정산Raw 시트 추출 / 월별 등록 / 금액 교차검증</p>
+          <p>정산Raw / 분실파손List 추출 · 월별 등록 · 금액 교차검증</p>
         </div>
       </div>
       <div class="topSpacer"></div>
@@ -564,12 +564,12 @@
               </div>
 
               <div class="row">
-                <button id="btnParse" class="btn primary" type="button">정산Raw 읽기</button>
+                <button id="btnParse" class="btn primary" type="button">정산서 읽기</button>
                 <button id="btnUpload" class="btn ok" type="button" disabled>DB 업로드</button>
                 <button id="btnReset" class="btn" type="button">초기화</button>
               </div>
 
-              <div id="statusText" class="status">정산서 파일을 선택하고 정산Raw 읽기를 누르세요.</div>
+              <div id="statusText" class="status">정산서 파일을 선택하고 정산서 읽기를 누르세요.</div>
 
               <div class="pillGrid">
                 <div class="pill"><span>추출 행</span><b id="countRows">0</b></div>
@@ -577,8 +577,8 @@
                 <div class="pill"><span>예외 행</span><b id="countExempt">0</b></div>
                 <div class="pill"><span>스킵 행</span><b id="countSkipped">0</b></div>
                 <div class="pill"><span>기본금액</span><b id="sumDefault">0</b></div>
-                <div class="pill"><span>프백 인센티브</span><b id="sumFreshbag">0</b></div>
-                <div class="pill"><span>총금액</span><b id="sumTotal">0</b></div>
+                <div class="pill"><span>프백 인센티브+회수</span><b id="sumFreshbag">0</b></div>
+                <div class="pill"><span>정산합계</span><b id="sumTotal">0</b></div>
                 <div class="pill"><span>날짜 수</span><b id="countDates">0</b></div>
               </div>
             </div>
@@ -589,7 +589,7 @@
               <h2>매핑 / 검증 기준</h2>
             </div>
             <div class="cardBody muted">
-              읽는 시트: <b>정산Raw</b><br><br>
+              읽는 시트: <b>정산Raw</b>, <b>분실파손List</b><br><br>
               구분 → classify<br>
               ID → id<br>
               Route → route<br>
@@ -602,11 +602,11 @@
               기본배송단가 금액 / 기본금액 → default_price<br>
               추가 인센티브 → freshbag_incentive, 프백 인센티브 단가로 사용<br>
               추가 인센티브 가중요인 금액 → freshbag_incentive_price, 프백 인센티브 금액으로 저장<br>
-              총금액 → total_price<br><br>
+              총금액 → total_price<br>프레시백 회수 인센티브 → freshbag_return<br><br>분실파손List:<br>날짜 → delivery_date<br>캠프 → camp<br>ID → id<br>이름 → driver_name<br>유형 → loss_damage_type<br>상세 → loss_damage_detail<br>개수 → loss_damage_count<br>차감금액 → deduction_price<br>운송장번호 → tracking_number<br>상품명(상세) → product_name<br><br>
               검증식:<br>
               1) <b>(배송 + 반품) × 단가 = 기본금액</b><br>
               2) <b>(배송 + 반품) × 추가 인센티브 = 추가 인센티브 가중요인 금액</b><br>
-              3) <b>기본금액 + 추가 인센티브 가중요인 금액 = 총금액</b><br><br>
+              3) <b>기본금액 + 추가 인센티브 가중요인 금액 = 총금액</b><br>4) <b>프레시백 회수 인센티브는 freshbag_return에 별도 저장하고 월 합계에는 더합니다.</b><br>5) <b>분실파손List 차감금액은 deduction_price에 저장하고 total_price에는 음수로 반영합니다.</b><br><br>
               <b>미계약 라우트</b>만 계약 단가 기준이 없어 오류 예외로 처리합니다.<br>프백 인센티브 단독 행은 배송/반품 수량 검증 대상이 아니므로 오류 행으로 올리지 않습니다.
             </div>
           </div>
@@ -669,6 +669,7 @@
       const HOME_PATH = CONFIG.PATHS?.index || "/zipcode_search";
       const TABLE_NAME = "maroowell_account";
       const REQUIRED_SHEET_NAME = "정산Raw";
+      const LOSS_SHEET_NAME = "분실파손List";
       const INSERT_CHUNK_SIZE = 500;
       const MONEY_TOLERANCE = 1;
 
@@ -974,16 +975,17 @@
             "freshbagprice"
           ], -1),
 
-          // 회수 수량은 명확한 수량/건수/개수 컬럼만 허용한다. 인센티브 금액 컬럼과 혼동 금지.
+          // 프레시백 회수 인센티브는 회수 금액이다.
+          // 기존 DB 컬럼 freshbag_return에 금액으로 저장한다.
           freshbagReturn: findColumnContains(headers, [
-            "프레시백회수수량",
-            "프레쉬백회수수량",
-            "프레시백회수건수",
-            "프레쉬백회수건수",
-            "프레시백회수개수",
-            "프레쉬백회수개수",
-            "freshbagreturncount"
-          ], -1, ["인센티브", "금액", "price", "단가"])
+            "프레시백회수인센티브",
+            "프레쉬백회수인센티브",
+            "프백회수인센티브",
+            "프레시백회수금액",
+            "프레쉬백회수금액",
+            "freshbagreturn",
+            "freshbagreturnprice"
+          ], -1)
         };
       }
 
@@ -1122,7 +1124,7 @@
         const hasExplicitFreshbagTotal = col.freshbagPrice >= 0 && hasValue(row[col.freshbagPrice]);
         const freshbagUnit = hasExplicitFreshbagUnit ? rawFreshbagIncentive : 0;
         const freshbagTotal = hasExplicitFreshbagTotal ? rawFreshbagPriceValue : roundMoney((parcel + returnCount) * freshbagUnit);
-        const freshbagReturn = parseIntCount(col.freshbagReturn >= 0 ? row[col.freshbagReturn] : 0);
+        const freshbagReturn = parseNumber(col.freshbagReturn >= 0 ? row[col.freshbagReturn] : 0);
 
         const qty = parcel + returnCount;
         const hasExplicitDefaultPrice = col.defaultPrice >= 0 && hasValue(row[col.defaultPrice]);
@@ -1157,12 +1159,15 @@
         const data = {
           date_year:Number(els.yearSelect.value),
           date_month:Number(els.monthSelect.value),
+          source_sheet: REQUIRED_SHEET_NAME,
           classify: classify || null,
           id: driverId || null,
           route: route || null,
           delivery_date: deliveryDate,
           camp: camp || null,
           wave: wave || null,
+          company_name: vendor || null,
+          driver_name: null,
           parcel,
           "return": returnCount,
           price,
@@ -1170,7 +1175,13 @@
           default_price: defaultPrice,
           freshbag_incentive_price: freshbagIncentivePrice,
           total_price: totalPrice,
-          freshbag_return: freshbagReturn
+          freshbag_return: freshbagReturn,
+          loss_damage_type: null,
+          loss_damage_detail: null,
+          loss_damage_count: 0,
+          deduction_price: 0,
+          tracking_number: null,
+          product_name: null
         };
 
         const validation = validateAmounts(data, row, {
@@ -1195,11 +1206,171 @@
             sourceTotal:rawTotal,
             sourceFreshbagIncentive:rawFreshbagIncentive,
             sourceFreshbagPrice:rawFreshbagPriceValue,
+            sourceFreshbagReturn:freshbagReturn,
             normalizedFreshbagIncentive:freshbagUnit,
             normalizedFreshbagPrice:freshbagTotal,
             exempt:isUncontracted
           }
         };
+      }
+
+
+      function findLossHeaderRow(rows){
+        for(let r = 0; r < Math.min(rows.length, 50); r++){
+          const keys = (rows[r] || []).map(compact);
+          const hasDate = keys.some(k => k === "날짜" || k.includes("날짜"));
+          const hasId = keys.some(k => k === "id" || k.includes("아이디"));
+          const hasAmount = keys.some(k => k.includes("차감금액") || k.includes("차감"));
+          const hasType = keys.some(k => k.includes("유형") || k.includes("타입"));
+          if(hasDate && hasId && hasAmount && hasType) return r;
+        }
+
+        return 0;
+      }
+
+      function buildLossColumnMap(headers){
+        return {
+          deliveryDate: findColumnContains(headers, ["날짜", "일자", "배송일자"], 0),
+          camp: findColumnContains(headers, ["캠프", "캠프명", "Camp"], 1),
+          id: findColumnContains(headers, ["ID", "아이디"], 2),
+          driverName: findColumnContains(headers, ["이름", "기사명", "성명"], 3),
+          lossType: findColumnContains(headers, ["유형", "타입", "분류"], 4),
+          lossDetail: findColumnContains(headers, ["상세", "상세유형", "내용"], 5),
+          lossCount: findColumnContains(headers, ["개수", "수량", "건수"], 6),
+          deductionPrice: findColumnContains(headers, ["차감금액", "차감액", "금액"], 7),
+          companyName: findColumnContains(headers, ["업체명", "업체", "Vendor"], 8),
+          trackingNumber: findColumnContains(headers, ["운송장번호", "운송장", "송장번호", "송장"], 9),
+          productName: findColumnContains(headers, ["상품명상세", "상품명", "상품", "상세상품"], 10)
+        };
+      }
+
+      function convertLossRow(row, col, rowNo){
+        const deliveryDate = parseDateValue(col.deliveryDate >= 0 ? row[col.deliveryDate] : null);
+        const camp = clean(col.camp >= 0 ? row[col.camp] : "");
+        const driverId = clean(col.id >= 0 ? row[col.id] : "");
+        const driverName = clean(col.driverName >= 0 ? row[col.driverName] : "");
+        const lossType = clean(col.lossType >= 0 ? row[col.lossType] : "");
+        const lossDetail = clean(col.lossDetail >= 0 ? row[col.lossDetail] : "");
+        const lossCount = parseIntCount(col.lossCount >= 0 ? row[col.lossCount] : 0);
+        const deductionPrice = parseNumber(col.deductionPrice >= 0 ? row[col.deductionPrice] : 0);
+        const companyName = clean(col.companyName >= 0 ? row[col.companyName] : "");
+        const trackingNumber = clean(col.trackingNumber >= 0 ? row[col.trackingNumber] : "");
+        const productName = clean(col.productName >= 0 ? row[col.productName] : "");
+
+        if(els.maroowellOnlyCheck.checked && companyName && companyName !== "마루웰"){
+          return {
+            skip:true,
+            reason:"업체명 필터",
+            rowNo,
+            vendor:companyName,
+            classify:"분실파손",
+            id:driverId,
+            route:""
+          };
+        }
+
+        if(!deliveryDate && !camp && !driverId && !driverName && !deductionPrice && !trackingNumber && !productName){
+          return {
+            skip:true,
+            reason:"빈 분실파손 행",
+            rowNo
+          };
+        }
+
+        const data = {
+          date_year:Number(els.yearSelect.value),
+          date_month:Number(els.monthSelect.value),
+          source_sheet: LOSS_SHEET_NAME,
+          classify:"분실파손",
+          id:driverId || null,
+          route:null,
+          delivery_date:deliveryDate,
+          camp:camp || null,
+          wave:null,
+          company_name:companyName || null,
+          driver_name:driverName || null,
+          parcel:0,
+          "return":0,
+          price:0,
+          freshbag_incentive:0,
+          default_price:0,
+          freshbag_incentive_price:0,
+          freshbag_return:0,
+          total_price:-Math.abs(deductionPrice),
+          loss_damage_type:lossType || null,
+          loss_damage_detail:lossDetail || null,
+          loss_damage_count:lossCount,
+          deduction_price:deductionPrice,
+          tracking_number:trackingNumber || null,
+          product_name:productName || null
+        };
+
+        return {
+          skip:false,
+          data,
+          validation:{
+            hasError:false,
+            exempt:false,
+            errors:[],
+            notes:["분실파손List: 차감금액을 deduction_price에 저장하고 total_price에는 음수로 반영"],
+            expectedDefault:null,
+            expectedFreshbag:null,
+            expectedTotal:null,
+            defaultDiff:0,
+            freshbagDiff:0,
+            totalDiff:0
+          },
+          meta:{
+            rowNo:`${LOSS_SHEET_NAME} ${rowNo}`,
+            vendor:companyName,
+            sheet:LOSS_SHEET_NAME,
+            sourceDefault:0,
+            sourceTotal:-Math.abs(deductionPrice),
+            sourceFreshbagIncentive:0,
+            sourceFreshbagPrice:0,
+            sourceFreshbagReturn:0,
+            normalizedFreshbagIncentive:0,
+            normalizedFreshbagPrice:0,
+            exempt:false
+          }
+        };
+      }
+
+      function appendLossDamageRows(workbook){
+        const sheetName = workbook.SheetNames.find(name => compact(name) === compact(LOSS_SHEET_NAME));
+        if(!sheetName) return { sheet:null, rows:0, skipped:0, columns:null, headers:null };
+
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header:1,
+          raw:true,
+          defval:null,
+          blankrows:false
+        });
+
+        if(!rows.length) return { sheet:sheetName, rows:0, skipped:0, columns:null, headers:null };
+
+        const headerRowIndex = findLossHeaderRow(rows);
+        const headers = rows[headerRowIndex] || [];
+        const col = buildLossColumnMap(headers);
+        let parsed = 0;
+        let skipped = 0;
+
+        for(let r = headerRowIndex + 1; r < rows.length; r++){
+          const row = rows[r] || [];
+          if(isBlankDataRow(row)) continue;
+
+          const converted = convertLossRow(row, col, r + 1);
+          if(converted.skip){
+            state.skipped.push(converted);
+            skipped++;
+          }else{
+            state.rows.push(converted);
+            parsed++;
+          }
+        }
+
+        return { sheet:sheetName, rows:parsed, skipped, header_row:headerRowIndex + 1, columns:col, headers };
       }
 
       function initSelectors(){
@@ -1282,6 +1453,8 @@
           }
         }
 
+        const lossResult = appendLossDamageRows(workbook);
+
         state.rows.sort((a,b) => {
           const ae = a.validation?.hasError ? 1 : 0;
           const be = b.validation?.hasError ? 1 : 0;
@@ -1302,7 +1475,7 @@
         const exemptCount = state.rows.filter(item => item.validation?.exempt).length;
 
         if(!state.rows.length){
-          setStatus("업로드 가능한 정산Raw 데이터가 없습니다.", "warn");
+          setStatus("업로드 가능한 정산 데이터가 없습니다.", "warn");
           els.btnUpload.disabled = true;
         }else if(errorCount > 0){
           setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 금액 검증 오류 ${errorCount.toLocaleString("ko-KR")}건이 있습니다. 오류 행을 확인하세요.`, "err");
@@ -1320,6 +1493,7 @@
           header_row:headerRowIndex + 1,
           total_excel_rows:rows.length,
           parsed_rows:state.rows.length,
+          loss_damage_result:lossResult,
           skipped_rows:state.skipped.length,
           validation_errors:errorCount,
           validation_exempt_rows:exemptCount,
@@ -1336,8 +1510,8 @@
         const dateCount = new Set(dataRows.map(row => row.delivery_date).filter(Boolean)).size;
 
         const defaultSum = dataRows.reduce((sum, row) => sum + Number(row.default_price || 0), 0);
-        const freshbagSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive || 0), 0);
-        const totalSum = dataRows.reduce((sum, row) => sum + Number(row.total_price || 0), 0);
+        const freshbagSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive_price || 0) + Number(row.freshbag_return || 0), 0);
+        const totalSum = dataRows.reduce((sum, row) => sum + Number(row.total_price || 0) + Number(row.freshbag_return || 0), 0);
 
         els.countRows.textContent = state.rows.length.toLocaleString("ko-KR");
         els.countErrors.textContent = errorCount.toLocaleString("ko-KR");
@@ -1387,9 +1561,9 @@
 
       function renderPreview(){
         const headers = [
-          "검증", "Excel행", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
-          "배송", "반품", "단가", "프백 인센티브", "프백 인센티브 금액", "기본금액", "총금액",
-          "예상기본", "기본차이", "예상프백", "프백차이", "예상총액", "총액차이", "메모"
+          "검증", "Excel행", "시트", "구분", "ID", "이름", "Route", "배송일자", "캠프", "배송유형",
+          "배송", "반품", "단가", "프백 인센티브", "프백 인센티브 금액", "프백 회수", "기본금액", "총금액",
+          "차감금액", "운송장번호", "상품명", "예상기본", "기본차이", "예상프백", "프백차이", "예상총액", "총액차이", "메모"
         ];
 
         els.previewTable.querySelector("thead").innerHTML = `<tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr>`;
@@ -1421,8 +1595,10 @@
             <tr class="${trClass}">
               <td class="${statusClass}">${esc(statusText)}</td>
               <td>${esc(item.meta.rowNo)}</td>
+              <td>${esc(row.source_sheet || REQUIRED_SHEET_NAME)}</td>
               <td>${esc(row.classify)}</td>
               <td class="left">${esc(row.id)}</td>
+              <td class="left">${esc(row.driver_name)}</td>
               <td>${esc(row.route)}</td>
               <td>${esc(row.delivery_date)}</td>
               <td>${esc(row.camp)}</td>
@@ -1432,8 +1608,12 @@
               <td class="money">${money(row.price)}</td>
               <td class="money">${money(row.freshbag_incentive)}</td>
               <td class="money">${money(row.freshbag_incentive_price)}</td>
+              <td class="money">${money(row.freshbag_return)}</td>
               <td class="money">${money(row.default_price)}</td>
               <td class="money">${money(row.total_price)}</td>
+              <td class="money">${money(row.deduction_price)}</td>
+              <td class="left">${esc(row.tracking_number)}</td>
+              <td class="left">${esc(row.product_name)}</td>
               <td class="money">${validation.expectedDefault === null || validation.expectedDefault === undefined ? "-" : money(validation.expectedDefault)}</td>
               <td class="money ${Math.abs(validation.defaultDiff || 0) > MONEY_TOLERANCE ? "badText" : ""}">${validation.exempt ? "-" : money(validation.defaultDiff || 0)}</td>
               <td class="money">${validation.expectedFreshbag === null || validation.expectedFreshbag === undefined ? "-" : money(validation.expectedFreshbag)}</td>
@@ -1533,7 +1713,7 @@
         state.fileName = "";
         els.fileInput.value = "";
         els.btnUpload.disabled = true;
-        setStatus("정산서 파일을 선택하고 정산Raw 읽기를 누르세요.", "");
+        setStatus("정산서 파일을 선택하고 정산서 읽기를 누르세요.", "");
         log("대기 중");
         renderSummary();
         renderValidationBox();
@@ -1646,7 +1826,7 @@
         const allowed = await checkAccess();
         if(!allowed) return;
 
-        setStatus("정산서 파일을 선택하고 정산Raw 읽기를 누르세요.", "");
+        setStatus("정산서 파일을 선택하고 정산서 읽기를 누르세요.", "");
       }
 
       boot();

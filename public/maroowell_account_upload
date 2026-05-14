@@ -481,6 +481,16 @@
             </div>
             <div class="cardBody">
               <div class="field">
+                <label for="yearSelect">정산 연도</label>
+                <select id="yearSelect" class="select"></select>
+              </div>
+
+              <div class="field">
+                <label for="monthSelect">정산 월</label>
+                <select id="monthSelect" class="select"></select>
+              </div>
+
+              <div class="field">
                 <label for="fileInput">정산서 파일</label>
                 <input id="fileInput" class="input" type="file" accept=".xlsx,.xls" />
               </div>
@@ -494,10 +504,10 @@
               </div>
 
               <div class="checkLine">
-                <input id="deleteAllCheck" type="checkbox" />
+                <input id="deleteAllCheck" type="checkbox" checked />
                 <div>
-                  업로드 전 <b>maroowell_account 전체 데이터 삭제</b><br>
-                  같은 파일 재업로드 때만 사용하세요.
+                  업로드 전 <b>선택한 정산 연도/월 기존 데이터 삭제</b><br>
+                  같은 월 정산을 재업로드할 때 중복 방지를 위해 사용하세요.
                 </div>
               </div>
 
@@ -518,6 +528,7 @@
                 <div class="pill"><span>프백금액</span><b id="sumFreshbag">0</b></div>
                 <div class="pill"><span>총금액</span><b id="sumTotal">0</b></div>
                 <div class="pill"><span>날짜 수</span><b id="countDates">0</b></div>
+                <div class="pill"><span>정산월</span><b id="countPeriod">-</b></div>
               </div>
             </div>
           </div>
@@ -531,6 +542,8 @@
               구분 → classify<br>
               ID → id<br>
               Route → route<br>
+              정산 연도 → date_year<br>
+              정산 월 → date_month<br>
               배송일자 → delivery_date<br>
               캠프명 → camp<br>
               배송유형 → wave<br>
@@ -601,6 +614,8 @@
       const els = {
         userBadge: document.getElementById("userBadge"),
         btnLogout: document.getElementById("btnLogout"),
+        yearSelect: document.getElementById("yearSelect"),
+        monthSelect: document.getElementById("monthSelect"),
         fileInput: document.getElementById("fileInput"),
         maroowellOnlyCheck: document.getElementById("maroowellOnlyCheck"),
         deleteAllCheck: document.getElementById("deleteAllCheck"),
@@ -616,6 +631,7 @@
         countFreshbag: document.getElementById("countFreshbag"),
         countSkipped: document.getElementById("countSkipped"),
         countDates: document.getElementById("countDates"),
+        countPeriod: document.getElementById("countPeriod"),
         sumDefault: document.getElementById("sumDefault"),
         sumFreshbag: document.getElementById("sumFreshbag"),
         sumTotal: document.getElementById("sumTotal"),
@@ -632,7 +648,8 @@
         access:null,
         rows:[],
         skipped:[],
-        fileName:""
+        fileName:"",
+        period:null
       };
 
       const supabaseClient = SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase
@@ -687,6 +704,41 @@
       function toInteger(v, fallback = 0){
         const n = toNumber(v, fallback);
         return Number.isFinite(n) ? Math.trunc(n) : fallback;
+      }
+
+      function initPeriodSelects(){
+        const now = new Date();
+        const currentYear = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        const years = [];
+
+        for(let y = currentYear + 1; y >= currentYear - 8; y--){
+          years.push(y);
+        }
+
+        els.yearSelect.innerHTML = years.map(y => `<option value="${y}">${y}년</option>`).join("");
+        els.monthSelect.innerHTML = Array.from({length:12}, (_, i) => {
+          const m = i + 1;
+          return `<option value="${m}">${m}월</option>`;
+        }).join("");
+
+        els.yearSelect.value = String(currentYear);
+        els.monthSelect.value = String(currentMonth);
+      }
+
+      function getSelectedPeriod(){
+        const dateYear = Number(els.yearSelect.value);
+        const dateMonth = Number(els.monthSelect.value);
+
+        if(!Number.isInteger(dateYear) || dateYear < 2000 || dateYear > 2100){
+          throw new Error("정산 연도를 선택하세요.");
+        }
+
+        if(!Number.isInteger(dateMonth) || dateMonth < 1 || dateMonth > 12){
+          throw new Error("정산 월을 선택하세요.");
+        }
+
+        return { date_year: dateYear, date_month: dateMonth };
       }
 
       function excelSerialToIso(serial){
@@ -773,7 +825,7 @@
         return row.every(cell => clean(cell) === "");
       }
 
-      function convertRow(row, col, rowNo){
+      function convertRow(row, col, rowNo, period){
         const classify = clean(row[col.classify]);
         const driverId = clean(row[col.id]);
         const route = clean(row[col.route]);
@@ -803,6 +855,8 @@
         return {
           skip:false,
           data:{
+            date_year: period.date_year,
+            date_month: period.date_month,
             classify: classify || null,
             id: driverId || null,
             route: route || null,
@@ -833,6 +887,9 @@
           setStatus("정산서 파일을 먼저 선택하세요.", "warn");
           return;
         }
+
+        const period = getSelectedPeriod();
+        state.period = period;
 
         state.rows = [];
         state.skipped = [];
@@ -889,7 +946,7 @@
           const row = rows[r] || [];
           if(isBlankDataRow(row)) continue;
 
-          const converted = convertRow(row, col, r + 1);
+          const converted = convertRow(row, col, r + 1, period);
 
           if(converted.skip){
             state.skipped.push(converted);
@@ -912,6 +969,8 @@
         log({
           file:file.name,
           sheet:sheetName,
+          date_year:period.date_year,
+          date_month:period.date_month,
           header_row:headerRowIndex + 1,
           total_excel_rows:rows.length,
           parsed_rows:state.rows.length,
@@ -936,6 +995,16 @@
         els.countFreshbag.textContent = freshbagCount.toLocaleString("ko-KR");
         els.countSkipped.textContent = state.skipped.length.toLocaleString("ko-KR");
         els.countDates.textContent = dateCount.toLocaleString("ko-KR");
+        if(dataRows.length){
+          els.countPeriod.textContent = `${dataRows[0].date_year}.${String(dataRows[0].date_month).padStart(2,"0")}`;
+        }else{
+          try{
+            const period = getSelectedPeriod();
+            els.countPeriod.textContent = `${period.date_year}.${String(period.date_month).padStart(2,"0")}`;
+          }catch{
+            els.countPeriod.textContent = "-";
+          }
+        }
         els.sumDefault.textContent = money(defaultSum);
         els.sumFreshbag.textContent = money(freshbagSum);
         els.sumTotal.textContent = money(totalSum);
@@ -943,7 +1012,7 @@
 
       function renderPreview(){
         const headers = [
-          "No", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
+          "No", "정산월", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
           "배송", "반품", "단가", "기본금액", "프백금액", "총금액"
         ];
 
@@ -964,6 +1033,7 @@
           return `
             <tr>
               <td>${idx + 1}</td>
+              <td>${esc(row.date_year)}.${String(row.date_month).padStart(2,"0")}</td>
               <td class="${isFreshbag ? "warn" : ""}">${esc(row.classify)}</td>
               <td class="left">${esc(row.id)}</td>
               <td>${esc(row.route)}</td>
@@ -983,11 +1053,12 @@
         els.previewNote.textContent = `최대 300행 표시 / 전체 ${state.rows.length.toLocaleString("ko-KR")}행`;
       }
 
-      async function deleteAllRows(){
+      async function deleteSelectedPeriodRows(period){
         const { error } = await supabaseClient
           .from(TABLE_NAME)
           .delete()
-          .gte("row_id", 0);
+          .eq("date_year", period.date_year)
+          .eq("date_month", period.date_month);
 
         if(error) throw error;
       }
@@ -998,7 +1069,10 @@
           return;
         }
 
-        if(!confirm(`${state.rows.length.toLocaleString("ko-KR")}행을 DB에 업로드할까요?`)) return;
+        const period = state.period || getSelectedPeriod();
+        const periodLabel = `${period.date_year}년 ${period.date_month}월`;
+
+        if(!confirm(`${periodLabel} 정산 데이터 ${state.rows.length.toLocaleString("ko-KR")}행을 DB에 업로드할까요?`)) return;
 
         els.btnUpload.disabled = true;
         els.btnParse.disabled = true;
@@ -1006,11 +1080,11 @@
 
         try{
           if(els.deleteAllCheck.checked){
-            const ok = confirm("주의: maroowell_account 전체 데이터를 먼저 삭제합니다. 계속할까요?");
+            const ok = confirm(`주의: ${periodLabel} 기존 정산 데이터를 먼저 삭제합니다. 계속할까요?`);
             if(!ok) return;
 
-            setStatus("기존 전체 데이터를 삭제하는 중입니다...", "warn");
-            await deleteAllRows();
+            setStatus(`${periodLabel} 기존 데이터를 삭제하는 중입니다...`, "warn");
+            await deleteSelectedPeriodRows(period);
           }
 
           const records = state.rows.map(item => item.data);
@@ -1033,7 +1107,9 @@
             result:"success",
             file:state.fileName,
             inserted_rows:inserted,
-            delete_all_before_upload:els.deleteAllCheck.checked
+            date_year:period.date_year,
+            date_month:period.date_month,
+            delete_period_before_upload:els.deleteAllCheck.checked
           });
         }catch(err){
           console.error(err);
@@ -1049,6 +1125,7 @@
         state.rows = [];
         state.skipped = [];
         state.fileName = "";
+        state.period = null;
         els.fileInput.value = "";
         els.btnUpload.disabled = true;
         setStatus("정산서 파일을 선택하고 정산Raw 읽기를 누르세요.", "");
@@ -1111,6 +1188,19 @@
         return true;
       }
 
+      function clearParsedRowsForPeriodChange(){
+        if(state.rows.length || state.skipped.length){
+          state.rows = [];
+          state.skipped = [];
+          state.period = null;
+          els.btnUpload.disabled = true;
+          setStatus("정산 연도/월이 변경되었습니다. 파일을 다시 읽어주세요.", "warn");
+          renderPreview();
+        }
+
+        renderSummary();
+      }
+
       function bind(){
         els.btnLogout.addEventListener("click", logout);
         els.deniedLogoutBtn.addEventListener("click", logout);
@@ -1128,9 +1218,12 @@
 
         els.btnUpload.addEventListener("click", uploadRows);
         els.btnReset.addEventListener("click", resetPage);
+        els.yearSelect.addEventListener("change", clearParsedRowsForPeriodChange);
+        els.monthSelect.addEventListener("change", clearParsedRowsForPeriodChange);
       }
 
       async function boot(){
+        initPeriodSelects();
         bind();
         renderSummary();
         renderPreview();

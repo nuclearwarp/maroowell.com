@@ -366,6 +366,76 @@
     td.money{font-weight:950;color:#bbf7d0}
     td.warn{font-weight:950;color:#fde68a}
     td.err{font-weight:950;color:#fecaca}
+    tr.issueRow td{background:rgba(127,29,29,.28)!important}
+    .issueBadge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:24px;
+      padding:0 8px;
+      border-radius:999px;
+      border:1px solid rgba(248,113,113,.45);
+      background:rgba(127,29,29,.42);
+      color:#fecaca;
+      font-size:11px;
+      font-weight:1000;
+      white-space:nowrap;
+    }
+    .okBadge{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:24px;
+      padding:0 8px;
+      border-radius:999px;
+      border:1px solid rgba(134,239,172,.35);
+      background:rgba(22,163,74,.22);
+      color:#bbf7d0;
+      font-size:11px;
+      font-weight:1000;
+      white-space:nowrap;
+    }
+
+    .issueList{
+      display:none;
+      margin:12px 16px 0;
+      border:1px solid rgba(248,113,113,.36);
+      border-radius:14px;
+      background:rgba(127,29,29,.20);
+      overflow:hidden;
+    }
+
+    .issueList.show{display:block}
+
+    .issueHead{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(248,113,113,.24);
+      color:#fecaca;
+      font-size:13px;
+      font-weight:1000;
+      background:rgba(127,29,29,.20);
+    }
+
+    .issueBody{
+      max-height:220px;
+      overflow:auto;
+      padding:8px;
+    }
+
+    .issueItem{
+      padding:8px 10px;
+      border:1px solid rgba(248,113,113,.20);
+      border-radius:11px;
+      background:rgba(0,0,0,.18);
+      color:#fee2e2;
+      font-size:12px;
+      font-weight:850;
+      line-height:1.45;
+      margin-bottom:7px;
+    }
+
+    .issueItem:last-child{margin-bottom:0}
+
 
     .emptyBox{
       padding:48px 16px;
@@ -524,6 +594,7 @@
                 <div class="pill"><span>배송 행</span><b id="countDelivery">0</b></div>
                 <div class="pill"><span>프백 행</span><b id="countFreshbag">0</b></div>
                 <div class="pill"><span>스킵 행</span><b id="countSkipped">0</b></div>
+                <div class="pill"><span>검증 오류</span><b id="countIssues">0</b></div>
                 <div class="pill"><span>배송금액</span><b id="sumDefault">0</b></div>
                 <div class="pill"><span>프백금액</span><b id="sumFreshbag">0</b></div>
                 <div class="pill"><span>총금액</span><b id="sumTotal">0</b></div>
@@ -550,8 +621,14 @@
               배송건수 → parcel<br>
               반품 → return<br>
               단가 → price<br>
-              총금액 → default_price / total_price<br>
-              프레시백 회수 인센티브 → freshbag_incentive / freshbag_incentive_price<br><br>
+              기본배송단가 금액 / 기본금액 → default_price<br>
+              추가인센티브 / 프레시백 인센티브 → freshbag_incentive<br>
+              추가 인센티브 가중요인 금액 → freshbag_incentive_price<br>
+              총금액 → total_price<br><br>
+              검증:<br>
+              1) (배송건수 + 반품) × 단가 = 기본금액<br>
+              2) (배송건수 + 반품) × (단가 + 프백금액) = 총금액<br>
+              불일치 행은 미리보기 상단에 빨간색으로 정렬됩니다.<br><br>
               분실파손List 시트는 이번 버전에서 무시합니다.
             </div>
           </div>
@@ -572,6 +649,7 @@
               <h2>미리보기</h2>
               <span class="muted" id="previewNote">최대 300행 표시</span>
             </div>
+            <div id="issueList" class="issueList"></div>
             <div class="tableWrap">
               <table id="previewTable">
                 <thead></thead>
@@ -626,10 +704,12 @@
         logOutput: document.getElementById("logOutput"),
         previewTable: document.getElementById("previewTable"),
         previewNote: document.getElementById("previewNote"),
+        issueList: document.getElementById("issueList"),
         countRows: document.getElementById("countRows"),
         countDelivery: document.getElementById("countDelivery"),
         countFreshbag: document.getElementById("countFreshbag"),
         countSkipped: document.getElementById("countSkipped"),
+        countIssues: document.getElementById("countIssues"),
         countDates: document.getElementById("countDates"),
         countPeriod: document.getElementById("countPeriod"),
         sumDefault: document.getElementById("sumDefault"),
@@ -825,6 +905,84 @@
         return row.every(cell => clean(cell) === "");
       }
 
+      function findOptionalColumn(headers, candidates){
+        const keys = headers.map(normalizeHeader);
+
+        for(const candidate of candidates){
+          const key = normalizeHeader(candidate);
+          const idx = keys.findIndex(item => item === key || item.includes(key));
+          if(idx >= 0) return idx;
+        }
+
+        return -1;
+      }
+
+      function cellNumber(row, index, fallback = null){
+        if(index === null || index === undefined || index < 0) return fallback;
+        const raw = row[index];
+        if(raw === null || raw === undefined || raw === "") return fallback;
+        return toNumber(raw, fallback);
+      }
+
+      function roundWon(v){
+        const n = Number(v || 0);
+        if(!Number.isFinite(n)) return 0;
+        return Math.round(n);
+      }
+
+      function sameWon(a, b){
+        return Math.abs(roundWon(a) - roundWon(b)) <= 1;
+      }
+
+      function formatDiff(actual, expected){
+        return `${money(actual)} / 계산 ${money(expected)} / 차이 ${money(Number(actual || 0) - Number(expected || 0))}`;
+      }
+
+      function buildValidation({ rowNo, quantity, price, freshbagUnit, defaultPrice, totalPrice, expectedDefault, expectedTotal, hasRawDefault, hasRawTotal }){
+        const issues = [];
+
+        if(hasRawDefault && !sameWon(defaultPrice, expectedDefault)){
+          issues.push({
+            type:"base",
+            label:"기본금액 불일치",
+            actual:defaultPrice,
+            expected:expectedDefault,
+            message:`기본금액 불일치: ${formatDiff(defaultPrice, expectedDefault)}`
+          });
+        }
+
+        if(hasRawTotal && !sameWon(totalPrice, expectedTotal)){
+          issues.push({
+            type:"total",
+            label:"총금액 불일치",
+            actual:totalPrice,
+            expected:expectedTotal,
+            message:`총금액 불일치: ${formatDiff(totalPrice, expectedTotal)}`
+          });
+        }
+
+        return {
+          rowNo,
+          quantity,
+          price,
+          freshbagUnit,
+          expectedDefault,
+          expectedTotal,
+          hasIssue:issues.length > 0,
+          issues
+        };
+      }
+
+      function issueCount(){
+        return state.rows.filter(item => item.meta?.validation?.hasIssue).length;
+      }
+
+      function issueItems(){
+        return state.rows
+          .filter(item => item.meta?.validation?.hasIssue)
+          .map(item => ({ data:item.data, meta:item.meta, validation:item.meta.validation }));
+      }
+
       function convertRow(row, col, rowNo, period){
         const classify = clean(row[col.classify]);
         const driverId = clean(row[col.id]);
@@ -836,8 +994,12 @@
         const parcel = toInteger(row[col.parcel], 0);
         const returnCount = toInteger(row[col.returnCount], 0);
         const price = toNumber(row[col.price], 0);
-        const rawTotalPrice = toNumber(row[col.totalPrice], 0);
-        const rawFreshbagPrice = toNumber(row[col.freshbagIncentive], 0);
+        const quantity = parcel + returnCount;
+
+        const rawDefaultPrice = cellNumber(row, col.defaultPrice, null);
+        const rawTotalPrice = cellNumber(row, col.totalPrice, null);
+        const rawFreshbagUnit = cellNumber(row, col.freshbagIncentive, null);
+        const rawFreshbagAmount = cellNumber(row, col.freshbagIncentivePrice, null);
 
         if(!classify && !driverId && !route && !deliveryDate && !camp && !wave){
           return { skip:true, reason:"빈 행", rowNo };
@@ -848,9 +1010,40 @@
         }
 
         const isFreshbag = isFreshbagClassify(classify);
-        const defaultPrice = isFreshbag ? 0 : rawTotalPrice;
-        const freshbagPrice = rawFreshbagPrice;
-        const totalPrice = defaultPrice + freshbagPrice;
+        const expectedDefault = quantity * price;
+        const freshbagUnit = rawFreshbagUnit ?? 0;
+        const expectedFreshbagAmount = quantity * freshbagUnit;
+        const freshbagAmount = rawFreshbagAmount ?? expectedFreshbagAmount;
+        const defaultPrice = rawDefaultPrice ?? expectedDefault;
+
+        /*
+          총금액 검증 기준:
+          - 추가인센티브(프백 단가)가 있으면: (배송 + 반품) * (단가 + 추가인센티브)
+          - 추가인센티브 단가가 없고 가중요인 금액만 있으면: 기본계산금액 + 가중요인금액
+          - 정산Raw가 프백 인센티브 단독 행이면 총금액은 가중요인 금액으로 처리
+        */
+        const expectedTotal = rawFreshbagUnit !== null
+          ? quantity * (price + freshbagUnit)
+          : expectedDefault + freshbagAmount;
+
+        const totalPrice = rawTotalPrice ?? (
+          isFreshbag && quantity === 0 && rawFreshbagAmount !== null
+            ? rawFreshbagAmount
+            : expectedTotal
+        );
+
+        const validation = buildValidation({
+          rowNo,
+          quantity,
+          price,
+          freshbagUnit,
+          defaultPrice,
+          totalPrice,
+          expectedDefault,
+          expectedTotal,
+          hasRawDefault: rawDefaultPrice !== null,
+          hasRawTotal: rawTotalPrice !== null
+        });
 
         return {
           skip:false,
@@ -866,16 +1059,23 @@
             parcel,
             "return": returnCount,
             price,
-            freshbag_incentive: freshbagPrice,
+            freshbag_incentive: freshbagUnit,
             default_price: defaultPrice,
-            freshbag_incentive_price: freshbagPrice,
+            freshbag_incentive_price: freshbagAmount,
             total_price: totalPrice,
             freshbag_return: 0
           },
           meta:{
             rowNo,
             vendor,
-            isFreshbag
+            isFreshbag,
+            raw:{
+              default_price:rawDefaultPrice,
+              total_price:rawTotalPrice,
+              freshbag_incentive:rawFreshbagUnit,
+              freshbag_incentive_price:rawFreshbagAmount
+            },
+            validation
           }
         };
       }
@@ -938,8 +1138,10 @@
           parcel: findColumn(headers, ["배송건수", "파슬", "parcel"], 7),
           returnCount: findColumn(headers, ["반품", "운송장", "return"], 8),
           price: findColumn(headers, ["단가", "반품동일", "price"], 9),
-          totalPrice: findColumn(headers, ["총금액", "total"], 10),
-          freshbagIncentive: findColumn(headers, ["프레시백회수인센티브", "프레쉬백회수인센티브", "프백", "freshbag"], 11)
+          defaultPrice: findOptionalColumn(headers, ["기본배송단가금액", "기본배송금액", "기본금액", "기본배송단가"]),
+          freshbagIncentive: findOptionalColumn(headers, ["추가인센티브", "프레시백인센티브", "프레쉬백인센티브", "프백인센", "freshbagincentive"]),
+          freshbagIncentivePrice: findOptionalColumn(headers, ["추가인센티브가중요인금액", "추가인센티브금액", "프레시백인센티브프라이스", "프백가중요인금액", "프레시백회수인센티브", "프레쉬백회수인센티브"]),
+          totalPrice: findOptionalColumn(headers, ["총금액", "totalprice", "total"])
         };
 
         for(let r = headerRowIndex + 1; r < rows.length; r++){
@@ -958,11 +1160,16 @@
         renderSummary();
         renderPreview();
 
+        const issues = issueCount();
+
         if(!state.rows.length){
           setStatus("업로드 가능한 정산Raw 데이터가 없습니다.", "warn");
           els.btnUpload.disabled = true;
+        }else if(issues){
+          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 검증 오류 ${issues.toLocaleString("ko-KR")}건이 있습니다. 상단 빨간 행을 확인하세요.`, "err");
+          els.btnUpload.disabled = false;
         }else{
-          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 미리보기 확인 후 DB 업로드를 누르세요.`, "ok");
+          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 금액 검증 이상 없음. 미리보기 확인 후 DB 업로드를 누르세요.`, "ok");
           els.btnUpload.disabled = false;
         }
 
@@ -975,6 +1182,8 @@
           total_excel_rows:rows.length,
           parsed_rows:state.rows.length,
           skipped_rows:state.skipped.length,
+          validation_issue_rows:issueCount(),
+          validation_issue_sample:issueItems().slice(0, 20),
           skipped_sample:state.skipped.slice(0, 20),
           columns:col,
           headers
@@ -989,11 +1198,14 @@
         const defaultSum = dataRows.reduce((sum, row) => sum + Number(row.default_price || 0), 0);
         const freshbagSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive_price || 0), 0);
         const totalSum = dataRows.reduce((sum, row) => sum + Number(row.total_price || 0), 0);
+        const issues = issueCount();
 
         els.countRows.textContent = state.rows.length.toLocaleString("ko-KR");
         els.countDelivery.textContent = deliveryCount.toLocaleString("ko-KR");
         els.countFreshbag.textContent = freshbagCount.toLocaleString("ko-KR");
         els.countSkipped.textContent = state.skipped.length.toLocaleString("ko-KR");
+        els.countIssues.textContent = issues.toLocaleString("ko-KR");
+        els.countIssues.style.color = issues ? "#fecaca" : "#bbf7d0";
         els.countDates.textContent = dateCount.toLocaleString("ko-KR");
         if(dataRows.length){
           els.countPeriod.textContent = `${dataRows[0].date_year}.${String(dataRows[0].date_month).padStart(2,"0")}`;
@@ -1012,13 +1224,24 @@
 
       function renderPreview(){
         const headers = [
-          "No", "정산월", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
-          "배송", "반품", "단가", "기본금액", "프백금액", "총금액"
+          "검증", "No", "원본행", "정산월", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
+          "배송", "반품", "수량", "단가", "프백단가", "기본금액", "기본계산", "프백금액", "총금액", "총계산", "오류내용"
         ];
 
         els.previewTable.querySelector("thead").innerHTML = `<tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr>`;
 
-        const shown = state.rows.slice(0, 300);
+        const sorted = state.rows
+          .map((item, idx) => ({ item, idx }))
+          .sort((a, b) => {
+            const ai = a.item.meta?.validation?.hasIssue ? 1 : 0;
+            const bi = b.item.meta?.validation?.hasIssue ? 1 : 0;
+            if(ai !== bi) return bi - ai;
+            return (a.item.meta?.rowNo || 0) - (b.item.meta?.rowNo || 0);
+          });
+
+        renderIssueList();
+
+        const shown = sorted.slice(0, 300);
 
         if(!shown.length){
           els.previewTable.querySelector("tbody").innerHTML = `<tr><td colspan="${headers.length}"><div class="emptyBox">아직 추출된 데이터가 없습니다.</div></td></tr>`;
@@ -1026,13 +1249,19 @@
           return;
         }
 
-        els.previewTable.querySelector("tbody").innerHTML = shown.map((item, idx) => {
+        els.previewTable.querySelector("tbody").innerHTML = shown.map(({ item }, idx) => {
           const row = item.data;
+          const validation = item.meta?.validation || {};
+          const issues = validation.issues || [];
+          const hasIssue = issues.length > 0;
           const isFreshbag = isFreshbagClassify(row.classify);
+          const issueText = issues.map(issue => issue.message).join(" / ");
 
           return `
-            <tr>
+            <tr class="${hasIssue ? "issueRow" : ""}">
+              <td>${hasIssue ? `<span class="issueBadge">오류</span>` : `<span class="okBadge">정상</span>`}</td>
               <td>${idx + 1}</td>
+              <td>${esc(item.meta?.rowNo || "")}</td>
               <td>${esc(row.date_year)}.${String(row.date_month).padStart(2,"0")}</td>
               <td class="${isFreshbag ? "warn" : ""}">${esc(row.classify)}</td>
               <td class="left">${esc(row.id)}</td>
@@ -1042,15 +1271,44 @@
               <td>${esc(row.wave)}</td>
               <td>${money(row.parcel)}</td>
               <td>${money(row["return"])}</td>
+              <td>${money(validation.quantity)}</td>
               <td>${money(row.price)}</td>
-              <td class="money">${money(row.default_price)}</td>
+              <td class="warn">${money(row.freshbag_incentive)}</td>
+              <td class="${issues.some(issue => issue.type === "base") ? "err" : "money"}">${money(row.default_price)}</td>
+              <td>${money(validation.expectedDefault)}</td>
               <td class="warn">${money(row.freshbag_incentive_price)}</td>
-              <td class="money">${money(row.total_price)}</td>
+              <td class="${issues.some(issue => issue.type === "total") ? "err" : "money"}">${money(row.total_price)}</td>
+              <td>${money(validation.expectedTotal)}</td>
+              <td class="left err">${esc(issueText)}</td>
             </tr>
           `;
         }).join("");
 
-        els.previewNote.textContent = `최대 300행 표시 / 전체 ${state.rows.length.toLocaleString("ko-KR")}행`;
+        const issues = issueCount();
+        els.previewNote.textContent = `최대 300행 표시 / 전체 ${state.rows.length.toLocaleString("ko-KR")}행 / 검증 오류 ${issues.toLocaleString("ko-KR")}건`;
+      }
+
+      function renderIssueList(){
+        const issues = issueItems();
+
+        if(!issues.length){
+          els.issueList.classList.remove("show");
+          els.issueList.innerHTML = "";
+          return;
+        }
+
+        const shown = issues.slice(0, 50);
+        els.issueList.classList.add("show");
+        els.issueList.innerHTML = `
+          <div class="issueHead">금액 검증 오류 ${issues.length.toLocaleString("ko-KR")}건 - 상위 ${shown.length.toLocaleString("ko-KR")}건 표시</div>
+          <div class="issueBody">
+            ${shown.map(item => {
+              const row = item.data;
+              const messages = item.validation.issues.map(issue => issue.message).join(" / ");
+              return `<div class="issueItem">원본 ${item.meta.rowNo}행 · ${esc(row.delivery_date)} · ${esc(row.id)} · ${esc(row.route || row.classify)}<br>${esc(messages)}</div>`;
+            }).join("")}
+          </div>
+        `;
       }
 
       async function deleteSelectedPeriodRows(period){
@@ -1071,7 +1329,9 @@
 
         const period = state.period || getSelectedPeriod();
         const periodLabel = `${period.date_year}년 ${period.date_month}월`;
+        const issues = issueCount();
 
+        if(issues && !confirm(`검증 오류 ${issues.toLocaleString("ko-KR")}건이 있습니다. 그래도 업로드할까요?`)) return;
         if(!confirm(`${periodLabel} 정산 데이터 ${state.rows.length.toLocaleString("ko-KR")}행을 DB에 업로드할까요?`)) return;
 
         els.btnUpload.disabled = true;

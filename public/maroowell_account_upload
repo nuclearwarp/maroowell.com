@@ -577,48 +577,13 @@
                 <div class="pill"><span>예외 행</span><b id="countExempt">0</b></div>
                 <div class="pill"><span>스킵 행</span><b id="countSkipped">0</b></div>
                 <div class="pill"><span>기본금액</span><b id="sumDefault">0</b></div>
-                <div class="pill"><span>프백 인센티브+회수</span><b id="sumFreshbag">0</b></div>
+                <div class="pill"><span>프백 인센티브</span><b id="sumFreshbagIncentive">0</b></div>
+                <div class="pill"><span>프백 회수</span><b id="sumFreshbagReturn">0</b></div>
                 <div class="pill"><span>정산합계</span><b id="sumTotal">0</b></div>
-                <div class="pill"><span>날짜 수</span><b id="countDates">0</b></div>
               </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="cardHead">
-              <h2>매핑 / 검증 기준</h2>
-            </div>
-            <div class="cardBody muted">
-              읽는 시트: <b>정산Raw</b>, <b>분실파손List</b><br><br>
-              구분 → classify<br>
-              ID → id<br>
-              Route → route<br>
-              배송일자 → delivery_date<br>
-              캠프명 → camp<br>
-              배송유형 → wave<br>
-              배송건수 → parcel<br>
-              반품 → return<br>
-              단가 → price<br>
-              기본배송단가 금액 / 기본금액 → default_price<br>
-              추가 인센티브 → freshbag_incentive, 프백 인센티브 단가로 사용<br>
-              추가 인센티브 가중요인 금액 → freshbag_incentive_price, 프백 인센티브 금액으로 저장<br>
-              총금액 → total_price<br>프레시백 회수 인센티브 → freshbag_return<br><br>분실파손List:<br>날짜 → delivery_date<br>캠프 → camp<br>ID → id<br>이름 → driver_name<br>유형 → loss_damage_type<br>상세 → loss_damage_detail<br>개수 → loss_damage_count<br>차감금액 → deduction_price<br>운송장번호 → tracking_number<br>상품명(상세) → product_name<br><br>
-              검증식:<br>
-              1) <b>(배송 + 반품) × 단가 = 기본금액</b><br>
-              2) <b>(배송 + 반품) × 추가 인센티브 = 추가 인센티브 가중요인 금액</b><br>
-              3) <b>기본금액 + 추가 인센티브 가중요인 금액 = 총금액</b><br>4) <b>프레시백 회수 인센티브는 freshbag_return에 별도 저장하고 월 합계에는 더합니다.</b><br>5) <b>분실파손List 차감금액은 deduction_price에 저장하고 total_price에는 음수로 반영합니다.</b><br><br>
-              <b>미계약 라우트</b>만 계약 단가 기준이 없어 오류 예외로 처리합니다.<br>프백 인센티브 단독 행은 배송/반품 수량 검증 대상이 아니므로 오류 행으로 올리지 않습니다.
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="cardHead">
-              <h2>로그</h2>
-            </div>
-            <div class="cardBody">
-              <pre id="logOutput" class="logBox">대기 중</pre>
-            </div>
-          </div>
         </section>
 
         <section>
@@ -630,7 +595,7 @@
           <div class="card">
             <div class="cardHead">
               <h2>미리보기</h2>
-              <span class="muted" id="previewNote">최대 500행 표시 / 오류 행 상단 정렬</span>
+              <span class="muted" id="previewNote">최대 500행 표시 / 오류 상단 · 예외 하단</span>
             </div>
             <div class="tableWrap">
               <table id="previewTable">
@@ -685,7 +650,6 @@
         btnUpload: document.getElementById("btnUpload"),
         btnReset: document.getElementById("btnReset"),
         statusText: document.getElementById("statusText"),
-        logOutput: document.getElementById("logOutput"),
         previewTable: document.getElementById("previewTable"),
         previewNote: document.getElementById("previewNote"),
         validationBox: document.getElementById("validationBox"),
@@ -694,9 +658,9 @@
         countErrors: document.getElementById("countErrors"),
         countExempt: document.getElementById("countExempt"),
         countSkipped: document.getElementById("countSkipped"),
-        countDates: document.getElementById("countDates"),
         sumDefault: document.getElementById("sumDefault"),
-        sumFreshbag: document.getElementById("sumFreshbag"),
+        sumFreshbagIncentive: document.getElementById("sumFreshbagIncentive"),
+        sumFreshbagReturn: document.getElementById("sumFreshbagReturn"),
         sumTotal: document.getElementById("sumTotal"),
         accessDenied: document.getElementById("accessDenied"),
         accessDeniedText: document.getElementById("accessDeniedText"),
@@ -747,10 +711,8 @@
         els.statusText.className = type ? "status " + type : "status";
       }
 
-      function log(value){
-        els.logOutput.textContent = typeof value === "string"
-          ? value
-          : JSON.stringify(value, null, 2);
+      function log(){
+        // 화면을 단순하게 유지하기 위해 내부 로그는 UI에 출력하지 않습니다.
       }
 
       function money(v){
@@ -1456,13 +1418,14 @@
         const lossResult = appendLossDamageRows(workbook);
 
         state.rows.sort((a,b) => {
+          // 오류 행만 최상단, 정상 행은 중간, 예외 행은 맨 아래로 보냅니다.
           const ae = a.validation?.hasError ? 1 : 0;
           const be = b.validation?.hasError ? 1 : 0;
           if(ae !== be) return be - ae;
 
           const ax = a.validation?.exempt ? 1 : 0;
           const bx = b.validation?.exempt ? 1 : 0;
-          if(ax !== bx) return bx - ax;
+          if(ax !== bx) return ax - bx;
 
           return Number(a.meta?.rowNo || 0) - Number(b.meta?.rowNo || 0);
         });
@@ -1478,10 +1441,10 @@
           setStatus("업로드 가능한 정산 데이터가 없습니다.", "warn");
           els.btnUpload.disabled = true;
         }else if(errorCount > 0){
-          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 금액 검증 오류 ${errorCount.toLocaleString("ko-KR")}건이 있습니다. 오류 행을 확인하세요.`, "err");
+          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 오류 ${errorCount.toLocaleString("ko-KR")}건.`, "err");
           els.btnUpload.disabled = false;
         }else{
-          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 검증 오류 없음. 예외 ${exemptCount.toLocaleString("ko-KR")}행.`, "ok");
+          setStatus(`${state.rows.length.toLocaleString("ko-KR")}행 추출 완료. 오류 없음.`, "ok");
           els.btnUpload.disabled = false;
         }
 
@@ -1507,19 +1470,19 @@
         const dataRows = state.rows.map(item => item.data);
         const errorCount = state.rows.filter(item => item.validation?.hasError).length;
         const exemptCount = state.rows.filter(item => item.validation?.exempt).length;
-        const dateCount = new Set(dataRows.map(row => row.delivery_date).filter(Boolean)).size;
 
         const defaultSum = dataRows.reduce((sum, row) => sum + Number(row.default_price || 0), 0);
-        const freshbagSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive_price || 0) + Number(row.freshbag_return || 0), 0);
+        const freshbagIncentiveSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_incentive_price || 0), 0);
+        const freshbagReturnSum = dataRows.reduce((sum, row) => sum + Number(row.freshbag_return || 0), 0);
         const totalSum = dataRows.reduce((sum, row) => sum + Number(row.total_price || 0) + Number(row.freshbag_return || 0), 0);
 
         els.countRows.textContent = state.rows.length.toLocaleString("ko-KR");
         els.countErrors.textContent = errorCount.toLocaleString("ko-KR");
         els.countExempt.textContent = exemptCount.toLocaleString("ko-KR");
         els.countSkipped.textContent = state.skipped.length.toLocaleString("ko-KR");
-        els.countDates.textContent = dateCount.toLocaleString("ko-KR");
         els.sumDefault.textContent = money(defaultSum);
-        els.sumFreshbag.textContent = money(freshbagSum);
+        els.sumFreshbagIncentive.textContent = money(freshbagIncentiveSum);
+        els.sumFreshbagReturn.textContent = money(freshbagReturnSum);
         els.sumTotal.textContent = money(totalSum);
       }
 
@@ -1572,7 +1535,7 @@
 
         if(!shown.length){
           els.previewTable.querySelector("tbody").innerHTML = `<tr><td colspan="${headers.length}"><div class="emptyBox">아직 추출된 데이터가 없습니다.</div></td></tr>`;
-          els.previewNote.textContent = "최대 500행 표시 / 오류 행 상단 정렬";
+          els.previewNote.textContent = "최대 500행 표시 / 오류 상단 · 예외 하단";
           return;
         }
 

@@ -92,6 +92,20 @@
       requireSuperAdmin: true
     },
     {
+      key: "mw-account",
+      label: "정산 데이터 조회",
+      path: "/maroowell_account",
+      aliases: ["/maroowell_account", "/maroowell_account.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "mw-account-upload",
+      label: "정산 업로드",
+      path: "/maroowell_account_upload",
+      aliases: ["/maroowell_account_upload", "/maroowell_account_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
       key: "dragon-index",
       label: "용차",
       path: "/dragon_car_index",
@@ -344,6 +358,14 @@
       case "/maroowell_payout":
       case "/maroowell_payout.html":
         return "마루웰 정산 관리";
+
+      case "/maroowell_account":
+      case "/maroowell_account.html":
+        return "정산 데이터 조회";
+
+      case "/maroowell_account_upload":
+      case "/maroowell_account_upload.html":
+        return "정산 업로드";
 
       case "/dragon_car_index":
       case "/dragon_car_index.html":

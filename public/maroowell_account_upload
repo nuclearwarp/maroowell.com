@@ -600,12 +600,12 @@
               반품 → return<br>
               단가 → price<br>
               기본배송단가 금액 / 기본금액 → default_price<br>
-              추가인센티브 / 프레시백 인센티브 → freshbag_incentive<br>
-              추가 인센티브 가중요인 금액 → freshbag_incentive_price<br>
+              추가인센티브 / 프레시백 인센티브 / 프레시백 회수 인센티브 → freshbag_incentive<br>
+              추가 인센티브 가중요인 금액 / 프백 인센티브 단가 → freshbag_incentive_price<br>
               총금액 → total_price<br><br>
               검증식:<br>
               1) <b>(배송 + 반품) × 단가 = 기본금액</b><br>
-              2) <b>(배송 + 반품) × (단가 + 프백 인센티브) = 총금액</b><br><br>
+              2) <b>(배송 + 반품) × (단가 + 프백 인센티브 단가) = 총금액</b><br><br>
               <b>미계약 라우트</b>만 계약 단가 기준이 없어 오류 예외로 처리합니다.<br>프백 인센티브 단독 행은 배송/반품 수량 검증 대상이 아니므로 오류 행으로 올리지 않습니다.
             </div>
           </div>
@@ -901,23 +901,92 @@
         }
       }
 
+      function findColumnExact(headers, names, fallback = -1){
+        const keys = headers.map(compact);
+        const candidates = names.map(compact);
+
+        for(const c of candidates){
+          const exact = keys.findIndex(k => k === c);
+          if(exact >= 0) return exact;
+        }
+
+        return fallback;
+      }
+
+      function findColumnContains(headers, names, fallback = -1, forbidden = []){
+        const keys = headers.map(compact);
+        const candidates = names.map(compact);
+        const forbiddenKeys = forbidden.map(compact);
+
+        for(const c of candidates){
+          const exact = keys.findIndex(k => k === c && !forbiddenKeys.some(f => k.includes(f)));
+          if(exact >= 0) return exact;
+        }
+
+        for(const c of candidates){
+          const partial = keys.findIndex(k => {
+            if(!k) return false;
+            if(forbiddenKeys.some(f => k.includes(f))) return false;
+            return k.includes(c) || c.includes(k);
+          });
+          if(partial >= 0) return partial;
+        }
+
+        return fallback;
+      }
+
       function buildColumnMap(headers){
         return {
-          classify: findColumn(headers, ["구분"], 0),
-          id: findColumn(headers, ["ID", "아이디"], 1),
-          route: findColumn(headers, ["Route", "라우트"], 2),
-          deliveryDate: findColumn(headers, ["배송일자", "배송일", "일자"], 3),
-          camp: findColumn(headers, ["캠프명", "캠프", "Camp"], 4),
-          wave: findColumn(headers, ["배송유형", "주간심야", "주야", "Wave"], 5),
-          vendor: findColumn(headers, ["업체명", "업체", "Vendor"], 6),
-          parcel: findColumn(headers, ["배송건수", "파슬", "parcel"], 7),
-          returnCount: findColumn(headers, ["반품", "운송장", "return"], 8),
-          price: findColumn(headers, ["단가", "반품동일", "price"], 9),
-          defaultPrice: findColumn(headers, ["기본배송단가금액", "기본금액", "기본배송단가", "defaultprice"], -1),
-          totalPrice: findColumn(headers, ["총금액", "total"], 10),
-          freshbagIncentive: findColumn(headers, ["추가인센티브", "프레시백인센티브", "프레쉬백인센티브", "프레시백회수인센티브", "프레쉬백회수인센티브", "프백인센", "freshbagincentive"], -1),
-          freshbagPrice: findColumn(headers, ["추가인센티브가중요인금액", "프레시백인센티브프라이스", "프레쉬백인센티브프라이스", "프백금액", "프백단가", "freshbagincentiveprice"], -1),
-          freshbagReturn: findColumn(headers, ["프레시백회수", "프레쉬백회수", "freshbagreturn"], -1)
+          classify: findColumnContains(headers, ["구분"], 0),
+          id: findColumnContains(headers, ["ID", "아이디"], 1),
+          route: findColumnContains(headers, ["Route", "라우트"], 2),
+          deliveryDate: findColumnContains(headers, ["배송일자", "배송일", "일자"], 3),
+          camp: findColumnContains(headers, ["캠프명", "캠프", "Camp"], 4),
+          wave: findColumnContains(headers, ["배송유형", "주간심야", "주야", "Wave"], 5),
+          vendor: findColumnContains(headers, ["업체명", "업체", "Vendor"], 6),
+          parcel: findColumnContains(headers, ["배송건수", "파슬", "parcel"], 7),
+          returnCount: findColumnContains(headers, ["반품", "운송장", "return"], 8),
+          price: findColumnContains(headers, ["단가", "반품동일", "price"], 9),
+
+          // 기본 배송단가 금액은 명시 컬럼이 있을 때만 매핑한다. 없으면 (배송+반품)*단가로 계산한다.
+          defaultPrice: findColumnContains(headers, ["기본배송단가금액", "기본금액", "기본배송금액", "defaultprice", "baseprice"], -1),
+
+          // 정산Raw의 총금액 컬럼.
+          totalPrice: findColumnContains(headers, ["총금액", "총액", "totalprice", "total"], 10),
+
+          // 프백 인센티브는 총 인센티브 금액이다. 검증식의 단가로 쓰지 않는다.
+          freshbagIncentive: findColumnContains(headers, [
+            "추가인센티브",
+            "프레시백인센티브",
+            "프레쉬백인센티브",
+            "프레시백회수인센티브",
+            "프레쉬백회수인센티브",
+            "프백인센",
+            "freshbagincentive"
+          ], -1, ["가중요인", "단가", "unit", "price"]),
+
+          // 프백 인센티브 단가는 추가 인센티브 가중요인 금액 계열 컬럼만 허용한다.
+          // 절대 '프레시백 회수 인센티브' 총액 컬럼을 여기에 매핑하지 않는다.
+          freshbagPrice: findColumnContains(headers, [
+            "추가인센티브가중요인금액",
+            "추가인센티브가중요인",
+            "프백단가",
+            "프레시백단가",
+            "프레쉬백단가",
+            "freshbagunit",
+            "freshbagunitprice"
+          ], -1),
+
+          // 회수 수량은 명확한 수량/건수/개수 컬럼만 허용한다. 인센티브 금액 컬럼과 혼동 금지.
+          freshbagReturn: findColumnContains(headers, [
+            "프레시백회수수량",
+            "프레쉬백회수수량",
+            "프레시백회수건수",
+            "프레쉬백회수건수",
+            "프레시백회수개수",
+            "프레쉬백회수개수",
+            "freshbagreturncount"
+          ], -1, ["인센티브", "금액", "price", "단가"])
         };
       }
 
@@ -926,13 +995,12 @@
         const errors = [];
         const notes = [];
 
-        const exempt = isFormulaExempt(classify);
         const qty = Number(data.parcel || 0) + Number(data["return"] || 0);
         const price = Number(data.price || 0);
+        const freshbagUnit = Number(data.freshbag_incentive_price || 0);
 
-        if(exempt){
+        if(isUncontractedRoute(classify)){
           notes.push("미계약 라우트: 계약 단가 기준이 없어 금액 검증식 예외 처리");
-
           return {
             hasError:false,
             exempt:true,
@@ -947,7 +1015,6 @@
 
         if(isFreshbagIncentiveRow(classify) && qty === 0 && price === 0){
           notes.push("프백 인센티브 단독 행: 배송/반품 수량 검증 대상 아님");
-
           return {
             hasError:false,
             exempt:false,
@@ -960,27 +1027,34 @@
           };
         }
 
-        const freshbagUnit = Number(data.freshbag_incentive_price || 0);
-
         const expectedDefault = roundMoney(qty * price);
         const expectedTotal = roundMoney(qty * (price + freshbagUnit));
 
-        const defaultPrice = roundMoney(data.default_price);
-        const totalPrice = roundMoney(data.total_price);
+        const defaultCompareValue = meta.hasExplicitDefaultPrice ? roundMoney(meta.sourceDefault) : roundMoney(meta.sourceTotal);
+        const totalCompareValue = roundMoney(meta.sourceTotal);
 
-        const defaultDiff = roundMoney(defaultPrice - expectedDefault);
-        const totalDiff = roundMoney(totalPrice - expectedTotal);
+        const defaultDiff = roundMoney(defaultCompareValue - expectedDefault);
+        const totalDiff = roundMoney(totalCompareValue - expectedTotal);
 
         if(Math.abs(defaultDiff) > MONEY_TOLERANCE){
-          errors.push(`기본금액 불일치: 실제 ${money(defaultPrice)} / 예상 ${money(expectedDefault)} / 차이 ${money(defaultDiff)}`);
+          const label = meta.hasExplicitDefaultPrice ? "기본금액" : "총금액 기준 기본금액";
+          errors.push(`${label} 불일치: 실제 ${money(defaultCompareValue)} / 예상 ${money(expectedDefault)} / 차이 ${money(defaultDiff)}`);
         }
 
         if(Math.abs(totalDiff) > MONEY_TOLERANCE){
-          errors.push(`총금액 불일치: 실제 ${money(totalPrice)} / 예상 ${money(expectedTotal)} / 차이 ${money(totalDiff)}`);
+          errors.push(`총금액 불일치: 실제 ${money(totalCompareValue)} / 예상 ${money(expectedTotal)} / 차이 ${money(totalDiff)}`);
         }
 
         if(!meta.hasExplicitDefaultPrice){
-          notes.push("기본금액 컬럼 없음: (배송+반품)×단가 계산값을 default_price로 저장");
+          notes.push("기본금액 명시 컬럼 없음: default_price는 (배송+반품)×단가 계산값으로 저장");
+        }
+
+        if(!meta.hasExplicitFreshbagUnit){
+          notes.push("프백 인센티브 단가 컬럼 없음: 총금액 검증은 기본금액 기준으로 수행");
+        }
+
+        if(meta.rawFreshbagPriceValue && Math.abs(meta.rawFreshbagPriceValue) > 23){
+          notes.push(`프백 인센티브 단가 후보값 ${money(meta.rawFreshbagPriceValue)}은 23원 초과라 단가로 사용하지 않음`);
         }
 
         return {
@@ -1033,12 +1107,12 @@
         const rawDefault = parseNumber(col.defaultPrice >= 0 ? row[col.defaultPrice] : null);
         const rawFreshbagIncentive = parseNumber(col.freshbagIncentive >= 0 ? row[col.freshbagIncentive] : 0);
         const rawFreshbagPriceValue = parseNumber(col.freshbagPrice >= 0 ? row[col.freshbagPrice] : 0);
-        const rawFreshbagPrice = Math.abs(rawFreshbagPriceValue) <= 23 ? rawFreshbagPriceValue : 0;
+        const hasExplicitFreshbagUnit = col.freshbagPrice >= 0 && hasValue(row[col.freshbagPrice]) && Math.abs(rawFreshbagPriceValue) <= 23;
+        const freshbagUnit = hasExplicitFreshbagUnit ? rawFreshbagPriceValue : 0;
         const freshbagReturn = parseIntCount(col.freshbagReturn >= 0 ? row[col.freshbagReturn] : 0);
 
         const qty = parcel + returnCount;
         const hasExplicitDefaultPrice = col.defaultPrice >= 0 && hasValue(row[col.defaultPrice]);
-        const isExempt = isFormulaExempt(classify);
         const isFreshbag = isFreshbagIncentiveRow(classify);
         const isUncontracted = isUncontractedRoute(classify);
 
@@ -1048,22 +1122,23 @@
 
         let totalPrice = hasValue(row[col.totalPrice])
           ? rawTotal
-          : roundMoney(qty * (price + rawFreshbagPrice));
+          : roundMoney(qty * (price + freshbagUnit));
 
         let freshbagIncentive = rawFreshbagIncentive;
-        let freshbagIncentivePrice = rawFreshbagPrice;
+        let freshbagIncentivePrice = freshbagUnit;
 
         if(isFreshbag){
           defaultPrice = 0;
           totalPrice = rawFreshbagIncentive || rawTotal || 0;
           freshbagIncentive = rawFreshbagIncentive || rawTotal || 0;
-          freshbagIncentivePrice = rawFreshbagPrice || 0;
+          freshbagIncentivePrice = 0;
         }
 
         if(isUncontracted){
           defaultPrice = rawDefault || rawTotal || 0;
           totalPrice = rawTotal || rawDefault || 0;
-          freshbagIncentivePrice = rawFreshbagPrice || 0;
+          freshbagIncentive = rawFreshbagIncentive || 0;
+          freshbagIncentivePrice = 0;
         }
 
         const data = {
@@ -1087,7 +1162,11 @@
 
         const validation = validateAmounts(data, row, {
           rowNo,
-          hasExplicitDefaultPrice
+          hasExplicitDefaultPrice,
+          hasExplicitFreshbagUnit,
+          sourceDefault:rawDefault,
+          sourceTotal:rawTotal,
+          rawFreshbagPriceValue
         });
 
         return {
@@ -1101,8 +1180,8 @@
             sourceTotal:rawTotal,
             sourceFreshbagIncentive:rawFreshbagIncentive,
             sourceFreshbagPrice:rawFreshbagPriceValue,
-            normalizedFreshbagPrice:rawFreshbagPrice,
-            exempt:isExempt
+            normalizedFreshbagPrice:freshbagUnit,
+            exempt:isUncontracted
           }
         };
       }
@@ -1293,7 +1372,7 @@
       function renderPreview(){
         const headers = [
           "검증", "Excel행", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
-          "배송", "반품", "단가", "프백 인센티브", "기본금액", "총금액",
+          "배송", "반품", "단가", "프백 인센티브", "프백 인센티브 단가", "기본금액", "총금액",
           "예상기본", "기본차이", "예상총액", "총액차이", "메모"
         ];
 
@@ -1335,6 +1414,7 @@
               <td class="money">${money(row.parcel)}</td>
               <td class="money">${money(row["return"])}</td>
               <td class="money">${money(row.price)}</td>
+              <td class="money">${money(row.freshbag_incentive)}</td>
               <td class="money">${money(row.freshbag_incentive_price)}</td>
               <td class="money">${money(row.default_price)}</td>
               <td class="money">${money(row.total_price)}</td>

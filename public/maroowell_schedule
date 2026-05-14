@@ -2613,8 +2613,26 @@
         };
       }
 
+      function isBlankScheduleSaveRow(row){
+        return row?.is_active===false && !clean(row?.driver_name) && !clean(row?.driver_display_name);
+      }
+
+      async function deleteScheduleSaveRow(row){
+        const {error,count}=await supabase
+          .from("maroowell_schedule")
+          .delete({count:"exact"})
+          .eq("schedule_date",row.schedule_date)
+          .eq("camp",row.camp)
+          .eq("wave",row.wave)
+          .eq("route_label",row.route_label);
+
+        if(error)throw error;
+        return Number(count || 0);
+      }
+
       async function saveScheduleRowsOneByOne(payload,upsertError){
         let saved=0;
+        let deleted=0;
         let skipped=0;
 
         if(upsertError){
@@ -2622,6 +2640,12 @@
         }
 
         for(const row of payload){
+          if(isBlankScheduleSaveRow(row)){
+            deleted+=await deleteScheduleSaveRow(row);
+            saved++;
+            continue;
+          }
+
           const {data:found,error:findError}=await supabase
             .from("maroowell_schedule")
             .select("id")
@@ -2647,11 +2671,6 @@
             continue;
           }
 
-          if(row.is_active===false && !clean(row.driver_name) && !clean(row.driver_display_name)){
-            skipped++;
-            continue;
-          }
-
           const {error:insertError}=await supabase
             .from("maroowell_schedule")
             .insert(row);
@@ -2660,7 +2679,7 @@
           saved++;
         }
 
-        return {saved,skipped,mode:"row_by_row"};
+        return {saved,deleted,skipped,mode:"row_by_row"};
       }
 
       async function saveScheduleRowsDirect(items){
@@ -2670,17 +2689,35 @@
           .map(makeSupabaseScheduleSaveRow)
           .filter(row=>row.schedule_date && row.camp && row.wave && row.route_label);
 
-        if(!payload.length)return {saved:0,skipped:0,mode:"empty"};
+        if(!payload.length)return {saved:0,deleted:0,skipped:0,mode:"empty"};
+
+        const deletePayload=payload.filter(isBlankScheduleSaveRow);
+        const upsertPayload=payload.filter(row=>!isBlankScheduleSaveRow(row));
+
+        let deleted=0;
+        for(const row of deletePayload){
+          deleted+=await deleteScheduleSaveRow(row);
+        }
+
+        if(!upsertPayload.length){
+          return {saved:deletePayload.length,deleted,skipped:0,mode:"delete_only"};
+        }
 
         const {error}=await supabase
           .from("maroowell_schedule")
-          .upsert(payload,{
+          .upsert(upsertPayload,{
             onConflict:"schedule_date,camp,wave,route_label"
           });
 
-        if(!error)return {saved:payload.length,skipped:0,mode:"upsert"};
+        if(!error)return {saved:upsertPayload.length+deletePayload.length,deleted,skipped:0,mode:"upsert_delete"};
 
-        return saveScheduleRowsOneByOne(payload,error);
+        const fallback=await saveScheduleRowsOneByOne(upsertPayload,error);
+        return {
+          saved:fallback.saved+deletePayload.length,
+          deleted:deleted+(fallback.deleted||0),
+          skipped:fallback.skipped||0,
+          mode:"row_by_row_delete"
+        };
       }
 
       async function saveAll(){

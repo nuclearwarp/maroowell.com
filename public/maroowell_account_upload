@@ -577,7 +577,7 @@
                 <div class="pill"><span>예외 행</span><b id="countExempt">0</b></div>
                 <div class="pill"><span>스킵 행</span><b id="countSkipped">0</b></div>
                 <div class="pill"><span>기본금액</span><b id="sumDefault">0</b></div>
-                <div class="pill"><span>프백인센</span><b id="sumFreshbag">0</b></div>
+                <div class="pill"><span>프백 인센티브</span><b id="sumFreshbag">0</b></div>
                 <div class="pill"><span>총금액</span><b id="sumTotal">0</b></div>
                 <div class="pill"><span>날짜 수</span><b id="countDates">0</b></div>
               </div>
@@ -605,8 +605,8 @@
               총금액 → total_price<br><br>
               검증식:<br>
               1) <b>(배송 + 반품) × 단가 = 기본금액</b><br>
-              2) <b>(배송 + 반품) × (단가 + 프백금액) = 총금액</b><br><br>
-              <b>미계약 라우트</b>와 <b>프레시백 인센티브 단독 행</b>은 정산 구조상 검증식 예외로 처리합니다.
+              2) <b>(배송 + 반품) × (단가 + 프백 인센티브) = 총금액</b><br><br>
+              <b>미계약 라우트</b>만 계약 단가 기준이 없어 오류 예외로 처리합니다.<br>프백 인센티브 단독 행은 배송/반품 수량 검증 대상이 아니므로 오류 행으로 올리지 않습니다.
             </div>
           </div>
 
@@ -854,7 +854,7 @@
       }
 
       function isFormulaExempt(classify){
-        return isUncontractedRoute(classify) || isFreshbagIncentiveRow(classify);
+        return isUncontractedRoute(classify);
       }
 
       function findColumn(headers, names, fallback = -1){
@@ -927,15 +927,11 @@
         const notes = [];
 
         const exempt = isFormulaExempt(classify);
+        const qty = Number(data.parcel || 0) + Number(data["return"] || 0);
+        const price = Number(data.price || 0);
 
         if(exempt){
-          if(isUncontractedRoute(classify)){
-            notes.push("미계약 라우트: 단가 계약 기준이 없어 금액 검증식 예외 처리");
-          }
-
-          if(isFreshbagIncentiveRow(classify)){
-            notes.push("프레시백 인센티브 단독 행: 배송/반품/단가 검증식 예외 처리");
-          }
+          notes.push("미계약 라우트: 계약 단가 기준이 없어 금액 검증식 예외 처리");
 
           return {
             hasError:false,
@@ -949,8 +945,21 @@
           };
         }
 
-        const qty = Number(data.parcel || 0) + Number(data["return"] || 0);
-        const price = Number(data.price || 0);
+        if(isFreshbagIncentiveRow(classify) && qty === 0 && price === 0){
+          notes.push("프백 인센티브 단독 행: 배송/반품 수량 검증 대상 아님");
+
+          return {
+            hasError:false,
+            exempt:false,
+            errors,
+            notes,
+            expectedDefault:null,
+            expectedTotal:null,
+            defaultDiff:0,
+            totalDiff:0
+          };
+        }
+
         const freshbagUnit = Number(data.freshbag_incentive_price || 0);
 
         const expectedDefault = roundMoney(qty * price);
@@ -1023,7 +1032,8 @@
         const rawTotal = parseNumber(col.totalPrice >= 0 ? row[col.totalPrice] : 0);
         const rawDefault = parseNumber(col.defaultPrice >= 0 ? row[col.defaultPrice] : null);
         const rawFreshbagIncentive = parseNumber(col.freshbagIncentive >= 0 ? row[col.freshbagIncentive] : 0);
-        const rawFreshbagPrice = parseNumber(col.freshbagPrice >= 0 ? row[col.freshbagPrice] : 0);
+        const rawFreshbagPriceValue = parseNumber(col.freshbagPrice >= 0 ? row[col.freshbagPrice] : 0);
+        const rawFreshbagPrice = Math.abs(rawFreshbagPriceValue) <= 23 ? rawFreshbagPriceValue : 0;
         const freshbagReturn = parseIntCount(col.freshbagReturn >= 0 ? row[col.freshbagReturn] : 0);
 
         const qty = parcel + returnCount;
@@ -1090,7 +1100,8 @@
             sourceDefault:rawDefault,
             sourceTotal:rawTotal,
             sourceFreshbagIncentive:rawFreshbagIncentive,
-            sourceFreshbagPrice:rawFreshbagPrice,
+            sourceFreshbagPrice:rawFreshbagPriceValue,
+            normalizedFreshbagPrice:rawFreshbagPrice,
             exempt:isExempt
           }
         };
@@ -1282,7 +1293,7 @@
       function renderPreview(){
         const headers = [
           "검증", "Excel행", "구분", "ID", "Route", "배송일자", "캠프", "배송유형",
-          "배송", "반품", "단가", "프백금액", "기본금액", "총금액",
+          "배송", "반품", "단가", "프백 인센티브", "기본금액", "총금액",
           "예상기본", "기본차이", "예상총액", "총액차이", "메모"
         ];
 

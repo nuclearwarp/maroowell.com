@@ -48,7 +48,7 @@ export default {
       if (route === "/meta" && request.method === "GET") {
         requireSelect(auth);
 
-        const latestWeek = await fetchLatestWeek(env);
+        const latestWeek = await fetchLatestWeek(env, auth.token);
 
         return json({
           ok: true,
@@ -59,7 +59,7 @@ export default {
       if (route === "" && request.method === "GET") {
         requireSelect(auth);
 
-        const result = await fetchRows(url, env);
+        const result = await fetchRows(url, env, auth.token);
 
         return json({
           ok: true,
@@ -71,7 +71,7 @@ export default {
         requireEdit(auth);
 
         const body = await readJson(request);
-        const row = await createRow(body, env);
+        const row = await createRow(body, env, auth.token);
 
         return json({
           ok: true,
@@ -85,7 +85,7 @@ export default {
         requireEdit(auth);
 
         const body = await readJson(request);
-        const row = await updateRow(id, body, env);
+        const row = await updateRow(id, body, env, auth.token);
 
         return json({
           ok: true,
@@ -112,7 +112,9 @@ function assertEnv(env) {
   const missing = [];
 
   if (!env.SUPABASE_URL) missing.push("SUPABASE_URL");
-  if (!env.SUPABASE_SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!env.SUPABASE_SERVICE_ROLE_KEY && !env.SUPABASE_ANON_KEY) {
+    missing.push("SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY");
+  }
 
   if (missing.length) {
     throw httpError(500, "missing_env: " + missing.join(", "));
@@ -138,7 +140,7 @@ async function requireUser(request, env) {
   const userRes = await fetch(`${supabaseBase(env)}/auth/v1/user`, {
     method: "GET",
     headers: {
-      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      apikey: supabaseApiKey(env),
       Authorization: `Bearer ${token}`
     }
   });
@@ -157,7 +159,7 @@ async function requireUser(request, env) {
     throw httpError(401, "invalid_user_payload");
   }
 
-  const access = await fetchAccess(userId, email, env);
+  const access = await fetchAccess(userId, email, token, env);
 
   return {
     token,
@@ -175,11 +177,11 @@ function bearerToken(request) {
   return clean(match?.[1]);
 }
 
-async function fetchAccess(userId, email, env) {
+async function fetchAccess(userId, email, token, env) {
   const [userAccess, clhiAccess, roleLevel] = await Promise.all([
-    fetchUserAccess(userId, email, env),
-    fetchClhiAccess(userId, email, env),
-    fetchVendorRoleLevel(userId, env)
+    fetchUserAccess(userId, email, token, env),
+    fetchClhiAccess(userId, email, token, env),
+    fetchVendorRoleLevel(userId, token, env)
   ]);
 
   const accessRoleLevel = Number(
@@ -205,13 +207,13 @@ async function fetchAccess(userId, email, env) {
   };
 }
 
-async function fetchUserAccess(userId, email, env) {
+async function fetchUserAccess(userId, email, token, env) {
   try {
     const rows = await supabaseGet(TABLE_USER_ACCESS, [
       "select=*",
       `user_id=eq.${postgrestValue(userId)}`,
       "limit=1"
-    ], env);
+    ], env, token);
 
     if (rows[0]) return rows[0];
   } catch {
@@ -223,7 +225,7 @@ async function fetchUserAccess(userId, email, env) {
       "select=*",
       `email=eq.${postgrestValue(email)}`,
       "limit=1"
-    ], env);
+    ], env, token);
 
     return rows[0] || null;
   } catch {
@@ -231,14 +233,14 @@ async function fetchUserAccess(userId, email, env) {
   }
 }
 
-async function fetchClhiAccess(userId, email, env) {
+async function fetchClhiAccess(userId, email, token, env) {
   try {
     const rows = await supabaseGet(TABLE_ACCESS, [
       "select=*",
       `user_id=eq.${postgrestValue(userId)}`,
       "can_select=eq.true",
       "limit=1"
-    ], env);
+    ], env, token);
 
     if (rows[0]) return rows[0];
   } catch {
@@ -251,7 +253,7 @@ async function fetchClhiAccess(userId, email, env) {
       `email=eq.${postgrestValue(email)}`,
       "can_select=eq.true",
       "limit=1"
-    ], env);
+    ], env, token);
 
     return rows[0] || null;
   } catch {
@@ -259,7 +261,7 @@ async function fetchClhiAccess(userId, email, env) {
   }
 }
 
-async function fetchVendorRoleLevel(userId, env) {
+async function fetchVendorRoleLevel(userId, token, env) {
   try {
     const rows = await supabaseGet(TABLE_VENDOR_MEMBERS, [
       "select=role_level",
@@ -267,7 +269,7 @@ async function fetchVendorRoleLevel(userId, env) {
       "is_active=eq.true",
       "order=role_level.desc",
       "limit=1"
-    ], env);
+    ], env, token);
 
     return Number(rows[0]?.role_level || 0);
   } catch {
@@ -300,17 +302,17 @@ function requireEdit(auth) {
   throw httpError(403, "super_admin_required");
 }
 
-async function fetchLatestWeek(env) {
+async function fetchLatestWeek(env, token) {
   const rows = await supabaseGet(TABLE_HISTORY, [
     "select=week",
     "order=week.desc",
     "limit=1"
-  ], env);
+  ], env, token);
 
   return clean(rows[0]?.week);
 }
 
-async function fetchRows(url, env) {
+async function fetchRows(url, env, token) {
   const limit = clampInt(url.searchParams.get("limit"), 300, 1, 1000);
   const q = clean(url.searchParams.get("q"));
   const parts = [
@@ -330,7 +332,7 @@ async function fetchRows(url, env) {
     `limit=${limit}`
   ];
 
-  const { rows, count } = await supabaseGetWithCount(TABLE_HISTORY, parts, env);
+  const { rows, count } = await supabaseGetWithCount(TABLE_HISTORY, parts, env, token);
 
   return {
     rows: rows.map(normalizeRow),
@@ -339,20 +341,20 @@ async function fetchRows(url, env) {
   };
 }
 
-async function createRow(body, env) {
+async function createRow(body, env, token) {
   const payload = normalizePayload(body, { partial: false });
-  const rows = await supabaseInsert(TABLE_HISTORY, [payload], env);
+  const rows = await supabaseInsert(TABLE_HISTORY, [payload], env, token);
   return normalizeRow(rows[0] || payload);
 }
 
-async function updateRow(id, body, env) {
+async function updateRow(id, body, env, token) {
   const payload = normalizePayload(body, { partial: true });
 
   if (!Object.keys(payload).length) {
     throw httpError(400, "empty_patch");
   }
 
-  const rows = await supabasePatch(TABLE_HISTORY, id, payload, env);
+  const rows = await supabasePatch(TABLE_HISTORY, id, payload, env, token);
   const row = rows[0] || null;
 
   if (!row) {
@@ -469,18 +471,18 @@ function buildSearchFilter(value) {
   return `or=(${body})`;
 }
 
-async function supabaseGet(table, queryParts, env) {
-  const { rows } = await supabaseGetWithCount(table, queryParts, env);
+async function supabaseGet(table, queryParts, env, token = "") {
+  const { rows } = await supabaseGetWithCount(table, queryParts, env, token);
   return rows;
 }
 
-async function supabaseGetWithCount(table, queryParts, env) {
+async function supabaseGetWithCount(table, queryParts, env, token = "") {
   const query = queryParts.filter(Boolean).join("&");
   const url = `${supabaseBase(env)}/rest/v1/${table}?${query}`;
   const res = await fetch(url, {
     method: "GET",
     headers: {
-      ...serviceHeaders(env),
+      ...serviceHeaders(env, token),
       Prefer: "count=exact"
     }
   });
@@ -499,12 +501,12 @@ async function supabaseGetWithCount(table, queryParts, env) {
   };
 }
 
-async function supabaseInsert(table, rows, env) {
+async function supabaseInsert(table, rows, env, token = "") {
   const url = `${supabaseBase(env)}/rest/v1/${table}?select=*`;
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      ...serviceHeaders(env),
+      ...serviceHeaders(env, token),
       Prefer: "return=representation"
     },
     body: JSON.stringify(rows)
@@ -518,12 +520,12 @@ async function supabaseInsert(table, rows, env) {
   return safeJson(text) || [];
 }
 
-async function supabasePatch(table, id, payload, env) {
+async function supabasePatch(table, id, payload, env, token = "") {
   const url = `${supabaseBase(env)}/rest/v1/${table}?id=eq.${postgrestValue(id)}&select=*`;
   const res = await fetch(url, {
     method: "PATCH",
     headers: {
-      ...serviceHeaders(env),
+      ...serviceHeaders(env, token),
       Prefer: "return=representation"
     },
     body: JSON.stringify(payload)
@@ -554,10 +556,18 @@ function supabaseBase(env) {
   return String(env.SUPABASE_URL || "").replace(/\/+$/, "");
 }
 
-function serviceHeaders(env) {
+function supabaseApiKey(env) {
+  return env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+}
+
+function supabaseAuthToken(env, token = "") {
+  return env.SUPABASE_SERVICE_ROLE_KEY || token || env.SUPABASE_ANON_KEY;
+}
+
+function serviceHeaders(env, token = "") {
   return {
-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    apikey: supabaseApiKey(env),
+    Authorization: `Bearer ${supabaseAuthToken(env, token)}`,
     "Content-Type": "application/json"
   };
 }

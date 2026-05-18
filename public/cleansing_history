@@ -390,6 +390,8 @@
   const $ = id => document.getElementById(id);
   const cfg = window.MARUWELL_CONFIG || {};
   const API = (cfg.CLEANSING_HISTORY_API_BASE || "https://cleansinghistory.maroowell.com").replace(/\/$/, "");
+  const TABLE_HISTORY = "cleansing_history";
+  const TABLE_CLHI_ACCESS = "cleansing_history_access";
 
   let supabaseClient = null;
   let me = {};
@@ -426,6 +428,11 @@
     return me?.is_super_admin === true || Number(me?.max_role_level || 0) >= 90;
   };
 
+  const isBackendSessionError = err => {
+    const msg = String(err?.message || err || "");
+    return /invalid_session|JWT|refresh token|Auth session missing/i.test(msg);
+  };
+
   function showErrorBox(title, message) {
     document.documentElement.style.visibility = "visible";
     $("bar").classList.add("hide");
@@ -445,14 +452,6 @@
     );
   }
 
-  /*
-    admin_access.html과 동일한 세션 처리 방식.
-    - sessionStorage 사용
-    - getSession()에서 access_token만 가져옴
-    - 프론트에서 getUser 검증 안 함
-    - 강제 refreshSession 안 함
-    - 로그인 자동 리다이렉트 안 함
-  */
   function initSupabase() {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = cfg;
 
@@ -476,6 +475,22 @@
         detectSessionInUrl: true
       }
     });
+  }
+
+  async function getSession() {
+    if (!supabaseClient) initSupabase();
+
+    const { data, error } = await supabaseClient.auth.getSession();
+
+    if (error) throw error;
+
+    const session = data?.session || null;
+
+    if (!session) {
+      throw new Error("로그인이 필요합니다. 먼저 로그인하세요.");
+    }
+
+    return session;
   }
 
   async function getToken(forceRefresh = false) {
@@ -502,6 +517,176 @@
     }
 
     return token;
+  }
+
+  async function directMe() {
+    const session = await getSession();
+    const user = session.user || {};
+    const uid = String(user.id || "").trim();
+    const email = String(user.email || "").trim();
+
+    if (!uid) {
+      throw new Error("유효하지 않은 로그인 세션입니다.");
+    }
+
+    const out = {
+      user: { id: uid, email },
+      email,
+      is_maroowell: false,
+      is_admin: false,
+      is_super_admin: false,
+      is_dragon_car_admin: false,
+      max_role_level: 0,
+      can_select: false
+    };
+
+    try {
+      const { data, error } = await supabaseClient.rpc("mw_my_access").maybeSingle();
+
+      if (!error && data) {
+        out.is_maroowell = data.is_maroowell === true;
+        out.is_admin = data.is_admin === true;
+        out.is_dragon_car_admin = data.is_dragon_car_admin === true;
+        out.max_role_level = Number(data.max_role_level || data.role_level || 0);
+        out.is_super_admin = out.max_role_level >= 90 || data.is_super_admin === true;
+      }
+    } catch {}
+
+    if (out.is_super_admin) {
+      out.can_select = true;
+      return out;
+    }
+
+    const checks = [
+      () => supabaseClient.from(TABLE_CLHI_ACCESS).select("can_select").eq("user_id", uid).eq("can_select", true).maybeSingle(),
+      () => supabaseClient.from(TABLE_CLHI_ACCESS).select("can_select").eq("email", email).eq("can_select", true).maybeSingle()
+    ];
+
+    for (const run of checks) {
+      try {
+        const { data, error } = await run();
+
+        if (!error && data?.can_select === true) {
+          out.can_select = true;
+          break;
+        }
+      } catch {}
+    }
+
+    return out;
+  }
+
+  async function directMeta() {
+    if (!supabaseClient) initSupabase();
+
+    const { data, error } = await supabaseClient
+      .from(TABLE_HISTORY)
+      .select("week")
+      .order("week", { ascending:false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return {
+      ok: true,
+      latest_week: data?.week || ""
+    };
+  }
+
+  function applyEq(query, field, value) {
+    const v = String(value || "").trim();
+    return v ? query.eq(field, v) : query;
+  }
+
+  function applyIlike(query, field, value) {
+    const v = String(value || "").trim();
+    return v ? query.ilike(field, `%${v.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`) : query;
+  }
+
+  function safeOrSearch(value) {
+    return String(value || "")
+      .trim()
+      .replace(/[,%]/g, " ")
+      .replace(/\s+/g, " ");
+  }
+
+  async function directRows() {
+    if (!supabaseClient) initSupabase();
+
+    const limit = Math.max(1, Math.min(1000, Number(val("limit")) || 300));
+    let query = supabaseClient
+      .from(TABLE_HISTORY)
+      .select("*", { count:"exact" });
+
+    query = applyEq(query, "week", val("week"));
+    query = applyEq(query, "camp", val("camp"));
+    query = applyEq(query, "wave", val("wave"));
+    query = applyIlike(query, "route", val("route"));
+    query = applyIlike(query, "vendor_name", val("vendor"));
+    query = applyIlike(query, "business_number", val("biz"));
+    query = applyEq(query, "reason", val("reason"));
+
+    const q = safeOrSearch(val("q"));
+
+    if (q) {
+      const like = `%${q}%`;
+      query = query.or([
+        `week.ilike.${like}`,
+        `camp.ilike.${like}`,
+        `wave.ilike.${like}`,
+        `route.ilike.${like}`,
+        `zip.ilike.${like}`,
+        `execution_rate_grade.ilike.${like}`,
+        `reason.ilike.${like}`,
+        `vendor_name.ilike.${like}`,
+        `business_number.ilike.${like}`
+      ].join(","));
+    }
+
+    const { data, error, count } = await query
+      .order("week", { ascending:false })
+      .order("camp", { ascending:true })
+      .order("wave", { ascending:true })
+      .order("route", { ascending:true })
+      .limit(limit);
+
+    if (error) throw error;
+
+    return {
+      ok: true,
+      rows: Array.isArray(data) ? data : [],
+      count: count ?? (Array.isArray(data) ? data.length : 0),
+      effective_week: val("week") || data?.[0]?.week || ""
+    };
+  }
+
+  async function directSave(path, options) {
+    if (!supabaseClient) initSupabase();
+
+    const body = JSON.parse(options?.body || "{}");
+    const id = path.match(/\/api\/cleansing-history\/([^/]+)$/)?.[1];
+    const query = supabaseClient.from(TABLE_HISTORY);
+
+    if (id) {
+      const { data, error } = await query.update(body).eq("id", id).select("*").maybeSingle();
+
+      if (error) throw error;
+
+      return {
+        ok: true,
+        row: data
+      };
+    }
+
+    const { data, error } = await query.insert(body).select("*").maybeSingle();
+
+    if (error) throw error;
+
+    return {
+      ok: true,
+      row: data
+    };
   }
 
   async function api(path, options = {}, retrying = false) {
@@ -543,7 +728,16 @@
   }
 
   async function initMe() {
-    me = await api("/api/cleansing-history/me");
+    try {
+      me = await directMe();
+      if (!me.can_select) {
+        try {
+          me = await api("/api/cleansing-history/me");
+        } catch {}
+      }
+    } catch {
+      me = await api("/api/cleansing-history/me");
+    }
 
     $("user").textContent = me.email || me.user?.email || "권한 확인됨";
     $("add").classList.toggle("hide", !isSuper());
@@ -559,7 +753,14 @@
   }
 
   async function initWeek() {
-    const meta = await api("/api/cleansing-history/meta");
+    let meta = null;
+
+    try {
+      meta = await api("/api/cleansing-history/meta");
+    } catch (e) {
+      if (!isBackendSessionError(e)) throw e;
+      meta = await directMeta();
+    }
 
     if (meta.latest_week && !val("week")) {
       $("week").value = meta.latest_week;
@@ -586,7 +787,14 @@
       if (v) p.set(id, v);
     });
 
-    const data = await api("/api/cleansing-history?" + p.toString());
+    let data = null;
+
+    try {
+      data = await api("/api/cleansing-history?" + p.toString());
+    } catch (e) {
+      if (!isBackendSessionError(e)) throw e;
+      data = await directRows();
+    }
 
     rows = data.rows || [];
 
@@ -677,10 +885,17 @@
       ? "/api/cleansing-history/" + encodeURIComponent(row.id)
       : "/api/cleansing-history";
 
-    await api(path, {
+    const options = {
       method: row ? "PATCH" : "POST",
       body: JSON.stringify(patch)
-    });
+    };
+
+    try {
+      await api(path, options);
+    } catch (e) {
+      if (!isBackendSessionError(e)) throw e;
+      await directSave(path, options);
+    }
 
     await load();
   }

@@ -349,8 +349,8 @@ function waveSortValue(wave) {
 
 function compareRows(a, b) {
   return compareWeekAsc(a, b) ||
-    clean(a.camp).localeCompare(clean(b.camp), "ko", { numeric: true, sensitivity: "base" }) ||
     (waveSortValue(a.wave) - waveSortValue(b.wave)) ||
+    clean(a.camp).localeCompare(clean(b.camp), "ko", { numeric: true, sensitivity: "base" }) ||
     clean(a.route).localeCompare(clean(b.route), "ko", { numeric: true, sensitivity: "base" });
 }
 

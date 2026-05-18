@@ -302,18 +302,20 @@ function requireEdit(auth) {
   throw httpError(403, "super_admin_required");
 }
 
-function weekSortValue(week) {
+function parseWeek(week) {
   const raw = clean(week).toUpperCase();
-  const yearMatch = raw.match(/(20\d{2})/);
-  const weekMatch = raw.match(/(?:^|[^0-9])(\d{1,2})\s*W\b/) || raw.match(/\bW\s*(\d{1,2})\b/);
+  const yearMatch = raw.match(/^\s*(20\d{2})/);
+  const weekMatch = raw.match(/(\d{1,2})\s*W\b/);
   const year = yearMatch ? Number(yearMatch[1]) : 0;
   const weekNo = weekMatch ? Number(weekMatch[1]) : 0;
 
-  return year * 100 + weekNo;
+  return { year, weekNo };
 }
 
 function compareWeekDesc(a, b) {
-  const diff = weekSortValue(b?.week ?? b) - weekSortValue(a?.week ?? a);
+  const aw = parseWeek(a?.week ?? a);
+  const bw = parseWeek(b?.week ?? b);
+  const diff = (bw.year - aw.year) || (bw.weekNo - aw.weekNo);
 
   if (diff) return diff;
 
@@ -323,11 +325,40 @@ function compareWeekDesc(a, b) {
   });
 }
 
+function compareWeekAsc(a, b) {
+  const aw = parseWeek(a?.week ?? a);
+  const bw = parseWeek(b?.week ?? b);
+  const diff = (aw.year - bw.year) || (aw.weekNo - bw.weekNo);
+
+  if (diff) return diff;
+
+  return clean(a?.week ?? a).localeCompare(clean(b?.week ?? b), "ko", {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
+function waveSortValue(wave) {
+  const raw = clean(wave).toUpperCase();
+
+  if (raw === "2W" || raw === "W2" || raw === "WAVE2" || raw === "주간") return 0;
+  if (raw === "1W" || raw === "W1" || raw === "WAVE1" || raw === "야간") return 1;
+
+  return 2;
+}
+
+function compareRows(a, b) {
+  return compareWeekAsc(a, b) ||
+    clean(a.camp).localeCompare(clean(b.camp), "ko", { numeric: true, sensitivity: "base" }) ||
+    (waveSortValue(a.wave) - waveSortValue(b.wave)) ||
+    clean(a.route).localeCompare(clean(b.route), "ko", { numeric: true, sensitivity: "base" });
+}
+
 async function fetchLatestWeek(env, token) {
-  const rows = await supabaseGet(TABLE_HISTORY, [
+  const rows = await supabaseGetAll(TABLE_HISTORY, [
     "select=week",
     "week=not.is.null",
-    "limit=1000"
+    "order=id.asc"
   ], env, token);
 
   const latest = rows
@@ -350,29 +381,17 @@ async function fetchRows(url, env, token) {
     filterIlike("business_number", url.searchParams.get("biz")),
     filterEq("reason", url.searchParams.get("reason")),
     q ? buildSearchFilter(q) : "",
-    "order=camp.asc",
-    "order=wave.asc",
-    "order=route.asc",
-    `limit=${limit}`
+    "order=id.asc"
   ];
 
-  const { rows, count } = await supabaseGetWithCount(TABLE_HISTORY, parts, env, token);
-
-  const sorted = rows.map(normalizeRow).sort((a, b) => {
-    const weekDiff = compareWeekDesc(a, b);
-
-    if (weekDiff) return weekDiff;
-
-    return clean(a.route).localeCompare(clean(b.route), "ko", {
-      numeric: true,
-      sensitivity: "base"
-    });
-  });
+  const { rows, count } = await supabaseGetAllWithCount(TABLE_HISTORY, parts, env, token);
+  const sorted = rows.map(normalizeRow).sort(compareRows);
+  const out = sorted.slice(0, limit);
 
   return {
-    rows: sorted,
+    rows: out,
     count,
-    effective_week: clean(url.searchParams.get("week")) || clean(sorted[0]?.week)
+    effective_week: clean(url.searchParams.get("week")) || clean(out[0]?.week)
   };
 }
 
@@ -509,6 +528,40 @@ function buildSearchFilter(value) {
 async function supabaseGet(table, queryParts, env, token = "") {
   const { rows } = await supabaseGetWithCount(table, queryParts, env, token);
   return rows;
+}
+
+async function supabaseGetAll(table, queryParts, env, token = "") {
+  const { rows } = await supabaseGetAllWithCount(table, queryParts, env, token);
+  return rows;
+}
+
+async function supabaseGetAllWithCount(table, queryParts, env, token = "") {
+  const out = [];
+  const pageSize = 1000;
+  let count = null;
+
+  for (let offset = 0; offset < 10000; offset += pageSize) {
+    const pagedParts = [
+      ...queryParts.filter(part => part && !String(part).startsWith("limit=") && !String(part).startsWith("offset=")),
+      `limit=${pageSize}`,
+      `offset=${offset}`
+    ];
+    const result = await supabaseGetWithCount(table, pagedParts, env, token);
+    const pageRows = Array.isArray(result.rows) ? result.rows : [];
+
+    if (offset === 0) {
+      count = Number.isFinite(result.count) ? result.count : null;
+    }
+
+    out.push(...pageRows);
+
+    if (pageRows.length < pageSize) break;
+  }
+
+  return {
+    rows: out,
+    count: count ?? out.length
+  };
 }
 
 async function supabaseGetWithCount(table, queryParts, env, token = "") {

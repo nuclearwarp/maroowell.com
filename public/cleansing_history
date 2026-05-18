@@ -369,13 +369,13 @@
     <div class="board" id="board">
       <div class="head">
         <div>
-          <h2>누적 데이터</h2>
+          <h2>클렌징 히스토리</h2>
           <p id="summary">조회 전</p>
         </div>
 
         <div class="actions">
           <button class="btn" id="refresh">새로고침</button>
-          <button class="btn purple" id="csv">CSV</button>
+          <button class="btn purple" id="copyImage">이미지 복사</button>
         </div>
       </div>
 
@@ -433,18 +433,20 @@
     return /invalid_session|JWT|refresh token|Auth session missing/i.test(msg);
   };
 
-  function weekSortValue(week) {
+  function parseWeek(week) {
     const raw = String(week || "").trim().toUpperCase();
-    const yearMatch = raw.match(/(20\d{2})/);
-    const weekMatch = raw.match(/(?:^|[^0-9])(\d{1,2})\s*W\b/) || raw.match(/\bW\s*(\d{1,2})\b/);
+    const yearMatch = raw.match(/^\s*(20\d{2})/);
+    const weekMatch = raw.match(/(\d{1,2})\s*W\b/);
     const year = yearMatch ? Number(yearMatch[1]) : 0;
     const weekNo = weekMatch ? Number(weekMatch[1]) : 0;
 
-    return year * 100 + weekNo;
+    return { year, weekNo };
   }
 
   function compareWeekDesc(a, b) {
-    const diff = weekSortValue(b?.week ?? b) - weekSortValue(a?.week ?? a);
+    const aw = parseWeek(a?.week ?? a);
+    const bw = parseWeek(b?.week ?? b);
+    const diff = (bw.year - aw.year) || (bw.weekNo - aw.weekNo);
 
     if (diff) return diff;
 
@@ -452,6 +454,35 @@
       numeric: true,
       sensitivity: "base"
     });
+  }
+
+  function compareWeekAsc(a, b) {
+    const aw = parseWeek(a?.week ?? a);
+    const bw = parseWeek(b?.week ?? b);
+    const diff = (aw.year - bw.year) || (aw.weekNo - bw.weekNo);
+
+    if (diff) return diff;
+
+    return String(a?.week ?? a ?? "").localeCompare(String(b?.week ?? b ?? ""), "ko", {
+      numeric: true,
+      sensitivity: "base"
+    });
+  }
+
+  function waveSortValue(wave) {
+    const raw = String(wave || "").trim().toUpperCase();
+
+    if (raw === "2W" || raw === "W2" || raw === "WAVE2" || raw === "주간") return 0;
+    if (raw === "1W" || raw === "W1" || raw === "WAVE1" || raw === "야간") return 1;
+
+    return 2;
+  }
+
+  function compareRows(a, b) {
+    return compareWeekAsc(a, b) ||
+      String(a.camp || "").localeCompare(String(b.camp || ""), "ko", { numeric:true, sensitivity:"base" }) ||
+      (waveSortValue(a.wave) - waveSortValue(b.wave)) ||
+      String(a.route || "").localeCompare(String(b.route || ""), "ko", { numeric:true, sensitivity:"base" });
   }
 
   function showErrorBox(title, message) {
@@ -600,15 +631,25 @@
   async function directMeta() {
     if (!supabaseClient) initSupabase();
 
-    const { data, error } = await supabaseClient
-      .from(TABLE_HISTORY)
-      .select("week")
-      .not("week", "is", null)
-      .limit(1000);
+    const data = [];
+    const pageSize = 1000;
 
-    if (error) throw error;
+    for (let from = 0; from < 10000; from += pageSize) {
+      const { data: page, error } = await supabaseClient
+        .from(TABLE_HISTORY)
+        .select("week")
+        .not("week", "is", null)
+        .range(from, from + pageSize - 1);
 
-    const latest = (Array.isArray(data) ? data : [])
+      if (error) throw error;
+
+      const rows = Array.isArray(page) ? page : [];
+      data.push(...rows);
+
+      if (rows.length < pageSize) break;
+    }
+
+    const latest = data
       .filter(row => String(row?.week || "").trim())
       .sort(compareWeekDesc)[0];
 
@@ -635,13 +676,10 @@
       .replace(/\s+/g, " ");
   }
 
-  async function directRows() {
-    if (!supabaseClient) initSupabase();
-
-    const limit = Math.max(1, Math.min(1000, Number(val("limit")) || 300));
+  function directRowsQuery({ count = false } = {}) {
     let query = supabaseClient
       .from(TABLE_HISTORY)
-      .select("*", { count:"exact" });
+      .select("*", count ? { count:"exact" } : {});
 
     query = applyEq(query, "week", val("week"));
     query = applyEq(query, "camp", val("camp"));
@@ -668,30 +706,41 @@
       ].join(","));
     }
 
-    const { data, error, count } = await query
-      .order("camp", { ascending:true })
-      .order("wave", { ascending:true })
-      .order("route", { ascending:true })
-      .limit(limit);
+    return query.order("id", { ascending:true });
+  }
 
-    if (error) throw error;
+  async function directRows() {
+    if (!supabaseClient) initSupabase();
 
-    const sorted = (Array.isArray(data) ? data : []).slice().sort((a, b) => {
-      const weekDiff = compareWeekDesc(a, b);
+    const limit = Math.max(1, Math.min(1000, Number(val("limit")) || 300));
+    const pageSize = 1000;
+    const fetched = [];
+    let totalCount = null;
 
-      if (weekDiff) return weekDiff;
+    for (let from = 0; from < 10000; from += pageSize) {
+      const { data, error, count } = await directRowsQuery({ count: from === 0 })
+        .range(from, from + pageSize - 1);
 
-      return String(a.route || "").localeCompare(String(b.route || ""), "ko", {
-        numeric: true,
-        sensitivity: "base"
-      });
-    });
+      if (error) throw error;
+
+      if (from === 0 && typeof count === "number") {
+        totalCount = count;
+      }
+
+      const pageRows = Array.isArray(data) ? data : [];
+      fetched.push(...pageRows);
+
+      if (pageRows.length < pageSize) break;
+    }
+
+    const sorted = fetched.slice().sort(compareRows);
+    const out = sorted.slice(0, limit);
 
     return {
       ok: true,
-      rows: sorted,
-      count: count ?? sorted.length,
-      effective_week: val("week") || sorted[0]?.week || ""
+      rows: out,
+      count: totalCount ?? sorted.length,
+      effective_week: val("week") || out[0]?.week || ""
     };
   }
 
@@ -934,38 +983,118 @@
     await load();
   }
 
-  function csv() {
-    const headers = [
-      "week",
-      "camp",
-      "wave",
-      "route",
-      "zip",
-      "demand",
-      "complete",
-      "execution_rate",
-      "execution_rate_grade",
-      "reason",
-      "price",
-      "vendor_name",
-      "business_number",
-      "created_at"
-    ];
+  function drawText(ctx, text, x, y, maxWidth) {
+    const raw = String(text ?? "");
 
-    const lines = [
-      headers.join(","),
-      ...rows.map(r => headers.map(k => {
-        return '"' + String(r[k] ?? "").replaceAll('"', '""') + '"';
-      }).join(","))
-    ];
+    if (!maxWidth || ctx.measureText(raw).width <= maxWidth) {
+      ctx.fillText(raw, x, y);
+      return;
+    }
 
-    const blob = new Blob(["\ufeff" + lines.join("\n")], {
-      type: "text/csv;charset=utf-8"
+    let out = raw;
+
+    while (out.length > 1 && ctx.measureText(out + "...").width > maxWidth) {
+      out = out.slice(0, -1);
+    }
+
+    ctx.fillText(out + "...", x, y);
+  }
+
+  function canvasBlob(canvas) {
+    return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  }
+
+  async function copyImage() {
+    if (!rows.length) {
+      alert("복사할 조회 결과가 없습니다.");
+      return;
+    }
+
+    const columns = [
+      ["Week", 120, r => r.week],
+      ["Camp", 100, r => r.camp],
+      ["Wave", 76, r => r.wave === "2W" ? "주간" : r.wave === "1W" ? "야간" : r.wave],
+      ["Route", 150, r => r.route],
+      ["Zip", 260, r => r.zip],
+      ["Demand", 105, r => fmtNum(r.demand)],
+      ["Complete", 105, r => fmtNum(r.complete)],
+      ["수행률", 92, r => fmtPct(r.execution_rate)],
+      ["등급", 78, r => r.execution_rate_grade],
+      ["Reason", 88, r => r.reason],
+      ["Price", 96, r => fmtWon(r.price)],
+      ["Vendor", 220, r => r.vendor_name],
+      ["사업자번호", 140, r => r.business_number]
+    ];
+    const rowHeight = 32;
+    const headerHeight = 86;
+    const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
+    const height = headerHeight + rowHeight * (rows.length + 1) + 18;
+    const canvas = document.createElement("canvas");
+    const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#081120";
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#eaf2ff";
+    ctx.font = "800 24px system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.fillText("클렌징 히스토리", 12, 34);
+    ctx.fillStyle = "#bfdbfe";
+    ctx.font = "800 13px system-ui, -apple-system, Segoe UI, sans-serif";
+    ctx.fillText($("summary").textContent || "", 12, 58);
+
+    let x = 12;
+    let y = headerHeight;
+    ctx.fillStyle = "#27364d";
+    ctx.fillRect(12, y - rowHeight, width - 24, rowHeight);
+    ctx.strokeStyle = "rgba(255,255,255,.16)";
+    ctx.lineWidth = 1;
+    ctx.font = "800 12px system-ui, -apple-system, Segoe UI, sans-serif";
+
+    for (const [label, colWidth] of columns) {
+      ctx.strokeRect(x, y - rowHeight, colWidth, rowHeight);
+      ctx.fillStyle = "#eaf2ff";
+      drawText(ctx, label, x + 8, y - 11, colWidth - 16);
+      x += colWidth;
+    }
+
+    rows.forEach((row, idx) => {
+      x = 12;
+      const top = y + idx * rowHeight;
+      ctx.fillStyle = idx % 2 ? "#0b1424" : "#0d1728";
+      ctx.fillRect(12, top, width - 24, rowHeight);
+      ctx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
+
+      for (const [, colWidth, getter] of columns) {
+        ctx.strokeStyle = "rgba(255,255,255,.10)";
+        ctx.strokeRect(x, top, colWidth, rowHeight);
+        ctx.fillStyle = "#dbeafe";
+        drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
+        x += colWidth;
+      }
     });
+
+    const blob = await canvasBlob(canvas);
+
+    if (!blob) {
+      throw new Error("이미지 생성 실패");
+    }
+
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob })
+      ]);
+      alert("이미지를 클립보드에 복사했습니다.");
+      return;
+    }
 
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "cleansing_history.csv";
+    a.download = "cleansing_history.png";
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -990,7 +1119,7 @@
       }
     };
 
-    $("csv").onclick = csv;
+    $("copyImage").onclick = () => copyImage().catch(e => alert(e.message));
 
     $("add").onclick = () => {
       save(null).catch(e => alert(e.message));

@@ -354,6 +354,100 @@ function compareRows(a, b) {
     clean(a.route).localeCompare(clean(b.route), "ko", { numeric: true, sensitivity: "base" });
 }
 
+function noSpace(v) {
+  return String(v ?? "").replace(/\s+/g, "");
+}
+
+function weekKey(v) {
+  const parts = parseWeek(v);
+  return parts.year && parts.weekNo ? `${parts.year}-${parts.weekNo}W` : noSpace(v);
+}
+
+function previousWeekKey(year, weekNo, back) {
+  if (!year || !weekNo) return "";
+
+  if (weekNo > back) {
+    return `${year}-${weekNo - back}W`;
+  }
+
+  return `${year - 1}-${52 - (back - weekNo)}W`;
+}
+
+function routeKey(value) {
+  const raw = noSpace(value);
+
+  if (!raw) return "";
+
+  return Array.from(new Set(raw.split(",").map(v => v.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "ko", { numeric: true, sensitivity: "base" }))
+    .join(",");
+}
+
+function statusKeys(row, weekOverride = "") {
+  const week = weekOverride || weekKey(row.week);
+  const camp = noSpace(row.camp);
+  const wave = noSpace(row.wave);
+  const route = routeKey(row.route);
+  const reason = noSpace(row.reason);
+
+  return {
+    full: `${week}||${camp}||${wave}||${route}||${reason}`,
+    route: `${week}||${camp}||${wave}||${route}`
+  };
+}
+
+function buildStatusIndex(sourceRows) {
+  const full = new Map();
+  const route = new Map();
+
+  for (const row of sourceRows || []) {
+    const baseOk = weekKey(row.week) && noSpace(row.camp) && noSpace(row.wave) && routeKey(row.route);
+
+    if (!baseOk) continue;
+
+    const keys = statusKeys(row);
+
+    if (noSpace(row.reason)) {
+      full.set(keys.full, (full.get(keys.full) || 0) + 1);
+    }
+
+    route.set(keys.route, (route.get(keys.route) || 0) + 1);
+  }
+
+  return { full, route };
+}
+
+function cleansingStatus(row, index) {
+  const parts = parseWeek(row.week);
+  const prevOne = previousWeekKey(parts.year, parts.weekNo, 1);
+  const prevTwo = previousWeekKey(parts.year, parts.weekNo, 2);
+
+  if (!prevOne || !prevTwo) return "pass";
+
+  const prevOneKeys = statusKeys(row, prevOne);
+  const prevTwoKeys = statusKeys(row, prevTwo);
+  const cleanCnt = index.full.get(prevTwoKeys.full) || 0;
+
+  if (cleanCnt > 0) return "클렌징";
+
+  const warnCnt =
+    (index.full.get(prevOneKeys.full) || 0) +
+    (index.full.get(prevTwoKeys.full) || 0) +
+    (index.route.get(prevOneKeys.route) || 0) +
+    (index.route.get(prevTwoKeys.route) || 0);
+
+  return warnCnt > 0 ? "경고" : "pass";
+}
+
+function decorateRows(targetRows, sourceRows) {
+  const index = buildStatusIndex(sourceRows);
+
+  return (targetRows || []).map(row => ({
+    ...row,
+    cleansing_status: cleansingStatus(row, index)
+  }));
+}
+
 async function fetchLatestWeek(env, token) {
   const rows = await supabaseGetAll(TABLE_HISTORY, [
     "select=week",
@@ -385,7 +479,11 @@ async function fetchRows(url, env, token) {
   ];
 
   const { rows, count } = await supabaseGetAllWithCount(TABLE_HISTORY, parts, env, token);
-  const sorted = rows.map(normalizeRow).sort(compareRows);
+  const contextRows = await supabaseGetAll(TABLE_HISTORY, [
+    "select=week,camp,wave,route,reason",
+    "order=id.asc"
+  ], env, token);
+  const sorted = decorateRows(rows.map(normalizeRow), contextRows).sort(compareRows);
   const out = sorted.slice(0, limit);
 
   return {

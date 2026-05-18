@@ -234,6 +234,10 @@
     .num { text-align:right; font-variant-numeric:tabular-nums; }
     .green { color:#bbf7d0; }
     .yellow { color:#fde68a; }
+    .red { color:#fca5a5; }
+    .mutedCell { color:#94a3b8; }
+    .statusClean { color:#f87171; font-weight:1000; }
+    .statusWarn { color:#fde68a; font-weight:1000; }
 
     .empty,
     .denied {
@@ -485,6 +489,110 @@
       String(a.route || "").localeCompare(String(b.route || ""), "ko", { numeric:true, sensitivity:"base" });
   }
 
+  function noSpace(v) {
+    return String(v ?? "").replace(/\s+/g, "");
+  }
+
+  function weekKey(v) {
+    const parts = parseWeek(v);
+    return parts.year && parts.weekNo ? `${parts.year}-${parts.weekNo}W` : noSpace(v);
+  }
+
+  function previousWeekKey(year, weekNo, back) {
+    if (!year || !weekNo) return "";
+
+    if (weekNo > back) {
+      return `${year}-${weekNo - back}W`;
+    }
+
+    return `${year - 1}-${52 - (back - weekNo)}W`;
+  }
+
+  function routeKey(value) {
+    const raw = noSpace(value);
+
+    if (!raw) return "";
+
+    return Array.from(new Set(raw.split(",").map(v => v.trim()).filter(Boolean)))
+      .sort((a, b) => a.localeCompare(b, "ko", { numeric:true, sensitivity:"base" }))
+      .join(",");
+  }
+
+  function statusKeys(row, weekOverride = "") {
+    const week = weekOverride || weekKey(row.week);
+    const camp = noSpace(row.camp);
+    const wave = noSpace(row.wave);
+    const route = routeKey(row.route);
+    const reason = noSpace(row.reason);
+
+    return {
+      full: `${week}||${camp}||${wave}||${route}||${reason}`,
+      route: `${week}||${camp}||${wave}||${route}`
+    };
+  }
+
+  function buildStatusIndex(sourceRows) {
+    const full = new Map();
+    const route = new Map();
+
+    for (const row of sourceRows || []) {
+      const baseOk = weekKey(row.week) && noSpace(row.camp) && noSpace(row.wave) && routeKey(row.route);
+
+      if (!baseOk) continue;
+
+      const keys = statusKeys(row);
+
+      if (noSpace(row.reason)) {
+        full.set(keys.full, (full.get(keys.full) || 0) + 1);
+      }
+
+      route.set(keys.route, (route.get(keys.route) || 0) + 1);
+    }
+
+    return { full, route };
+  }
+
+  function cleansingStatus(row, index) {
+    const parts = parseWeek(row.week);
+    const prevOne = previousWeekKey(parts.year, parts.weekNo, 1);
+    const prevTwo = previousWeekKey(parts.year, parts.weekNo, 2);
+
+    if (!prevOne || !prevTwo) return "pass";
+
+    const prevOneKeys = statusKeys(row, prevOne);
+    const prevTwoKeys = statusKeys(row, prevTwo);
+    const cleanCnt = index.full.get(prevTwoKeys.full) || 0;
+
+    if (cleanCnt > 0) return "클렌징";
+
+    const warnCnt =
+      (index.full.get(prevOneKeys.full) || 0) +
+      (index.full.get(prevTwoKeys.full) || 0) +
+      (index.route.get(prevOneKeys.route) || 0) +
+      (index.route.get(prevTwoKeys.route) || 0);
+
+    return warnCnt > 0 ? "경고" : "pass";
+  }
+
+  function decorateRows(targetRows, sourceRows) {
+    const index = buildStatusIndex(sourceRows);
+
+    return (targetRows || []).map(row => ({
+      ...row,
+      cleansing_status: cleansingStatus(row, index)
+    }));
+  }
+
+  function statusClass(value) {
+    if (value === "클렌징") return "statusClean";
+    if (value === "경고") return "statusWarn";
+    return "mutedCell";
+  }
+
+  function reasonClass(value) {
+    return noSpace(value) === "반품" ? "red" : "";
+  }
+
   function showErrorBox(title, message) {
     document.documentElement.style.visibility = "visible";
     $("bar").classList.add("hide");
@@ -709,6 +817,27 @@
     return query.order("id", { ascending:true });
   }
 
+  async function directStatusContextRows() {
+    const pageSize = 1000;
+    const out = [];
+
+    for (let from = 0; from < 10000; from += pageSize) {
+      const { data, error } = await supabaseClient
+        .from(TABLE_HISTORY)
+        .select("week,camp,wave,route,reason")
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      const pageRows = Array.isArray(data) ? data : [];
+      out.push(...pageRows);
+
+      if (pageRows.length < pageSize) break;
+    }
+
+    return out;
+  }
+
   async function directRows() {
     if (!supabaseClient) initSupabase();
 
@@ -733,7 +862,8 @@
       if (pageRows.length < pageSize) break;
     }
 
-    const sorted = fetched.slice().sort(compareRows);
+    const contextRows = await directStatusContextRows();
+    const sorted = decorateRows(fetched, contextRows).sort(compareRows);
     const out = sorted.slice(0, limit);
 
     return {
@@ -911,6 +1041,7 @@
             <th style="width:90px">수행률</th>
             <th style="width:80px">등급</th>
             <th style="width:80px">Reason</th>
+            <th style="width:82px">판정</th>
             <th style="width:90px">Price</th>
             <th style="width:230px">Vendor</th>
             <th style="width:130px">사업자번호</th>
@@ -929,7 +1060,8 @@
               <td class="num">${fmtNum(r.complete)}</td>
               <td class="num green">${fmtPct(r.execution_rate)}</td>
               <td>${esc(r.execution_rate_grade || "")}</td>
-              <td>${esc(r.reason || "")}</td>
+              <td class="${reasonClass(r.reason)}">${esc(r.reason || "")}</td>
+              <td class="${statusClass(r.cleansing_status)}">${esc(r.cleansing_status || "pass")}</td>
               <td class="num yellow">${fmtWon(r.price)}</td>
               <td class="left">${esc(r.vendor_name || "")}</td>
               <td>${esc(r.business_number || "")}</td>
@@ -1021,12 +1153,13 @@
       ["수행률", 92, r => fmtPct(r.execution_rate)],
       ["등급", 78, r => r.execution_rate_grade],
       ["Reason", 88, r => r.reason],
+      ["판정", 82, r => r.cleansing_status || "pass"],
       ["Price", 96, r => fmtWon(r.price)],
       ["Vendor", 220, r => r.vendor_name],
       ["사업자번호", 140, r => r.business_number]
     ];
     const rowHeight = 32;
-    const headerHeight = 86;
+    const headerHeight = 58;
     const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
     const height = headerHeight + rowHeight * (rows.length + 1) + 18;
     const canvas = document.createElement("canvas");
@@ -1043,9 +1176,6 @@
     ctx.fillStyle = "#eaf2ff";
     ctx.font = "800 24px system-ui, -apple-system, Segoe UI, sans-serif";
     ctx.fillText("클렌징 히스토리", 12, 34);
-    ctx.fillStyle = "#bfdbfe";
-    ctx.font = "800 13px system-ui, -apple-system, Segoe UI, sans-serif";
-    ctx.fillText($("summary").textContent || "", 12, 58);
 
     let x = 12;
     let y = headerHeight;
@@ -1069,10 +1199,14 @@
       ctx.fillRect(12, top, width - 24, rowHeight);
       ctx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
 
-      for (const [, colWidth, getter] of columns) {
+      for (const [label, colWidth, getter] of columns) {
         ctx.strokeStyle = "rgba(255,255,255,.10)";
         ctx.strokeRect(x, top, colWidth, rowHeight);
-        ctx.fillStyle = "#dbeafe";
+        ctx.fillStyle =
+          label === "판정" && row.cleansing_status === "클렌징" ? "#f87171" :
+            label === "판정" && row.cleansing_status === "경고" ? "#fde68a" :
+              label === "Reason" && noSpace(row.reason) === "반품" ? "#fca5a5" :
+                "#dbeafe";
         drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
         x += colWidth;
       }

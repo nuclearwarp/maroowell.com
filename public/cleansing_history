@@ -235,9 +235,29 @@
     .green { color:#bbf7d0; }
     .yellow { color:#fde68a; }
     .red { color:#fca5a5; }
-    .mutedCell { color:#94a3b8; }
-    .statusClean { color:#f87171; font-weight:1000; }
-    .statusWarn { color:#fde68a; font-weight:1000; }
+    tbody tr.rowClean td,
+    tbody tr.rowClean .green,
+    tbody tr.rowClean .yellow,
+    tbody tr.rowClean .red {
+      color:#f87171;
+      font-weight:1000;
+    }
+    tbody tr.rowWarn td,
+    tbody tr.rowWarn .green,
+    tbody tr.rowWarn .yellow,
+    tbody tr.rowWarn .red {
+      color:#fde68a;
+      font-weight:1000;
+    }
+
+    .cellInput {
+      height:30px;
+      min-width:0;
+      border-radius:8px;
+      padding:0 7px;
+      font-size:12px;
+      font-weight:800;
+    }
 
     .empty,
     .denied {
@@ -400,6 +420,7 @@
   let supabaseClient = null;
   let me = {};
   let rows = [];
+  let editingId = "";
 
   const esc = v => String(v ?? "")
     .replaceAll("&", "&amp;")
@@ -583,14 +604,75 @@
     }));
   }
 
-  function statusClass(value) {
-    if (value === "클렌징") return "statusClean";
-    if (value === "경고") return "statusWarn";
-    return "mutedCell";
-  }
-
   function reasonClass(value) {
     return noSpace(value) === "반품" ? "red" : "";
+  }
+
+  function rowClass(row) {
+    if (row?.cleansing_status === "클렌징") return "rowClean";
+    if (row?.cleansing_status === "경고") return "rowWarn";
+    return "";
+  }
+
+  function rowId(row) {
+    return String(row?.id ?? "");
+  }
+
+  function isEditing(row) {
+    return editingId && rowId(row) === editingId;
+  }
+
+  function inputCell(row, field, className = "") {
+    return `<input class="cellInput ${className}" data-field="${esc(field)}" value="${esc(row?.[field] ?? "")}">`;
+  }
+
+  function waveCell(row) {
+    const value = String(row?.wave || "");
+
+    return `
+      <select class="cellInput" data-field="wave">
+        <option value="2W" ${value === "2W" ? "selected" : ""}>주간</option>
+        <option value="1W" ${value === "1W" ? "selected" : ""}>야간</option>
+      </select>
+    `;
+  }
+
+  function displayWave(row) {
+    return row.wave === "2W" ? "주간" : row.wave === "1W" ? "야간" : esc(row.wave || "");
+  }
+
+  function actionButton(row) {
+    const id = rowId(row);
+    const attr = isEditing(row) ? "data-save" : "data-edit";
+    const text = isEditing(row) ? "저장" : "수정";
+
+    return `<td><button class="btn" style="height:28px;padding:0 9px" ${attr}="${esc(id)}">${text}</button></td>`;
+  }
+
+  function numericPatchValue(value) {
+    const text = String(value || "").replace(/[,%₩,\s]/g, "");
+
+    if (!text) return null;
+
+    const n = Number(text);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function readPatchFromRow(tr) {
+    const patch = {};
+
+    tr.querySelectorAll("[data-field]").forEach(input => {
+      const field = input.dataset.field;
+      const value = input.value.trim();
+
+      if (["demand", "complete", "execution_rate", "price"].includes(field)) {
+        patch[field] = numericPatchValue(value);
+      } else {
+        patch[field] = value || null;
+      }
+    });
+
+    return patch;
   }
 
   function showErrorBox(title, message) {
@@ -1041,7 +1123,6 @@
             <th style="width:90px">수행률</th>
             <th style="width:80px">등급</th>
             <th style="width:80px">Reason</th>
-            <th style="width:82px">판정</th>
             <th style="width:90px">Price</th>
             <th style="width:230px">Vendor</th>
             <th style="width:130px">사업자번호</th>
@@ -1049,22 +1130,21 @@
         </thead>
         <tbody>
           ${rows.map(r => `
-            <tr>
-              ${edit ? `<td><button class="btn" style="height:28px;padding:0 9px" data-edit="${esc(r.id)}">수정</button></td>` : ""}
-              <td>${esc(r.week)}</td>
-              <td>${esc(r.camp)}</td>
-              <td>${r.wave === "2W" ? "주간" : r.wave === "1W" ? "야간" : esc(r.wave || "")}</td>
-              <td>${esc(r.route)}</td>
-              <td class="left">${esc(r.zip || "")}</td>
-              <td class="num">${fmtNum(r.demand)}</td>
-              <td class="num">${fmtNum(r.complete)}</td>
-              <td class="num green">${fmtPct(r.execution_rate)}</td>
-              <td>${esc(r.execution_rate_grade || "")}</td>
-              <td class="${reasonClass(r.reason)}">${esc(r.reason || "")}</td>
-              <td class="${statusClass(r.cleansing_status)}">${esc(r.cleansing_status || "pass")}</td>
-              <td class="num yellow">${fmtWon(r.price)}</td>
-              <td class="left">${esc(r.vendor_name || "")}</td>
-              <td>${esc(r.business_number || "")}</td>
+            <tr class="${rowClass(r)}" data-row-id="${esc(rowId(r))}">
+              ${edit ? actionButton(r) : ""}
+              <td>${isEditing(r) ? inputCell(r, "week") : esc(r.week)}</td>
+              <td>${isEditing(r) ? inputCell(r, "camp") : esc(r.camp)}</td>
+              <td>${isEditing(r) ? waveCell(r) : displayWave(r)}</td>
+              <td>${isEditing(r) ? inputCell(r, "route") : esc(r.route)}</td>
+              <td class="left">${isEditing(r) ? inputCell(r, "zip") : esc(r.zip || "")}</td>
+              <td class="num">${isEditing(r) ? inputCell(r, "demand", "num") : fmtNum(r.demand)}</td>
+              <td class="num">${isEditing(r) ? inputCell(r, "complete", "num") : fmtNum(r.complete)}</td>
+              <td class="num green">${isEditing(r) ? inputCell(r, "execution_rate", "num") : fmtPct(r.execution_rate)}</td>
+              <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : esc(r.execution_rate_grade || "")}</td>
+              <td class="${reasonClass(r.reason)}">${isEditing(r) ? inputCell(r, "reason") : esc(r.reason || "")}</td>
+              <td class="num yellow">${isEditing(r) ? inputCell(r, "price", "num") : fmtWon(r.price)}</td>
+              <td class="left">${isEditing(r) ? inputCell(r, "vendor_name") : esc(r.vendor_name || "")}</td>
+              <td>${isEditing(r) ? inputCell(r, "business_number") : esc(r.business_number || "")}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -1096,6 +1176,12 @@
       return;
     }
 
+    await persistPatch(row, patch);
+    editingId = "";
+    await load();
+  }
+
+  async function persistPatch(row, patch) {
     const path = row
       ? "/api/cleansing-history/" + encodeURIComponent(row.id)
       : "/api/cleansing-history";
@@ -1111,6 +1197,18 @@
       if (!isBackendSessionError(e)) throw e;
       await directSave(path, options);
     }
+  }
+
+  async function saveInline(row, tr) {
+    const patch = readPatchFromRow(tr);
+
+    if (!patch.week || !patch.camp || !patch.route) {
+      alert("week/camp/route 필수");
+      return;
+    }
+
+    await persistPatch(row, patch);
+    editingId = "";
 
     await load();
   }
@@ -1153,7 +1251,6 @@
       ["수행률", 92, r => fmtPct(r.execution_rate)],
       ["등급", 78, r => r.execution_rate_grade],
       ["Reason", 88, r => r.reason],
-      ["판정", 82, r => r.cleansing_status || "pass"],
       ["Price", 96, r => fmtWon(r.price)],
       ["Vendor", 220, r => r.vendor_name],
       ["사업자번호", 140, r => r.business_number]
@@ -1203,8 +1300,8 @@
         ctx.strokeStyle = "rgba(255,255,255,.10)";
         ctx.strokeRect(x, top, colWidth, rowHeight);
         ctx.fillStyle =
-          label === "판정" && row.cleansing_status === "클렌징" ? "#f87171" :
-            label === "판정" && row.cleansing_status === "경고" ? "#fde68a" :
+          row.cleansing_status === "클렌징" ? "#f87171" :
+            row.cleansing_status === "경고" ? "#fde68a" :
               label === "Reason" && noSpace(row.reason) === "반품" ? "#fca5a5" :
                 "#dbeafe";
         drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
@@ -1260,13 +1357,29 @@
     };
 
     $("table").onclick = e => {
+      const saveBtn = e.target.closest("[data-save]");
+
+      if (saveBtn) {
+        const id = saveBtn.dataset.save;
+        const row = rows.find(r => rowId(r) === id);
+        const tr = saveBtn.closest("tr");
+
+        if (row && tr) {
+          saveInline(row, tr).catch(err => alert(err.message));
+        }
+
+        return;
+      }
+
       const btn = e.target.closest("[data-edit]");
+
       if (!btn) return;
 
-      const row = rows.find(r => String(r.id) === btn.dataset.edit);
+      const row = rows.find(r => rowId(r) === btn.dataset.edit);
 
       if (row) {
-        save(row).catch(err => alert(err.message));
+        editingId = rowId(row);
+        render();
       }
     };
 

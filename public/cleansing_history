@@ -235,17 +235,52 @@
     .green { color:#bbf7d0; }
     .yellow { color:#fde68a; }
     .red { color:#fca5a5; }
+    .gradeBadge,
+    .zipLink {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:3px;
+      font-weight:900;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .gradeBadge {
+      min-width:42px;
+      min-height:23px;
+      padding:4px 8px;
+      border:1px solid currentColor;
+      background:rgba(255,255,255,.04);
+    }
+    .grade1 { color:#22c55e; background:rgba(34,197,94,.10); }
+    .grade2 { color:#7bdc5a; background:rgba(123,220,90,.10); }
+    .grade3 { color:#f6b94b; background:rgba(246,185,75,.10); }
+    .grade4 { color:#fb7185; background:rgba(251,113,133,.10); }
+    .gradeNone { color:#9ca3af; background:rgba(156,163,175,.08); }
+    .zipLink {
+      color:#bfdbfe;
+      text-decoration:underline;
+      text-underline-offset:2px;
+      margin:0 2px 2px;
+    }
+    .zipLink:hover {
+      color:#fff;
+    }
     tbody tr.rowClean td,
     tbody tr.rowClean .green,
     tbody tr.rowClean .yellow,
-    tbody tr.rowClean .red {
+    tbody tr.rowClean .red,
+    tbody tr.rowClean .zipLink,
+    tbody tr.rowClean .gradeBadge {
       color:#f87171;
       font-weight:1000;
     }
     tbody tr.rowWarn td,
     tbody tr.rowWarn .green,
     tbody tr.rowWarn .yellow,
-    tbody tr.rowWarn .red {
+    tbody tr.rowWarn .red,
+    tbody tr.rowWarn .zipLink,
+    tbody tr.rowWarn .gradeBadge {
       color:#fde68a;
       font-weight:1000;
     }
@@ -622,6 +657,59 @@
 
   function reasonClass(value) {
     return noSpace(value) === "반품" ? "red" : "";
+  }
+
+  function gradeKind(value) {
+    const text = noSpace(value);
+
+    if (text.includes("1등급")) return "grade1";
+    if (text.includes("2등급")) return "grade2";
+    if (text.includes("3등급")) return "grade3";
+    if (text.includes("4등급")) return "grade4";
+    if (text.includes("미수행")) return "gradeNone";
+
+    return "";
+  }
+
+  function gradeColor(value) {
+    const kind = gradeKind(value);
+
+    if (kind === "grade1") return "#22c55e";
+    if (kind === "grade2") return "#7bdc5a";
+    if (kind === "grade3") return "#f6b94b";
+    if (kind === "grade4") return "#fb7185";
+    if (kind === "gradeNone") return "#9ca3af";
+
+    return "#dbeafe";
+  }
+
+  function gradeBadge(value) {
+    const text = String(value || "").trim();
+
+    if (!text) return "";
+
+    return `<span class="gradeBadge ${gradeKind(text)}">${esc(text)}</span>`;
+  }
+
+  function zipTokens(value) {
+    return String(value || "")
+      .split(/[,\s]+/)
+      .map(v => v.trim())
+      .filter(Boolean);
+  }
+
+  function zipUrl(zip) {
+    return `/zipcode_search?zips=${encodeURIComponent(zip)}`;
+  }
+
+  function zipLinks(value) {
+    const zips = zipTokens(value);
+
+    if (!zips.length) return "";
+
+    return zips
+      .map(zip => `<a class="zipLink" href="${esc(zipUrl(zip))}">${esc(zip)}</a>`)
+      .join("");
   }
 
   function rowClass(row) {
@@ -1156,11 +1244,11 @@
               <td>${isEditing(r) ? inputCell(r, "camp") : esc(r.camp)}</td>
               <td>${isEditing(r) ? waveCell(r) : displayWave(r)}</td>
               <td>${isEditing(r) ? inputCell(r, "route") : esc(r.route)}</td>
-              <td class="left">${isEditing(r) ? inputCell(r, "zip") : esc(r.zip || "")}</td>
+              <td class="left">${isEditing(r) ? inputCell(r, "zip") : zipLinks(r.zip)}</td>
               <td class="num">${isEditing(r) ? inputCell(r, "demand", "num") : fmtNum(r.demand)}</td>
               <td class="num">${isEditing(r) ? inputCell(r, "complete", "num") : fmtNum(r.complete)}</td>
               <td class="num green">${isEditing(r) ? inputCell(r, "execution_rate", "num") : fmtPct(r.execution_rate)}</td>
-              <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : esc(r.execution_rate_grade || "")}</td>
+              <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : gradeBadge(r.execution_rate_grade)}</td>
               <td class="${reasonClass(r.reason)}">${isEditing(r) ? inputCell(r, "reason") : esc(r.reason || "")}</td>
               <td class="num yellow">${isEditing(r) ? inputCell(r, "price", "num") : fmtWon(r.price)}</td>
               <td class="left">${isEditing(r) ? inputCell(r, "vendor_name") : esc(r.vendor_name || "")}</td>
@@ -1250,6 +1338,26 @@
     ctx.fillText(out + "...", x, y);
   }
 
+  function drawGradeBadge(ctx, value, x, y, maxWidth) {
+    const text = String(value || "").trim();
+
+    if (!text) return;
+
+    const color = gradeColor(text);
+    const width = Math.min(maxWidth || 56, Math.max(44, ctx.measureText(text).width + 16));
+    const height = 22;
+    const top = y - 16;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color + "1A";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, top, width, height);
+    ctx.fillStyle = color;
+    drawText(ctx, text, x + 8, y, width - 16);
+    ctx.restore();
+  }
+
   function canvasBlob(canvas) {
     return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
   }
@@ -1269,14 +1377,14 @@
       ["Demand", 105, r => fmtNum(r.demand)],
       ["Complete", 105, r => fmtNum(r.complete)],
       ["수행률", 92, r => fmtPct(r.execution_rate)],
-      ["등급", 78, r => r.execution_rate_grade],
+      ["등급", 78, r => r.execution_rate_grade, "grade"],
       ["Reason", 88, r => r.reason],
       ["Price", 96, r => fmtWon(r.price)],
       ["Vendor", 220, r => r.vendor_name],
       ["사업자번호", 140, r => r.business_number]
     ];
     const rowHeight = 32;
-    const headerHeight = 58;
+    const headerHeight = 44;
     const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
     const height = headerHeight + rowHeight * (rows.length + 1) + 18;
     const canvas = document.createElement("canvas");
@@ -1290,10 +1398,6 @@
     ctx.scale(scale, scale);
     ctx.fillStyle = "#081120";
     ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = "#eaf2ff";
-    ctx.font = "800 24px system-ui, -apple-system, Segoe UI, sans-serif";
-    ctx.fillText("클렌징 히스토리", 12, 34);
-
     let x = 12;
     let y = headerHeight;
     ctx.fillStyle = "#27364d";
@@ -1316,7 +1420,7 @@
       ctx.fillRect(12, top, width - 24, rowHeight);
       ctx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
 
-      for (const [label, colWidth, getter] of columns) {
+      for (const [label, colWidth, getter, kind] of columns) {
         ctx.strokeStyle = "rgba(255,255,255,.10)";
         ctx.strokeRect(x, top, colWidth, rowHeight);
         ctx.fillStyle =
@@ -1324,7 +1428,11 @@
             row.cleansing_status === "경고" ? "#fde68a" :
               label === "Reason" && noSpace(row.reason) === "반품" ? "#fca5a5" :
                 "#dbeafe";
-        drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
+        if (kind === "grade" && !["클렌징", "경고"].includes(row.cleansing_status)) {
+          drawGradeBadge(ctx, getter(row), x + 8, top + 21, colWidth - 16);
+        } else {
+          drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
+        }
         x += colWidth;
       }
     });

@@ -4,29 +4,206 @@
   if (window.__MW_BOARD_MENU_INIT__) return;
   window.__MW_BOARD_MENU_INIT__ = true;
 
+  const MENU_MODE = window.MW_BOARD_MENU_MODE || "public";
+
   const PAGES = [
-    ["우편번호 검색기", "/zipcode_search"],
-    ["라우트 편집기", "/coupangRouteMap.html"],
-    ["쿠팡 캠프 조회", "/coupang_camp"],
-    ["프레시백 현황 조회", "/coupang_freshbag"],
-    ["클렌징 히스토리", "/cleansing_history"],
-    ["프레시백 현황 업로드", "/coupang_freshbag_upload"],
-    ["마루웰 정보", "/maroowell_info"],
-    ["마루웰 라우트정보", "/maroowell_route_info"],
-    ["마루웰 입차 스케줄", "/maroowell_schedule"],
-    ["마루웰 회수율", "/maroowell_freshbag_ratio"],
-    ["마루웰 회수율 업로드", "/maroowell_freshbag_ratio_upload"],
-    ["마루웰 라우트 단가", "/maroowell_route"],
-    ["마루웰 정산", "/maroowell_payout"],
-    ["정산 데이터 조회", "/maroowell_account"],
-    ["정산 업로드", "/maroowell_account_upload"],
-    ["용차", "/dragon_car_index"],
-    ["용차 스케줄", "/dragon_car_schedule"],
-    ["용차 정산서", "/dragon_car_pay"],
-    ["관리자 권한 관리", "/admin_access.html"]
+    {
+      key: "zipcode_search",
+      label: "우편번호 검색기",
+      path: "/zipcode_search",
+      aliases: ["/zipcode_search", "/zipcode_search.html"],
+      public: true
+    },
+    {
+      key: "route",
+      label: "라우트 편집기",
+      path: "/coupangRouteMap.html",
+      aliases: ["/coupangRouteMap", "/coupangRouteMap.html"],
+      public: true
+    },
+    {
+      key: "coupang-camps",
+      label: "쿠팡 캠프 조회",
+      path: "/coupang_camp",
+      aliases: ["/coupang_camp", "/coupang_camp.html"],
+      public: true
+    },
+    {
+      key: "freshbag-view",
+      label: "프레시백 현황 조회",
+      path: "/coupang_freshbag",
+      aliases: ["/coupang_freshbag", "/coupang_freshbag.html"],
+      public: true
+    },
+    {
+      key: "cleansing_history",
+      label: "클렌징 히스토리",
+      path: "/cleansing_history",
+      aliases: ["/cleansing_history", "/cleansing_history.html"],
+      public: true
+    },
+    {
+      key: "freshbag-upload",
+      label: "프레시백 현황 업로드",
+      path: "/coupang_freshbag_upload",
+      aliases: ["/coupang_freshbag_upload", "/coupang_freshbag_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "info",
+      label: "마루웰 정보",
+      path: "/maroowell_info",
+      aliases: ["/maroowell_info", "/maroowell_info.html"],
+      requireRoleLevel: 30
+    },
+    {
+      key: "mw-route-info",
+      label: "마루웰 라우트정보",
+      path: "/maroowell_route_info",
+      aliases: ["/maroowell_route_info", "/maroowell_route_info.html"],
+      requireMaroowell: true
+    },
+    {
+      key: "mw-schedule",
+      label: "마루웰 입차 스케줄",
+      path: "/maroowell_schedule",
+      aliases: ["/maroowell_schedule", "/maroowell_schedule.html"],
+      requireRoleLevel: 30
+    },
+    {
+      key: "mw-freshbag-ratio",
+      label: "마루웰 회수율",
+      path: "/maroowell_freshbag_ratio",
+      aliases: ["/maroowell_freshbag_ratio", "/maroowell_freshbag_ratio.html"],
+      requireMaroowell: true
+    },
+    {
+      key: "mw-freshbag-ratio-upload",
+      label: "마루웰 회수율 업로드",
+      path: "/maroowell_freshbag_ratio_upload",
+      aliases: ["/maroowell_freshbag_ratio_upload", "/maroowell_freshbag_ratio_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "mw-route",
+      label: "마루웰 라우트 단가",
+      path: "/maroowell_route",
+      aliases: ["/maroowell_route", "/maroowell_route.html"],
+      requireRoleLevel: 60
+    },
+    {
+      key: "mw-payout",
+      label: "마루웰 정산",
+      path: "/maroowell_payout",
+      aliases: ["/maroowell_payout", "/maroowell_payout.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "mw-account",
+      label: "정산 데이터 조회",
+      path: "/maroowell_account",
+      aliases: ["/maroowell_account", "/maroowell_account.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "mw-account-upload",
+      label: "정산 업로드",
+      path: "/maroowell_account_upload",
+      aliases: ["/maroowell_account_upload", "/maroowell_account_upload.html"],
+      requireSuperAdmin: true
+    },
+    {
+      key: "dragon-index",
+      label: "용차",
+      path: "/dragon_car_index",
+      aliases: ["/dragon_car_index", "/dragon_car_index.html"],
+      requireDragonCarAdmin: true
+    },
+    {
+      key: "dragon-schedule",
+      label: "용차 스케줄",
+      path: "/dragon_car_schedule",
+      aliases: ["/dragon_car_schedule", "/dragon_car_schedule.html"],
+      requireTeamOrDragonCarAdmin: true
+    },
+    {
+      key: "dragon-pay",
+      label: "용차 정산서",
+      path: "/dragon_car_pay",
+      aliases: ["/dragon_car_pay", "/dragon_car_pay.html"],
+      requireDragonCarAdmin: true
+    },
+    {
+      key: "admin-access",
+      label: "관리자 권한 관리",
+      path: "/admin_access.html",
+      aliases: ["/admin_access", "/admin_access.html", "/maroowell_access"],
+      requireSuperAdmin: true
+    }
   ];
 
-  function esc(v) {
+  function normalizePath(path) {
+    let p = String(path || "").trim();
+    if (!p) return "/";
+
+    if (p.startsWith("http://") || p.startsWith("https://")) {
+      try {
+        p = new URL(p).pathname || "/";
+      } catch {
+        return "/";
+      }
+    }
+
+    p = p.replace(/[?#].*$/, "");
+    if (!p.startsWith("/")) p = "/" + p;
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+
+    return p || "/";
+  }
+
+  function getCurrentPath() {
+    return normalizePath(location.pathname || "/");
+  }
+
+  function pathVariants(path) {
+    const p = normalizePath(path);
+    const set = new Set([p]);
+
+    if (p === "/") {
+      set.add("/index");
+      set.add("/index.html");
+    } else if (p === "/index" || p === "/index.html") {
+      set.add("/");
+      set.add("/index");
+      set.add("/index.html");
+    } else if (p.endsWith(".html")) {
+      set.add(p.slice(0, -5));
+    } else if (p !== "/" && !p.endsWith(".html")) {
+      set.add(p + ".html");
+    }
+
+    return Array.from(set);
+  }
+
+  function isCurrentPage(page) {
+    const current = getCurrentPath();
+    const currentVariants = new Set(pathVariants(current));
+    const pagePaths = [page.path, ...(page.aliases || [])];
+
+    for (const item of pagePaths) {
+      for (const variant of pathVariants(item)) {
+        if (currentVariants.has(variant)) return true;
+      }
+    }
+
+    return false;
+  }
+
+  function findCurrentPage() {
+    return PAGES.find(page => isCurrentPage(page)) || null;
+  }
+
+  function escapeHtml(v) {
     return String(v ?? "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -35,96 +212,652 @@
       .replaceAll("'", "&#39;");
   }
 
-  function normalizePath(path) {
-    let p = String(path || "").replace(/[?#].*$/, "");
-    if (!p.startsWith("/")) p = "/" + p;
-    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-    return p || "/";
+  function defaultAccess() {
+    return {
+      user_id: "",
+      email: "",
+      is_maroowell: false,
+      is_admin: false,
+      max_role_level: 0,
+      is_dragon_car_admin: false,
+      signed_in: false
+    };
   }
 
-  function samePath(a, b) {
-    const x = normalizePath(a);
-    const y = normalizePath(b);
-    return x === y || x + ".html" === y || x === y + ".html";
+  function canAccessPage(page, access) {
+    if (!page) return true;
+    if (page.public) return true;
+
+    const isMaroowell = access?.is_maroowell === true;
+    const isAdmin = access?.is_admin === true;
+    const roleLevel = Number(access?.max_role_level || 0);
+    const isDragonCarAdmin = access?.is_dragon_car_admin === true;
+
+    if (page.requireSuperAdmin) {
+      return isMaroowell && isAdmin && roleLevel >= 90;
+    }
+
+    if (page.requireTeamOrDragonCarAdmin) {
+      return (isMaroowell && roleLevel >= 30) || isDragonCarAdmin;
+    }
+
+    if (page.requireDragonCarAdmin) {
+      return isDragonCarAdmin;
+    }
+
+    if (page.requireMaroowell) {
+      return isMaroowell;
+    }
+
+    if (page.requireRoleLevel) {
+      return isMaroowell && roleLevel >= Number(page.requireRoleLevel);
+    }
+
+    return true;
   }
 
-  function injectStyle() {
+  function pageBadge(page) {
+    if (page.public) return "";
+
+    if (page.requireSuperAdmin) {
+      return "최고관리자";
+    }
+
+    if (page.requireTeamOrDragonCarAdmin) {
+      return "팀장/용차";
+    }
+
+    if (page.requireDragonCarAdmin) {
+      return "용차관리자";
+    }
+
+    if (page.requireMaroowell) {
+      return "마루웰";
+    }
+
+    if (Number(page.requireRoleLevel) >= 60) {
+      return "관리자";
+    }
+
+    if (Number(page.requireRoleLevel) >= 30) {
+      return "팀장";
+    }
+
+    return "권한";
+  }
+
+  function requirementText(page) {
+    if (!page) return "접근 권한이 없습니다.";
+
+    if (page.requireSuperAdmin) {
+      return "최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상";
+    }
+
+    if (page.requireTeamOrDragonCarAdmin) {
+      return "마루웰 팀장 이상 또는 용차 관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상 또는 용차관리자 권한";
+    }
+
+    if (page.requireDragonCarAdmin) {
+      return "용차 관리자 권한이 필요합니다.\n조건: profiles.is_dragon_car_admin = true";
+    }
+
+    if (page.requireMaroowell) {
+      return "마루웰 소속 권한이 필요합니다.\n조건: user_access.is_maroowell = true";
+    }
+
+    if (Number(page.requireRoleLevel) >= 60) {
+      return "관리자 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 60 이상";
+    }
+
+    if (Number(page.requireRoleLevel) >= 30) {
+      return "팀장 권한이 필요합니다.\n조건: 마루웰 권한 + role_level 30 이상";
+    }
+
+    return "접근 권한이 없습니다.";
+  }
+
+  function pageSubtext(path) {
+    switch (normalizePath(path)) {
+      case "/zipcode_search":
+      case "/zipcode_search.html":
+        return "우편번호 / 지도 조회";
+
+      case "/coupangRouteMap":
+      case "/coupangRouteMap.html":
+        return "라우트 / 벤더 / 입차지 편집";
+
+      case "/coupang_camp":
+      case "/coupang_camp.html":
+        return "쿠팡 캠프 / 주소조회";
+
+      case "/coupang_freshbag":
+      case "/coupang_freshbag.html":
+        return "프레시백 가중요인 현황 조회";
+
+      case "/coupang_freshbag_upload":
+      case "/coupang_freshbag_upload.html":
+        return "프레시백 엑셀 업로드";
+
+      case "/cleansing_history":
+      case "/cleansing_history.html":
+        return "클렌징 히스토리 조회";
+
+      case "/maroowell_info":
+      case "/maroowell_info.html":
+        return "마루웰 기본 정보";
+
+      case "/maroowell_route_info":
+      case "/maroowell_route_info.html":
+        return "마루웰 라우트 정보 조회";
+
+      case "/maroowell_schedule":
+      case "/maroowell_schedule.html":
+        return "마루웰 입차 스케줄";
+
+      case "/maroowell_freshbag_ratio":
+      case "/maroowell_freshbag_ratio.html":
+        return "마루웰 프레시백 회수율 조회";
+
+      case "/maroowell_freshbag_ratio_upload":
+      case "/maroowell_freshbag_ratio_upload.html":
+        return "마루웰 회수율 엑셀 업로드";
+
+      case "/maroowell_route":
+      case "/maroowell_route.html":
+        return "라우트 단가 / 주소 / 원청 관리";
+
+      case "/maroowell_payout":
+      case "/maroowell_payout.html":
+        return "마루웰 정산 관리";
+
+      case "/maroowell_account":
+      case "/maroowell_account.html":
+        return "정산 데이터 조회";
+
+      case "/maroowell_account_upload":
+      case "/maroowell_account_upload.html":
+        return "정산 업로드";
+
+      case "/dragon_car_index":
+      case "/dragon_car_index.html":
+        return "용차 관리";
+
+      case "/dragon_car_schedule":
+      case "/dragon_car_schedule.html":
+        return "용차 기사 출근 / 휴무 스케줄";
+
+      case "/dragon_car_pay":
+      case "/dragon_car_pay.html":
+        return "용차 정산서";
+
+      case "/admin_access":
+      case "/admin_access.html":
+        return "사용자 / 관리자 권한 관리";
+
+      default:
+        return "";
+    }
+  }
+
+  async function loadAccess() {
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
+    const out = defaultAccess();
+
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) {
+      return out;
+    }
+
+    const authStorage = (() => {
+      try {
+        return window.sessionStorage;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: !!authStorage,
+        storage: authStorage,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
+      const uid = session?.user?.id;
+
+      if (!uid) return out;
+
+      out.signed_in = true;
+      out.user_id = uid;
+      out.email = session?.user?.email || "";
+
+      const { data, error } = await supabase
+        .rpc("mw_my_access")
+        .maybeSingle();
+
+      if (error || !data) return out;
+
+      return {
+        signed_in: true,
+        user_id: data.user_id || uid,
+        email: data.email || session?.user?.email || "",
+        is_maroowell: data.is_maroowell === true,
+        is_admin: data.is_admin === true,
+        max_role_level: Number(data.max_role_level || 0),
+        is_dragon_car_admin: data.is_dragon_car_admin === true
+      };
+    } catch {
+      return out;
+    }
+  }
+
+  function injectStyles() {
     if (document.getElementById("mw-board-menu-style")) return;
+
     const style = document.createElement("style");
     style.id = "mw-board-menu-style";
     style.textContent = `
-      .mw-board-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:99990;display:none}
+      .mw-board-backdrop{
+        position:fixed;
+        inset:0;
+        background:rgba(0,0,0,.42);
+        backdrop-filter:blur(2px);
+        z-index:99990;
+        display:none;
+      }
       .mw-board-backdrop.open{display:block}
-      .mw-board-panel{position:fixed;top:18px;left:18px;width:min(390px,calc(100vw - 36px));max-height:min(78vh,720px);overflow:auto;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(15,26,45,.98),rgba(8,14,26,.98));box-shadow:0 22px 80px rgba(0,0,0,.45);z-index:99991;display:none;color:#e6eefc;font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif}
+
+      .mw-board-panel{
+        position:fixed;
+        top:18px;
+        left:18px;
+        width:min(380px, calc(100vw - 36px));
+        max-height:min(78vh, 720px);
+        overflow:auto;
+        border-radius:20px;
+        border:1px solid rgba(255,255,255,.12);
+        background:linear-gradient(180deg, rgba(15,26,45,.98), rgba(8,14,26,.98));
+        box-shadow:0 22px 80px rgba(0,0,0,.45);
+        z-index:99991;
+        display:none;
+      }
       .mw-board-panel.open{display:block}
-      .mw-board-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.08)}
-      .mw-board-title{font-size:16px;font-weight:900}.mw-board-close{height:34px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#d7e4ff;font-weight:900;cursor:pointer}
-      .mw-board-body{padding:12px}.mw-board-desc{color:rgba(230,238,252,.68);font-size:12px;line-height:1.5;margin:0 2px 10px}.mw-board-list{display:grid;gap:10px}
-      .mw-board-item{border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;color:#fff;cursor:pointer;text-align:left;width:100%;text-decoration:none}.mw-board-item:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18)}.mw-board-item.current{border-color:rgba(96,165,250,.55);background:rgba(59,130,246,.14)}.mw-board-item-title{font-size:15px;font-weight:900;line-height:1.2}.mw-board-item-sub{font-size:12px;color:rgba(230,238,252,.66);line-height:1.45;margin-top:6px}
+
+      .mw-board-head{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+        padding:14px 16px 12px;
+        border-bottom:1px solid rgba(255,255,255,.08);
+      }
+      .mw-board-title{
+        font-size:16px;
+        font-weight:900;
+        color:#eef4ff;
+        letter-spacing:.2px;
+      }
+      .mw-board-close{
+        height:34px;
+        min-width:34px;
+        padding:0 12px;
+        border-radius:999px;
+        border:1px solid rgba(255,255,255,.12);
+        background:rgba(255,255,255,.06);
+        color:#d7e4ff;
+        font-weight:900;
+        cursor:pointer;
+      }
+      .mw-board-close:hover{background:rgba(255,255,255,.12)}
+
+      .mw-board-body{padding:12px}
+      .mw-board-desc{
+        color:rgba(230,238,252,.68);
+        font-size:12px;
+        line-height:1.5;
+        margin:0 2px 10px;
+      }
+      .mw-board-list{display:grid;gap:10px}
+
+      .mw-board-item{
+        border:1px solid rgba(255,255,255,.10);
+        background:rgba(255,255,255,.04);
+        border-radius:16px;
+        padding:14px 14px;
+        color:#fff;
+        cursor:pointer;
+        text-align:left;
+        width:100%;
+        text-decoration:none;
+      }
+      .mw-board-item:hover{
+        background:rgba(255,255,255,.08);
+        border-color:rgba(255,255,255,.18);
+      }
+      .mw-board-item.current{
+        border-color:rgba(96,165,250,.55);
+        background:rgba(59,130,246,.14);
+        box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
+      }
+      .mw-board-item-title{
+        font-size:15px;
+        font-weight:900;
+        line-height:1.2;
+        margin-bottom:6px;
+      }
+      .mw-board-item-sub{
+        font-size:12px;
+        color:rgba(230,238,252,.66);
+        line-height:1.45;
+      }
+      .mw-board-badge{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        margin-left:8px;
+        padding:3px 8px;
+        border-radius:999px;
+        border:1px solid rgba(255,255,255,.14);
+        background:rgba(255,255,255,.06);
+        color:#dbe7ff;
+        font-size:11px;
+        font-weight:900;
+        vertical-align:middle;
+      }
+
+      .mw-denied-screen{
+        position:fixed;
+        inset:0;
+        z-index:2147483000;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:20px;
+        background:linear-gradient(180deg, rgba(11,18,32,.98), rgba(7,11,19,.99));
+        color:#e6eefc;
+        font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif;
+      }
+      .mw-denied-card{
+        width:min(560px, calc(100vw - 28px));
+        border:1px solid rgba(255,255,255,.12);
+        border-radius:22px;
+        background:#101827;
+        box-shadow:0 24px 70px rgba(0,0,0,.46);
+        padding:24px;
+      }
+      .mw-denied-card h2{
+        margin:0 0 10px;
+        font-size:24px;
+        line-height:1.2;
+      }
+      .mw-denied-card p{
+        margin:0;
+        color:#b8c3d9;
+        line-height:1.65;
+        white-space:pre-wrap;
+        font-size:14px;
+      }
+      .mw-denied-meta{
+        margin-top:14px;
+        padding:12px 14px;
+        border-radius:14px;
+        border:1px solid rgba(255,255,255,.10);
+        background:rgba(255,255,255,.04);
+        color:#e6eefc;
+        font-size:13px;
+        font-weight:800;
+        line-height:1.6;
+        word-break:break-word;
+      }
+      .mw-denied-actions{
+        margin-top:18px;
+        display:flex;
+        gap:10px;
+        justify-content:flex-end;
+        flex-wrap:wrap;
+      }
+      .mw-denied-btn{
+        height:40px;
+        padding:0 14px;
+        border-radius:999px;
+        border:1px solid rgba(255,255,255,.14);
+        background:#162744;
+        color:#e6eefc;
+        cursor:pointer;
+        font-weight:900;
+      }
+      .mw-denied-btn:hover{background:#1a2f55}
+      .mw-denied-btn.danger{
+        background:rgba(107,27,27,.35);
+        border-color:rgba(255,60,60,.22);
+        color:#ffccd3;
+      }
     `;
     document.head.appendChild(style);
   }
 
-  function init() {
-    injectStyle();
-    const trigger = document.getElementById("mwBoardMenuToggle") || document.querySelector("[data-mw-board-toggle]");
-    if (!trigger) return;
-
-    trigger.setAttribute("href", "#");
-    trigger.setAttribute("role", "button");
-    trigger.style.cursor = "pointer";
-
-    document.getElementById("mwBoardBackdrop")?.remove();
-    document.getElementById("mwBoardPanel")?.remove();
-
+  function createMenuShell() {
     const backdrop = document.createElement("div");
-    backdrop.id = "mwBoardBackdrop";
     backdrop.className = "mw-board-backdrop";
+    backdrop.id = "mwBoardBackdrop";
 
     const panel = document.createElement("div");
-    panel.id = "mwBoardPanel";
     panel.className = "mw-board-panel";
+    panel.id = "mwBoardPanel";
+
     panel.innerHTML = `
       <div class="mw-board-head">
         <div class="mw-board-title">게시판</div>
         <button type="button" class="mw-board-close" id="mwBoardCloseBtn">닫기</button>
       </div>
       <div class="mw-board-body">
-        <div class="mw-board-desc">페이지를 선택하세요.</div>
-        <div class="mw-board-list">
-          ${PAGES.map(([label, path]) => `
-            <button type="button" class="mw-board-item ${samePath(location.pathname, path) ? "current" : ""}" data-path="${esc(path)}">
-              <div class="mw-board-item-title">${esc(label)}</div>
-              <div class="mw-board-item-sub">${esc(path)}</div>
-            </button>
-          `).join("")}
-        </div>
+        <div class="mw-board-desc">권한이 있는 페이지까지만 표시됩니다.</div>
+        <div class="mw-board-list" id="mwBoardList"></div>
       </div>
     `;
 
     document.body.appendChild(backdrop);
     document.body.appendChild(panel);
 
+    return {
+      backdrop,
+      panel,
+      list: panel.querySelector("#mwBoardList"),
+      closeBtn: panel.querySelector("#mwBoardCloseBtn")
+    };
+  }
+
+  function findTrigger() {
+    return (
+      document.getElementById("mwBoardMenuToggle") ||
+      document.querySelector("[data-mw-board-toggle]") ||
+      null
+    );
+  }
+
+  function safeSetTrigger(trigger) {
+    if (!trigger) return;
+    trigger.setAttribute("href", "#");
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("aria-haspopup", "dialog");
+    trigger.style.cursor = "pointer";
+  }
+
+  function buildMenuHtml(access) {
+    const items = PAGES.filter(page => canAccessPage(page, access));
+
+    return items.map(page => {
+      const current = isCurrentPage(page);
+      const badgeText = pageBadge(page);
+      const badge = badgeText ? `<span class="mw-board-badge">${escapeHtml(badgeText)}</span>` : "";
+
+      return `
+        <button
+          type="button"
+          class="mw-board-item ${current ? "current" : ""}"
+          data-path="${escapeHtml(page.path)}"
+        >
+          <div class="mw-board-item-title">
+            ${escapeHtml(page.label)} ${badge}
+          </div>
+          <div class="mw-board-item-sub">${escapeHtml(pageSubtext(page.path))}</div>
+        </button>
+      `;
+    }).join("");
+  }
+
+  function showAccessDenied(page, access) {
+    injectStyles();
+
+    document.documentElement.style.visibility = "visible";
+
+    const old = document.getElementById("mwDeniedScreen");
+    if (old) old.remove();
+
+    const homePath = window.MARUWELL_CONFIG?.PATHS?.index || "/zipcode_search";
+    const loginPath = window.MARUWELL_CONFIG?.PATHS?.login || "/";
+
+    const email = access?.email || "-";
+    const roleLevel = Number(access?.max_role_level || 0);
+    const isMaroowell = access?.is_maroowell === true;
+    const isAdmin = access?.is_admin === true;
+    const isDragon = access?.is_dragon_car_admin === true;
+
+    const screen = document.createElement("div");
+    screen.id = "mwDeniedScreen";
+    screen.className = "mw-denied-screen";
+    screen.innerHTML = `
+      <div class="mw-denied-card">
+        <h2>접근 권한 없음</h2>
+        <p>${escapeHtml(requirementText(page))}</p>
+        <div class="mw-denied-meta">
+          현재 계정: ${escapeHtml(email)}<br>
+          마루웰: ${isMaroowell ? "O" : "X"} /
+          관리자: ${isAdmin ? "O" : "X"} /
+          role_level: ${roleLevel} /
+          용차관리자: ${isDragon ? "O" : "X"}
+        </div>
+        <div class="mw-denied-actions">
+          <button type="button" class="mw-denied-btn" id="mwDeniedHomeBtn">홈으로</button>
+          <button type="button" class="mw-denied-btn danger" id="mwDeniedLoginBtn">${access?.signed_in ? "로그아웃" : "로그인"}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(screen);
+    document.body.style.overflow = "hidden";
+
+    screen.querySelector("#mwDeniedHomeBtn")?.addEventListener("click", () => {
+      location.href = homePath;
+    });
+
+    screen.querySelector("#mwDeniedLoginBtn")?.addEventListener("click", async () => {
+      try {
+        const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
+
+        if (access?.signed_in && SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient) {
+          const authStorage = (() => {
+            try {
+              return window.sessionStorage;
+            } catch {
+              return undefined;
+            }
+          })();
+
+          const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: {
+              persistSession: !!authStorage,
+              storage: authStorage,
+              autoRefreshToken: true,
+              detectSessionInUrl: true
+            }
+          });
+
+          await supabase.auth.signOut();
+        }
+      } catch {}
+
+      location.href = loginPath;
+    });
+  }
+
+  async function init() {
+    injectStyles();
+
+    const access = await loadAccess();
+    const currentPage = findCurrentPage();
+
+    document.documentElement.style.visibility = "visible";
+
+    if (currentPage && !canAccessPage(currentPage, access)) {
+      showAccessDenied(currentPage, access);
+      return;
+    }
+
+    const trigger = findTrigger();
+    if (!trigger) return;
+
+    if (MENU_MODE === "admin" && !canAccessPage(PAGES.find(p => p.key === "admin-access"), access)) {
+      return;
+    }
+
+    safeSetTrigger(trigger);
+
+    const ui = createMenuShell();
+    ui.list.innerHTML = buildMenuHtml(access);
+
     let opened = false;
-    const openMenu = () => { opened = true; backdrop.classList.add("open"); panel.classList.add("open"); document.body.style.overflow = "hidden"; };
-    const closeMenu = () => { opened = false; backdrop.classList.remove("open"); panel.classList.remove("open"); document.body.style.overflow = ""; };
 
-    trigger.addEventListener("click", (event) => {
-      event.preventDefault();
-      opened ? closeMenu() : openMenu();
+    function openMenu() {
+      if (opened) return;
+      opened = true;
+      ui.backdrop.classList.add("open");
+      ui.panel.classList.add("open");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeMenu() {
+      if (!opened) return;
+      opened = false;
+      ui.backdrop.classList.remove("open");
+      ui.panel.classList.remove("open");
+      document.body.style.overflow = "";
+    }
+
+    trigger.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (opened) closeMenu();
+      else openMenu();
     });
 
-    backdrop.addEventListener("click", closeMenu);
-    panel.querySelector("#mwBoardCloseBtn")?.addEventListener("click", closeMenu);
-    panel.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-path]");
-      if (!button) return;
-      const path = button.getAttribute("data-path") || "/";
+    ui.closeBtn.addEventListener("click", closeMenu);
+    ui.backdrop.addEventListener("click", closeMenu);
+
+    ui.list.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-path]");
+      if (!btn) return;
+
+      const path = btn.getAttribute("data-path") || "/";
+      const page = PAGES.find(item => item.path === path);
+
+      if (page && isCurrentPage(page)) {
+        closeMenu();
+        return;
+      }
+
       closeMenu();
-      if (!samePath(location.pathname, path)) location.href = path;
+
+      setTimeout(() => {
+        location.href = path;
+      }, 80);
     });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") closeMenu();
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeMenu();
     });
   }
 

@@ -6,6 +6,7 @@ window.MARUWELL_CONFIG = {
   SUPABASE_URL: "https://rgqerimdxkthkcewqbbe.supabase.co",
   SUPABASE_ANON_KEY: "sb_publishable_FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H",
   ADMIN_API_BASE: "https://admin-access.maroowell.com",
+  CLEANSING_HISTORY_API_BASE: "https://cleansinghistory.maroowell.com",
 
   PATHS: {
     // login.html을 index.html로 바꿨으므로 기본 로그인 진입점은 루트
@@ -20,6 +21,7 @@ window.MARUWELL_CONFIG = {
     dragon_car_pay: "/dragon_car_pay.html",
     maroowell_payout: "/maroowell_payout",
     maroowell_route: "/maroowell_route",
+    cleansing_history: "/cleansing_history",
     admin_access: "/admin_access.html"
   }
 };

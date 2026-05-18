@@ -433,6 +433,27 @@
     return /invalid_session|JWT|refresh token|Auth session missing/i.test(msg);
   };
 
+  function weekSortValue(week) {
+    const raw = String(week || "").trim().toUpperCase();
+    const yearMatch = raw.match(/(20\d{2})/);
+    const weekMatch = raw.match(/(?:^|[^0-9])(\d{1,2})\s*W\b/) || raw.match(/\bW\s*(\d{1,2})\b/);
+    const year = yearMatch ? Number(yearMatch[1]) : 0;
+    const weekNo = weekMatch ? Number(weekMatch[1]) : 0;
+
+    return year * 100 + weekNo;
+  }
+
+  function compareWeekDesc(a, b) {
+    const diff = weekSortValue(b?.week ?? b) - weekSortValue(a?.week ?? a);
+
+    if (diff) return diff;
+
+    return String(b?.week ?? b ?? "").localeCompare(String(a?.week ?? a ?? ""), "ko", {
+      numeric: true,
+      sensitivity: "base"
+    });
+  }
+
   function showErrorBox(title, message) {
     document.documentElement.style.visibility = "visible";
     $("bar").classList.add("hide");
@@ -582,15 +603,18 @@
     const { data, error } = await supabaseClient
       .from(TABLE_HISTORY)
       .select("week")
-      .order("week", { ascending:false })
-      .limit(1)
-      .maybeSingle();
+      .not("week", "is", null)
+      .limit(1000);
 
     if (error) throw error;
 
+    const latest = (Array.isArray(data) ? data : [])
+      .filter(row => String(row?.week || "").trim())
+      .sort(compareWeekDesc)[0];
+
     return {
       ok: true,
-      latest_week: data?.week || ""
+      latest_week: latest?.week || ""
     };
   }
 
@@ -645,7 +669,6 @@
     }
 
     const { data, error, count } = await query
-      .order("week", { ascending:false })
       .order("camp", { ascending:true })
       .order("wave", { ascending:true })
       .order("route", { ascending:true })
@@ -653,11 +676,22 @@
 
     if (error) throw error;
 
+    const sorted = (Array.isArray(data) ? data : []).slice().sort((a, b) => {
+      const weekDiff = compareWeekDesc(a, b);
+
+      if (weekDiff) return weekDiff;
+
+      return String(a.route || "").localeCompare(String(b.route || ""), "ko", {
+        numeric: true,
+        sensitivity: "base"
+      });
+    });
+
     return {
       ok: true,
-      rows: Array.isArray(data) ? data : [],
-      count: count ?? (Array.isArray(data) ? data.length : 0),
-      effective_week: val("week") || data?.[0]?.week || ""
+      rows: sorted,
+      count: count ?? sorted.length,
+      effective_week: val("week") || sorted[0]?.week || ""
     };
   }
 

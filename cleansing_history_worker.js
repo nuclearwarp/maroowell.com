@@ -302,14 +302,39 @@ function requireEdit(auth) {
   throw httpError(403, "super_admin_required");
 }
 
+function weekSortValue(week) {
+  const raw = clean(week).toUpperCase();
+  const yearMatch = raw.match(/(20\d{2})/);
+  const weekMatch = raw.match(/(?:^|[^0-9])(\d{1,2})\s*W\b/) || raw.match(/\bW\s*(\d{1,2})\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : 0;
+  const weekNo = weekMatch ? Number(weekMatch[1]) : 0;
+
+  return year * 100 + weekNo;
+}
+
+function compareWeekDesc(a, b) {
+  const diff = weekSortValue(b?.week ?? b) - weekSortValue(a?.week ?? a);
+
+  if (diff) return diff;
+
+  return clean(b?.week ?? b).localeCompare(clean(a?.week ?? a), "ko", {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
 async function fetchLatestWeek(env, token) {
   const rows = await supabaseGet(TABLE_HISTORY, [
     "select=week",
-    "order=week.desc",
-    "limit=1"
+    "week=not.is.null",
+    "limit=1000"
   ], env, token);
 
-  return clean(rows[0]?.week);
+  const latest = rows
+    .filter(row => clean(row?.week))
+    .sort(compareWeekDesc)[0];
+
+  return clean(latest?.week);
 }
 
 async function fetchRows(url, env, token) {
@@ -325,7 +350,6 @@ async function fetchRows(url, env, token) {
     filterIlike("business_number", url.searchParams.get("biz")),
     filterEq("reason", url.searchParams.get("reason")),
     q ? buildSearchFilter(q) : "",
-    "order=week.desc",
     "order=camp.asc",
     "order=wave.asc",
     "order=route.asc",
@@ -334,10 +358,21 @@ async function fetchRows(url, env, token) {
 
   const { rows, count } = await supabaseGetWithCount(TABLE_HISTORY, parts, env, token);
 
+  const sorted = rows.map(normalizeRow).sort((a, b) => {
+    const weekDiff = compareWeekDesc(a, b);
+
+    if (weekDiff) return weekDiff;
+
+    return clean(a.route).localeCompare(clean(b.route), "ko", {
+      numeric: true,
+      sensitivity: "base"
+    });
+  });
+
   return {
-    rows: rows.map(normalizeRow),
+    rows: sorted,
     count,
-    effective_week: clean(url.searchParams.get("week")) || (rows[0] ? clean(rows[0].week) : "")
+    effective_week: clean(url.searchParams.get("week")) || clean(sorted[0]?.week)
   };
 }
 

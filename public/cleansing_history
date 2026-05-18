@@ -478,8 +478,18 @@
     });
   }
 
-  async function getToken() {
+  async function getToken(forceRefresh = false) {
     if (!supabaseClient) initSupabase();
+
+    if (forceRefresh) {
+      const { data, error } = await supabaseClient.auth.refreshSession();
+
+      if (error) throw error;
+
+      const refreshedToken = data?.session?.access_token;
+
+      if (refreshedToken) return refreshedToken;
+    }
 
     const { data, error } = await supabaseClient.auth.getSession();
 
@@ -494,8 +504,8 @@
     return token;
   }
 
-  async function api(path, options = {}) {
-    const token = await getToken();
+  async function api(path, options = {}, retrying = false) {
+    const token = await getToken(retrying);
 
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", "Bearer " + token);
@@ -522,6 +532,10 @@
     }
 
     if (!res.ok || data?.ok === false) {
+      if (!retrying && res.status === 401 && data?.error === "invalid_session") {
+        return api(path, options, true);
+      }
+
       throw new Error(data?.error || data?.message || text || "요청 실패");
     }
 
@@ -737,7 +751,7 @@
       const btn = e.target.closest("[data-edit]");
       if (!btn) return;
 
-      const row = rows.find(r => r.id === btn.dataset.edit);
+      const row = rows.find(r => String(r.id) === btn.dataset.edit);
 
       if (row) {
         save(row).catch(err => alert(err.message));

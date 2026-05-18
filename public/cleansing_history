@@ -284,6 +284,9 @@
       color:#fde68a;
       font-weight:1000;
     }
+    tbody tr.waveDivider td {
+      border-top:3px solid rgba(255,255,255,.36);
+    }
 
     .cellInput {
       height:30px;
@@ -698,8 +701,9 @@
       .filter(Boolean);
   }
 
-  function zipUrl(zip) {
-    return `/zipcode_search?zips=${encodeURIComponent(zip)}`;
+  function zipUrl(value) {
+    const zips = Array.isArray(value) ? value : zipTokens(value);
+    return `/zipcode_search?zips=${encodeURIComponent(zips.join(","))}`;
   }
 
   function zipLinks(value) {
@@ -707,15 +711,37 @@
 
     if (!zips.length) return "";
 
+    const href = esc(zipUrl(zips));
+
     return zips
-      .map(zip => `<a class="zipLink" href="${esc(zipUrl(zip))}">${esc(zip)}</a>`)
+      .map(zip => `<a class="zipLink" href="${href}" target="_blank">${esc(zip)}</a>`)
       .join("");
   }
 
-  function rowClass(row) {
-    if (row?.cleansing_status === "클렌징") return "rowClean";
-    if (row?.cleansing_status === "경고") return "rowWarn";
-    return "";
+  function sameWeek(a, b) {
+    const aw = parseWeek(a?.week);
+    const bw = parseWeek(b?.week);
+
+    return aw.year === bw.year && aw.weekNo === bw.weekNo && aw.year && aw.weekNo;
+  }
+
+  function hasWaveDivider(row, index) {
+    if (!index) return false;
+
+    const prev = rows[index - 1];
+
+    return sameWeek(row, prev) && waveSortValue(prev?.wave) !== waveSortValue(row?.wave);
+  }
+
+  function rowClass(row, index) {
+    const classes = [];
+
+    if (row?.cleansing_status === "클렌징") classes.push("rowClean");
+    else if (row?.cleansing_status === "경고") classes.push("rowWarn");
+
+    if (hasWaveDivider(row, index)) classes.push("waveDivider");
+
+    return classes.join(" ");
   }
 
   function rowId(row) {
@@ -1237,8 +1263,8 @@
           </tr>
         </thead>
         <tbody>
-          ${rows.map(r => `
-            <tr class="${rowClass(r)}" data-row-id="${esc(rowId(r))}">
+          ${rows.map((r, idx) => `
+            <tr class="${rowClass(r, idx)}" data-row-id="${esc(rowId(r))}">
               ${edit ? actionButton(r) : ""}
               <td>${isEditing(r) ? inputCell(r, "week") : esc(r.week)}</td>
               <td>${isEditing(r) ? inputCell(r, "camp") : esc(r.camp)}</td>
@@ -1338,6 +1364,35 @@
     ctx.fillText(out + "...", x, y);
   }
 
+  function wrappedZipLines(ctx, value, maxWidth) {
+    const tokens = zipTokens(value);
+    const lines = [];
+    let line = "";
+
+    for (const token of tokens) {
+      const next = line ? `${line}, ${token}` : token;
+
+      if (line && ctx.measureText(next).width > maxWidth) {
+        lines.push(line);
+        line = token;
+      } else {
+        line = next;
+      }
+    }
+
+    if (line) lines.push(line);
+
+    return lines.length ? lines : [""];
+  }
+
+  function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight = 15) {
+    const lines = String(text || "").split("\n");
+
+    lines.forEach((line, idx) => {
+      drawText(ctx, line, x, y + idx * lineHeight, maxWidth);
+    });
+  }
+
   function drawGradeBadge(ctx, value, x, y, maxWidth) {
     const text = String(value || "").trim();
 
@@ -1373,7 +1428,7 @@
       ["Camp", 100, r => r.camp],
       ["Wave", 76, r => r.wave === "2W" ? "주간" : r.wave === "1W" ? "야간" : r.wave],
       ["Route", 150, r => r.route],
-      ["Zip", 260, r => r.zip],
+      ["Zip", 260, r => r.zip, "zip"],
       ["Demand", 105, r => fmtNum(r.demand)],
       ["Complete", 105, r => fmtNum(r.complete)],
       ["수행률", 92, r => fmtPct(r.execution_rate)],
@@ -1386,7 +1441,20 @@
     const rowHeight = 32;
     const headerHeight = 44;
     const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
-    const height = headerHeight + rowHeight * (rows.length + 1) + 18;
+    const zipColumn = columns.find(([label]) => label === "Zip");
+    const measureCanvas = document.createElement("canvas");
+    const measureCtx = measureCanvas.getContext("2d");
+    measureCtx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
+    const rowPlans = rows.map(row => {
+      const zipLines = wrappedZipLines(measureCtx, row.zip, (zipColumn?.[1] || 260) - 16);
+
+      return {
+        row,
+        zipLines,
+        height: Math.max(rowHeight, 18 + zipLines.length * 15)
+      };
+    });
+    const height = headerHeight + rowPlans.reduce((sum, plan) => sum + plan.height, 0) + 18;
     const canvas = document.createElement("canvas");
     const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     canvas.width = width * scale;
@@ -1413,16 +1481,18 @@
       x += colWidth;
     }
 
-    rows.forEach((row, idx) => {
+    let top = y;
+
+    rowPlans.forEach((plan, idx) => {
+      const row = plan.row;
       x = 12;
-      const top = y + idx * rowHeight;
       ctx.fillStyle = idx % 2 ? "#0b1424" : "#0d1728";
-      ctx.fillRect(12, top, width - 24, rowHeight);
+      ctx.fillRect(12, top, width - 24, plan.height);
       ctx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
 
       for (const [label, colWidth, getter, kind] of columns) {
         ctx.strokeStyle = "rgba(255,255,255,.10)";
-        ctx.strokeRect(x, top, colWidth, rowHeight);
+        ctx.strokeRect(x, top, colWidth, plan.height);
         ctx.fillStyle =
           row.cleansing_status === "클렌징" ? "#f87171" :
             row.cleansing_status === "경고" ? "#fde68a" :
@@ -1430,11 +1500,25 @@
                 "#dbeafe";
         if (kind === "grade" && !["클렌징", "경고"].includes(row.cleansing_status)) {
           drawGradeBadge(ctx, getter(row), x + 8, top + 21, colWidth - 16);
+        } else if (kind === "zip") {
+          drawWrappedText(ctx, plan.zipLines.join("\n"), x + 8, top + 21, colWidth - 16);
         } else {
           drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
         }
         x += colWidth;
       }
+
+      if (hasWaveDivider(row, idx)) {
+        ctx.strokeStyle = "rgba(255,255,255,.46)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(12, top + 1.5);
+        ctx.lineTo(width - 12, top + 1.5);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+
+      top += plan.height;
     });
 
     const blob = await canvasBlob(canvas);

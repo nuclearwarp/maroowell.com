@@ -36,6 +36,13 @@
       public: true
     },
     {
+      key: "cleansing_history",
+      label: "클렌징 히스토리",
+      path "/cleansing_history",
+      aliases: ["/cleansing_history", "/cleansing_history.html"],
+      public: true
+    },
+    {
       key: "freshbag-upload",
       label: "프레시백 현황 업로드",
       path: "/coupang_freshbag_upload",

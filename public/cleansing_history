@@ -458,6 +458,22 @@
     return /invalid_session|JWT|refresh token|Auth session missing/i.test(msg);
   };
 
+  const isBackendSaveError = err => {
+    const msg = String(err?.message || err || "");
+    return isBackendSessionError(err) || /supabase_(patch|insert|upsert)_failed:cleansing_history/i.test(msg);
+  };
+
+  function stringifyDetail(detail) {
+    if (!detail) return "";
+    if (typeof detail === "string") return detail;
+
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+
   function parseWeek(week) {
     const raw = String(week || "").trim().toUpperCase();
     const yearMatch = raw.match(/^\s*(20\d{2})/);
@@ -1016,7 +1032,11 @@
         return api(path, options, true);
       }
 
-      throw new Error(data?.error || data?.message || text || "요청 실패");
+      const detail = stringifyDetail(data?.detail);
+      throw new Error([
+        data?.error || data?.message || text || "요청 실패",
+        detail
+      ].filter(Boolean).join("\n"));
     }
 
     return data;
@@ -1194,7 +1214,7 @@
     try {
       await api(path, options);
     } catch (e) {
-      if (!isBackendSessionError(e)) throw e;
+      if (!isBackendSaveError(e)) throw e;
       await directSave(path, options);
     }
   }

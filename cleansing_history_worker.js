@@ -553,8 +553,6 @@ function normalizePayload(input, { partial }) {
     payload.wave = normalizeWave(payload.wave) || null;
   }
 
-  payload.updated_at = new Date().toISOString();
-
   return payload;
 }
 

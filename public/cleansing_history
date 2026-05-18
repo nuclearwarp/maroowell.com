@@ -266,6 +266,14 @@
     .zipLink:hover {
       color:#fff;
     }
+    .subNum {
+      display:block;
+      margin-top:3px;
+      color:#94a3b8;
+      font-size:10px;
+      line-height:1.1;
+      font-weight:800;
+    }
     tbody tr.rowClean td,
     tbody tr.rowClean .green,
     tbody tr.rowClean .yellow,
@@ -485,6 +493,22 @@
     if (v === null || v === undefined || v === "") return "";
     const n = Number(v);
     return Number.isFinite(n) ? "₩" + n.toLocaleString("ko-KR") : String(v);
+  };
+
+  const dailyAverage = value => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n / 7 : null;
+  };
+
+  const fmtDailyAvg = value => {
+    const n = dailyAverage(value);
+    if (n === null) return "";
+    return n.toLocaleString("ko-KR", { maximumFractionDigits: 1 });
+  };
+
+  const demandCell = value => {
+    const avg = fmtDailyAvg(value);
+    return `${fmtNum(value)}${avg ? `<span class="subNum">일평균 ${esc(avg)}</span>` : ""}`;
   };
 
   const isSuper = () => {
@@ -1248,17 +1272,17 @@
           <tr>
             ${edit ? '<th style="width:70px">관리</th>' : ""}
             <th style="width:100px">Week</th>
-            <th style="width:90px">Camp</th>
+            <th style="width:90px">캠프</th>
             <th style="width:70px">Wave</th>
-            <th style="width:130px">Route</th>
-            <th style="width:230px">Zip</th>
-            <th style="width:90px">Demand</th>
-            <th style="width:90px">Complete</th>
+            <th style="width:130px">라우트</th>
+            <th style="width:230px">우편번호</th>
+            <th style="width:90px">배송 필요</th>
+            <th style="width:90px">배송 완료</th>
             <th style="width:90px">수행률</th>
             <th style="width:80px">등급</th>
-            <th style="width:80px">Reason</th>
-            <th style="width:90px">Price</th>
-            <th style="width:230px">Vendor</th>
+            <th style="width:80px">사유</th>
+            <th style="width:90px">단가</th>
+            <th style="width:230px">벤더사</th>
             <th style="width:130px">사업자번호</th>
           </tr>
         </thead>
@@ -1271,7 +1295,7 @@
               <td>${isEditing(r) ? waveCell(r) : displayWave(r)}</td>
               <td>${isEditing(r) ? inputCell(r, "route") : esc(r.route)}</td>
               <td class="left">${isEditing(r) ? inputCell(r, "zip") : zipLinks(r.zip)}</td>
-              <td class="num">${isEditing(r) ? inputCell(r, "demand", "num") : fmtNum(r.demand)}</td>
+              <td class="num">${isEditing(r) ? inputCell(r, "demand", "num") : demandCell(r.demand)}</td>
               <td class="num">${isEditing(r) ? inputCell(r, "complete", "num") : fmtNum(r.complete)}</td>
               <td class="num green">${isEditing(r) ? inputCell(r, "execution_rate", "num") : fmtPct(r.execution_rate)}</td>
               <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : gradeBadge(r.execution_rate_grade)}</td>
@@ -1393,6 +1417,20 @@
     });
   }
 
+  function drawDemand(ctx, value, x, y, maxWidth) {
+    drawText(ctx, fmtNum(value), x, y, maxWidth);
+
+    const avg = fmtDailyAvg(value);
+
+    if (!avg) return;
+
+    ctx.save();
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "700 10px system-ui, -apple-system, Segoe UI, sans-serif";
+    drawText(ctx, `일평균 ${avg}`, x, y + 13, maxWidth);
+    ctx.restore();
+  }
+
   function drawGradeBadge(ctx, value, x, y, maxWidth) {
     const text = String(value || "").trim();
 
@@ -1425,23 +1463,23 @@
 
     const columns = [
       ["Week", 120, r => r.week],
-      ["Camp", 100, r => r.camp],
+      ["캠프", 100, r => r.camp],
       ["Wave", 76, r => r.wave === "2W" ? "주간" : r.wave === "1W" ? "야간" : r.wave],
-      ["Route", 150, r => r.route],
-      ["Zip", 260, r => r.zip, "zip"],
-      ["Demand", 105, r => fmtNum(r.demand)],
-      ["Complete", 105, r => fmtNum(r.complete)],
+      ["라우트", 150, r => r.route],
+      ["우편번호", 260, r => r.zip, "zip"],
+      ["배송 필요", 105, r => r.demand, "demand"],
+      ["배송 완료", 105, r => fmtNum(r.complete)],
       ["수행률", 92, r => fmtPct(r.execution_rate)],
       ["등급", 78, r => r.execution_rate_grade, "grade"],
-      ["Reason", 88, r => r.reason],
-      ["Price", 96, r => fmtWon(r.price)],
-      ["Vendor", 220, r => r.vendor_name],
+      ["사유", 88, r => r.reason],
+      ["단가", 96, r => fmtWon(r.price)],
+      ["벤더사", 220, r => r.vendor_name],
       ["사업자번호", 140, r => r.business_number]
     ];
     const rowHeight = 32;
     const headerHeight = 44;
     const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
-    const zipColumn = columns.find(([label]) => label === "Zip");
+    const zipColumn = columns.find(([, , , kind]) => kind === "zip");
     const measureCanvas = document.createElement("canvas");
     const measureCtx = measureCanvas.getContext("2d");
     measureCtx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
@@ -1496,12 +1534,14 @@
         ctx.fillStyle =
           row.cleansing_status === "클렌징" ? "#f87171" :
             row.cleansing_status === "경고" ? "#fde68a" :
-              label === "Reason" && noSpace(row.reason) === "반품" ? "#fca5a5" :
+              label === "사유" && noSpace(row.reason) === "반품" ? "#fca5a5" :
                 "#dbeafe";
         if (kind === "grade" && !["클렌징", "경고"].includes(row.cleansing_status)) {
           drawGradeBadge(ctx, getter(row), x + 8, top + 21, colWidth - 16);
         } else if (kind === "zip") {
           drawWrappedText(ctx, plan.zipLines.join("\n"), x + 8, top + 21, colWidth - 16);
+        } else if (kind === "demand") {
+          drawDemand(ctx, getter(row), x + 8, top + 18, colWidth - 16);
         } else {
           drawText(ctx, getter(row), x + 8, top + 21, colWidth - 16);
         }

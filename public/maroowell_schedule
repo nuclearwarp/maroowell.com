@@ -107,6 +107,8 @@
       text-overflow:clip;
       pointer-events:none;
     }
+    .dateMini[data-date-mode="short"]::after{font-size:12px}
+    .dateMini[data-date-mode="full"]::after{font-size:11px;letter-spacing:-.02em}
     .excelDateModal{
       position:fixed;
       inset:0;
@@ -136,6 +138,7 @@
       border-bottom:1px solid rgba(255,255,255,.10);
     }
     .excelDateHead h3{margin:0;font-size:17px;letter-spacing:-.03em}
+    .excelDateHeadActions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
     .excelDateBody{padding:14px 16px 16px}
     .excelDateDesc{
       margin:0 0 12px;
@@ -157,6 +160,16 @@
       font-weight:1000;
     }
     .excelDateOption:hover{background:rgba(37,99,235,.26);border-color:rgba(147,197,253,.45)}
+    .excelDateOption.selected{
+      background:rgba(37,99,235,.42);
+      border-color:rgba(147,197,253,.88);
+      box-shadow:inset 0 0 0 2px rgba(147,197,253,.20);
+    }
+    .excelDateOption.selected::before{
+      content:"✓ ";
+      color:#bbf7d0;
+      font-weight:1000;
+    }
     .excelDateOption small{
       display:block;
       margin-top:4px;
@@ -769,7 +782,10 @@
     <div class="excelDatePanel" role="dialog" aria-modal="true" aria-labelledby="excelDateTitle">
       <div class="excelDateHead">
         <h3 id="excelDateTitle">엑셀 생성 일자 선택</h3>
-        <button id="btnExcelDateClose" class="btn" type="button">닫기</button>
+        <div class="excelDateHeadActions">
+          <button id="btnExcelDateGenerate" class="btn ok" type="button">생성</button>
+          <button id="btnExcelDateClose" class="btn" type="button">닫기</button>
+        </div>
       </div>
       <div class="excelDateBody">
         <p id="excelDateDesc" class="excelDateDesc">생성할 스케줄 일자를 선택하세요.</p>
@@ -845,6 +861,7 @@
         boardWrap:document.getElementById("boardWrap"),
         suggestBox:document.getElementById("suggestBox"),
         excelDateModal:document.getElementById("excelDateModal"),
+        btnExcelDateGenerate:document.getElementById("btnExcelDateGenerate"),
         btnExcelDateClose:document.getElementById("btnExcelDateClose"),
         excelDateDesc:document.getElementById("excelDateDesc"),
         excelDateList:document.getElementById("excelDateList")
@@ -1010,7 +1027,18 @@
       function compactDateLabel(iso){
         const d=parseIso(iso);
         if(!d)return "-";
-        return `${d.getMonth()+1}/${d.getDate()}`;
+        return `${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      }
+
+      function responsiveDateMiniLabel(iso,label){
+        if(!iso)return "-";
+        const width=Number(label?.getBoundingClientRect?.().width || label?.clientWidth || 0);
+        if(width >= 142){
+          label?.setAttribute("data-date-mode","full");
+          return iso;
+        }
+        label?.setAttribute("data-date-mode","short");
+        return compactDateLabel(iso);
       }
 
       function updateDateMiniLabel(input){
@@ -1018,7 +1046,7 @@
         const label=input.closest(".dateMini");
         if(!label)return;
         const iso=normalizeDateInput(input.value);
-        label.setAttribute("data-date-label", iso ? compactDateLabel(iso) : "-");
+        label.setAttribute("data-date-label", responsiveDateMiniLabel(iso,label));
       }
 
       function updateDateMiniLabels(){
@@ -3193,6 +3221,21 @@
         els.excelDateModal.classList.remove("open");
         els.excelDateModal.setAttribute("aria-hidden","true");
         if(els.excelDateList) els.excelDateList.innerHTML="";
+        if(els.btnExcelDateGenerate) els.btnExcelDateGenerate.disabled=false;
+      }
+
+      function selectedExcelDates(){
+        if(!els.excelDateList)return [];
+        return Array.from(els.excelDateList.querySelectorAll(".excelDateOption.selected"))
+          .map(btn=>btn.getAttribute("data-date") || "")
+          .map(normalizeDateInput)
+          .filter(Boolean);
+      }
+
+      function updateExcelDateGenerateButton(){
+        if(!els.btnExcelDateGenerate)return;
+        const count=selectedExcelDates().length;
+        els.btnExcelDateGenerate.textContent=count ? `생성 (${count})` : "생성";
       }
 
       function openExcelDatePicker(){
@@ -3204,13 +3247,13 @@
         }
 
         const dates=state.weekDates.slice();
-        els.excelDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 엑셀로 생성할 일자를 선택하세요.`;
+        els.excelDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 엑셀로 생성할 일자를 선택하세요. 여러 날짜를 선택할 수 있습니다.`;
         els.excelDateList.innerHTML=dates.map(date=>{
           const pddDate=pddDateForScheduleDate(date);
           const count=countMetaRowsForScheduleDate(date);
           const pddText=normalizeWave(state.wave)==="WAVE1" ? `PDD ${mdLabel(pddDate)}` : `업무일 ${mdLabel(pddDate)}`;
           return `
-            <button class="excelDateOption" type="button" data-date="${esc(date)}">
+            <button class="excelDateOption" type="button" data-date="${esc(date)}" aria-pressed="false">
               ${esc(dateLabel(date))}
               <small>${esc(pddText)} · ${count.toLocaleString("ko-KR")}행</small>
             </button>
@@ -3219,12 +3262,14 @@
 
         els.excelDateList.querySelectorAll("[data-date]").forEach(btn=>{
           btn.addEventListener("click",()=>{
-            const date=btn.getAttribute("data-date") || "";
-            closeExcelDatePicker();
-            exportMetaExcelForDate(date);
+            const selected=!btn.classList.contains("selected");
+            btn.classList.toggle("selected",selected);
+            btn.setAttribute("aria-pressed",selected ? "true" : "false");
+            updateExcelDateGenerateButton();
           });
         });
 
+        updateExcelDateGenerateButton();
         els.excelDateModal.classList.add("open");
         els.excelDateModal.setAttribute("aria-hidden","false");
       }
@@ -3249,37 +3294,7 @@
         openExcelDatePicker();
       }
 
-      async function exportMetaExcelForDate(scheduleDate){
-        const selectedDate=normalizeDateInput(scheduleDate);
-
-        if(!window.XLSX){
-          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
-          return;
-        }
-
-        if(!state.camp||!state.weekDates.length){
-          alert("먼저 불러오기를 해주세요.");
-          return;
-        }
-
-        if(!selectedDate || !state.weekDates.includes(selectedDate)){
-          alert("현재 주차에 포함된 일자를 선택하세요.");
-          return;
-        }
-
-        hideSuggest();
-
-        setStatus(`${dateLabel(selectedDate)} 엑셀 계정 정보를 확인하는 중입니다.`);
-        await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
-
-        const rows=collectMetaRows({scheduleDate:selectedDate});
-
-        if(!rows.length){
-          alert(`${dateLabel(selectedDate)}에 엑셀로 생성할 스케줄 데이터가 없습니다.`);
-          setStatus(`${dateLabel(selectedDate)} 엑셀 생성 데이터 없음`);
-          return;
-        }
-
+      function writeMetaExcelFileForDate(selectedDate,rows){
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
 
         const aoa=[
@@ -3319,8 +3334,61 @@
           bookSST:true,
           cellDates:false
         });
+      }
 
-        setStatus(`엑셀 생성 완료: ${dateLabel(selectedDate)} / ${rows.length}행`);
+      async function exportMetaExcelForDates(scheduleDates){
+        const selectedDates=Array.from(new Set((scheduleDates||[])
+          .map(normalizeDateInput)
+          .filter(date=>date && state.weekDates.includes(date))));
+
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        if(!state.camp||!state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        if(!selectedDates.length){
+          alert("엑셀로 생성할 일자를 선택하세요.");
+          return;
+        }
+
+        hideSuggest();
+        closeExcelDatePicker();
+
+        setStatus(`엑셀 계정 정보를 확인하는 중입니다: ${selectedDates.length}개 일자`);
+        await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
+
+        let created=0;
+        const skipped=[];
+
+        for(const selectedDate of selectedDates){
+          const rows=collectMetaRows({scheduleDate:selectedDate});
+
+          if(!rows.length){
+            skipped.push(dateLabel(selectedDate));
+            continue;
+          }
+
+          writeMetaExcelFileForDate(selectedDate,rows);
+          created++;
+        }
+
+        if(created===0){
+          alert(`선택한 일자에 엑셀로 생성할 스케줄 데이터가 없습니다.\n${skipped.join(", ")}`);
+          setStatus("엑셀 생성 데이터 없음");
+          return;
+        }
+
+        const skipText=skipped.length ? ` / 데이터 없음: ${skipped.join(", ")}` : "";
+        setStatus(`엑셀 생성 완료: ${created}개 파일${skipText}`);
+      }
+
+      async function exportMetaExcelForDate(scheduleDate){
+        return exportMetaExcelForDates([scheduleDate]);
       }
 
       async function copyImage(){
@@ -3485,6 +3553,9 @@
           });
         });
 
+        els.btnExcelDateGenerate?.addEventListener("click",()=>{
+          exportMetaExcelForDates(selectedExcelDates());
+        });
         els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
         els.excelDateModal?.addEventListener("click",e=>{
           if(e.target===els.excelDateModal) closeExcelDatePicker();
@@ -3548,7 +3619,10 @@
         });
 
         els.boardWrap.addEventListener("scroll",hideSuggest,{passive:true});
-        window.addEventListener("resize",hideSuggest);
+        window.addEventListener("resize",()=>{
+          hideSuggest();
+          updateDateMiniLabels();
+        });
 
         els.waveSelect.addEventListener("change",()=>{
           state.wave=normalizeWave(els.waveSelect.value);

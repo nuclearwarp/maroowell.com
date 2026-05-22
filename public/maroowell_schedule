@@ -3307,7 +3307,31 @@
         openExcelDatePicker();
       }
 
-      function writeMetaExcelFileForDate(selectedDate,rows){
+      function excelFileDatePart(selectedDates){
+        const dates=Array.from(new Set((selectedDates||[])
+          .map(normalizeDateInput)
+          .filter(Boolean)))
+          .sort();
+
+        if(!dates.length)return "date";
+
+        if(dates.length===1){
+          return dates[0];
+        }
+
+        const contiguous=dates.every((date,idx)=>{
+          if(idx===0)return true;
+          return date===addDays(dates[idx-1],1);
+        });
+
+        if(contiguous){
+          return `${dates[0]}_${dates[dates.length-1]}`;
+        }
+
+        return dates.join("_");
+      }
+
+      function writeMetaExcelFileForDates(selectedDates,rows){
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
 
         const aoa=[
@@ -3337,8 +3361,8 @@
         ws["!autofilter"]={ref:`A1:J${aoa.length}`};
         XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
 
-        const safeDate=mdLabel(selectedDate).replace(/[\/\s]/g,"-");
-        const fileName=`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${state.weekLabel}_${safeDate}`
+        const fileDatePart=excelFileDatePart(selectedDates);
+        const fileName=`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${fileDatePart}`
           .replace(/[\\/:*?"<>|]/g,"_")
           .replace(/\s+/g," ");
 
@@ -3352,7 +3376,8 @@
       async function exportMetaExcelForDates(scheduleDates){
         const selectedDates=Array.from(new Set((scheduleDates||[])
           .map(normalizeDateInput)
-          .filter(date=>date && state.weekDates.includes(date))));
+          .filter(date=>date && state.weekDates.includes(date))))
+          .sort();
 
         if(!window.XLSX){
           alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
@@ -3375,8 +3400,8 @@
         setStatus(`엑셀 계정 정보를 확인하는 중입니다: ${selectedDates.length}개 일자`);
         await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
 
-        let created=0;
         const skipped=[];
+        const allRows=[];
 
         for(const selectedDate of selectedDates){
           const rows=collectMetaRows({scheduleDate:selectedDate});
@@ -3386,23 +3411,32 @@
             continue;
           }
 
-          writeMetaExcelFileForDate(selectedDate,rows);
-          created++;
+          allRows.push(...rows);
         }
 
-        if(created===0){
+        if(!allRows.length){
           alert(`선택한 일자에 엑셀로 생성할 스케줄 데이터가 없습니다.\n${skipped.join(", ")}`);
           setStatus("엑셀 생성 데이터 없음");
           return;
         }
 
+        allRows.sort((a,b)=>{
+          if(a.date!==b.date)return a.date.localeCompare(b.date);
+          const nc=sortText(a.name,b.name);
+          if(nc!==0)return nc;
+          return sortText(a.id,b.id);
+        });
+
+        writeMetaExcelFileForDates(selectedDates,allRows);
+
         const skipText=skipped.length ? ` / 데이터 없음: ${skipped.join(", ")}` : "";
-        setStatus(`엑셀 생성 완료: ${created}개 파일${skipText}`);
+        setStatus(`엑셀 생성 완료: ${allRows.length.toLocaleString("ko-KR")}행 / 1개 파일${skipText}`);
       }
 
       async function exportMetaExcelForDate(scheduleDate){
         return exportMetaExcelForDates([scheduleDate]);
       }
+
 
       async function copyImage(){
         if(!window.htmlToImage){alert("이미지 변환 라이브러리를 불러오지 못했습니다.");return}

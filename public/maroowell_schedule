@@ -3064,7 +3064,6 @@
         setStatus("엑셀 계정 정보를 확인하는 중입니다.");
         await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
 
-        const exportStartDate=excelExportStartScheduleDate();
         const rows=collectMetaRows();
 
         if(!rows.length){
@@ -3077,43 +3076,82 @@
         }
 
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
-        const aoa=[
-          header,
-          ...rows.map(r=>[
-            r.date,
-            META_VENDOR_NAME,
-            Number(META_BUSINESS_NO),
-            metaCampName(state.camp),
-            state.wave,
-            r.name,
-            r.id,
-            META_WORK_STATUS,
-            metaRotationByWave(state.wave),
-            r.routes.join(",")
-          ])
-        ];
 
-        const wb=XLSX.utils.book_new();
-        const ws=XLSX.utils.aoa_to_sheet(aoa);
+        function makeAoa(targetRows){
+          return [
+            header,
+            ...targetRows.map(r=>[
+              r.date,
+              META_VENDOR_NAME,
+              Number(META_BUSINESS_NO),
+              metaCampName(state.camp),
+              state.wave,
+              r.name,
+              r.id,
+              META_WORK_STATUS,
+              metaRotationByWave(state.wave),
+              r.routes.join(",")
+            ])
+          ];
+        }
 
-        // CLS Quickflex Admin 업로드 양식과 동일하게 주요 컬럼 타입을 강제한다.
-        // A열 업무일: 날짜 serial number + yy-mm-dd 표시 / C열 사업자등록번호: 숫자 타입 / 나머지: 문자열 타입
-        forceMetaAdminCellTypes(ws,aoa.length);
+        function safeFileName(name){
+          return String(name || "")
+            .replace(/[\\/:*?"<>|]/g,"_")
+            .replace(/\s+/g," ")
+            .trim();
+        }
 
-        ws["!cols"]=[{wch:12},{wch:14},{wch:16},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:16},{wch:34}];
-        ws["!autofilter"]={ref:`A1:J${aoa.length}`};
-        XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
+        function writeMetaWorkbook(targetRows,suffix){
+          const aoa=makeAoa(targetRows);
+          const wb=XLSX.utils.book_new();
+          const ws=XLSX.utils.aoa_to_sheet(aoa);
 
-        const fileName=`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${weekRangeLabel()}`
-          .replace(/[\\/:*?"<>|]/g,"_")
-          .replace(/\s+/g," ");
+          // CLS Quickflex Admin 업로드 양식과 동일하게 주요 컬럼 타입을 강제한다.
+          // A열 업무일: 날짜 serial number + yy-mm-dd 표시 / C열 사업자등록번호: 숫자 타입 / 나머지: 문자열 타입
+          forceMetaAdminCellTypes(ws,aoa.length);
 
-        XLSX.writeFile(wb,`${fileName}.xlsx`,{
-          bookType:"xlsx",
-          bookSST:true,
-          cellDates:false
-        });
+          ws["!cols"]=[{wch:12},{wch:14},{wch:16},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:16},{wch:34}];
+          ws["!autofilter"]={ref:`A1:J${aoa.length}`};
+          XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
 
+          const fileName=safeFileName(`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${weekRangeLabel()}${suffix || ""}`);
+
+          XLSX.writeFile(wb,`${fileName}.xlsx`,{
+            bookType:"xlsx",
+            bookSST:true,
+            cellDates:false
+          });
+        }
+
+        function isSaturdayScheduleRow(row){
+          const d=parseIso(row?.scheduleDate);
+          return !!d && d.getDay()===6;
+        }
+
+        if(normalizeWave(state.wave)==="WAVE1"){
+          const normalRows=rows.filter(row=>!isSaturdayScheduleRow(row));
+          const saturdayRows=rows.filter(isSaturdayScheduleRow);
+          let fileCount=0;
+          let rowCount=0;
+
+          if(normalRows.length){
+            writeMetaWorkbook(normalRows,"_일-금");
+            fileCount++;
+            rowCount+=normalRows.length;
+          }
+
+          if(saturdayRows.length){
+            writeMetaWorkbook(saturdayRows,"_토요일");
+            fileCount++;
+            rowCount+=saturdayRows.length;
+          }
+
+          setStatus(`엑셀 생성 완료: ${fileCount}개 파일 / ${rowCount}행 / ${excelExportRuleText()}`);
+          return;
+        }
+
+        writeMetaWorkbook(rows,"");
         setStatus(`엑셀 생성 완료: ${rows.length}행 / ${excelExportRuleText()}`);
       }
 

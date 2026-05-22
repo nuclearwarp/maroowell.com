@@ -80,6 +80,94 @@
       background:#07101d;color:#eaf2ff;padding:0 7px;font-size:12px;font-weight:900;outline:none
     }
     .dateMini input:focus{border-color:rgba(96,165,250,.75);box-shadow:0 0 0 2px rgba(96,165,250,.13)}
+    .dateMini{position:relative;cursor:pointer}
+    .dateMini input{
+      cursor:pointer;
+      color:transparent!important;
+      caret-color:transparent!important;
+      padding-right:24px!important;
+    }
+    .dateMini input::-webkit-calendar-picker-indicator{
+      cursor:pointer;
+      opacity:.85;
+    }
+    .dateMini::after{
+      content:attr(data-date-label);
+      position:absolute;
+      left:42px;
+      right:25px;
+      top:50%;
+      transform:translateY(-50%);
+      color:#eaf2ff;
+      font-size:12px;
+      font-weight:1000;
+      line-height:1;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:clip;
+      pointer-events:none;
+    }
+    .excelDateModal{
+      position:fixed;
+      inset:0;
+      z-index:2147482500;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:rgba(0,0,0,.48);
+      backdrop-filter:blur(2px);
+    }
+    .excelDateModal.open{display:flex}
+    .excelDatePanel{
+      width:min(520px, calc(100vw - 28px));
+      border:1px solid rgba(255,255,255,.16);
+      border-radius:20px;
+      background:linear-gradient(180deg,#111c30,#0b1424);
+      box-shadow:0 24px 80px rgba(0,0,0,.52);
+      overflow:hidden;
+    }
+    .excelDateHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:15px 16px;
+      border-bottom:1px solid rgba(255,255,255,.10);
+    }
+    .excelDateHead h3{margin:0;font-size:17px;letter-spacing:-.03em}
+    .excelDateBody{padding:14px 16px 16px}
+    .excelDateDesc{
+      margin:0 0 12px;
+      color:#b7c7e6;
+      font-size:13px;
+      font-weight:800;
+      line-height:1.5;
+    }
+    .excelDateList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .excelDateOption{
+      min-height:48px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.06);
+      color:#eaf2ff;
+      padding:8px 10px;
+      cursor:pointer;
+      text-align:left;
+      font-weight:1000;
+    }
+    .excelDateOption:hover{background:rgba(37,99,235,.26);border-color:rgba(147,197,253,.45)}
+    .excelDateOption small{
+      display:block;
+      margin-top:4px;
+      color:#bfdbfe;
+      font-size:11px;
+      font-weight:900;
+    }
+    @media(max-width:560px){
+      .excelDateList{grid-template-columns:1fr}
+      .dateMini::after{font-size:11px;left:45px;right:26px}
+    }
     .btnMini{
       height:30px;padding:0 8px;border-radius:10px;border:1px solid rgba(134,239,172,.35);
       background:rgba(22,163,74,.55);color:#ecfdf5;font-size:12px;font-weight:1000;cursor:pointer;white-space:nowrap
@@ -677,6 +765,19 @@
 
   <div id="suggestBox" class="suggestBox"></div>
 
+  <div id="excelDateModal" class="excelDateModal" aria-hidden="true">
+    <div class="excelDatePanel" role="dialog" aria-modal="true" aria-labelledby="excelDateTitle">
+      <div class="excelDateHead">
+        <h3 id="excelDateTitle">엑셀 생성 일자 선택</h3>
+        <button id="btnExcelDateClose" class="btn" type="button">닫기</button>
+      </div>
+      <div class="excelDateBody">
+        <p id="excelDateDesc" class="excelDateDesc">생성할 스케줄 일자를 선택하세요.</p>
+        <div id="excelDateList" class="excelDateList"></div>
+      </div>
+    </div>
+  </div>
+
   <script>
     (async function(){
       "use strict";
@@ -742,7 +843,11 @@
         boardSubTitle:document.getElementById("boardSubTitle"),
         tableHost:document.getElementById("tableHost"),
         boardWrap:document.getElementById("boardWrap"),
-        suggestBox:document.getElementById("suggestBox")
+        suggestBox:document.getElementById("suggestBox"),
+        excelDateModal:document.getElementById("excelDateModal"),
+        btnExcelDateClose:document.getElementById("btnExcelDateClose"),
+        excelDateDesc:document.getElementById("excelDateDesc"),
+        excelDateList:document.getElementById("excelDateList")
       };
 
       const state = {
@@ -900,6 +1005,34 @@
         if(m) return toIso(new Date(state.isoYear || new Date().getFullYear(),Number(m[1])-1,Number(m[2])));
         const d=new Date(raw);
         return Number.isNaN(d.getTime()) ? "" : toIso(d);
+      }
+
+      function compactDateLabel(iso){
+        const d=parseIso(iso);
+        if(!d)return "-";
+        return `${d.getMonth()+1}/${d.getDate()}`;
+      }
+
+      function updateDateMiniLabel(input){
+        if(!input)return;
+        const label=input.closest(".dateMini");
+        if(!label)return;
+        const iso=normalizeDateInput(input.value);
+        label.setAttribute("data-date-label", iso ? compactDateLabel(iso) : "-");
+      }
+
+      function updateDateMiniLabels(){
+        updateDateMiniLabel(els.actualUpdateInput);
+        updateDateMiniLabel(els.fakeUpdateInput);
+      }
+
+      function openNativeDatePicker(input){
+        if(!input)return;
+        try{input.focus({preventScroll:true})}catch{try{input.focus()}catch{}}
+        if(typeof input.showPicker==="function"){
+          try{input.showPicker();return}catch{}
+        }
+        try{input.click()}catch{}
       }
 
       function normalizeRoutePart(v){return clean(v).replace(/[^0-9A-Za-z가-힣]/g,"").toUpperCase()}
@@ -1944,6 +2077,7 @@
         els.fakeUpdateInput.value="";
         els.actualUpdateInput.title="실제 업데이트 기준일 없음";
         els.fakeUpdateInput.title="가라 업데이트 기준일 없음";
+        updateDateMiniLabels();
       }
 
       function renderUpdateStatus(row){
@@ -1954,6 +2088,7 @@
         els.fakeUpdateInput.value=fake || "";
         els.actualUpdateInput.title=`실제 업데이트: ${actual ? dateDot(actual) : "-"}`;
         els.fakeUpdateInput.title=`가라 업데이트: ${fake ? dateDot(fake) : "-"}`;
+        updateDateMiniLabels();
       }
 
       async function loadUpdateStatusOnly(){
@@ -2997,13 +3132,18 @@
         }
       }
 
-      function collectMetaRows(){
+      function collectMetaRows(options){
         const grouped=new Map();
         const labels=allRouteLabels({includeOff:false});
+        const selectedDate=normalizeDateInput(options?.scheduleDate);
         const exportStartDate=excelExportStartScheduleDate();
 
         for(const date of state.weekDates){
-          if(date < exportStartDate) continue;
+          if(selectedDate){
+            if(date!==selectedDate) continue;
+          }else if(date < exportStartDate){
+            continue;
+          }
 
           for(const routeLabel of labels){
             const normalizedRoute=normalizeRouteLabel(routeLabel);
@@ -3048,6 +3188,52 @@
         });
       }
 
+      function closeExcelDatePicker(){
+        if(!els.excelDateModal)return;
+        els.excelDateModal.classList.remove("open");
+        els.excelDateModal.setAttribute("aria-hidden","true");
+        if(els.excelDateList) els.excelDateList.innerHTML="";
+      }
+
+      function openExcelDatePicker(){
+        if(!els.excelDateModal || !els.excelDateList)return;
+
+        if(!state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        const dates=state.weekDates.slice();
+        els.excelDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 엑셀로 생성할 일자를 선택하세요.`;
+        els.excelDateList.innerHTML=dates.map(date=>{
+          const pddDate=pddDateForScheduleDate(date);
+          const count=countMetaRowsForScheduleDate(date);
+          const pddText=normalizeWave(state.wave)==="WAVE1" ? `PDD ${mdLabel(pddDate)}` : `업무일 ${mdLabel(pddDate)}`;
+          return `
+            <button class="excelDateOption" type="button" data-date="${esc(date)}">
+              ${esc(dateLabel(date))}
+              <small>${esc(pddText)} · ${count.toLocaleString("ko-KR")}행</small>
+            </button>
+          `;
+        }).join("");
+
+        els.excelDateList.querySelectorAll("[data-date]").forEach(btn=>{
+          btn.addEventListener("click",()=>{
+            const date=btn.getAttribute("data-date") || "";
+            closeExcelDatePicker();
+            exportMetaExcelForDate(date);
+          });
+        });
+
+        els.excelDateModal.classList.add("open");
+        els.excelDateModal.setAttribute("aria-hidden","false");
+      }
+
+      function countMetaRowsForScheduleDate(scheduleDate){
+        const rows=collectMetaRows({scheduleDate});
+        return rows.length;
+      }
+
       async function exportMetaExcel(){
         if(!window.XLSX){
           alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
@@ -3060,99 +3246,81 @@
         }
 
         hideSuggest();
+        openExcelDatePicker();
+      }
 
-        setStatus("엑셀 계정 정보를 확인하는 중입니다.");
+      async function exportMetaExcelForDate(scheduleDate){
+        const selectedDate=normalizeDateInput(scheduleDate);
+
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+
+        if(!state.camp||!state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+
+        if(!selectedDate || !state.weekDates.includes(selectedDate)){
+          alert("현재 주차에 포함된 일자를 선택하세요.");
+          return;
+        }
+
+        hideSuggest();
+
+        setStatus(`${dateLabel(selectedDate)} 엑셀 계정 정보를 확인하는 중입니다.`);
         await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
 
-        const rows=collectMetaRows();
+        const rows=collectMetaRows({scheduleDate:selectedDate});
 
         if(!rows.length){
-          alert(
-            "엑셀로 생성할 스케줄 데이터가 없습니다.\n\n" +
-            excelExportRuleText() + "\n" +
-            "현재 화면 주차에서 해당 기준 이후의 배정 데이터가 있는지 확인하세요."
-          );
+          alert(`${dateLabel(selectedDate)}에 엑셀로 생성할 스케줄 데이터가 없습니다.`);
+          setStatus(`${dateLabel(selectedDate)} 엑셀 생성 데이터 없음`);
           return;
         }
 
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
 
-        function makeAoa(targetRows){
-          return [
-            header,
-            ...targetRows.map(r=>[
-              r.date,
-              META_VENDOR_NAME,
-              Number(META_BUSINESS_NO),
-              metaCampName(state.camp),
-              state.wave,
-              r.name,
-              r.id,
-              META_WORK_STATUS,
-              metaRotationByWave(state.wave),
-              r.routes.join(",")
-            ])
-          ];
-        }
+        const aoa=[
+          header,
+          ...rows.map(r=>[
+            r.date,
+            META_VENDOR_NAME,
+            Number(META_BUSINESS_NO),
+            metaCampName(state.camp),
+            state.wave,
+            r.name,
+            r.id,
+            META_WORK_STATUS,
+            metaRotationByWave(state.wave),
+            r.routes.join(",")
+          ])
+        ];
 
-        function safeFileName(name){
-          return String(name || "")
-            .replace(/[\\/:*?"<>|]/g,"_")
-            .replace(/\s+/g," ")
-            .trim();
-        }
+        const wb=XLSX.utils.book_new();
+        const ws=XLSX.utils.aoa_to_sheet(aoa);
 
-        function writeMetaWorkbook(targetRows,suffix){
-          const aoa=makeAoa(targetRows);
-          const wb=XLSX.utils.book_new();
-          const ws=XLSX.utils.aoa_to_sheet(aoa);
+        // CLS Quickflex Admin 업로드 양식과 동일하게 주요 컬럼 타입을 강제한다.
+        // A열 업무일: 날짜 serial number + yy-mm-dd 표시 / C열 사업자등록번호: 숫자 타입 / 나머지: 문자열 타입
+        forceMetaAdminCellTypes(ws,aoa.length);
 
-          // CLS Quickflex Admin 업로드 양식과 동일하게 주요 컬럼 타입을 강제한다.
-          // A열 업무일: 날짜 serial number + yy-mm-dd 표시 / C열 사업자등록번호: 숫자 타입 / 나머지: 문자열 타입
-          forceMetaAdminCellTypes(ws,aoa.length);
+        ws["!cols"]=[{wch:12},{wch:14},{wch:16},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:16},{wch:34}];
+        ws["!autofilter"]={ref:`A1:J${aoa.length}`};
+        XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
 
-          ws["!cols"]=[{wch:12},{wch:14},{wch:16},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:16},{wch:34}];
-          ws["!autofilter"]={ref:`A1:J${aoa.length}`};
-          XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
+        const safeDate=mdLabel(selectedDate).replace(/[\/\s]/g,"-");
+        const fileName=`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${state.weekLabel}_${safeDate}`
+          .replace(/[\\/:*?"<>|]/g,"_")
+          .replace(/\s+/g," ");
 
-          const fileName=safeFileName(`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${weekRangeLabel()}${suffix || ""}`);
+        XLSX.writeFile(wb,`${fileName}.xlsx`,{
+          bookType:"xlsx",
+          bookSST:true,
+          cellDates:false
+        });
 
-          XLSX.writeFile(wb,`${fileName}.xlsx`,{
-            bookType:"xlsx",
-            bookSST:true,
-            cellDates:false
-          });
-        }
-
-        function isSaturdayScheduleRow(row){
-          const d=parseIso(row?.scheduleDate);
-          return !!d && d.getDay()===6;
-        }
-
-        if(normalizeWave(state.wave)==="WAVE1"){
-          const normalRows=rows.filter(row=>!isSaturdayScheduleRow(row));
-          const saturdayRows=rows.filter(isSaturdayScheduleRow);
-          let fileCount=0;
-          let rowCount=0;
-
-          if(normalRows.length){
-            writeMetaWorkbook(normalRows,"_일-금");
-            fileCount++;
-            rowCount+=normalRows.length;
-          }
-
-          if(saturdayRows.length){
-            writeMetaWorkbook(saturdayRows,"_토요일");
-            fileCount++;
-            rowCount+=saturdayRows.length;
-          }
-
-          setStatus(`엑셀 생성 완료: ${fileCount}개 파일 / ${rowCount}행 / ${excelExportRuleText()}`);
-          return;
-        }
-
-        writeMetaWorkbook(rows,"");
-        setStatus(`엑셀 생성 완료: ${rows.length}행 / ${excelExportRuleText()}`);
+        setStatus(`엑셀 생성 완료: ${dateLabel(selectedDate)} / ${rows.length}행`);
       }
 
       async function copyImage(){
@@ -3303,6 +3471,25 @@
 
         els.waveSelect.value=state.wave;
 
+        [els.actualUpdateInput, els.fakeUpdateInput].forEach(input=>{
+          if(!input)return;
+          input.addEventListener("input",()=>updateDateMiniLabel(input));
+          input.addEventListener("change",()=>updateDateMiniLabel(input));
+          input.addEventListener("click",e=>{
+            e.preventDefault();
+            openNativeDatePicker(input);
+          });
+          input.closest(".dateMini")?.addEventListener("click",e=>{
+            e.preventDefault();
+            openNativeDatePicker(input);
+          });
+        });
+
+        els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
+        els.excelDateModal?.addEventListener("click",e=>{
+          if(e.target===els.excelDateModal) closeExcelDatePicker();
+        });
+
         els.btnLogout.addEventListener("click",async()=>{
           try{await supabase.auth.signOut()}catch{}
           location.href=LOGIN_PATH;
@@ -3356,6 +3543,7 @@
           if(e.key==="Escape"){
             closeWeekPicker();
             hideSuggest();
+            closeExcelDatePicker();
           }
         });
 

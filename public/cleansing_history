@@ -8,6 +8,7 @@
   <title>클렌징 히스토리</title>
   <link rel="icon" href="/favicon.ico?v=2">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
   <script src="/board-menu.js" defer></script>
 
   <style>
@@ -98,6 +99,7 @@
       background:var(--panel);
       border-bottom:1px solid var(--line);
       align-items:end;
+      overflow:auto hidden;
     }
 
     label {
@@ -208,6 +210,7 @@
       text-align:center;
       font-size:12px;
       line-height:1.45;
+      vertical-align:middle;
     }
 
     th:last-child,
@@ -225,18 +228,46 @@
 
     td {
       font-weight:800;
-      word-break:break-word;
+      word-break:normal;
+      overflow-wrap:anywhere;
     }
 
     tbody tr:hover td {
       background:rgba(96,165,250,.07);
     }
 
-    .left { text-align:left; }
-    .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .left {
+      text-align:left;
+    }
+
+    .center {
+      text-align:center;
+    }
+
+    .num {
+      text-align:right;
+      font-variant-numeric:tabular-nums;
+    }
+
     .green { color:#bbf7d0; }
     .yellow { color:#fde68a; }
     .red { color:#fca5a5; }
+
+    .routeCell {
+      text-align:center;
+      white-space:normal;
+      word-break:keep-all;
+      overflow-wrap:anywhere;
+    }
+
+    .zipCell,
+    .vendorCell {
+      text-align:left;
+      white-space:normal;
+      word-break:keep-all;
+      overflow-wrap:anywhere;
+    }
+
     .gradeBadge,
     .zipLink {
       display:inline-flex;
@@ -247,6 +278,7 @@
       line-height:1;
       white-space:nowrap;
     }
+
     .gradeBadge {
       min-width:42px;
       min-height:23px;
@@ -254,20 +286,24 @@
       border:1px solid currentColor;
       background:rgba(255,255,255,.04);
     }
+
     .grade1 { color:#22c55e; background:rgba(34,197,94,.10); }
     .grade2 { color:#7bdc5a; background:rgba(123,220,90,.10); }
     .grade3 { color:#f6b94b; background:rgba(246,185,75,.10); }
     .grade4 { color:#fb7185; background:rgba(251,113,133,.10); }
     .gradeNone { color:#9ca3af; background:rgba(156,163,175,.08); }
+
     .zipLink {
       color:#bfdbfe;
       text-decoration:underline;
       text-underline-offset:2px;
       margin:0 2px 2px;
     }
+
     .zipLink:hover {
       color:#fff;
     }
+
     .subNum {
       display:block;
       margin-top:5px;
@@ -276,6 +312,7 @@
       line-height:1.25;
       font-weight:800;
     }
+
     tbody tr.rowClean td,
     tbody tr.rowClean .green,
     tbody tr.rowClean .yellow,
@@ -285,6 +322,7 @@
       color:#f87171;
       font-weight:1000;
     }
+
     tbody tr.rowWarn td,
     tbody tr.rowWarn .green,
     tbody tr.rowWarn .yellow,
@@ -294,6 +332,7 @@
       color:#fde68a;
       font-weight:1000;
     }
+
     tbody tr.waveDivider td {
       border-top:3px solid rgba(255,255,255,.36);
     }
@@ -337,6 +376,44 @@
     }
 
     .hide { display:none!important; }
+
+    .captureCloneWrap {
+      position:fixed;
+      left:-100000px;
+      top:0;
+      z-index:-1;
+      pointer-events:none;
+      background:#081120;
+      padding:0;
+    }
+
+    .captureBoard {
+      width:max-content;
+      min-width:1180px;
+      border-radius:18px;
+      overflow:hidden;
+      background:var(--panel2);
+      border:1px solid var(--line);
+    }
+
+    .captureBoard .actions {
+      display:none;
+    }
+
+    .captureBoard .manageCol {
+      display:none;
+    }
+
+    .captureBoard table {
+      table-layout:fixed;
+      width:auto;
+      min-width:0;
+    }
+
+    .captureBoard th,
+    .captureBoard td {
+      vertical-align:middle;
+    }
 
     @media(max-width:1100px) {
       .bar {
@@ -700,18 +777,6 @@
     return "";
   }
 
-  function gradeColor(value) {
-    const kind = gradeKind(value);
-
-    if (kind === "grade1") return "#22c55e";
-    if (kind === "grade2") return "#7bdc5a";
-    if (kind === "grade3") return "#f6b94b";
-    if (kind === "grade4") return "#fb7185";
-    if (kind === "gradeNone") return "#9ca3af";
-
-    return "#dbeafe";
-  }
-
   function gradeBadge(value) {
     const text = String(value || "").trim();
 
@@ -802,7 +867,7 @@
     const attr = isEditing(row) ? "data-save" : "data-edit";
     const text = isEditing(row) ? "저장" : "수정";
 
-    return `<td><button class="btn" style="height:28px;padding:0 9px" ${attr}="${esc(id)}">${text}</button></td>`;
+    return `<td class="manageCol"><button class="btn" style="height:28px;padding:0 9px" ${attr}="${esc(id)}">${text}</button></td>`;
   }
 
   function numericPatchValue(value) {
@@ -989,10 +1054,10 @@
 
       if (error) throw error;
 
-      const rows = Array.isArray(page) ? page : [];
-      data.push(...rows);
+      const pageRows = Array.isArray(page) ? page : [];
+      data.push(...pageRows);
 
-      if (rows.length < pageSize) break;
+      if (pageRows.length < pageSize) break;
     }
 
     const latest = data
@@ -1272,7 +1337,7 @@
       <table>
         <thead>
           <tr>
-            ${edit ? '<th style="width:70px">관리</th>' : ""}
+            ${edit ? '<th class="manageCol" style="width:70px">관리</th>' : ""}
             <th style="width:100px">Week</th>
             <th style="width:90px">캠프</th>
             <th style="width:70px">Wave</th>
@@ -1295,15 +1360,15 @@
               <td>${isEditing(r) ? inputCell(r, "week") : esc(r.week)}</td>
               <td>${isEditing(r) ? inputCell(r, "camp") : esc(r.camp)}</td>
               <td>${isEditing(r) ? waveCell(r) : displayWave(r)}</td>
-              <td>${isEditing(r) ? inputCell(r, "route") : esc(r.route)}</td>
-              <td class="left">${isEditing(r) ? inputCell(r, "zip") : zipLinks(r.zip)}</td>
+              <td class="routeCell">${isEditing(r) ? inputCell(r, "route") : esc(r.route)}</td>
+              <td class="zipCell">${isEditing(r) ? inputCell(r, "zip") : zipLinks(r.zip)}</td>
               <td class="num">${isEditing(r) ? inputCell(r, "demand", "num") : demandCell(r.demand)}</td>
               <td class="num">${isEditing(r) ? inputCell(r, "complete", "num") : fmtNum(r.complete)}</td>
               <td class="num green">${isEditing(r) ? inputCell(r, "execution_rate", "num") : fmtPct(r.execution_rate)}</td>
               <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : gradeBadge(r.execution_rate_grade)}</td>
               <td class="${reasonClass(r.reason)}">${isEditing(r) ? inputCell(r, "reason") : esc(r.reason || "")}</td>
               <td class="num yellow">${isEditing(r) ? inputCell(r, "price", "num") : fmtWon(r.price)}</td>
-              <td class="left">${isEditing(r) ? inputCell(r, "vendor_name") : esc(r.vendor_name || "")}</td>
+              <td class="vendorCell">${isEditing(r) ? inputCell(r, "vendor_name") : esc(r.vendor_name || "")}</td>
               <td>${isEditing(r) ? inputCell(r, "business_number") : esc(r.business_number || "")}</td>
             </tr>
           `).join("")}
@@ -1373,88 +1438,10 @@
     await load();
   }
 
-  function drawText(ctx, text, x, y, maxWidth) {
-    const raw = String(text ?? "");
-
-    if (!maxWidth || ctx.measureText(raw).width <= maxWidth) {
-      ctx.fillText(raw, x, y);
-      return;
-    }
-
-    let out = raw;
-
-    while (out.length > 1 && ctx.measureText(out + "...").width > maxWidth) {
-      out = out.slice(0, -1);
-    }
-
-    ctx.fillText(out + "...", x, y);
-  }
-
-  function wrappedZipLines(ctx, value, maxWidth) {
-    const tokens = zipTokens(value);
-    const lines = [];
-    let line = "";
-
-    for (const token of tokens) {
-      const next = line ? `${line}, ${token}` : token;
-
-      if (line && ctx.measureText(next).width > maxWidth) {
-        lines.push(line);
-        line = token;
-      } else {
-        line = next;
-      }
-    }
-
-    if (line) lines.push(line);
-
-    return lines.length ? lines : [""];
-  }
-
-  function drawWrappedText(ctx, text, x, y, maxWidth, lineHeight = 15) {
-    const lines = String(text || "").split("\n");
-
-    lines.forEach((line, idx) => {
-      drawText(ctx, line, x, y + idx * lineHeight, maxWidth);
-    });
-  }
-
-  function drawDemand(ctx, value, x, y, maxWidth) {
-    drawText(ctx, fmtNum(value), x, y - 2, maxWidth);
-
-    const avg = fmtDailyAvg(value);
-
-    if (!avg) return;
-
-    ctx.save();
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "700 10px system-ui, -apple-system, Segoe UI, sans-serif";
-    drawText(ctx, `일평균 ${avg}`, x, y + 14, maxWidth);
-    ctx.restore();
-  }
-
-  function drawGradeBadge(ctx, value, x, y, maxWidth) {
-    const text = String(value || "").trim();
-
-    if (!text) return;
-
-    const color = gradeColor(text);
-    const width = Math.min(maxWidth || 56, Math.max(44, ctx.measureText(text).width + 16));
-    const height = 22;
-    const top = y - 16;
-
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color + "1A";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x, top, width, height);
-    ctx.fillStyle = color;
-    drawText(ctx, text, x + 8, y, width - 16);
-    ctx.restore();
-  }
-
-  function canvasBlob(canvas) {
-    return new Promise(resolve => canvas.toBlob(resolve, "image/png"));
+  function captureFileName() {
+    const week = val("week") || "week";
+    const wave = val("wave") || "all";
+    return `cleansing_history_${week}_${wave}`.replace(/[\\/:*?"<>|]/g, "_") + ".png";
   }
 
   async function copyImage() {
@@ -1463,125 +1450,62 @@
       return;
     }
 
-    const columns = [
-      ["Week", 120, r => r.week],
-      ["캠프", 100, r => r.camp],
-      ["Wave", 76, r => r.wave === "2W" ? "주간" : r.wave === "1W" ? "야간" : r.wave],
-      ["라우트", 150, r => r.route],
-      ["우편번호", 260, r => r.zip, "zip"],
-      ["배송 필요", 105, r => r.demand, "demand"],
-      ["배송 완료", 105, r => fmtNum(r.complete)],
-      ["수행률", 92, r => fmtPct(r.execution_rate)],
-      ["등급", 78, r => r.execution_rate_grade, "grade"],
-      ["사유", 88, r => r.reason],
-      ["단가", 96, r => fmtWon(r.price)],
-      ["벤더사", 220, r => r.vendor_name],
-      ["사업자번호", 140, r => r.business_number]
-    ];
-    const rowHeight = 42;
-    const headerHeight = 50;
-    const width = columns.reduce((sum, col) => sum + col[1], 0) + 24;
-    const zipColumn = columns.find(([, , , kind]) => kind === "zip");
-    const measureCanvas = document.createElement("canvas");
-    const measureCtx = measureCanvas.getContext("2d");
-    measureCtx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
-    const rowPlans = rows.map(row => {
-      const zipLines = wrappedZipLines(measureCtx, row.zip, (zipColumn?.[1] || 260) - 16);
-
-      return {
-        row,
-        zipLines,
-        height: Math.max(rowHeight, 24 + zipLines.length * 15)
-      };
-    });
-    const height = headerHeight + rowPlans.reduce((sum, plan) => sum + plan.height, 0) + 18;
-    const canvas = document.createElement("canvas");
-    const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    canvas.width = width * scale;
-    canvas.height = height * scale;
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
-
-    const ctx = canvas.getContext("2d");
-    ctx.scale(scale, scale);
-    ctx.fillStyle = "#081120";
-    ctx.fillRect(0, 0, width, height);
-    let x = 12;
-    let y = headerHeight;
-    ctx.fillStyle = "#27364d";
-    ctx.fillRect(12, y - rowHeight, width - 24, rowHeight);
-    ctx.strokeStyle = "rgba(255,255,255,.16)";
-    ctx.lineWidth = 1;
-    ctx.font = "800 12px system-ui, -apple-system, Segoe UI, sans-serif";
-
-    for (const [label, colWidth] of columns) {
-      ctx.strokeRect(x, y - rowHeight, colWidth, rowHeight);
-      ctx.fillStyle = "#eaf2ff";
-      drawText(ctx, label, x + 8, y - 14, colWidth - 16);
-      x += colWidth;
-    }
-
-    let top = y;
-
-    rowPlans.forEach((plan, idx) => {
-      const row = plan.row;
-      x = 12;
-      ctx.fillStyle = idx % 2 ? "#0b1424" : "#0d1728";
-      ctx.fillRect(12, top, width - 24, plan.height);
-      ctx.font = "700 12px system-ui, -apple-system, Segoe UI, sans-serif";
-
-      for (const [label, colWidth, getter, kind] of columns) {
-        ctx.strokeStyle = "rgba(255,255,255,.10)";
-        ctx.strokeRect(x, top, colWidth, plan.height);
-        ctx.fillStyle =
-          row.cleansing_status === "클렌징" ? "#f87171" :
-            row.cleansing_status === "경고" ? "#fde68a" :
-              label === "사유" && noSpace(row.reason) === "반품" ? "#fca5a5" :
-                "#dbeafe";
-        if (kind === "grade" && !["클렌징", "경고"].includes(row.cleansing_status)) {
-          drawGradeBadge(ctx, getter(row), x + 8, top + 25, colWidth - 16);
-        } else if (kind === "zip") {
-          drawWrappedText(ctx, plan.zipLines.join("\n"), x + 8, top + 25, colWidth - 16);
-        } else if (kind === "demand") {
-          drawDemand(ctx, getter(row), x + 8, top + 20, colWidth - 16);
-        } else {
-          drawText(ctx, getter(row), x + 8, top + 25, colWidth - 16);
-        }
-        x += colWidth;
-      }
-
-      if (hasWaveDivider(row, idx)) {
-        ctx.strokeStyle = "rgba(255,255,255,.46)";
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(12, top + 1.5);
-        ctx.lineTo(width - 12, top + 1.5);
-        ctx.stroke();
-        ctx.lineWidth = 1;
-      }
-
-      top += plan.height;
-    });
-
-    const blob = await canvasBlob(canvas);
-
-    if (!blob) {
-      throw new Error("이미지 생성 실패");
-    }
-
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([
-        new ClipboardItem({ "image/png": blob })
-      ]);
-      alert("이미지를 클립보드에 복사했습니다.");
+    if (!window.htmlToImage?.toBlob) {
+      alert("이미지 생성 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.");
       return;
     }
 
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "cleansing_history.png";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const source = $("board");
+    const wrap = document.createElement("div");
+    const clone = source.cloneNode(true);
+
+    wrap.className = "captureCloneWrap";
+    clone.classList.add("captureBoard");
+
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+
+    const table = clone.querySelector("table");
+    if (table) {
+      table.style.width = table.scrollWidth + "px";
+    }
+
+    const cloneWidth = Math.ceil(Math.max(clone.scrollWidth, source.scrollWidth, 1180));
+    const cloneHeight = Math.ceil(clone.scrollHeight);
+
+    try {
+      const blob = await htmlToImage.toBlob(clone, {
+        backgroundColor:"#081120",
+        pixelRatio:2,
+        width:cloneWidth,
+        height:cloneHeight,
+        style:{
+          width:cloneWidth + "px",
+          height:cloneHeight + "px"
+        },
+        cacheBust:true
+      });
+
+      if (!blob) {
+        throw new Error("이미지 생성 실패");
+      }
+
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob })
+        ]);
+        alert("이미지를 클립보드에 복사했습니다.");
+        return;
+      }
+
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = captureFileName();
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally {
+      wrap.remove();
+    }
   }
 
   function bind() {

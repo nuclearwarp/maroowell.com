@@ -6,466 +6,91 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="referrer" content="origin" />
-  <title>정산 데이터 조회</title>
+  <title>정산 통계 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="/board-menu.js" defer></script>
-
   <style>
-    :root{
-      --bg:#081120;--panel:#101b2f;--panel2:#0d1728;--line:rgba(255,255,255,.11);--line2:rgba(255,255,255,.18);
-      --txt:#eaf2ff;--muted:#9fb0d0;--blue:#2563eb;--green:#16a34a;--red:#b91c1c;--yellow:#f59e0b;--cyan:#0891b2;
-      --shadow:0 16px 42px rgba(0,0,0,.28)
-    }
-    *{box-sizing:border-box}
-    html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif}
-    body{overflow:auto}button,input,select{font-family:inherit}
+    :root{--bg:#081120;--panel:#101b2f;--panel2:#0d1728;--line:rgba(255,255,255,.11);--line2:rgba(255,255,255,.18);--txt:#eaf2ff;--muted:#9fb0d0;--blue:#2563eb;--green:#16a34a;--red:#b91c1c;--yellow:#f59e0b;--shadow:0 16px 42px rgba(0,0,0,.28)}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif}body{overflow:auto}button,input,select,textarea{font-family:inherit}
     .app{min-height:100vh;min-height:100dvh;background:linear-gradient(180deg,var(--bg),#060b13)}
     .topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0b1424,#07101d)}
     .brand{display:flex;align-items:center;gap:10px;min-width:0}.logoButton{width:34px;height:34px;border:1px solid transparent;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;flex:0 0 auto;cursor:pointer;background:rgba(255,255,255,.03)}.logoButton:hover{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.18)}.logoButton img{width:28px;height:28px;display:block}.brandText{min-width:0}.brandText h1{margin:0;font-size:22px;line-height:1.05;letter-spacing:-.04em}.brandText p{margin:4px 0 0;color:var(--muted);font-size:12px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.topSpacer{flex:1}
     .userBadge{display:inline-flex;align-items:center;min-height:34px;max-width:260px;padding:0 12px;border-radius:999px;border:1px solid var(--line2);background:rgba(255,255,255,.05);color:#bfdbfe;font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .btn{height:38px;padding:0 13px;border-radius:999px;border:1px solid var(--line2);background:rgba(255,255,255,.07);color:var(--txt);font-size:13px;font-weight:900;cursor:pointer;white-space:nowrap;touch-action:manipulation}.btn:hover{background:rgba(255,255,255,.11)}.btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}.btn.ok{background:rgba(22,163,74,.55);border-color:rgba(134,239,172,.35)}.btn.warn{background:rgba(245,158,11,.34);border-color:rgba(253,230,138,.35)}.btn.copy{background:rgba(14,116,144,.55);border-color:rgba(103,232,249,.35)}.btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}.btn:disabled{opacity:.55;cursor:not-allowed}
-    .wrap{max-width:1680px;margin:0 auto;padding:16px 14px 44px}.card{border:1px solid var(--line2);border-radius:18px;background:rgba(16,27,47,.88);box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px}.cardHead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.04)}.cardHead h2{margin:0;font-size:17px;letter-spacing:-.03em}.cardBody{padding:16px}
-    .toolbar{display:grid;grid-template-columns:150px 120px 150px minmax(240px,1fr) auto auto auto;gap:10px;align-items:end}.field{display:flex;flex-direction:column;gap:6px;min-width:0}.field label{color:#bfdbfe;font-size:12px;font-weight:900}.input,.select{width:100%;height:42px;border-radius:12px;border:1px solid var(--line2);background:#0b1220;color:var(--txt);padding:0 12px;font-size:14px;font-weight:800;outline:none}.input:focus,.select:focus{border-color:rgba(96,165,250,.75);box-shadow:0 0 0 3px rgba(96,165,250,.12)}.select option{background:#0b1220;color:#fff}
-    .pillGrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-top:12px}.pill{display:flex;flex-direction:column;gap:5px;min-height:58px;border:1px solid var(--line2);border-radius:14px;background:rgba(255,255,255,.045);padding:9px 10px}.pill span{color:var(--muted);font-size:11px;font-weight:900}.pill b{font-size:18px;line-height:1.1}.status{font-size:13px;font-weight:800;line-height:1.55;color:#b7c7e6;white-space:pre-wrap;margin-top:10px}.status.ok{color:#bbf7d0}.status.warn{color:#fde68a}.status.err{color:#fecaca}.muted{color:var(--muted);font-size:13px;font-weight:800;line-height:1.55}.money{color:#bbf7d0;font-weight:950}.warnText{color:#fde68a;font-weight:950}.dangerText{color:#fecaca;font-weight:950}.left{text-align:left!important}
-    .tableWrap{overflow:auto;max-height:calc(100dvh - 315px);border-top:1px solid var(--line);background:rgba(0,0,0,.16)}table{width:100%;min-width:1420px;border-collapse:separate;border-spacing:0;font-size:12px}th,td{border-right:1px solid rgba(255,255,255,.11);border-bottom:1px solid rgba(255,255,255,.11);padding:7px 8px;text-align:center;vertical-align:middle;white-space:nowrap}th{position:sticky;top:0;z-index:2;background:#27364d;color:#fff;font-size:12px;font-weight:1000}td{background:rgba(255,255,255,.025)}tr:hover td{background:rgba(96,165,250,.08)}.emptyBox{padding:44px 12px;text-align:center;color:#cbd5e1;font-size:14px;font-weight:900}
-    .accessDenied{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,rgba(11,18,32,.96),rgba(11,18,32,.98));z-index:9999}.accessDenied.show{display:flex}.accessCard{width:min(520px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.10);border-radius:22px;background:#101827;box-shadow:0 24px 60px rgba(0,0,0,.35);padding:24px}.accessCard h2{margin:0 0 8px;font-size:24px}.accessCard p{margin:0;color:#b8c3d9;line-height:1.6;font-size:14px;white-space:pre-wrap}.accessMeta{margin-top:14px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e6eefc;font-size:13px;font-weight:800;word-break:break-word;line-height:1.6}.accessActions{margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
-    @media(max-width:980px){.brandText h1{font-size:18px}.brandText p,.userBadge{display:none}.topbar{padding:10px}.topbar .btn{height:34px;padding:0 10px;font-size:12px}.toolbar{grid-template-columns:1fr}.toolbar .btn{width:100%}.pillGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.tableWrap{max-height:none}.wrap{padding:10px 8px 36px}}
+    .btn{height:38px;padding:0 13px;border-radius:999px;border:1px solid var(--line2);background:rgba(255,255,255,.07);color:var(--txt);font-size:13px;font-weight:900;cursor:pointer;white-space:nowrap;touch-action:manipulation}.btn:hover{background:rgba(255,255,255,.11)}.btn.primary{background:rgba(37,99,235,.75);border-color:rgba(147,197,253,.45)}.btn.ok{background:rgba(22,163,74,.55);border-color:rgba(134,239,172,.35)}.btn.copy{background:rgba(14,116,144,.55);border-color:rgba(103,232,249,.35)}.btn.danger{background:rgba(185,28,28,.42);border-color:rgba(252,165,165,.35);color:#fecaca}.btn:disabled{opacity:.55;cursor:not-allowed}
+    .wrap{max-width:1760px;margin:0 auto;padding:16px 14px 44px}.card,.subCard{border:1px solid var(--line2);border-radius:18px;background:rgba(16,27,47,.88);box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px}.subCard{background:rgba(13,23,40,.78)}.cardHead,.subCardHead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.04)}.cardHead h2,.subCardHead h3{margin:0;font-size:17px;letter-spacing:-.03em}.subCardHead h3{font-size:15px}.cardHead .right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.cardBody{padding:16px}
+    .toolbar{display:grid;grid-template-columns:130px 130px 140px 140px 150px 150px minmax(220px,1fr) auto auto auto;gap:10px;align-items:end}.field{display:flex;flex-direction:column;gap:6px;min-width:0}.field label{color:#bfdbfe;font-size:12px;font-weight:900}.input,.select,.textarea{width:100%;border-radius:12px;border:1px solid var(--line2);background:#0b1220;color:var(--txt);padding:0 12px;font-size:14px;font-weight:800;outline:none}.input,.select{height:42px}.textarea{min-height:84px;padding:10px 12px;line-height:1.5;resize:vertical;font-size:12px;font-weight:800;white-space:pre;overflow:auto}.input:focus,.select:focus,.textarea:focus{border-color:rgba(96,165,250,.75);box-shadow:0 0 0 3px rgba(96,165,250,.12)}.select option{background:#0b1220;color:#fff}
+    .status{font-size:13px;font-weight:800;line-height:1.55;color:#b7c7e6;white-space:pre-wrap;margin-top:10px}.status.ok{color:#bbf7d0}.status.warn{color:#fde68a}.status.err{color:#fecaca}.muted{color:var(--muted);font-size:13px;font-weight:800;line-height:1.55}.hint{color:#9fb0d0;font-size:12px;font-weight:800;line-height:1.55;margin-top:8px}
+    .pillGrid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px;margin-top:12px}.pill{display:flex;flex-direction:column;gap:5px;min-height:58px;border:1px solid var(--line2);border-radius:14px;background:rgba(255,255,255,.045);padding:9px 10px;min-width:0}.pill span{color:var(--muted);font-size:11px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pill b{font-size:18px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.money{color:#bbf7d0;font-weight:950}.warnText{color:#fde68a;font-weight:950}.dangerText{color:#fecaca;font-weight:950}.blueText{color:#bfdbfe;font-weight:950}
+    .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.tableWrap{overflow:auto;max-height:560px;background:rgba(0,0,0,.14)}table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px}th,td{border-right:1px solid rgba(255,255,255,.11);border-bottom:1px solid rgba(255,255,255,.11);padding:8px 8px;text-align:center;vertical-align:middle;white-space:nowrap}th{position:sticky;top:0;z-index:2;background:#27364d;color:#fff;font-size:12px;font-weight:1000}td{background:rgba(255,255,255,.025);font-weight:800}tr:hover td{background:rgba(96,165,250,.08)}.left{text-align:left!important}.right{text-align:right!important;font-variant-numeric:tabular-nums}.center{text-align:center!important}.emptyBox{padding:44px 12px;text-align:center;color:#cbd5e1;font-size:14px;font-weight:900}
+    .aliasBox{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:12px;align-items:start}.accessDenied{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,rgba(11,18,32,.96),rgba(11,18,32,.98));z-index:9999}.accessDenied.show{display:flex}.accessCard{width:min(520px,calc(100vw - 24px));border:1px solid rgba(255,255,255,.10);border-radius:22px;background:#101827;box-shadow:0 24px 60px rgba(0,0,0,.35);padding:24px}.accessCard h2{margin:0 0 8px;font-size:24px}.accessCard p{margin:0;color:#b8c3d9;line-height:1.6;font-size:14px;white-space:pre-wrap}.accessMeta{margin-top:14px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e6eefc;font-size:13px;font-weight:800;word-break:break-word;line-height:1.6}.accessActions{margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+    @media(max-width:1280px){.toolbar{grid-template-columns:repeat(3,minmax(0,1fr))}.toolbar .btn{width:100%}.pillGrid{grid-template-columns:repeat(4,minmax(0,1fr))}.grid2{grid-template-columns:1fr}.aliasBox{grid-template-columns:1fr}}@media(max-width:720px){.brandText h1{font-size:18px}.brandText p,.userBadge{display:none}.topbar{padding:10px}.topbar .btn{height:34px;padding:0 10px;font-size:12px}.toolbar{grid-template-columns:1fr}.pillGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.wrap{padding:10px 8px 36px}.cardBody{padding:12px}.tableWrap{max-height:none}}
   </style>
 </head>
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand">
-        <a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기"><img src="/favicon.ico" alt="Maroowell" /></a>
-        <div class="brandText"><h1>정산 데이터 조회</h1><p>정산Raw / 분실파손List 월별 정산 데이터 조회</p></div>
-      </div>
+      <div class="brand"><a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기"><img src="/favicon.ico" alt="Maroowell" /></a><div class="brandText"><h1>정산 통계 조회</h1><p>maroowell_account 기반 월별·일별·요일별·노선별 수량 통계</p></div></div>
       <div class="topSpacer"></div><div id="userBadge" class="userBadge">-</div><button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </header>
-
     <main class="wrap">
-      <section class="card">
-        <div class="cardHead"><h2>조회 조건</h2><span id="stateText" class="muted">대기 중</span></div>
-        <div class="cardBody">
-          <div class="toolbar">
-            <div class="field"><label for="yearSelect">정산 연도</label><select id="yearSelect" class="select"></select></div>
-            <div class="field"><label for="monthSelect">정산 월</label><select id="monthSelect" class="select"></select></div>
-            <div class="field">
-              <label for="viewSelect">조회 구분</label>
-              <select id="viewSelect" class="select">
-                <option value="raw">정산Raw</option>
-                <option value="loss">분실/파손</option>
-              </select>
-            </div>
-            <div class="field"><label for="searchInput">검색</label><input id="searchInput" class="input" type="text" placeholder="ID / 이름 / Route / 캠프 / 운송장번호 / 상품명" autocomplete="off" /></div>
-            <button id="btnLoad" class="btn primary" type="button">조회</button>
-            <button id="btnExcel" class="btn ok" type="button">엑셀 다운로드</button>
-            <button id="btnReset" class="btn" type="button">초기화</button>
-          </div>
-          <div id="statusText" class="status">정산 연도와 월을 선택하고 조회를 누르세요.</div>
-          <div id="summaryGrid" class="pillGrid"></div>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="cardHead"><h2 id="tableTitle">정산 데이터</h2><span id="tableNote" class="muted">-</span></div>
-        <div class="tableWrap">
-          <table id="dataTable"><thead></thead><tbody><tr><td><div class="emptyBox">조회된 데이터가 없습니다.</div></td></tr></tbody></table>
-        </div>
-      </section>
+      <section class="card"><div class="cardHead"><h2>조회 조건</h2><span id="stateText" class="muted">대기 중</span></div><div class="cardBody"><div class="toolbar">
+        <div class="field"><label for="yearSelect">정산 연도</label><select id="yearSelect" class="select"></select></div>
+        <div class="field"><label for="monthSelect">정산 월</label><select id="monthSelect" class="select"></select></div>
+        <div class="field"><label for="rangeSelect">조회 범위</label><select id="rangeSelect" class="select"><option value="month">선택 월</option><option value="year">연도 전체</option></select></div>
+        <div class="field"><label for="campSelect">캠프</label><select id="campSelect" class="select"><option value="">전체 캠프</option></select></div>
+        <div class="field"><label for="waveSelect">주/야</label><select id="waveSelect" class="select"><option value="">전체</option><option value="주간">주간</option><option value="야간">야간</option><option value="WAVE2">WAVE2</option><option value="WAVE1">WAVE1</option></select></div>
+        <div class="field"><label for="routeModeSelect">노선 기준</label><select id="routeModeSelect" class="select"><option value="base">노선 묶음 예: 213</option><option value="exact">상세 라우트 예: 213A</option></select></div>
+        <div class="field"><label for="searchInput">검색</label><input id="searchInput" class="input" type="text" placeholder="캠프 / 노선 / ID / 배송유형" autocomplete="off" /></div>
+        <button id="btnLoad" class="btn primary" type="button">조회</button><button id="btnExcel" class="btn ok" type="button">엑셀 다운로드</button><button id="btnReset" class="btn" type="button">초기화</button>
+      </div><div id="statusText" class="status">정산 연도와 월을 선택하고 조회를 누르세요.</div><div id="summaryGrid" class="pillGrid"></div></div></section>
+      <section class="card"><div class="cardHead"><h2>노선 변경 / 캠프 변경 묶음 규칙</h2><div class="right"><button id="btnSaveAlias" class="btn copy" type="button">규칙 저장</button><button id="btnResetAlias" class="btn" type="button">기본값</button></div></div><div class="cardBody"><div class="aliasBox"><div><textarea id="aliasText" class="textarea" spellcheck="false"></textarea><div class="hint">형식: <b>현재캠프|현재노선 = 과거노선, 과거캠프|과거노선</b><br>예시: <b>대구3|213 = 329</b> → 대구3의 과거 329 노선을 현재 213 노선으로 합산합니다.</div></div><div class="muted">노선 기준이 <b>노선 묶음</b>일 때 적용됩니다.<br>213A, 213B 같은 상세 라우트는 기본적으로 213으로 묶습니다.<br>담당 캠프까지 바뀐 경우에는 <b>대구3|213 = 구캠프명|329</b>처럼 입력하면 됩니다.</div></div></div></section>
+      <section class="card"><div class="cardHead"><h2>노선별 수량 통계</h2><span id="routeNote" class="muted">-</span></div><div class="tableWrap"><table id="routeTable"><thead></thead><tbody><tr><td><div class="emptyBox">조회된 통계가 없습니다.</div></td></tr></tbody></table></div></section>
+      <div class="grid2"><section class="subCard"><div class="subCardHead"><h3>일별 수량 통계</h3><span id="dailyNote" class="muted">-</span></div><div class="tableWrap"><table id="dailyTable"><thead></thead><tbody><tr><td><div class="emptyBox">조회된 통계가 없습니다.</div></td></tr></tbody></table></div></section><section class="subCard"><div class="subCardHead"><h3>요일별 수량 통계</h3><span id="weekdayNote" class="muted">-</span></div><div class="tableWrap"><table id="weekdayTable"><thead></thead><tbody><tr><td><div class="emptyBox">조회된 통계가 없습니다.</div></td></tr></tbody></table></div></section></div>
+      <section class="card"><div class="cardHead"><h2>월별 수량 통계</h2><span id="monthlyNote" class="muted">-</span></div><div class="tableWrap"><table id="monthlyTable"><thead></thead><tbody><tr><td><div class="emptyBox">조회된 통계가 없습니다.</div></td></tr></tbody></table></div></section>
     </main>
   </div>
-
   <div id="accessDenied" class="accessDenied"><div class="accessCard"><h2>접근 권한 없음</h2><p id="accessDeniedText">최고관리자 권한이 필요합니다.</p><div id="accessDeniedEmail" class="accessMeta"></div><div class="accessActions"><button id="deniedHomeBtn" class="btn" type="button">홈으로</button><button id="deniedLogoutBtn" class="btn danger" type="button">로그아웃</button></div></div></div>
-
   <script>
     (async function(){
       "use strict";
-      const CONFIG = window.MARUWELL_CONFIG || {};
-      const SUPABASE_URL = CONFIG.SUPABASE_URL;
-      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY;
-      const LOGIN_PATH = CONFIG.PATHS?.login || "/login.html";
-      const HOME_PATH = CONFIG.PATHS?.index || "/zipcode_search";
-      const TABLE_NAME = "maroowell_account";
-
-      const els = {
-        userBadge:document.getElementById("userBadge"),
-        btnLogout:document.getElementById("btnLogout"),
-        yearSelect:document.getElementById("yearSelect"),
-        monthSelect:document.getElementById("monthSelect"),
-        viewSelect:document.getElementById("viewSelect"),
-        searchInput:document.getElementById("searchInput"),
-        btnLoad:document.getElementById("btnLoad"),
-        btnExcel:document.getElementById("btnExcel"),
-        btnReset:document.getElementById("btnReset"),
-        stateText:document.getElementById("stateText"),
-        statusText:document.getElementById("statusText"),
-        summaryGrid:document.getElementById("summaryGrid"),
-        dataTable:document.getElementById("dataTable"),
-        tableTitle:document.getElementById("tableTitle"),
-        tableNote:document.getElementById("tableNote"),
-        accessDenied:document.getElementById("accessDenied"),
-        accessDeniedText:document.getElementById("accessDeniedText"),
-        accessDeniedEmail:document.getElementById("accessDeniedEmail"),
-        deniedHomeBtn:document.getElementById("deniedHomeBtn"),
-        deniedLogoutBtn:document.getElementById("deniedLogoutBtn")
-      };
-
-      const state = { session:null, user:null, access:null, rows:[], filtered:[] };
-      const supabaseClient = SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase
-        ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}})
-        : null;
-
-      function clean(v){return String(v ?? "").trim()}
-      function esc(v){return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;")}
-      function num(v){const n=Number(v||0);return Number.isFinite(n)?n:0}
-      function money(v){return num(v).toLocaleString("ko-KR")}
-      function setStatus(text,type){els.statusText.textContent=text||"";els.statusText.className=type?`status ${type}`:"status"}
-      function setBusy(busy){els.btnLoad.disabled=busy;els.btnExcel.disabled=busy;els.stateText.textContent=busy?"처리 중":"READY"}
-      function currentView(){return els.viewSelect.value === "loss" ? "loss" : "raw"}
-
-      function isLossRow(row){
-        const source = clean(row.source_sheet).replace(/\s+/g,"").toLowerCase();
-        const classify = clean(row.classify).replace(/\s+/g,"").toLowerCase();
-        return source === "분실파손list".toLowerCase() || classify === "분실파손" || classify.includes("분실") || classify.includes("파손");
-      }
-
-      function isRawRow(row){
-        return !isLossRow(row);
-      }
-
-      function rowSettlementTotal(row){
-        return num(row.total_price) + num(row.freshbag_return) + num(row.deduction_price || 0);
-      }
-
-      function initPeriodSelects(){
-        const now=new Date();
-        const currentYear=now.getFullYear();
-        const currentMonth=now.getMonth()+1;
-        const years=[];
-        for(let y=currentYear+1;y>=currentYear-8;y--) years.push(y);
-        els.yearSelect.innerHTML=years.map(y=>`<option value="${y}">${y}년</option>`).join("");
-        els.monthSelect.innerHTML=Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}월</option>`).join("");
-        els.yearSelect.value=String(currentYear);
-        els.monthSelect.value=String(currentMonth);
-      }
-
-      function getSelectedPeriod(){
-        const dateYear=Number(els.yearSelect.value);
-        const dateMonth=Number(els.monthSelect.value);
-        if(!Number.isInteger(dateYear)||dateYear<2000||dateYear>2100) throw new Error("정산 연도를 선택하세요.");
-        if(!Number.isInteger(dateMonth)||dateMonth<1||dateMonth>12) throw new Error("정산 월을 선택하세요.");
-        return {date_year:dateYear,date_month:dateMonth};
-      }
-
-      function showAccessDenied(message){
-        els.accessDeniedText.textContent=message||"최고관리자 권한이 필요합니다.";
-        els.accessDeniedEmail.textContent=state.user?.email?`현재 계정: ${state.user.email}`:"로그인 계정을 확인할 수 없습니다.";
-        els.accessDenied.classList.add("show");
-        document.documentElement.style.visibility="visible";
-      }
-
-      async function logout(){
-        try{if(supabaseClient) await supabaseClient.auth.signOut()}catch{}
-        location.href=LOGIN_PATH;
-      }
-
-      async function checkAccess(){
-        if(!supabaseClient){
-          showAccessDenied("Supabase 설정을 찾지 못했습니다. config.js를 확인하세요.");
-          return false;
-        }
-
-        const {data:sessionData,error:sessionError}=await supabaseClient.auth.getSession();
-        if(sessionError) throw sessionError;
-
-        state.session=sessionData?.session||null;
-        state.user=state.session?.user||null;
-
-        if(!state.user){
-          location.href=`${LOGIN_PATH}?next=${encodeURIComponent(location.pathname)}`;
-          return false;
-        }
-
-        els.userBadge.textContent=state.user.email||state.user.id||"로그인";
-
-        const {data,error}=await supabaseClient.rpc("mw_my_access").maybeSingle();
-        if(error) throw error;
-
-        state.access=data||null;
-
-        const isSuperAdmin=data?.is_maroowell===true&&data?.is_admin===true&&Number(data?.max_role_level||0)>=90;
-        if(!isSuperAdmin){
-          showAccessDenied("최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상");
-          return false;
-        }
-
-        document.documentElement.style.visibility="visible";
-        return true;
-      }
-
-      async function loadRows(){
-        const period=getSelectedPeriod();
-        setBusy(true);
-        setStatus(`${period.date_year}년 ${period.date_month}월 데이터를 조회하는 중입니다...`,"");
-
-        try{
-          const {data,error}=await supabaseClient
-            .from(TABLE_NAME)
-            .select("*")
-            .eq("date_year",period.date_year)
-            .eq("date_month",period.date_month)
-            .order("delivery_date",{ascending:true,nullsFirst:false})
-            .order("route",{ascending:true,nullsFirst:false})
-            .order("row_id",{ascending:true});
-
-          if(error) throw error;
-
-          state.rows=Array.isArray(data)?data:[];
-          applyFilter();
-          setStatus(`조회 완료: ${state.filtered.length.toLocaleString("ko-KR")}행`,"ok");
-        }catch(err){
-          console.error(err);
-          setStatus(`조회 실패: ${err.message||err}`,"err");
-        }finally{
-          setBusy(false);
-        }
-      }
-
-      function baseRowsByView(){
-        return currentView() === "loss"
-          ? state.rows.filter(isLossRow)
-          : state.rows.filter(isRawRow);
-      }
-
-      function applyFilter(){
-        const q=clean(els.searchInput.value).toLowerCase();
-        const baseRows=baseRowsByView();
-
-        state.filtered=!q ? baseRows : baseRows.filter(row=>{
-          const fields=currentView()==="loss"
-            ? [row.delivery_date,row.camp,row.id,row.driver_name,row.loss_damage_type,row.loss_damage_detail,row.company_name,row.tracking_number,row.product_name]
-            : [row.classify,row.id,row.route,row.delivery_date,row.camp,row.wave,row.company_name];
-
-          return fields.some(v=>clean(v).toLowerCase().includes(q));
-        });
-
-        renderSummary();
-        renderTable();
-      }
-
-      function summaryPill(label,value,cls){
-        return `<div class="pill"><span>${esc(label)}</span><b class="${cls||""}">${esc(value)}</b></div>`;
-      }
-
-      function renderSummary(){
-        const period=getSelectedPeriod();
-        const rows=state.filtered;
-
-        if(currentView()==="loss"){
-          const deductionSum=rows.reduce((s,r)=>s+num(r.deduction_price || r.total_price),0);
-          const countSum=rows.reduce((s,r)=>s+num(r.loss_damage_count),0);
-          const campCount=new Set(rows.map(r=>clean(r.camp)).filter(Boolean)).size;
-          const idCount=new Set(rows.map(r=>clean(r.id)).filter(Boolean)).size;
-
-          els.summaryGrid.innerHTML=[
-            summaryPill("정산월",`${period.date_year}.${String(period.date_month).padStart(2,"0")}`),
-            summaryPill("전체 행",rows.length.toLocaleString("ko-KR")),
-            summaryPill("차감금액",money(deductionSum),"dangerText"),
-            summaryPill("개수",money(countSum)),
-            summaryPill("캠프 수",campCount.toLocaleString("ko-KR")),
-            summaryPill("ID 수",idCount.toLocaleString("ko-KR"))
-          ].join("");
-
-          return;
-        }
-
-        const defaultSum=rows.reduce((s,r)=>s+num(r.default_price),0);
-        const incentiveSum=rows.reduce((s,r)=>s+num(r.freshbag_incentive_price),0);
-        const returnSum=rows.reduce((s,r)=>s+num(r.freshbag_return),0);
-        const totalSum=rows.reduce((s,r)=>s+num(r.total_price),0);
-        const settlementSum=rows.reduce((s,r)=>s+rowSettlementTotal(r),0);
-
-        els.summaryGrid.innerHTML=[
-          summaryPill("정산월",`${period.date_year}.${String(period.date_month).padStart(2,"0")}`),
-          summaryPill("전체 행",rows.length.toLocaleString("ko-KR")),
-          summaryPill("배송금액",money(defaultSum),"money"),
-          summaryPill("프백 인센티브",money(incentiveSum),"warnText"),
-          summaryPill("프백 회수금액",money(returnSum),"warnText"),
-          summaryPill("총금액",money(totalSum),"money"),
-          summaryPill("정산합계",money(settlementSum),"money")
-        ].join("");
-      }
-
-      function renderTable(){
-        if(currentView()==="loss") renderLossTable();
-        else renderRawTable();
-      }
-
-      function renderRawTable(){
-        const headers=["No","구분","ID","Route","배송일자","캠프","배송유형","배송건수","반품","단가","추가 인센티브","기본금액","추가 인센티브 금액","프백 회수금액","총금액","정산합계"];
-        els.tableTitle.textContent="정산Raw";
-        els.dataTable.querySelector("thead").innerHTML=`<tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr>`;
-
-        if(!state.filtered.length){
-          els.dataTable.querySelector("tbody").innerHTML=`<tr><td colspan="${headers.length}"><div class="emptyBox">조회된 정산Raw 데이터가 없습니다.</div></td></tr>`;
-          els.tableNote.textContent="0행";
-          return;
-        }
-
-        els.dataTable.querySelector("tbody").innerHTML=state.filtered.map((row,idx)=>`
-          <tr>
-            <td>${idx+1}</td>
-            <td>${esc(row.classify)}</td>
-            <td class="left">${esc(row.id)}</td>
-            <td>${esc(row.route)}</td>
-            <td>${esc(row.delivery_date)}</td>
-            <td>${esc(row.camp)}</td>
-            <td>${esc(row.wave)}</td>
-            <td>${money(row.parcel)}</td>
-            <td>${money(row["return"])}</td>
-            <td>${money(row.price)}</td>
-            <td class="warnText">${money(row.freshbag_incentive)}</td>
-            <td class="money">${money(row.default_price)}</td>
-            <td class="warnText">${money(row.freshbag_incentive_price)}</td>
-            <td class="warnText">${money(row.freshbag_return)}</td>
-            <td class="money">${money(row.total_price)}</td>
-            <td class="money">${money(rowSettlementTotal(row))}</td>
-          </tr>
-        `).join("");
-
-        els.tableNote.textContent=`${state.filtered.length.toLocaleString("ko-KR")}행 표시`;
-      }
-
-      function renderLossTable(){
-        const headers=["No","날짜","캠프","ID","이름","유형","상세","개수","차감금액","업체명","운송장번호","상품명"];
-        els.tableTitle.textContent="분실/파손";
-        els.dataTable.querySelector("thead").innerHTML=`<tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr>`;
-
-        if(!state.filtered.length){
-          els.dataTable.querySelector("tbody").innerHTML=`<tr><td colspan="${headers.length}"><div class="emptyBox">조회된 분실/파손 데이터가 없습니다.</div></td></tr>`;
-          els.tableNote.textContent="0행";
-          return;
-        }
-
-        els.dataTable.querySelector("tbody").innerHTML=state.filtered.map((row,idx)=>`
-          <tr>
-            <td>${idx+1}</td>
-            <td>${esc(row.delivery_date)}</td>
-            <td>${esc(row.camp)}</td>
-            <td class="left">${esc(row.id)}</td>
-            <td class="left">${esc(row.driver_name)}</td>
-            <td>${esc(row.loss_damage_type)}</td>
-            <td class="left">${esc(row.loss_damage_detail)}</td>
-            <td>${money(row.loss_damage_count)}</td>
-            <td class="dangerText">${money(row.deduction_price || row.total_price)}</td>
-            <td>${esc(row.company_name)}</td>
-            <td>${esc(row.tracking_number)}</td>
-            <td class="left">${esc(row.product_name)}</td>
-          </tr>
-        `).join("");
-
-        els.tableNote.textContent=`${state.filtered.length.toLocaleString("ko-KR")}행 표시`;
-      }
-
-      function exportExcel(){
-        if(!state.filtered.length){
-          setStatus("다운로드할 데이터가 없습니다.","warn");
-          return;
-        }
-
-        const period=getSelectedPeriod();
-        const view=currentView();
-
-        const rows=view==="loss"
-          ? state.filtered.map((r,idx)=>({
-              No:idx+1,
-              정산연도:r.date_year,
-              정산월:r.date_month,
-              날짜:r.delivery_date,
-              캠프:r.camp,
-              ID:r.id,
-              이름:r.driver_name,
-              유형:r.loss_damage_type,
-              상세:r.loss_damage_detail,
-              개수:r.loss_damage_count,
-              차감금액:r.deduction_price || r.total_price,
-              업체명:r.company_name,
-              운송장번호:r.tracking_number,
-              상품명:r.product_name
-            }))
-          : state.filtered.map((r,idx)=>({
-              No:idx+1,
-              정산연도:r.date_year,
-              정산월:r.date_month,
-              구분:r.classify,
-              ID:r.id,
-              Route:r.route,
-              배송일자:r.delivery_date,
-              캠프:r.camp,
-              배송유형:r.wave,
-              배송건수:r.parcel,
-              반품:r["return"],
-              단가:r.price,
-              추가인센티브:r.freshbag_incentive,
-              기본금액:r.default_price,
-              추가인센티브금액:r.freshbag_incentive_price,
-              프백회수금액:r.freshbag_return,
-              총금액:r.total_price,
-              정산합계:rowSettlementTotal(r)
-            }));
-
-        const ws=XLSX.utils.json_to_sheet(rows);
-        const wb=XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb,ws,view==="loss"?"분실파손":"정산Raw");
-
-        const suffix=view==="loss"?"loss_damage":"raw";
-        XLSX.writeFile(wb,`maroowell_account_${suffix}_${period.date_year}_${String(period.date_month).padStart(2,"0")}.xlsx`);
-      }
-
-      function resetPage(){
-        state.rows=[];
-        state.filtered=[];
-        els.searchInput.value="";
-        setStatus("정산 연도와 월을 선택하고 조회를 누르세요.","");
-        renderSummary();
-        renderTable();
-      }
-
-      function resetViewOnly(){
-        els.searchInput.value="";
-        applyFilter();
-      }
-
-      function bind(){
-        els.btnLogout.addEventListener("click",logout);
-        els.deniedLogoutBtn.addEventListener("click",logout);
-        els.deniedHomeBtn.addEventListener("click",()=>{location.href=HOME_PATH});
-        els.btnLoad.addEventListener("click",loadRows);
-        els.btnExcel.addEventListener("click",exportExcel);
-        els.btnReset.addEventListener("click",resetPage);
-        els.searchInput.addEventListener("input",applyFilter);
-        els.viewSelect.addEventListener("change",resetViewOnly);
-        els.yearSelect.addEventListener("change",resetPage);
-        els.monthSelect.addEventListener("change",resetPage);
-      }
-
-      async function boot(){
-        initPeriodSelects();
-        bind();
-        renderSummary();
-        renderTable();
-
-        try{
-          await checkAccess();
-        }catch(err){
-          console.error(err);
-          showAccessDenied(err.message||String(err));
-        }
-      }
-
-      boot();
+      const CONFIG=window.MARUWELL_CONFIG||{},SUPABASE_URL=CONFIG.SUPABASE_URL,SUPABASE_ANON_KEY=CONFIG.SUPABASE_ANON_KEY,LOGIN_PATH=CONFIG.PATHS?.login||"/login.html",HOME_PATH=CONFIG.PATHS?.index||"/zipcode_search",TABLE_NAME="maroowell_account",ALIAS_STORAGE_KEY="maroowell_account_route_alias_rules_v1";
+      const DEFAULT_ALIAS_TEXT=["# 현재캠프|현재노선 = 과거노선, 과거캠프|과거노선","# 예시: 대구3 213 노선이 예전에는 329였으면 아래처럼 둡니다.","대구3|213 = 329"].join("\n"),WEEKDAYS=["일","월","화","수","목","금","토"];
+      const els={userBadge:gid("userBadge"),btnLogout:gid("btnLogout"),yearSelect:gid("yearSelect"),monthSelect:gid("monthSelect"),rangeSelect:gid("rangeSelect"),campSelect:gid("campSelect"),waveSelect:gid("waveSelect"),routeModeSelect:gid("routeModeSelect"),searchInput:gid("searchInput"),aliasText:gid("aliasText"),btnSaveAlias:gid("btnSaveAlias"),btnResetAlias:gid("btnResetAlias"),btnLoad:gid("btnLoad"),btnExcel:gid("btnExcel"),btnReset:gid("btnReset"),stateText:gid("stateText"),statusText:gid("statusText"),summaryGrid:gid("summaryGrid"),routeTable:gid("routeTable"),dailyTable:gid("dailyTable"),weekdayTable:gid("weekdayTable"),monthlyTable:gid("monthlyTable"),routeNote:gid("routeNote"),dailyNote:gid("dailyNote"),weekdayNote:gid("weekdayNote"),monthlyNote:gid("monthlyNote"),accessDenied:gid("accessDenied"),accessDeniedText:gid("accessDeniedText"),accessDeniedEmail:gid("accessDeniedEmail"),deniedHomeBtn:gid("deniedHomeBtn"),deniedLogoutBtn:gid("deniedLogoutBtn")};
+      const state={session:null,user:null,access:null,rows:[],rawRows:[],filteredRows:[],stats:null};
+      const supabaseClient=SUPABASE_URL&&SUPABASE_ANON_KEY&&window.supabase?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
+      function gid(id){return document.getElementById(id)}
+      function clean(v){return String(v??"").trim()}function esc(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;")}function num(v){const n=Number(v||0);return Number.isFinite(n)?n:0}function int(v){return Math.round(num(v))}function money(v){return num(v).toLocaleString("ko-KR")}function count(v){return int(v).toLocaleString("ko-KR")}function setStatus(text,type){els.statusText.textContent=text||"";els.statusText.className=type?`status ${type}`:"status"}function setBusy(b){els.btnLoad.disabled=b;els.btnExcel.disabled=b;els.stateText.textContent=b?"처리 중":"READY"}function isoMonth(d){return clean(d).slice(0,7)}function weekdayOf(d){const dt=new Date(`${d}T00:00:00`);return Number.isFinite(dt.getTime())?dt.getDay():-1}function weekdayLabel(d){const w=weekdayOf(d);return w>=0?WEEKDAYS[w]:""}
+      function isLossRow(row){const source=clean(row.source_sheet).replace(/\s+/g,"").toLowerCase(),classify=clean(row.classify).replace(/\s+/g,"").toLowerCase();return source==="분실파손list"||classify==="분실파손"||classify.includes("분실")||classify.includes("파손")}function isRawRow(row){return !isLossRow(row)}function classifyRawOk(row){const c=clean(row.classify);return !c||!/분실|파손/i.test(c)}
+      function normalizeWave(v){const raw=clean(v).toUpperCase();if(raw==="WAVE2"||raw==="2W"||raw==="주간")return"주간";if(raw==="WAVE1"||raw==="1W"||raw==="야간")return"야간";return clean(v)||"-"}
+      function routeTokens(v){const raw=clean(v);return raw?raw.split(/[,\s/]+/).map(clean).filter(Boolean):[]}function routeBase(v){const token=routeTokens(v)[0]||clean(v);if(!token)return"-";const m=token.match(/^(?:[A-Za-z가-힣_]*)(\d+)/);return m?m[1]:token}function routeExact(v){return routeTokens(v)[0]||clean(v)||"-"}function aliasKey(c,r){return`${clean(c)}||${clean(r)}`}
+      function parseAliasRules(text){const map=new Map(),errors=[];String(text||"").split(/\r?\n/).forEach((line,i)=>{const original=line;line=line.replace(/#.*$/,"").trim();if(!line)return;const parts=line.split("=");if(parts.length<2){errors.push(`${i+1}행: = 기호가 없습니다.`);return}const left=clean(parts.shift()),right=clean(parts.join("=")),lp=left.split("|").map(clean).filter(Boolean);if(lp.length<2){errors.push(`${i+1}행: 왼쪽은 현재캠프|현재노선 형식이어야 합니다. (${original})`);return}const cc=lp[0],cr=lp[1],aliases=right.split(",").map(clean).filter(Boolean);if(!aliases.length){errors.push(`${i+1}행: 오른쪽 과거 노선이 비어 있습니다.`);return}map.set(aliasKey(cc,cr),{camp:cc,route:cr});aliases.forEach(a=>{const ap=a.split("|").map(clean).filter(Boolean),ac=ap.length>=2?ap[0]:cc,ar=ap.length>=2?ap[1]:ap[0];if(ac&&ar)map.set(aliasKey(ac,ar),{camp:cc,route:cr})})});return{map,errors}}
+      function normalizedRouteGroup(row,aliasMap){const mode=els.routeModeSelect.value,oc=clean(row.camp)||"-",or=mode==="exact"?routeExact(row.route):routeBase(row.route);if(mode!=="base")return{camp:oc,route:or,originalCamp:oc,originalRoute:or,changed:false};const a=aliasMap.get(aliasKey(oc,or));return a?{camp:a.camp,route:a.route,originalCamp:oc,originalRoute:or,changed:a.camp!==oc||a.route!==or}:{camp:oc,route:or,originalCamp:oc,originalRoute:or,changed:false}}
+      function newMetric(extra={}){return{rows:0,parcel:0,return:0,quantity:0,default_price:0,freshbag_incentive_price:0,freshbag_return:0,freshbag_total:0,total_price:0,settlement_total:0,price_sum:0,price_count:0,dateSet:new Set(),idSet:new Set(),originalRouteSet:new Set(),first_date:"",last_date:"",uncontracted:0,...extra}}
+      function addMetric(t,row){const p=num(row.parcel),r=num(row.return),def=num(row.default_price),fi=num(row.freshbag_incentive_price),fr=num(row.freshbag_return),tp=num(row.total_price),price=num(row.price);t.rows++;t.parcel+=p;t.return+=r;t.quantity+=p+r;t.default_price+=def;t.freshbag_incentive_price+=fi;t.freshbag_return+=fr;t.freshbag_total+=fi+fr;t.total_price+=tp;t.settlement_total+=tp+fr;t.price_sum+=price;t.price_count+=price?1:0;const d=clean(row.delivery_date);if(d){t.dateSet.add(d);if(!t.first_date||d<t.first_date)t.first_date=d;if(!t.last_date||d>t.last_date)t.last_date=d}const id=clean(row.id);if(id)t.idSet.add(id);const or=clean(row.__originalRoute||row.route);if(or)t.originalRouteSet.add(or);if(clean(row.classify).includes("미계약"))t.uncontracted++}
+      function finalizeMetric(m){const days=m.dateSet?.size||0;return{...m,days,ids:m.idSet?.size||0,original_routes:Array.from(m.originalRouteSet||[]).sort((a,b)=>a.localeCompare(b,"ko",{numeric:true,sensitivity:"base"})).join(", "),avg_day:days?m.quantity/days:0,avg_price:m.price_count?m.price_sum/m.price_count:0}}
+      function initPeriodSelects(){const now=new Date(),cy=now.getFullYear(),cm=now.getMonth()+1,years=[];for(let y=cy+1;y>=cy-8;y--)years.push(y);els.yearSelect.innerHTML=years.map(y=>`<option value="${y}">${y}년</option>`).join("");els.monthSelect.innerHTML=Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}월</option>`).join("");els.yearSelect.value=String(cy);els.monthSelect.value=String(cm)}function initAliasText(){els.aliasText.value=localStorage.getItem(ALIAS_STORAGE_KEY)||DEFAULT_ALIAS_TEXT}
+      function getSelectedPeriod(){const y=Number(els.yearSelect.value),m=Number(els.monthSelect.value);if(!Number.isInteger(y)||y<2000||y>2100)throw new Error("정산 연도를 선택하세요.");if(!Number.isInteger(m)||m<1||m>12)throw new Error("정산 월을 선택하세요.");return{date_year:y,date_month:m,range:els.rangeSelect.value}}
+      function showAccessDenied(msg){els.accessDeniedText.textContent=msg||"최고관리자 권한이 필요합니다.";els.accessDeniedEmail.textContent=state.user?.email?`현재 계정: ${state.user.email}`:"로그인 계정을 확인할 수 없습니다.";els.accessDenied.classList.add("show");document.documentElement.style.visibility="visible"}
+      async function logout(){try{if(supabaseClient)await supabaseClient.auth.signOut()}catch{}location.href=LOGIN_PATH}
+      async function checkAccess(){if(!supabaseClient){showAccessDenied("Supabase 설정을 찾지 못했습니다. config.js를 확인하세요.");return false}const{data:sd,error:se}=await supabaseClient.auth.getSession();if(se)throw se;state.session=sd?.session||null;state.user=state.session?.user||null;if(!state.user){location.href=`${LOGIN_PATH}?next=${encodeURIComponent(location.pathname)}`;return false}els.userBadge.textContent=state.user.email||state.user.id||"로그인";const{data,error}=await supabaseClient.rpc("mw_my_access").maybeSingle();if(error)throw error;state.access=data||null;const ok=data?.is_maroowell===true&&data?.is_admin===true&&Number(data?.max_role_level||0)>=90;if(!ok){showAccessDenied("최고관리자 권한이 필요합니다.\n조건: 마루웰 권한 + 관리자 권한 + role_level 90 이상");return false}document.documentElement.style.visibility="visible";return true}
+      async function fetchAccountRows(period){const pageSize=1000,out=[];for(let from=0;from<100000;from+=pageSize){let q=supabaseClient.from(TABLE_NAME).select("*").eq("date_year",period.date_year);if(period.range!=="year")q=q.eq("date_month",period.date_month);q=q.order("delivery_date",{ascending:true,nullsFirst:false}).order("camp",{ascending:true,nullsFirst:false}).order("wave",{ascending:true,nullsFirst:false}).order("route",{ascending:true,nullsFirst:false}).range(from,from+pageSize-1);const{data,error}=await q;if(error)throw error;const rows=Array.isArray(data)?data:[];out.push(...rows);if(rows.length<pageSize)break}return out}
+      function rebuildCampOptions(rows){const selected=els.campSelect.value,camps=Array.from(new Set(rows.map(r=>clean(r.camp)).filter(Boolean))).sort((a,b)=>a.localeCompare(b,"ko",{numeric:true,sensitivity:"base"}));els.campSelect.innerHTML=`<option value="">전체 캠프</option>`+camps.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");if(selected&&camps.includes(selected))els.campSelect.value=selected}
+      function baseFilteredRows(){const q=clean(els.searchInput.value).toLowerCase(),camp=clean(els.campSelect.value),wave=clean(els.waveSelect.value),aliasMap=parseAliasRules(els.aliasText.value).map;return state.rawRows.filter(row=>{const g=normalizedRouteGroup(row,aliasMap),rw=normalizeWave(row.wave);if(camp&&g.camp!==camp&&clean(row.camp)!==camp)return false;if(wave){const wn=normalizeWave(wave);if(rw!==wn&&clean(row.wave)!==wave)return false}if(q){const hay=[row.classify,row.id,row.route,g.route,row.delivery_date,row.camp,g.camp,row.wave,rw].map(clean).join(" ").toLowerCase();if(!hay.includes(q))return false}return true})}
+      function buildStats(){const alias=parseAliasRules(els.aliasText.value);if(alias.errors.length)setStatus(`노선 묶음 규칙 오류가 있습니다.\n${alias.errors.join("\n")}`,"warn");const aliasMap=alias.map,filtered=baseFilteredRows();state.filteredRows=filtered;const total=newMetric(),routeMap=new Map(),dailyMap=new Map(),weekdayMap=new Map(),monthlyMap=new Map();filtered.forEach(row=>{const g=normalizedRouteGroup(row,aliasMap),wave=normalizeWave(row.wave),date=clean(row.delivery_date),month=isoMonth(date)||`${row.date_year||""}-${String(row.date_month||"").padStart(2,"0")}`,weekday=weekdayLabel(date);row.__groupCamp=g.camp;row.__groupRoute=g.route;row.__originalCamp=g.originalCamp;row.__originalRoute=g.originalRoute;row.__groupChanged=g.changed;row.__waveNorm=wave;addMetric(total,row);const rk=`${g.camp}||${wave}||${g.route}`;if(!routeMap.has(rk))routeMap.set(rk,newMetric({camp:g.camp,wave,route:g.route,originalGroupSet:new Set()}));const rm=routeMap.get(rk);rm.originalGroupSet.add(`${g.originalCamp} ${g.originalRoute}`);addMetric(rm,row);if(date){const dk=`${date}||${g.camp}||${wave}`;if(!dailyMap.has(dk))dailyMap.set(dk,newMetric({date,weekday,camp:g.camp,wave}));addMetric(dailyMap.get(dk),row)}if(weekday){const wn=weekdayOf(date),wk=`${wn}||${weekday}||${g.camp}||${wave}`;if(!weekdayMap.has(wk))weekdayMap.set(wk,newMetric({weekday_no:wn,weekday,camp:g.camp,wave}));addMetric(weekdayMap.get(wk),row)}if(month){const mk=`${month}||${g.camp}||${wave}`;if(!monthlyMap.has(mk))monthlyMap.set(mk,newMetric({month,camp:g.camp,wave}));addMetric(monthlyMap.get(mk),row)}});const routeRows=Array.from(routeMap.values()).map(m=>{const fm=finalizeMetric(m);fm.original_groups=Array.from(m.originalGroupSet||[]).sort((a,b)=>a.localeCompare(b,"ko",{numeric:true,sensitivity:"base"})).join(", ");return fm}).sort((a,b)=>b.quantity-a.quantity||a.camp.localeCompare(b.camp,"ko",{numeric:true,sensitivity:"base"})||a.wave.localeCompare(b.wave,"ko",{numeric:true,sensitivity:"base"})||a.route.localeCompare(b.route,"ko",{numeric:true,sensitivity:"base"}));const dailyRows=Array.from(dailyMap.values()).map(finalizeMetric).sort((a,b)=>a.date.localeCompare(b.date)||a.camp.localeCompare(b.camp,"ko",{numeric:true,sensitivity:"base"})||a.wave.localeCompare(b.wave,"ko",{numeric:true,sensitivity:"base"}));const weekdayRows=Array.from(weekdayMap.values()).map(finalizeMetric).sort((a,b)=>a.weekday_no-b.weekday_no||a.camp.localeCompare(b.camp,"ko",{numeric:true,sensitivity:"base"})||a.wave.localeCompare(b.wave,"ko",{numeric:true,sensitivity:"base"}));const monthlyRows=Array.from(monthlyMap.values()).map(finalizeMetric).sort((a,b)=>a.month.localeCompare(b.month)||a.camp.localeCompare(b.camp,"ko",{numeric:true,sensitivity:"base"})||a.wave.localeCompare(b.wave,"ko",{numeric:true,sensitivity:"base"}));state.stats={total:finalizeMetric(total),routeRows,dailyRows,weekdayRows,monthlyRows};renderAll()}
+      async function loadRows(){const period=getSelectedPeriod(),label=period.range==="year"?`${period.date_year}년 전체`:`${period.date_year}년 ${period.date_month}월`;setBusy(true);setStatus(`${label} 정산 데이터를 조회하는 중입니다...`,"");try{const rows=await fetchAccountRows(period);state.rows=rows;state.rawRows=rows.filter(isRawRow).filter(classifyRawOk);rebuildCampOptions(state.rawRows);buildStats();const rawCount=state.rawRows.length,lossCount=rows.filter(isLossRow).length;setStatus(`조회 완료: 정산Raw ${rawCount.toLocaleString("ko-KR")}행 기준으로 통계를 생성했습니다. / 분실·파손 ${lossCount.toLocaleString("ko-KR")}행은 수량 통계에서 제외했습니다.`,"ok")}catch(err){console.error(err);setStatus(`조회 실패: ${err.message||err}`,"err")}finally{setBusy(false)}}
+      function summaryPill(label,value,cls){return`<div class="pill"><span>${esc(label)}</span><b class="${cls||""}">${esc(value)}</b></div>`}function renderSummary(){const s=state.stats?.total||newMetric(),p=getSelectedPeriod(),pt=p.range==="year"?`${p.date_year}년`:`${p.date_year}.${String(p.date_month).padStart(2,"0")}`;els.summaryGrid.innerHTML=[summaryPill("조회 범위",pt,"blueText"),summaryPill("집계 행",count(s.rows)),summaryPill("일자 수",count(s.days)),summaryPill("배송",count(s.parcel)),summaryPill("반품",count(s.return)),summaryPill("총수량",count(s.quantity),"money"),summaryPill("일평균",s.avg_day?s.avg_day.toLocaleString("ko-KR",{maximumFractionDigits:1}):"0","warnText"),summaryPill("총금액",money(s.settlement_total),"money")].join("")}
+      function setHead(table,headers){table.querySelector("thead").innerHTML=`<tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr>`}function setEmpty(table,len,msg){table.querySelector("tbody").innerHTML=`<tr><td colspan="${len}"><div class="emptyBox">${esc(msg)}</div></td></tr>`}
+      function renderRouteTable(){const rows=state.stats?.routeRows||[],headers=["캠프","주/야","노선","일자 수","배송","반품","총수량","일평균","기본금액","프백 인센티브","프백 회수","총금액","원본 노선","기간"];setHead(els.routeTable,headers);if(!rows.length){setEmpty(els.routeTable,headers.length,"조회된 노선별 통계가 없습니다.");els.routeNote.textContent="0행";return}els.routeTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td class="left">${esc(r.route)}</td><td class="right">${count(r.days)}</td><td class="right">${count(r.parcel)}</td><td class="right">${count(r.return)}</td><td class="right money">${count(r.quantity)}</td><td class="right warnText">${r.avg_day.toLocaleString("ko-KR",{maximumFractionDigits:1})}</td><td class="right">${money(r.default_price)}</td><td class="right">${money(r.freshbag_incentive_price)}</td><td class="right">${money(r.freshbag_return)}</td><td class="right money">${money(r.settlement_total)}</td><td class="left">${esc(r.original_groups||"-")}</td><td>${esc([r.first_date,r.last_date].filter(Boolean).join(" ~ "))}</td></tr>`).join("");els.routeNote.textContent=`${rows.length.toLocaleString("ko-KR")}개 노선 그룹`}
+      function renderDailyTable(){const rows=state.stats?.dailyRows||[],headers=["배송일자","요일","캠프","주/야","노선 수","배송","반품","총수량","기본금액","프백 인센티브","프백 회수","총금액"];setHead(els.dailyTable,headers);if(!rows.length){setEmpty(els.dailyTable,headers.length,"조회된 일별 통계가 없습니다.");els.dailyNote.textContent="0행";return}els.dailyTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.weekday)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td class="right">${count(r.originalRouteSet?.size||0)}</td><td class="right">${count(r.parcel)}</td><td class="right">${count(r.return)}</td><td class="right money">${count(r.quantity)}</td><td class="right">${money(r.default_price)}</td><td class="right">${money(r.freshbag_incentive_price)}</td><td class="right">${money(r.freshbag_return)}</td><td class="right money">${money(r.settlement_total)}</td></tr>`).join("");els.dailyNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}
+      function renderWeekdayTable(){const rows=state.stats?.weekdayRows||[],headers=["요일","캠프","주/야","일자 수","배송","반품","총수량","일평균","기본금액","프백 인센티브","프백 회수","총금액"];setHead(els.weekdayTable,headers);if(!rows.length){setEmpty(els.weekdayTable,headers.length,"조회된 요일별 통계가 없습니다.");els.weekdayNote.textContent="0행";return}els.weekdayTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.weekday)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td class="right">${count(r.days)}</td><td class="right">${count(r.parcel)}</td><td class="right">${count(r.return)}</td><td class="right money">${count(r.quantity)}</td><td class="right warnText">${r.avg_day.toLocaleString("ko-KR",{maximumFractionDigits:1})}</td><td class="right">${money(r.default_price)}</td><td class="right">${money(r.freshbag_incentive_price)}</td><td class="right">${money(r.freshbag_return)}</td><td class="right money">${money(r.settlement_total)}</td></tr>`).join("");els.weekdayNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}
+      function renderMonthlyTable(){const rows=state.stats?.monthlyRows||[],headers=["정산월","캠프","주/야","일자 수","배송","반품","총수량","일평균","기본금액","프백 인센티브","프백 회수","총금액"];setHead(els.monthlyTable,headers);if(!rows.length){setEmpty(els.monthlyTable,headers.length,"조회된 월별 통계가 없습니다.");els.monthlyNote.textContent="0행";return}els.monthlyTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.month)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td class="right">${count(r.days)}</td><td class="right">${count(r.parcel)}</td><td class="right">${count(r.return)}</td><td class="right money">${count(r.quantity)}</td><td class="right warnText">${r.avg_day.toLocaleString("ko-KR",{maximumFractionDigits:1})}</td><td class="right">${money(r.default_price)}</td><td class="right">${money(r.freshbag_incentive_price)}</td><td class="right">${money(r.freshbag_return)}</td><td class="right money">${money(r.settlement_total)}</td></tr>`).join("");els.monthlyNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}
+      function renderAll(){renderSummary();renderRouteTable();renderDailyTable();renderWeekdayTable();renderMonthlyTable()}function resetTables(){state.rows=[];state.rawRows=[];state.filteredRows=[];state.stats=null;renderAll();setStatus("정산 연도와 월을 선택하고 조회를 누르세요.","")}
+      function sheetFromRows(rows,mapper){return rows.map((r,i)=>({No:i+1,...mapper(r)}))}function exportExcel(){if(!state.stats||!state.filteredRows.length){setStatus("다운로드할 통계가 없습니다. 먼저 조회하세요.","warn");return}const p=getSelectedPeriod(),pp=p.range==="year"?`${p.date_year}`:`${p.date_year}_${String(p.date_month).padStart(2,"0")}`,wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetFromRows(state.stats.routeRows,r=>({캠프:r.camp,주야:r.wave,노선:r.route,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity,일평균:Number(r.avg_day.toFixed(1)),기본금액:r.default_price,프백인센티브:r.freshbag_incentive_price,프백회수:r.freshbag_return,총금액:r.settlement_total,원본노선:r.original_groups,시작일:r.first_date,종료일:r.last_date}))),"노선별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetFromRows(state.stats.dailyRows,r=>({배송일자:r.date,요일:r.weekday,캠프:r.camp,주야:r.wave,노선수:r.originalRouteSet?.size||0,배송:r.parcel,반품:r.return,총수량:r.quantity,기본금액:r.default_price,프백인센티브:r.freshbag_incentive_price,프백회수:r.freshbag_return,총금액:r.settlement_total}))),"일별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetFromRows(state.stats.weekdayRows,r=>({요일:r.weekday,캠프:r.camp,주야:r.wave,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity,일평균:Number(r.avg_day.toFixed(1)),기본금액:r.default_price,프백인센티브:r.freshbag_incentive_price,프백회수:r.freshbag_return,총금액:r.settlement_total}))),"요일별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetFromRows(state.stats.monthlyRows,r=>({정산월:r.month,캠프:r.camp,주야:r.wave,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity,일평균:Number(r.avg_day.toFixed(1)),기본금액:r.default_price,프백인센티브:r.freshbag_incentive_price,프백회수:r.freshbag_return,총금액:r.settlement_total}))),"월별");XLSX.writeFile(wb,`maroowell_account_stats_${pp}.xlsx`)}
+      function saveAliasRules(){localStorage.setItem(ALIAS_STORAGE_KEY,els.aliasText.value);buildStats();setStatus("노선 묶음 규칙을 저장하고 통계를 다시 계산했습니다.","ok")}function resetAliasRules(){els.aliasText.value=DEFAULT_ALIAS_TEXT;localStorage.setItem(ALIAS_STORAGE_KEY,DEFAULT_ALIAS_TEXT);buildStats();setStatus("노선 묶음 규칙을 기본값으로 되돌렸습니다.","ok")}
+      function bind(){els.btnLogout.addEventListener("click",logout);els.deniedLogoutBtn.addEventListener("click",logout);els.deniedHomeBtn.addEventListener("click",()=>{location.href=HOME_PATH});els.btnLoad.addEventListener("click",loadRows);els.btnExcel.addEventListener("click",exportExcel);els.btnReset.addEventListener("click",resetTables);els.btnSaveAlias.addEventListener("click",saveAliasRules);els.btnResetAlias.addEventListener("click",resetAliasRules);[els.campSelect,els.waveSelect,els.routeModeSelect,els.searchInput].forEach(el=>{el.addEventListener("input",()=>{if(state.rawRows.length)buildStats()});el.addEventListener("change",()=>{if(state.rawRows.length)buildStats()})});[els.yearSelect,els.monthSelect,els.rangeSelect].forEach(el=>el.addEventListener("change",resetTables));els.searchInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&state.rawRows.length)buildStats()})}
+      async function boot(){initPeriodSelects();initAliasText();bind();renderAll();try{await checkAccess()}catch(err){console.error(err);showAccessDenied(err.message||String(err))}}boot();
     })();
   </script>
 </body>

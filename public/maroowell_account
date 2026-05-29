@@ -104,78 +104,291 @@
       function exportExcel(){if(!state.stats||!state.filteredRows.length){setStatus("다운로드할 통계가 없습니다. 먼저 조회하세요.","warn");return}const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetRows(state.stats.routeRows,r=>({캠프:r.camp,주야:r.wave,노선:r.route,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity,일평균:Number(r.avg_day.toFixed(1)),원본캠프노선:r.original_groups,시작일:r.first_date,종료일:r.last_date}))),"노선별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetRows(state.stats.dailyRows,r=>({배송일자:r.date,요일:r.weekday,캠프:r.camp,주야:r.wave,노선:r.route,배송:r.parcel,반품:r.return,총수량:r.quantity}))),"일별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetRows(state.stats.weekdayRows,r=>({요일:r.weekday,캠프:r.camp,주야:r.wave,노선:r.route,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity}))),"요일별");XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(sheetRows(state.stats.monthlyRows,r=>({정산월:r.month,캠프:r.camp,주야:r.wave,노선:r.route,일자수:r.days,배송:r.parcel,반품:r.return,총수량:r.quantity,일평균:Number(r.avg_day.toFixed(1))}))),"월별");XLSX.writeFile(wb,`maroowell_account_stats_${Date.now()}.xlsx`)}
       async function copyTable(tableId){
         const source=document.getElementById(tableId);
-        if(!source||!source.querySelector("tbody tr")){
-          alert("복사할 표가 없습니다.");
-          return;
-        }
-        if(!window.htmlToImage?.toBlob){
-          alert("이미지 생성 라이브러리를 불러오지 못했습니다.");
+        if(!source){
+          alert("복사할 표를 찾지 못했습니다.");
           return;
         }
 
-        const waitFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-        const fullTableHeight=table=>{
-          let h=0;
-          const caption=table.querySelector("caption");
-          if(caption)h+=caption.getBoundingClientRect().height;
-          const thead=table.querySelector("thead");
-          if(thead)h+=thead.getBoundingClientRect().height;
-          table.querySelectorAll("tbody tr").forEach(tr=>{h+=tr.getBoundingClientRect().height});
-          return Math.ceil(h+4);
-        };
+        const headerCells=Array.from(source.querySelectorAll("thead tr:first-child th"));
+        const bodyRows=Array.from(source.querySelectorAll("tbody tr"))
+          .filter(tr=>!tr.querySelector(".emptyBox"))
+          .map(tr=>Array.from(tr.children).map(td=>td.innerText.trim()));
 
-        const wrap=document.createElement("div");
-        const clone=source.cloneNode(true);
-        wrap.className="captureWrap";
-        clone.classList.add("captureTable");
+        if(!headerCells.length||!bodyRows.length){
+          alert("복사할 표 데이터가 없습니다.");
+          return;
+        }
 
-        // 화면에서는 tableWrap의 max-height 때문에 스크롤이 생기지만,
-        // 이미지 복사는 실제 table 전체 높이로 강제해서 화면 해상도와 무관하게 끝까지 캡처한다.
-        clone.style.position="static";
-        clone.style.display="table";
-        clone.style.maxHeight="none";
-        clone.style.overflow="visible";
-        clone.style.transform="none";
-        clone.querySelectorAll("th").forEach(th=>{
-          th.style.position="static";
-          th.style.top="auto";
-          th.style.zIndex="auto";
+        const headers=headerCells.map(th=>th.innerText.trim());
+        const captionText=(source.querySelector("caption")?.innerText||"").trim();
+        const colCount=Math.max(headers.length,...bodyRows.map(r=>r.length));
+        const rows=bodyRows.map(r=>{
+          const out=r.slice(0,colCount);
+          while(out.length<colCount)out.push("");
+          return out;
         });
 
-        wrap.appendChild(clone);
-        document.body.appendChild(wrap);
+        const canvas=document.createElement("canvas");
+        const ctx=canvas.getContext("2d");
 
-        try{
-          await waitFrame();
+        const scale=2;
+        const padX=12;
+        const rowPadY=9;
+        const headerH=44;
+        const captionH=captionText?68:0;
+        const font="800 14px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const headerFont="1000 15px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const captionFont="1000 18px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const smallFont="800 12px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
 
-          const rect=clone.getBoundingClientRect();
-          const fullH=fullTableHeight(clone);
-          const w=Math.ceil(Math.max(clone.scrollWidth,clone.offsetWidth,rect.width,760));
-          const h=Math.ceil(Math.max(clone.scrollHeight,clone.offsetHeight,rect.height,fullH));
+        function isNumText(v){
+          return /^-?[\d,]+(\.\d+)?$/.test(String(v||"").trim());
+        }
 
-          clone.style.width=w+"px";
-          clone.style.height=h+"px";
-          wrap.style.width=w+"px";
-          wrap.style.height=h+"px";
+        function isNumericColumn(name){
+          return /일자$|배송|반품|총수량|일평균/.test(name||"");
+        }
 
-          await waitFrame();
+        function wrapText(text,maxWidth,fontValue){
+          const raw=String(text??"");
+          const hardLines=raw.split(/\n/);
+          ctx.font=fontValue||font;
+          const lines=[];
 
-          const blob=await htmlToImage.toBlob(wrap,{
-            backgroundColor:"#ffffff",
-            pixelRatio:2,
-            width:w,
-            height:h,
-            style:{
-              width:w+"px",
-              height:h+"px",
-              background:"#ffffff",
-              overflow:"visible",
-              maxHeight:"none"
-            },
-            cacheBust:true
+          hardLines.forEach(part=>{
+            const words=part.split(/(\s+)/).filter(v=>v!=="");
+            let line="";
+
+            if(!words.length){
+              lines.push("");
+              return;
+            }
+
+            words.forEach(word=>{
+              const next=line+word;
+              if(ctx.measureText(next).width<=maxWidth||!line){
+                line=next;
+                return;
+              }
+              lines.push(line.trimEnd());
+              line=word.trimStart();
+            });
+
+            if(line)lines.push(line.trimEnd());
           });
 
-          if(!blob)throw new Error("이미지 생성 실패");
+          return lines.length?lines:[""];
+        }
+
+        function maxColumnWidth(index){
+          const header=headers[index]||"";
+          if(/원본/.test(header))return 360;
+          if(/기간/.test(header))return 230;
+          if(/배송일자|정산월/.test(header))return 135;
+          if(/캠프/.test(header))return 120;
+          if(/주\/야/.test(header))return 95;
+          if(/노선/.test(header))return 110;
+          if(/일평균/.test(header))return 120;
+          if(/배송|반품|총수량|일자/.test(header))return 125;
+          return 140;
+        }
+
+        function minColumnWidth(index){
+          const header=headers[index]||"";
+          if(/원본/.test(header))return 260;
+          if(/기간/.test(header))return 190;
+          if(/배송일자|정산월/.test(header))return 120;
+          if(/캠프/.test(header))return 90;
+          if(/노선/.test(header))return 80;
+          return 78;
+        }
+
+        ctx.font=font;
+        const widths=Array.from({length:colCount},(_,i)=>{
+          const header=headers[i]||"";
+          let w=ctx.measureText(header).width+padX*2;
+
+          rows.forEach(row=>{
+            const cell=String(row[i]||"");
+            ctx.font=font;
+            const lines=cell.split(/\n/);
+            lines.forEach(line=>{
+              w=Math.max(w,ctx.measureText(line).width+padX*2);
+            });
+          });
+
+          return Math.ceil(Math.max(minColumnWidth(i),Math.min(maxColumnWidth(i),w)));
+        });
+
+        // 표가 너무 좁아져서 글자가 찢어지는 걸 방지한다.
+        const tableW=widths.reduce((a,b)=>a+b,0);
+        const lineH=22;
+
+        const wrappedRows=rows.map(row=>row.map((cell,i)=>{
+          const header=headers[i]||"";
+          const usable=widths[i]-padX*2;
+          const shouldWrap=/원본|기간/.test(header);
+          if(shouldWrap)return wrapText(cell,usable,font);
+          return String(cell??"").split(/\n/);
+        }));
+
+        const rowHeights=wrappedRows.map(row=>{
+          const maxLines=Math.max(1,...row.map(lines=>lines.length));
+          return Math.max(42,maxLines*lineH+rowPadY*2);
+        });
+
+        const tableH=captionH+headerH+rowHeights.reduce((a,b)=>a+b,0);
+        canvas.width=Math.ceil(tableW*scale);
+        canvas.height=Math.ceil(tableH*scale);
+        canvas.style.width=tableW+"px";
+        canvas.style.height=tableH+"px";
+        ctx.scale(scale,scale);
+
+        ctx.fillStyle="#ffffff";
+        ctx.fillRect(0,0,tableW,tableH);
+
+        function drawStatCaption(){
+          if(!captionText)return;
+
+          ctx.fillStyle="#ffffff";
+          ctx.fillRect(0,0,tableW,captionH);
+
+          ctx.font=captionFont;
+          ctx.textBaseline="top";
+
+          const parts=[];
+          const re=/(최고수량\s[\d,.]+\s\([^)]+\)|최저수량\s[\d,.]+\s\([^)]+\)|평균수량\s[\d,.]+)/g;
+          let last=0;
+          let match;
+
+          while((match=re.exec(captionText))){
+            if(match.index>last)parts.push({text:captionText.slice(last,match.index),color:"#111827"});
+            const text=match[0];
+            const color=text.startsWith("최고수량")?"#2563eb":text.startsWith("최저수량")?"#ef4444":"#ca8a04";
+            parts.push({text,color});
+            last=re.lastIndex;
+          }
+
+          if(last<captionText.length)parts.push({text:captionText.slice(last),color:"#111827"});
+
+          let x=16,y=14;
+          const maxX=tableW-16;
+
+          parts.forEach(part=>{
+            const chars=String(part.text).split("");
+            let buf="";
+            ctx.fillStyle=part.color;
+
+            chars.forEach(ch=>{
+              const next=buf+ch;
+              if(x+ctx.measureText(next).width>maxX&&buf){
+                ctx.fillText(buf,x,y);
+                x+=ctx.measureText(buf).width;
+                x=16;
+                y+=25;
+                buf=ch;
+              }else{
+                buf=next;
+              }
+            });
+
+            if(buf){
+              ctx.fillText(buf,x,y);
+              x+=ctx.measureText(buf).width;
+            }
+          });
+
+          ctx.strokeStyle="#cfd8e3";
+          ctx.lineWidth=1;
+          ctx.beginPath();
+          ctx.moveTo(0,captionH-.5);
+          ctx.lineTo(tableW,captionH-.5);
+          ctx.stroke();
+        }
+
+        function alignFor(index){
+          const header=headers[index]||"";
+          if(/원본/.test(header))return "left";
+          if(isNumericColumn(header))return "right";
+          return "center";
+        }
+
+        function cellColor(index,text){
+          const header=headers[index]||"";
+          if(/배송|총수량/.test(header))return "#047857";
+          if(/일평균/.test(header))return "#a16207";
+          return "#111827";
+        }
+
+        function drawCellText(textLines,x,y,w,h,index,bold=false){
+          const align=alignFor(index);
+          const header=headers[index]||"";
+          ctx.font=bold?headerFont:font;
+          ctx.textBaseline="middle";
+          ctx.fillStyle=bold?"#0f172a":cellColor(index,textLines.join(" "));
+
+          const totalTextH=textLines.length*lineH;
+          let ty=y+h/2-totalTextH/2+lineH/2;
+
+          textLines.forEach(line=>{
+            let tx=x+w/2;
+            ctx.textAlign="center";
+
+            if(align==="left"){
+              tx=x+padX;
+              ctx.textAlign="left";
+            }else if(align==="right"){
+              tx=x+w-padX;
+              ctx.textAlign="right";
+            }
+
+            ctx.fillText(line,tx,ty);
+            ty+=lineH;
+          });
+        }
+
+        drawStatCaption();
+
+        let y=captionH;
+        let x=0;
+
+        ctx.strokeStyle="#cfd8e3";
+        ctx.lineWidth=1;
+
+        headers.forEach((header,i)=>{
+          const w=widths[i];
+          ctx.fillStyle="#dbe7f5";
+          ctx.fillRect(x,y,w,headerH);
+          ctx.strokeRect(x+.5,y+.5,w,headerH);
+          drawCellText([header],x,y,w,headerH,i,true);
+          x+=w;
+        });
+
+        y+=headerH;
+
+        wrappedRows.forEach((row,rowIndex)=>{
+          x=0;
+          const h=rowHeights[rowIndex];
+          const bg=rowIndex%2===1?"#f8fafc":"#ffffff";
+
+          row.forEach((lines,i)=>{
+            const w=widths[i];
+            ctx.fillStyle=bg;
+            ctx.fillRect(x,y,w,h);
+            ctx.strokeStyle="#cfd8e3";
+            ctx.strokeRect(x+.5,y+.5,w,h);
+            drawCellText(lines,x,y,w,h,i,false);
+            x+=w;
+          });
+
+          y+=h;
+        });
+
+        canvas.toBlob(async blob=>{
+          if(!blob){
+            alert("표 이미지 생성 실패");
+            return;
+          }
 
           if(navigator.clipboard&&window.ClipboardItem){
             await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
@@ -188,9 +401,7 @@
           a.download=`${tableId}.png`;
           a.click();
           URL.revokeObjectURL(a.href);
-        }finally{
-          wrap.remove();
-        }
+        },"image/png");
       }
       function graphContextLabel(rows){const camp=clean(els.currentCampInput.value);const route=clean(els.currentRouteInput.value);if(camp||route)return` (${[camp,route].filter(Boolean).join(", ")})`;const camps=Array.from(new Set((rows||[]).map(r=>clean(r.camp)).filter(Boolean)));const routes=Array.from(new Set((rows||[]).map(r=>clean(r.route)).filter(Boolean)));if(camps.length===1&&routes.length===1)return` (${camps[0]}, ${routes[0]})`;if(camps.length===1)return` (${camps[0]})`;return""}
       function graphData(kind){if(!state.stats)return{title:"그래프",rows:[],metric:"quantity",kind:"route",stats:""};if(kind==="route"){const rows=state.stats.routeRows.slice(0,30);return{title:"노선별 총수량",rows:rows.map(r=>({label:`${r.camp} ${r.wave} ${r.route}`,value:r.quantity,parcel:r.parcel,ret:r.return,source:r})),metric:"quantity",kind:"route",stats:graphStatsText(rows,"route")}}if(kind==="daily"){const rows=state.stats.dailyRows;return{title:`일별 총수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.date,value:r.quantity,parcel:r.parcel,ret:r.return,source:r})),metric:"quantity",kind:"daily",stats:graphStatsText(rows,"daily")}}if(kind==="weekday"){const rows=state.stats.weekdayRows;return{title:`요일별 총수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.weekday,value:r.quantity,parcel:r.parcel,ret:r.return,source:r})),metric:"quantity",kind:"weekday",stats:graphStatsText(rows,"weekday")}}if(kind==="monthlyAvg"){const rows=state.stats.monthlyRows;return{title:`월별 일평균${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.month,value:r.avg_day,parcel:r.parcel,ret:r.return,source:r})),metric:"avg_day",kind:"monthly",stats:graphStatsText(rows,"monthly","avg_day")}}const rows=state.stats.monthlyRows;return{title:`월별 총수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.month,value:r.quantity,parcel:r.parcel,ret:r.return,source:r})),metric:"quantity",kind:"monthly",stats:graphStatsText(rows,"monthly")}}

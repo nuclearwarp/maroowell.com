@@ -132,14 +132,14 @@
         const ctx=canvas.getContext("2d");
 
         const scale=2;
-        const padX=12;
-        const rowPadY=9;
-        const headerH=44;
-        const captionH=captionText?68:0;
-        const font="800 14px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
-        const headerFont="1000 15px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
-        const captionFont="1000 18px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
-        const smallFont="800 12px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const padX=10;
+        const rowPadY=6;
+        const headerH=36;
+        let captionH=captionText?42:0;
+        const font="800 12px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const headerFont="1000 13px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const captionFont="1000 14px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
+        const smallFont="800 11px system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif";
 
         function isNumText(v){
           return /^-?[\d,]+(\.\d+)?$/.test(String(v||"").trim());
@@ -220,9 +220,37 @@
           return Math.ceil(Math.max(minColumnWidth(i),Math.min(maxColumnWidth(i),w)));
         });
 
-        // 표가 너무 좁아져서 글자가 찢어지는 걸 방지한다.
-        const tableW=widths.reduce((a,b)=>a+b,0);
-        const lineH=22;
+        // 표가 너무 좁아져서 글자가 찢어지는 것을 방지하고,
+        // 상단 최고/최저/평균 요약 문구가 억지로 줄바꿈되지 않도록 캡션 폭도 반영한다.
+        ctx.font=captionFont;
+        const captionW=captionText ? Math.ceil(ctx.measureText(captionText).width+28) : 0;
+        let tableW=widths.reduce((a,b)=>a+b,0);
+        if(captionW>tableW){
+          const extra=Math.ceil((captionW-tableW)/Math.max(widths.length,1));
+          widths.forEach((_,i)=>{widths[i]+=extra});
+          tableW=widths.reduce((a,b)=>a+b,0);
+        }
+        const lineH=18;
+
+        if(captionText){
+          ctx.font=captionFont;
+          const re=/(최고수량\s[\d,.]+\s\([^)]+\)|최저수량\s[\d,.]+\s\([^)]+\)|평균수량\s[\d,.]+)/g;
+          const parts=[];
+          let last=0,match;
+          while((match=re.exec(captionText))){
+            if(match.index>last)parts.push(captionText.slice(last,match.index));
+            parts.push(match[0]);
+            last=re.lastIndex;
+          }
+          if(last<captionText.length)parts.push(captionText.slice(last));
+          let x=14,lines=1,maxX=tableW-14;
+          parts.forEach(text=>{
+            const w=ctx.measureText(String(text||"")).width;
+            if(x+w>maxX&&x>14){lines++;x=14}
+            x+=w;
+          });
+          captionH=lines>1?42+(lines-1)*20:42;
+        }
 
         const wrappedRows=rows.map(row=>row.map((cell,i)=>{
           const header=headers[i]||"";
@@ -234,7 +262,7 @@
 
         const rowHeights=wrappedRows.map(row=>{
           const maxLines=Math.max(1,...row.map(lines=>lines.length));
-          return Math.max(42,maxLines*lineH+rowPadY*2);
+          return Math.max(32,maxLines*lineH+rowPadY*2);
         });
 
         const tableH=captionH+headerH+rowHeights.reduce((a,b)=>a+b,0);
@@ -271,31 +299,20 @@
 
           if(last<captionText.length)parts.push({text:captionText.slice(last),color:"#111827"});
 
-          let x=16,y=14;
-          const maxX=tableW-16;
+          let x=14;
+          let y=11;
+          const maxX=tableW-14;
 
           parts.forEach(part=>{
-            const chars=String(part.text).split("");
-            let buf="";
-            ctx.fillStyle=part.color;
-
-            chars.forEach(ch=>{
-              const next=buf+ch;
-              if(x+ctx.measureText(next).width>maxX&&buf){
-                ctx.fillText(buf,x,y);
-                x+=ctx.measureText(buf).width;
-                x=16;
-                y+=25;
-                buf=ch;
-              }else{
-                buf=next;
-              }
-            });
-
-            if(buf){
-              ctx.fillText(buf,x,y);
-              x+=ctx.measureText(buf).width;
+            const text=String(part.text||"");
+            const w=ctx.measureText(text).width;
+            if(x+w>maxX&&x>14){
+              x=14;
+              y+=20;
             }
+            ctx.fillStyle=part.color;
+            ctx.fillText(text,x,y);
+            x+=w;
           });
 
           ctx.strokeStyle="#cfd8e3";
@@ -383,6 +400,10 @@
 
           y+=h;
         });
+
+        ctx.strokeStyle="#cfd8e3";
+        ctx.lineWidth=1;
+        ctx.strokeRect(.5,.5,tableW-1,tableH-1);
 
         canvas.toBlob(async blob=>{
           if(!blob){

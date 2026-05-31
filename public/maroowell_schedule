@@ -692,12 +692,18 @@
     <section id="toolbar" class="toolbar">
       <div class="field">
         <label for="campInput">Camp</label>
-        <input id="campInput" class="input" type="text" placeholder="예: M익산1, 대구3" autocomplete="off" />
+        <select id="campInput" class="select">
+          <option value="">캠프 선택</option>
+          <option value="일산2">일산2 - 주간</option>
+          <option value="용인3">용인3 - 주간</option>
+          <option value="대구3">대구3 - 주간</option>
+          <option value="M익산1">M익산1 - 야간</option>
+        </select>
       </div>
 
       <div class="field">
         <label for="waveSelect">주/야</label>
-        <select id="waveSelect" class="select">
+        <select id="waveSelect" class="select" disabled>
           <option value="WAVE2">주간</option>
           <option value="WAVE1">야간</option>
         </select>
@@ -773,7 +779,7 @@
             </div>
           </div>
           <div id="tableHost">
-            <div class="emptyBoard">캠프를 입력하고 불러오기를 누르면 라우트 스케줄 표가 표시됩니다.</div>
+            <div class="emptyBoard">캠프를 선택하면 라우트 스케줄 표가 표시됩니다.</div>
           </div>
         </div>
       </section>
@@ -892,6 +898,25 @@
       function compact(v){return clean(v).replace(/\s+/g,"")}
       function keyOf(v){return compact(v).toUpperCase()}
       function campKey(v){return compact(v).replace(/_/g,"").toUpperCase()}
+      function waveForCamp(camp){
+        const key=campKey(camp);
+        const map={
+          [campKey("일산2")]:"WAVE2",
+          [campKey("용인3")]:"WAVE2",
+          [campKey("대구3")]:"WAVE2",
+          [campKey("M익산1")]:"WAVE1",
+          [campKey("M_익산1")]:"WAVE1"
+        };
+        return map[key] || "";
+      }
+      function syncWaveFromCamp(){
+        const wave=waveForCamp(els?.campInput?.value);
+        if(wave){
+          state.wave=wave;
+          if(els?.waveSelect) els.waveSelect.value=wave;
+        }
+        return wave;
+      }
       function esc(v){return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 
       function normalizeWave(v){
@@ -2134,7 +2159,9 @@
 
       async function loadUpdateStatusOnly(){
         state.camp=clean(els.campInput.value);
-        state.wave=normalizeWave(els.waveSelect.value);
+        state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
+        els.waveSelect.value=state.wave;
+        syncWaveFromCamp();
         if(!state.camp){
           setUpdateStatusEmpty();
           return;
@@ -2151,7 +2178,8 @@
 
       async function saveUpdateStatus(){
         state.camp=clean(els.campInput.value);
-        state.wave=normalizeWave(els.waveSelect.value);
+        state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
+        els.waveSelect.value=state.wave;
         if(!state.camp){
           alert("Camp를 먼저 입력하세요.");
           return;
@@ -2184,7 +2212,7 @@
 
       async function loadAll(){
         state.camp=clean(els.campInput.value);
-        state.wave=normalizeWave(els.waveSelect.value);
+        state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
         els.waveSelect.value=state.wave;
         updateWeekState();
 
@@ -3540,8 +3568,10 @@
       function resetFilters(){
         hideSuggest();
         els.campInput.value="";
+        els.waveSelect.value="WAVE2";
         els.searchInput.value="";
         state.camp="";
+        state.wave="WAVE2";
         state.routesRaw=[];
         state.routeParents=[];
         state.displayRows=[];
@@ -3550,7 +3580,7 @@
         state.dirty.clear();
         setUpdateStatusEmpty();
         renderHeader();
-        els.tableHost.innerHTML=`<div class="emptyBoard">캠프를 입력하고 불러오기를 누르면 라우트 스케줄 표가 표시됩니다.</div>`;
+        els.tableHost.innerHTML=`<div class="emptyBoard">캠프를 선택하면 라우트 스케줄 표가 표시됩니다.</div>`;
         updatePills();
         setStatus("초기화 완료");
       }
@@ -3681,8 +3711,12 @@
         });
 
         els.waveSelect.addEventListener("change",()=>{
-          state.wave=normalizeWave(els.waveSelect.value);
-          els.waveSelect.value=state.wave;
+          syncWaveFromCamp();
+        });
+
+        els.campInput.addEventListener("change",()=>{
+          state.camp=clean(els.campInput.value);
+          syncWaveFromCamp();
           state.dirty.clear();
           hideSuggest();
           if(state.camp)loadAll();
@@ -3690,15 +3724,6 @@
             renderHeader();
             loadUpdateStatusOnly();
           }
-        });
-
-        els.campInput.addEventListener("keydown",e=>{
-          if(e.key==="Enter")loadAll();
-        });
-
-        els.campInput.addEventListener("change",()=>{
-          state.camp=clean(els.campInput.value);
-          loadUpdateStatusOnly();
         });
 
         els.searchInput.addEventListener("input",()=>render());
@@ -3729,7 +3754,7 @@
         document.documentElement.style.visibility="visible";
         setState("ok","READY");
         els.apiPill.textContent="API";
-        setStatus("캠프와 주/야를 선택하고 불러오기를 누르세요.");
+        setStatus("캠프를 선택하면 주/야가 자동 선택되고 바로 조회됩니다.");
       }
 
       boot().catch(e=>{

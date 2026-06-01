@@ -7,6 +7,8 @@
   <meta name="referrer" content="origin" />
   <title>마루웰 정보</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
   <style>
     html{visibility:hidden}
@@ -45,6 +47,7 @@
 
       --topbarH:56px;
       --toolbarH:58px;
+      --hiddenbarH:50px;
       --statusH:44px;
     }
 
@@ -61,7 +64,7 @@
     .app{
       height:100%;
       display:grid;
-      grid-template-rows:var(--topbarH) var(--toolbarH) 1fr var(--statusH);
+      grid-template-rows:var(--topbarH) var(--toolbarH) auto 1fr var(--statusH);
     }
 
     .topbar{
@@ -71,6 +74,8 @@
       padding:0 14px;
       border-bottom:1px solid var(--line);
       background:linear-gradient(180deg,var(--bg),var(--bg2));
+      min-width:0;
+      overflow:hidden;
     }
 
     .topbar a{
@@ -96,6 +101,7 @@
       font-size:18px;
       line-height:1.1;
       letter-spacing:.1px;
+      white-space:nowrap;
     }
 
     .titleBox small{
@@ -103,6 +109,9 @@
       color:var(--muted);
       font-size:11px;
       font-weight:900;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
     }
 
     .spacer{flex:1}
@@ -118,6 +127,7 @@
       font-weight:900;
       font-size:13px;
       white-space:nowrap;
+      flex:0 0 auto;
     }
 
     .btn:hover{background:var(--btn2)}
@@ -134,6 +144,7 @@
       background:var(--panel);
       border-bottom:1px solid var(--line);
       overflow:auto hidden;
+      min-width:0;
     }
 
     .group{
@@ -178,21 +189,71 @@
       white-space:nowrap;
     }
 
+    .hiddenColumnBar{
+      min-height:0;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      background:#101a2c;
+      border-bottom:1px solid var(--line);
+      overflow:auto hidden;
+    }
+
+    .hiddenColumnBar.empty{
+      display:none;
+    }
+
+    .hiddenLabel{
+      color:#bfdbfe;
+      font-size:12px;
+      font-weight:1000;
+      flex:0 0 auto;
+    }
+
+    .hiddenChip{
+      height:30px;
+      padding:0 11px;
+      border-radius:999px;
+      border:1px solid rgba(147,197,253,.35);
+      background:rgba(37,99,235,.22);
+      color:#dbeafe;
+      font-size:12px;
+      font-weight:1000;
+      cursor:pointer;
+      white-space:nowrap;
+      flex:0 0 auto;
+    }
+
+    .hiddenChip:hover{
+      background:rgba(37,99,235,.34);
+    }
+
+    .hiddenChip.all{
+      border-color:rgba(134,239,172,.35);
+      background:rgba(22,163,74,.24);
+      color:#dcfce7;
+    }
+
     .sheetWrap{
       overflow:auto;
       background:var(--sheetBg);
     }
 
     .sheetInner{
-      min-width:3450px;
+      min-width:max-content;
     }
 
     table{
-      width:100%;
+      width:max-content;
       border-collapse:separate;
       border-spacing:0;
       table-layout:fixed;
       color:var(--cellTxt);
+    }
+
+    col.hiddenCol{
+      display:none;
     }
 
     th,td{
@@ -209,7 +270,7 @@
       top:0;
       z-index:4;
       background:var(--headBg);
-      padding:10px 8px;
+      padding:8px 7px;
       text-align:center;
       font-size:13px;
       font-weight:900;
@@ -217,10 +278,44 @@
     }
 
     thead tr.filterRow th{
-      top:43px;
+      top:40px;
       z-index:3;
       background:var(--filterBg);
       padding:6px;
+    }
+
+    .thInner{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      min-width:0;
+    }
+
+    .thLabel{
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .hideColBtn{
+      width:20px;
+      height:20px;
+      border-radius:999px;
+      border:1px solid #c3cfdd;
+      background:#eef3fb;
+      color:#64748b;
+      font-size:11px;
+      line-height:18px;
+      font-weight:1000;
+      cursor:pointer;
+      flex:0 0 auto;
+    }
+
+    .hideColBtn:hover{
+      background:#fff;
+      color:#0f172a;
+      border-color:#94a3b8;
     }
 
     tbody td{
@@ -324,28 +419,6 @@
 
     .filterInput:focus{
       border-color:#60a5fa;
-    }
-
-    .chip{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      min-width:44px;
-      padding:6px 10px;
-      border-radius:999px;
-      font-size:12px;
-      font-weight:900;
-      white-space:nowrap;
-    }
-
-    .chip.ok{
-      background:#d9f0c7;
-      color:#46691c;
-    }
-
-    .chip.no{
-      background:#ffd6d0;
-      color:#a33d2c;
     }
 
     .rowActionBtn{
@@ -471,11 +544,11 @@
     @media (max-width:980px){
       .toolbar{padding:8px}
       .btn{padding:0 10px;font-size:12px}
+      .titleBox b{font-size:16px}
     }
   </style>
-
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+
 <body>
   <div class="app">
     <div class="topbar">
@@ -492,7 +565,7 @@
       <button id="btnReload" class="btn" type="button">불러오기</button>
       <button id="btnAddRow" class="btn warn" type="button">행 추가</button>
       <button id="btnSaveAll" class="btn ok" type="button">전체 저장</button>
-      <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
+      <button id="btnExportExcel" class="btn" type="button">엑셀 다운로드</button>
       <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </div>
 
@@ -516,92 +589,17 @@
       </div>
 
       <div class="group">
-        <span class="helper">필터칸에서 <b>!키워드</b> 또는 <b>-키워드</b> 입력 시 제외 검색</span>
+        <span class="helper">열 제목의 <b>접기</b>를 누르면 숨겨지고, 아래 숨김 열 메뉴에서 다시 활성화합니다. 엑셀 다운로드는 현재 보이는 열만 내려갑니다.</span>
       </div>
     </div>
 
+    <div id="hiddenColumnBar" class="hiddenColumnBar empty"></div>
+
     <div class="sheetWrap">
       <div class="sheetInner">
-        <table>
-          <colgroup>
-            <col style="width:80px" />
-            <col style="width:120px" />
-            <col style="width:130px" />
-            <col style="width:110px" />
-            <col style="width:100px" />
-            <col style="width:90px" />
-            <col style="width:120px" />
-            <col style="width:130px" />
-            <col style="width:150px" />
-            <col style="width:150px" />
-            <col style="width:170px" />
-            <col style="width:120px" />
-            <col style="width:170px" />
-            <col style="width:150px" />
-            <col style="width:150px" />
-            <col style="width:130px" />
-            <col style="width:150px" />
-            <col style="width:110px" />
-            <col style="width:120px" />
-            <col style="width:120px" />
-            <col style="width:120px" />
-            <col style="width:90px" />
-            <col style="width:72px" />
-          </colgroup>
-
-          <thead>
-            <tr>
-              <th>순번</th>
-              <th>이름</th>
-              <th>연락처</th>
-              <th>직책</th>
-              <th>camp</th>
-              <th>wave</th>
-              <th>coupang_id</th>
-              <th>차량 번호</th>
-              <th>주민번호</th>
-              <th>운송자격증번호</th>
-              <th>서브 계정</th>
-              <th>급여 은행</th>
-              <th>급여 계좌</th>
-              <th>사업자 상호</th>
-              <th>사업자 번호</th>
-              <th>입사일</th>
-              <th>비상 연락처</th>
-              <th>관계</th>
-              <th>고정 수수료</th>
-              <th>고정 단가</th>
-              <th>용차 수수료</th>
-              <th>고용산재</th>
-              <th>삭제</th>
-            </tr>
-            <tr class="filterRow">
-              <th></th>
-              <th><input class="filterInput" data-filter="person_name" placeholder="이름 / !이우람" /></th>
-              <th><input class="filterInput" data-filter="contact_phone" placeholder="연락처" /></th>
-              <th><input class="filterInput" data-filter="position_title" placeholder="직책 / !퇴사" /></th>
-              <th><input class="filterInput" data-filter="camp_code" placeholder="camp" /></th>
-              <th><input class="filterInput" data-filter="wave" placeholder="주간 / 야간 / !주간" /></th>
-              <th><input class="filterInput" data-filter="coupang_id" placeholder="ID" /></th>
-              <th><input class="filterInput" data-filter="vehicle_plate_number" placeholder="차량 번호 / !배" /></th>
-              <th><input class="filterInput" data-filter="resident_registration_number" placeholder="주민번호" /></th>
-              <th><input class="filterInput" data-filter="transport_qualification_number" placeholder="자격증번호" /></th>
-              <th><input class="filterInput" data-filter="sub_account_info" placeholder="서브 계정" /></th>
-              <th><input class="filterInput" data-filter="payroll_bank_name" placeholder="은행" /></th>
-              <th><input class="filterInput" data-filter="payroll_account_number" placeholder="계좌" /></th>
-              <th><input class="filterInput" data-filter="business_name" placeholder="사업자 상호" /></th>
-              <th><input class="filterInput" data-filter="business_registration_number" placeholder="사업자 번호" /></th>
-              <th><input class="filterInput" data-filter="hire_date" placeholder="2025 / !2024" /></th>
-              <th><input class="filterInput" data-filter="emergency_contact_phone" placeholder="비상 연락처" /></th>
-              <th><input class="filterInput" data-filter="emergency_contact_relationship" placeholder="관계" /></th>
-              <th><input class="filterInput" data-filter="fixed_commission_amount" placeholder="고정 수수료" /></th>
-              <th><input class="filterInput" data-filter="fixed_unit_price" placeholder="고정 단가" /></th>
-              <th><input class="filterInput" data-filter="dragon_car_commission" placeholder="용차 수수료 / !8%" /></th>
-              <th><input class="filterInput" data-filter="employment_accident_insurance" placeholder="O / X / !X" /></th>
-              <th></th>
-            </tr>
-          </thead>
-
+        <table id="infoTable">
+          <colgroup id="tableColgroup"></colgroup>
+          <thead id="tableHead"></thead>
           <tbody id="sheetBody"></tbody>
         </table>
       </div>
@@ -637,6 +635,7 @@
 
       const ACCESS_TABLE = "user_access";
       const DATA_TABLE = "maroowell_info";
+      const HIDDEN_COLUMNS_KEY = "mw_info_hidden_columns_v1";
 
       const DATA_COLUMNS = [
         "person_name",
@@ -663,38 +662,66 @@
       ];
 
       const COLUMN_CONFIG = [
-        { key: "pk_id", label: "순번", type: "readonly", className: "right code center" },
-        { key: "person_name", label: "이름" },
-        { key: "contact_phone", label: "연락처", className: "code" },
-        { key: "position_title", label: "직책", className: "center" },
-        { key: "camp_code", label: "camp", className: "center" },
-        { key: "wave", label: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center" },
-        { key: "coupang_id", label: "coupang_id", className: "code" },
-        { key: "vehicle_plate_number", label: "차량 번호", className: "center" },
-        { key: "resident_registration_number", label: "주민번호", className: "code" },
-        { key: "transport_qualification_number", label: "운송자격증번호", className: "code" },
-        { key: "sub_account_info", label: "서브 계정" },
-        { key: "payroll_bank_name", label: "급여 은행", className: "center" },
-        { key: "payroll_account_number", label: "급여 계좌", className: "code" },
-        { key: "business_name", label: "사업자 상호" },
-        { key: "business_registration_number", label: "사업자 번호", className: "code" },
-        { key: "hire_date", label: "입사일", type: "date", className: "center code" },
-        { key: "emergency_contact_phone", label: "비상 연락처", className: "code" },
-        { key: "emergency_contact_relationship", label: "관계", className: "center" },
-        { key: "fixed_commission_amount", label: "고정 수수료", className: "right code" },
-        { key: "fixed_unit_price", label: "고정 단가", className: "right code" },
-        { key: "dragon_car_commission", label: "용차 수수료", className: "right code" },
-        { key: "employment_accident_insurance", label: "고용산재", type: "select", options: ["", "O", "X"], className: "center" }
+        { key: "pk_id", label: "순번", type: "readonly", className: "right code center", width: 80 },
+        { key: "person_name", label: "이름", width: 120 },
+        { key: "contact_phone", label: "연락처", className: "code", width: 130 },
+        { key: "position_title", label: "직책", className: "center", width: 110 },
+        { key: "camp_code", label: "camp", className: "center", width: 100 },
+        { key: "wave", label: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center", width: 90 },
+        { key: "coupang_id", label: "coupang_id", className: "code", width: 120 },
+        { key: "vehicle_plate_number", label: "차량 번호", className: "center", width: 130 },
+        { key: "resident_registration_number", label: "주민번호", className: "code", width: 150 },
+        { key: "transport_qualification_number", label: "운송자격증번호", className: "code", width: 150 },
+        { key: "sub_account_info", label: "서브 계정", width: 170 },
+        { key: "payroll_bank_name", label: "급여 은행", className: "center", width: 120 },
+        { key: "payroll_account_number", label: "급여 계좌", className: "code", width: 170 },
+        { key: "business_name", label: "사업자 상호", width: 150 },
+        { key: "business_registration_number", label: "사업자 번호", className: "code", width: 150 },
+        { key: "hire_date", label: "입사일", type: "date", className: "center code", width: 130 },
+        { key: "emergency_contact_phone", label: "비상 연락처", className: "code", width: 150 },
+        { key: "emergency_contact_relationship", label: "관계", className: "center", width: 110 },
+        { key: "fixed_commission_amount", label: "고정 수수료", className: "right code", width: 120 },
+        { key: "fixed_unit_price", label: "고정 단가", className: "right code", width: 120 },
+        { key: "dragon_car_commission", label: "용차 수수료", className: "right code", width: 120 },
+        { key: "employment_accident_insurance", label: "고용산재", type: "select", options: ["", "O", "X"], className: "center", width: 90 }
       ];
+
+      const FILTER_PLACEHOLDERS = {
+        person_name: "이름 / !이우람",
+        contact_phone: "연락처",
+        position_title: "직책 / !퇴사",
+        camp_code: "camp",
+        wave: "주간 / 야간 / !주간",
+        coupang_id: "ID",
+        vehicle_plate_number: "차량 번호 / !배",
+        resident_registration_number: "주민번호",
+        transport_qualification_number: "자격증번호",
+        sub_account_info: "서브 계정",
+        payroll_bank_name: "은행",
+        payroll_account_number: "계좌",
+        business_name: "사업자 상호",
+        business_registration_number: "사업자 번호",
+        hire_date: "2025 / !2024",
+        emergency_contact_phone: "비상 연락처",
+        emergency_contact_relationship: "관계",
+        fixed_commission_amount: "고정 수수료",
+        fixed_unit_price: "고정 단가",
+        dragon_car_commission: "용차 수수료 / !8%",
+        employment_accident_insurance: "O / X / !X"
+      };
 
       const $ = (sel) => document.querySelector(sel);
 
       const dom = {
+        table: $("#infoTable"),
+        tableColgroup: $("#tableColgroup"),
+        tableHead: $("#tableHead"),
         sheetBody: $("#sheetBody"),
+        hiddenColumnBar: $("#hiddenColumnBar"),
         btnReload: $("#btnReload"),
         btnAddRow: $("#btnAddRow"),
         btnSaveAll: $("#btnSaveAll"),
-        btnExportCsv: $("#btnExportCsv"),
+        btnExportExcel: $("#btnExportExcel"),
         btnClearFilters: $("#btnClearFilters"),
         btnLogout: $("#btnLogout"),
         toggleIncludeResigned: $("#toggleIncludeResigned"),
@@ -703,7 +730,6 @@
         pillRows: $("#pillRows"),
         pillDirty: $("#pillDirty"),
         statusText: $("#statusText"),
-        filterInputs: Array.from(document.querySelectorAll(".filterInput")),
         accessDenied: $("#accessDenied"),
         accessDeniedText: $("#accessDeniedText"),
         accessDeniedEmail: $("#accessDeniedEmail"),
@@ -720,228 +746,32 @@
         session: null,
         accessRow: null,
         deletedIds: new Set(),
-        tempSeq: 0
+        tempSeq: 0,
+        filters: {},
+        hiddenColumns: new Set()
       };
 
-      function getSupabaseProjectRef(url) {
+      function loadHiddenColumns() {
         try {
-          const host = new URL(url).hostname || "";
-          return host.split(".")[0] || "";
+          const arr = JSON.parse(localStorage.getItem(HIDDEN_COLUMNS_KEY) || "[]");
+          state.hiddenColumns = new Set(Array.isArray(arr) ? arr.filter(key => COLUMN_CONFIG.some(col => col.key === key)) : []);
         } catch {
-          return "";
+          state.hiddenColumns = new Set();
         }
       }
 
-      function createSupabaseSessionBridge(url) {
-        const projectRef = getSupabaseProjectRef(url);
-        const prefixes = projectRef ? [
-          "sb-" + projectRef + "-auth-token",
-          "sb-" + projectRef + "-auth-token-code-verifier"
-        ] : [];
-        const origin = window.location.origin;
-        const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
-        const tabId = (Date.now().toString(36) + Math.random().toString(36).slice(2));
-        const pending = new Map();
-        let channel = null;
-        let started = false;
-
-        function matchesKey(key) {
-          return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
-        }
-
-        function readEntries(storage) {
-          const target = storage || window.sessionStorage;
-          const rows = [];
-          try {
-            for (let i = 0; i < target.length; i++) {
-              const key = target.key(i);
-              if (!matchesKey(key)) continue;
-              rows.push({ key, value: target.getItem(key) });
-            }
-          } catch {}
-          return rows;
-        }
-
-        function hasSession(storage) {
-          return readEntries(storage).some(row =>
-            row.key.includes("-auth-token") &&
-            !row.key.includes("code-verifier") &&
-            !!row.value
-          );
-        }
-
-        function writeEntries(entries, storage) {
-          const target = storage || window.sessionStorage;
-          try {
-            for (const row of entries || []) {
-              if (!row || !matchesKey(row.key)) continue;
-              if (row.value == null) target.removeItem(row.key);
-              else target.setItem(row.key, row.value);
-            }
-          } catch {}
-        }
-
-        function clearSession(storage) {
-          const target = storage || window.sessionStorage;
-          try {
-            const keys = [];
-            for (let i = 0; i < target.length; i++) {
-              const key = target.key(i);
-              if (matchesKey(key)) keys.push(key);
-            }
-            keys.forEach(key => target.removeItem(key));
-          } catch {}
-        }
-
-        function resolvePending(requestId, entries) {
-          const item = pending.get(requestId);
-          if (!item) return;
-          pending.delete(requestId);
-          clearTimeout(item.timer);
-          if (Array.isArray(entries) && entries.length) writeEntries(entries, window.sessionStorage);
-          item.resolve(hasSession(window.sessionStorage));
-        }
-
-        function handleSyncState(syncState) {
-          if (syncState === "SIGNED_OUT") {
-            clearSession(window.sessionStorage);
-            return;
-          }
-          if (syncState === "SESSION_UPDATED" && !hasSession(window.sessionStorage)) {
-            requestSessionCopy(1200).catch(() => {});
-          }
-        }
-
-        function onWindowMessage(event) {
-          if (event.origin !== origin) return;
-          const msg = event.data || {};
-          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-          if (msg.type === "MW_SESSION_REQUEST") {
-            if (!hasSession(window.sessionStorage)) return;
-            try {
-              event.source?.postMessage({
-                type: "MW_SESSION_RESPONSE",
-                projectRef,
-                requestId: msg.requestId,
-                entries: readEntries(window.sessionStorage),
-                fromTabId: tabId
-              }, origin);
-            } catch {}
-            return;
-          }
-
-          if (msg.type === "MW_SESSION_RESPONSE") {
-            resolvePending(msg.requestId, msg.entries);
-            return;
-          }
-
-          if (msg.type === "MW_AUTH_SYNC") {
-            handleSyncState(msg.state);
-          }
-        }
-
-        function onChannelMessage(event) {
-          const msg = event.data || {};
-          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-
-          if (msg.type === "MW_SESSION_REQUEST") {
-            if (!hasSession(window.sessionStorage)) return;
-            try {
-              channel?.postMessage({
-                type: "MW_SESSION_RESPONSE",
-                projectRef,
-                requestId: msg.requestId,
-                entries: readEntries(window.sessionStorage),
-                fromTabId: tabId
-              });
-            } catch {}
-            return;
-          }
-
-          if (msg.type === "MW_SESSION_RESPONSE") {
-            resolvePending(msg.requestId, msg.entries);
-            return;
-          }
-
-          if (msg.type === "MW_AUTH_SYNC") {
-            handleSyncState(msg.state);
-          }
-        }
-
-        function start() {
-          if (started || !projectRef) return;
-          started = true;
-          window.addEventListener("message", onWindowMessage);
-          try {
-            if ("BroadcastChannel" in window) {
-              channel = new BroadcastChannel(channelName);
-              channel.addEventListener("message", onChannelMessage);
-            }
-          } catch {}
-        }
-
-        function requestSessionCopy(timeoutMs) {
-          start();
-          if (!projectRef) return Promise.resolve(false);
-          if (hasSession(window.sessionStorage)) return Promise.resolve(true);
-
-          const requestId = tabId + ":" + Date.now().toString(36) + Math.random().toString(36).slice(2);
-          const payload = {
-            type: "MW_SESSION_REQUEST",
-            projectRef,
-            requestId,
-            fromTabId: tabId
-          };
-
-          return new Promise(resolve => {
-            const timer = window.setTimeout(() => {
-              pending.delete(requestId);
-              resolve(hasSession(window.sessionStorage));
-            }, Math.max(300, Number(timeoutMs) || 900));
-
-            pending.set(requestId, { resolve, timer });
-
-            try { channel?.postMessage(payload); } catch {}
-            try {
-              if (window.opener && window.opener !== window) {
-                window.opener.postMessage(payload, origin);
-              }
-            } catch {}
-          });
-        }
-
-        function broadcastAuthState(syncState) {
-          start();
-          const payload = {
-            type: "MW_AUTH_SYNC",
-            projectRef,
-            state: syncState,
-            fromTabId: tabId
-          };
-          try { channel?.postMessage(payload); } catch {}
-          try {
-            if (window.opener && window.opener !== window) {
-              window.opener.postMessage(payload, origin);
-            }
-          } catch {}
-        }
-
-        return {
-          start,
-          requestSessionCopy,
-          broadcastAuthState
-        };
+      function saveHiddenColumns() {
+        try {
+          localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify(Array.from(state.hiddenColumns)));
+        } catch {}
       }
+
+      loadHiddenColumns();
 
       const authStorage = (() => {
         try { return window.sessionStorage; } catch {}
         return null;
       })();
-
-      const sessionBridge = createSupabaseSessionBridge(SUPABASE_URL);
-      sessionBridge.start();
-      await sessionBridge.requestSessionCopy(1200);
 
       const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient)
         ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -995,9 +825,13 @@
         dom.btnReload.disabled = !!on;
         dom.btnAddRow.disabled = !!on;
         dom.btnSaveAll.disabled = !!on;
-        dom.btnExportCsv.disabled = !!on;
+        dom.btnExportExcel.disabled = !!on;
         dom.btnClearFilters.disabled = !!on;
         if (on) setStatus(text || "처리 중...", "warn");
+      }
+
+      function visibleColumns() {
+        return COLUMN_CONFIG.filter(col => !state.hiddenColumns.has(col.key));
       }
 
       function formatDateForInput(v) {
@@ -1076,7 +910,6 @@
       async function signOutAndMove() {
         try {
           await supabase?.auth?.signOut();
-          sessionBridge.broadcastAuthState("SIGNED_OUT");
         } catch {}
         location.replace(LOGIN_PATH);
       }
@@ -1102,13 +935,9 @@
 
           supabase.auth.onAuthStateChange((evt, s) => {
             if (evt === "SIGNED_OUT" || !s) {
-              sessionBridge.broadcastAuthState("SIGNED_OUT");
               const next = safeNextPath(location.pathname + location.search + location.hash);
               location.replace(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
               return;
-            }
-            if (evt === "SIGNED_IN" || evt === "TOKEN_REFRESHED" || evt === "USER_UPDATED") {
-              sessionBridge.broadcastAuthState("SESSION_UPDATED");
             }
           });
 
@@ -1188,15 +1017,67 @@
         return state.rows.find(row => String(rowId(row)) === String(id)) || null;
       }
 
+      function renderHiddenColumnBar() {
+        const hidden = COLUMN_CONFIG.filter(col => state.hiddenColumns.has(col.key));
+
+        if (!hidden.length) {
+          dom.hiddenColumnBar.className = "hiddenColumnBar empty";
+          dom.hiddenColumnBar.innerHTML = "";
+          return;
+        }
+
+        dom.hiddenColumnBar.className = "hiddenColumnBar";
+        dom.hiddenColumnBar.innerHTML = `
+          <span class="hiddenLabel">숨김 열</span>
+          ${hidden.map(col => `<button class="hiddenChip" type="button" data-show-col="${escapeHtml(col.key)}">${escapeHtml(col.label)} 다시 보기</button>`).join("")}
+          <button class="hiddenChip all" type="button" data-show-all-cols="1">전체 열 보기</button>
+        `;
+      }
+
+      function renderTableStructure() {
+        const cols = visibleColumns();
+
+        dom.tableColgroup.innerHTML = [
+          ...cols.map(col => `<col style="width:${Number(col.width || 120)}px" />`),
+          `<col style="width:72px" />`
+        ].join("");
+
+        dom.tableHead.innerHTML = `
+          <tr>
+            ${cols.map(col => `
+              <th data-head-col="${escapeHtml(col.key)}">
+                <div class="thInner">
+                  <span class="thLabel">${escapeHtml(col.label)}</span>
+                  <button class="hideColBtn" type="button" data-hide-col="${escapeHtml(col.key)}" title="${escapeHtml(col.label)} 열 접기">접기</button>
+                </div>
+              </th>
+            `).join("")}
+            <th>
+              <div class="thInner">
+                <span class="thLabel">삭제</span>
+              </div>
+            </th>
+          </tr>
+          <tr class="filterRow">
+            ${cols.map(col => {
+              if (col.key === "pk_id") return `<th></th>`;
+              const value = state.filters[col.key] || "";
+              return `<th><input class="filterInput" data-filter="${escapeHtml(col.key)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(FILTER_PLACEHOLDERS[col.key] || col.label)}" /></th>`;
+            }).join("")}
+            <th></th>
+          </tr>
+        `;
+
+        renderHiddenColumnBar();
+      }
+
       function applyFilters() {
         state.filteredRows = state.rows.filter(row => {
           if (row.pk_id && state.deletedIds.has(row.pk_id)) return false;
           if (!dom.toggleIncludeResigned.checked && isResigned(row)) return false;
           if (dom.toggleOnlyChanged.checked && !row.__dirty) return false;
 
-          for (const input of dom.filterInputs) {
-            const key = input.dataset.filter;
-            const expr = input.value || "";
+          for (const [key, expr] of Object.entries(state.filters)) {
             if (!normalizeText(expr)) continue;
             if (!matchFilter(getRowValue(row, key), expr)) return false;
           }
@@ -1204,6 +1085,7 @@
           return true;
         });
 
+        renderTableStructure();
         renderTable();
         updatePills();
 
@@ -1267,10 +1149,11 @@
       }
 
       function renderTable() {
+        const cols = visibleColumns();
         if (!state.filteredRows.length) {
           dom.sheetBody.innerHTML = `
             <tr class="emptyDataRow">
-              <td colspan="23">조회 결과가 없습니다.</td>
+              <td colspan="${cols.length + 1}">조회 결과가 없습니다.</td>
             </tr>
           `;
           return;
@@ -1279,7 +1162,7 @@
         dom.sheetBody.innerHTML = state.filteredRows.map(row => {
           const rid = rowId(row);
           const trClass = isResigned(row) ? "resigned-row" : "";
-          const cells = COLUMN_CONFIG.map(col => buildDataCell(row, col)).join("");
+          const cells = cols.map(col => buildDataCell(row, col)).join("");
 
           return `
             <tr data-row="${escapeHtml(rid)}" class="${trClass}">
@@ -1301,7 +1184,7 @@
 
         tr.classList.toggle("resigned-row", isResigned(row));
 
-        for (const col of COLUMN_CONFIG) {
+        for (const col of visibleColumns()) {
           const td = tr.querySelector(`td[data-col="${col.key}"]`);
           if (!td) continue;
           td.classList.toggle("dirty-cell", !!row.__dirtyFields?.[col.key]);
@@ -1375,6 +1258,7 @@
           console.error(e);
           state.rows = [];
           state.filteredRows = [];
+          renderTableStructure();
           renderTable();
           updatePills();
           setStatus("불러오기 실패: " + (e?.message || String(e)), "err");
@@ -1432,35 +1316,25 @@
       }
 
       function clearFilters() {
-        dom.filterInputs.forEach(el => { el.value = ""; });
+        state.filters = {};
         dom.toggleOnlyChanged.checked = false;
         applyFilters();
       }
 
-      function exportCsv() {
+      function exportExcel() {
         const rows = state.filteredRows.filter(row => !(row.pk_id && state.deletedIds.has(row.pk_id)));
         if (!rows.length) {
           alert("내보낼 데이터가 없습니다.");
           return;
         }
 
-        const headers = ["pk_id", ...DATA_COLUMNS];
-        const lines = [
-          headers.join(","),
-          ...rows.map(row => {
-            return headers.map(key => {
-              const raw = key === "pk_id" ? (row.pk_id ?? "") : getRowValue(row, key);
-              const escaped = String(raw ?? "").replaceAll('"', '""');
-              return `"${escaped}"`;
-            }).join(",");
-          })
+        const cols = visibleColumns();
+        const header = cols.map(col => col.label);
+        const aoa = [
+          header,
+          ...rows.map(row => cols.map(col => col.key === "pk_id" ? (row.pk_id ?? "") : getRowValue(row, col.key)))
         ];
 
-        const csv = "\uFEFF" + lines.join("\n");
-        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-
-        const a = document.createElement("a");
         const now = new Date();
         const stamp = [
           now.getFullYear(),
@@ -1471,12 +1345,44 @@
           String(now.getMinutes()).padStart(2, "0")
         ].join("");
 
+        if (window.XLSX?.utils?.aoa_to_sheet) {
+          const ws = XLSX.utils.aoa_to_sheet(aoa);
+          ws["!cols"] = cols.map(col => ({ wch: Math.max(10, Math.min(28, Math.round((col.width || 120) / 7))) }));
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "maroowell_info");
+          XLSX.writeFile(wb, `maroowell_info_${stamp}.xlsx`);
+          return;
+        }
+
+        const csv = "\uFEFF" + aoa.map(line => line.map(v => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
         a.href = url;
         a.download = `maroowell_info_${stamp}.csv`;
         document.body.appendChild(a);
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
+      }
+
+      function hideColumn(key) {
+        if (!COLUMN_CONFIG.some(col => col.key === key)) return;
+        state.hiddenColumns.add(key);
+        saveHiddenColumns();
+        applyFilters();
+      }
+
+      function showColumn(key) {
+        state.hiddenColumns.delete(key);
+        saveHiddenColumns();
+        applyFilters();
+      }
+
+      function showAllColumns() {
+        state.hiddenColumns.clear();
+        saveHiddenColumns();
+        applyFilters();
       }
 
       function bindTableEvents() {
@@ -1535,15 +1441,45 @@
         dom.btnReload.addEventListener("click", fetchRows);
         dom.btnAddRow.addEventListener("click", addRow);
         dom.btnSaveAll.addEventListener("click", saveAll);
-        dom.btnExportCsv.addEventListener("click", exportCsv);
+        dom.btnExportExcel.addEventListener("click", exportExcel);
         dom.btnClearFilters.addEventListener("click", clearFilters);
         dom.btnLogout.addEventListener("click", signOutAndMove);
 
         dom.toggleIncludeResigned.addEventListener("change", applyFilters);
         dom.toggleOnlyChanged.addEventListener("change", applyFilters);
 
-        dom.filterInputs.forEach(el => {
-          el.addEventListener("input", applyFilters);
+        dom.tableHead.addEventListener("input", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLInputElement)) return;
+          const key = target.dataset.filter;
+          if (!key) return;
+          state.filters[key] = target.value;
+          applyFilters();
+          const next = dom.tableHead.querySelector(`.filterInput[data-filter="${CSS.escape(key)}"]`);
+          if (next) {
+            next.focus();
+            const len = next.value.length;
+            next.setSelectionRange(len, len);
+          }
+        });
+
+        dom.tableHead.addEventListener("click", (e) => {
+          const btn = e.target.closest("[data-hide-col]");
+          if (!btn) return;
+          hideColumn(btn.getAttribute("data-hide-col"));
+        });
+
+        dom.hiddenColumnBar.addEventListener("click", (e) => {
+          const btn = e.target.closest("button");
+          if (!btn) return;
+
+          if (btn.hasAttribute("data-show-all-cols")) {
+            showAllColumns();
+            return;
+          }
+
+          const key = btn.getAttribute("data-show-col");
+          if (key) showColumn(key);
         });
 
         dom.btnDeniedHome.addEventListener("click", () => {
@@ -1556,14 +1492,17 @@
       }
 
       bindEvents();
+      renderTableStructure();
+      renderTable();
 
       if (!(await requireAuthAndAccess())) return;
       await fetchRows();
     })();
   </script>
-<script>
-  window.MW_BOARD_MENU_MODE = "admin";
-</script>
-<script src="/board-menu.js"></script>
+
+  <script>
+    window.MW_BOARD_MENU_MODE = "admin";
+  </script>
+  <script src="/board-menu.js"></script>
 </body>
 </html>

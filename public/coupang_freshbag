@@ -325,10 +325,10 @@
     th,td{
       border-right:1px solid rgba(255,255,255,.12);
       border-bottom:1px solid rgba(255,255,255,.12);
-      padding:6px 6px;
+      padding:5px 4px;
       text-align:center;
       white-space:nowrap;
-      min-width:56px;
+      min-width:52px;
       max-width:120px;
       overflow:hidden;
       text-overflow:ellipsis;
@@ -356,9 +356,9 @@
       position:sticky;
       left:0;
       z-index:4;
-      width:74px;
-      min-width:74px;
-      max-width:74px;
+      width:66px;
+      min-width:66px;
+      max-width:66px;
       background:#111827;
     }
 
@@ -370,11 +370,11 @@
     th.sticky1,
     td.sticky1{
       position:sticky;
-      left:74px;
+      left:66px;
       z-index:4;
-      width:88px;
-      min-width:88px;
-      max-width:88px;
+      width:76px;
+      min-width:76px;
+      max-width:76px;
     }
 
     th.sticky1{z-index:8}
@@ -388,11 +388,11 @@
     th.sticky2,
     td.sticky2{
       position:sticky;
-      left:162px;
+      left:142px;
       z-index:4;
-      width:108px;
-      min-width:108px;
-      max-width:108px;
+      width:88px;
+      min-width:88px;
+      max-width:88px;
     }
 
     th.sticky2{z-index:8}
@@ -406,11 +406,11 @@
     th.sticky3,
     td.sticky3{
       position:sticky;
-      left:270px;
+      left:230px;
       z-index:4;
-      width:96px;
-      min-width:96px;
-      max-width:96px;
+      width:78px;
+      min-width:78px;
+      max-width:78px;
     }
 
     th.sticky3{z-index:8}
@@ -642,6 +642,62 @@
   const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v3";
   const HIDDEN_MONTHS_STORAGE_KEY = "mw:coupang_freshbag:hidden_months:v1";
 
+  const DEFAULT_PRESETS = [
+    {
+      id: "default_mw_ilsan2_day",
+      defaultPreset: true,
+      name: "마루웰 일산2 주간",
+      updatedAt: "default",
+      year: "",
+      camp: "일산2",
+      wave: "W2",
+      gajoong1: "",
+      gajoong2: "",
+      rows: ["126A","126B","126C","126D","130A","130B"].map(route => ({ wave:"W2", camp:"일산2", route }))
+    },
+    {
+      id: "default_mw_yongin3_day",
+      defaultPreset: true,
+      name: "마루웰 용인3 주간",
+      updatedAt: "default",
+      year: "",
+      camp: "용인3",
+      wave: "W2",
+      gajoong1: "",
+      gajoong2: "",
+      rows: ["602A","602B","612A"].map(route => ({ wave:"W2", camp:"용인3", route }))
+    },
+    {
+      id: "default_mw_daegu3_day",
+      defaultPreset: true,
+      name: "마루웰 대구3 주간",
+      updatedAt: "default",
+      year: "",
+      camp: "대구3",
+      wave: "W2",
+      gajoong1: "",
+      gajoong2: "",
+      rows: ["213A","213B","213C","213D"].map(route => ({ wave:"W2", camp:"대구3", route }))
+    },
+    {
+      id: "default_mw_miksan1_night",
+      defaultPreset: true,
+      name: "마루웰 M익산1 야간",
+      updatedAt: "default",
+      year: "",
+      camp: "M익산1",
+      wave: "W1",
+      gajoong1: "",
+      gajoong2: "",
+      rows: [
+        "405A","405B","405C","405D",
+        "406A","406B","406C","406D",
+        "407A","407B","407C","407D",
+        "408A","408B","408C","408D"
+      ].map(route => ({ wave:"W1", camp:"M익산1", route }))
+    }
+  ];
+
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
     $("statusText").className = type ? "status " + type : "status";
@@ -663,7 +719,11 @@
   function normalizeRoute(v) {
     return String(v || "")
       .toUpperCase()
-      .replace(/[^0-9A-Z가-힣]/g, "");
+      .replace(/[^0-9A-Z]/g, "");
+  }
+
+  function sanitizeRouteInputValue(v) {
+    return normalizeRoute(v);
   }
 
   function routeGroup(v) {
@@ -872,6 +932,15 @@
     return Array.isArray(list) ? list : [];
   }
 
+  function getAllPresets() {
+    const userPresets = getSavedPresets();
+    const userIds = new Set(userPresets.map(item => item.id));
+    return [
+      ...DEFAULT_PRESETS.filter(item => !userIds.has(item.id)),
+      ...userPresets
+    ];
+  }
+
   function setSavedPresets(list) {
     return safeLocalStorageSet(PRESET_STORAGE_KEY, Array.isArray(list) ? list : []);
   }
@@ -950,9 +1019,13 @@
     const select = $("savedPresetSelect");
     if (!select) return;
 
-    const presets = getSavedPresets()
+    const presets = getAllPresets()
       .slice()
-      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+      .sort((a, b) => {
+        if (a.defaultPreset && !b.defaultPreset) return -1;
+        if (!a.defaultPreset && b.defaultPreset) return 1;
+        return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+      });
 
     if (!presets.length) {
       select.innerHTML = `<option value="">저장된 프리셋 없음</option>`;
@@ -962,7 +1035,7 @@
     select.innerHTML = [
       `<option value="">저장된 프리셋 선택</option>`,
       ...presets.map(preset => {
-        const date = String(preset.updatedAt || "").slice(0, 10);
+        const date = preset.defaultPreset ? "기본" : String(preset.updatedAt || "").slice(0, 10);
         const count = Array.isArray(preset.rows) ? preset.rows.length : 0;
         const label = `${preset.name || "이름 없음"} · ${count}행 · ${date}`;
         return `<option value="${esc(preset.id)}">${esc(label)}</option>`;
@@ -1075,7 +1148,7 @@
       throw new Error("불러올 프리셋을 선택하세요.");
     }
 
-    const preset = getSavedPresets().find(item => item.id === selectedId);
+    const preset = getAllPresets().find(item => item.id === selectedId);
 
     if (!preset) {
       throw new Error("저장된 프리셋을 찾을 수 없습니다.");
@@ -1094,14 +1167,19 @@
       return;
     }
 
-    const presets = getSavedPresets();
-    const preset = presets.find(item => item.id === selectedId);
+    const preset = getAllPresets().find(item => item.id === selectedId);
 
     if (!preset) {
       setStatus("삭제할 프리셋을 찾을 수 없습니다.", "bad");
       return;
     }
 
+    if (preset.defaultPreset) {
+      setStatus("기본 마루웰 프리셋은 삭제할 수 없습니다.", "warn");
+      return;
+    }
+
+    const presets = getSavedPresets();
     const ok = confirm(`저장된 프리셋을 삭제할까요?\n\n${preset.name}`);
 
     if (!ok) return;
@@ -1524,6 +1602,15 @@
       }
     };
 
+    if (meta === "route") {
+      input.setAttribute("inputmode", "latin");
+      input.setAttribute("autocomplete", "off");
+      input.addEventListener("input", () => {
+        const next = sanitizeRouteInputValue(input.value);
+        if (input.value !== next) input.value = next;
+      });
+    }
+
     input.addEventListener("blur", () => commit(), { once:true });
     input.addEventListener("keydown", e => {
       if (e.key === "Enter") {
@@ -1695,9 +1782,9 @@
     }
 
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 86 },
-      { key: "camp", label: "Camp", width: 104 },
-      { key: "route", label: "Route", width: 92 }
+      { key: "wave", label: "주/야", width: 70 },
+      { key: "camp", label: "Camp", width: 82 },
+      { key: "route", label: "Route", width: 72 }
     ];
 
     const months = visibleMonths(lastMonth);
@@ -1908,7 +1995,7 @@
 
   $("savedPresetSelect").addEventListener("change", () => {
     const selectedId = $("savedPresetSelect").value;
-    const preset = getSavedPresets().find(item => item.id === selectedId);
+    const preset = getAllPresets().find(item => item.id === selectedId);
 
     if (preset) {
       $("presetNameInput").value = preset.name || "";

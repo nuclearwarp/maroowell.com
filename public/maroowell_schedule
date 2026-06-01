@@ -1564,6 +1564,43 @@
         return clean(acc?.exportId);
       }
 
+      function pddExportIdentity(value,source){
+        const raw=clean(value);
+
+        const metaIdentity=resolveMetaAdminExportIdentity(raw,source || {});
+        const metaId=clean(metaIdentity?.id);
+        if(metaId){
+          return {id:metaId, fallback:false, identity:metaIdentity};
+        }
+
+        const direct=clean(pddExportId(raw,source || {}));
+        if(direct){
+          return {id:direct, fallback:false, identity:null};
+        }
+
+        const account=resolvePddAccount(raw,source || {});
+        const accountId=clean(account?.exportId);
+        if(accountId){
+          return {id:accountId, fallback:false, identity:account};
+        }
+
+        const sourceId=clean(
+          source?.driver_coupang_id ||
+          source?.driver_export_id ||
+          source?.coupang_id ||
+          source?.export_id ||
+          ""
+        );
+        if(sourceId){
+          return {id:sourceId, fallback:false, identity:null};
+        }
+
+        // 기존 로직은 ID를 못 찾으면 해당 라우트를 통째로 건너뛰어서
+        // 화면에 배정된 405A/405B 같은 스케줄이 PDD 공유에서 사라질 수 있었다.
+        // 여기서는 누락 방지를 우선해서 이름 그대로라도 출력한다.
+        return {id:raw, fallback:true, identity:null};
+      }
+
       function metaNameCandidates(value){
         const out=[];
         const names=splitPersonNames(value);
@@ -3085,13 +3122,16 @@
               const finalSource=hasParentValue ? parentSource : childSource;
               const route=childLabel;
 
-              const directId=pddExportId(finalValue,finalSource);
-              const fallbackAccount=resolvePddAccount(finalValue,finalSource);
-              const finalId=clean(directId || fallbackAccount?.exportId);
+              const pddIdentity=pddExportIdentity(finalValue,finalSource);
+              const finalId=clean(pddIdentity.id);
 
               if(!finalId || !route){
                 console.warn("[PDD SKIP] ID not found",{date,route,finalValue,parentLabel,childLabel,finalSource,driverAccounts:state.driverAccounts});
                 continue;
+              }
+
+              if(pddIdentity.fallback){
+                console.warn("[PDD FALLBACK] ID not found, using display name",{date,route,finalValue,parentLabel,childLabel,finalSource});
               }
 
               const dedupeKey=`${finalId}||${route}`;
@@ -3108,13 +3148,16 @@
           if(!finalValue) continue;
 
           const route=parentLabel;
-          const directId=pddExportId(finalValue,parentSource);
-          const fallbackAccount=resolvePddAccount(finalValue,parentSource);
-          const finalId=clean(directId || fallbackAccount?.exportId);
+          const pddIdentity=pddExportIdentity(finalValue,parentSource);
+          const finalId=clean(pddIdentity.id);
 
           if(!finalId || !route){
             console.warn("[PDD SKIP] ID not found",{date,route,finalValue,parentLabel,parentSource,driverAccounts:state.driverAccounts});
             continue;
+          }
+
+          if(pddIdentity.fallback){
+            console.warn("[PDD FALLBACK] ID not found, using display name",{date,route,finalValue,parentLabel,parentSource});
           }
 
           const dedupeKey=`${finalId}||${route}`;

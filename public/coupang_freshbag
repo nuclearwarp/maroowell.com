@@ -716,6 +716,31 @@
     return String(v ?? "").trim();
   }
 
+  function compactText(v) {
+    return clean(v).replace(/\s+/g, "");
+  }
+
+  function normalizeCampForDb(value) {
+    const s = compactText(value);
+    if (!s) return "";
+
+    // M캠프는 화면/프리셋에서 M익산1처럼 입력해도
+    // DB 조회는 M_익산1처럼 언더바가 들어간 camp 값으로 조회한다.
+    if (/^M(?!_)/i.test(s)) {
+      return "M_" + s.slice(1);
+    }
+
+    return s;
+  }
+
+  function normalizeCampForDisplay(value) {
+    const s = compactText(value);
+    if (/^M_/i.test(s)) {
+      return "M" + s.slice(2);
+    }
+    return s;
+  }
+
   function normalizeRoute(v) {
     return String(v || "")
       .toUpperCase()
@@ -953,7 +978,7 @@
     const rows = tableRows
       .map(row => ({
         wave: effectiveWave(row),
-        camp: effectiveCamp(row),
+        camp: normalizeCampForDisplay(effectiveCamp(row)),
         route: effectiveRoute(row)
       }))
       .filter(row => row.route);
@@ -1001,7 +1026,7 @@
       name: clean(nameOverride),
       updatedAt: new Date().toISOString(),
       year: $("yearFilter").value || "",
-      camp: clean($("campFilter").value),
+      camp: normalizeCampForDisplay($("campFilter").value),
       wave: clean($("waveFilter").value).toUpperCase(),
       gajoong1: $("g1Filter").value || "",
       gajoong2: $("g2Filter").value || "",
@@ -1097,7 +1122,7 @@
     const row = createBlankRow();
 
     row.wave = waveValueFromLabel(item.wave);
-    row.camp = clean(item.camp);
+    row.camp = normalizeCampForDisplay(item.camp);
     row.route = normalizeRoute(item.route);
     row.months = {};
 
@@ -1120,7 +1145,7 @@
       $("yearFilter").value = String(preset.year);
     }
 
-    $("campFilter").value = preset.camp || "";
+    $("campFilter").value = normalizeCampForDisplay(preset.camp || "");
     $("waveFilter").value = preset.wave || "";
     $("g1Filter").value = preset.gajoong1 || "";
     $("g2Filter").value = preset.gajoong2 || "";
@@ -1214,12 +1239,16 @@
 
   function getCriteriaRows() {
     return tableRows
-      .map(row => ({
-        row,
-        wave: effectiveWave(row),
-        camp: effectiveCamp(row),
-        route: effectiveRoute(row)
-      }))
+      .map(row => {
+        const displayCamp = effectiveCamp(row);
+        return {
+          row,
+          wave: effectiveWave(row),
+          camp: normalizeCampForDb(displayCamp),
+          displayCamp: normalizeCampForDisplay(displayCamp),
+          route: effectiveRoute(row)
+        };
+      })
       .filter(item => item.route);
   }
 
@@ -1250,7 +1279,7 @@
   async function fetchRowsByCriteria(criteria) {
     const year = Number($("yearFilter").value);
     const waves = unique(criteria.map(x => x.wave));
-    const camps = unique(criteria.map(x => x.camp));
+    const camps = unique(criteria.map(x => normalizeCampForDb(x.camp)));
     const routes = unique(criteria.map(x => x.route));
     const g1 = $("g1Filter").value;
     const g2 = $("g2Filter").value;
@@ -1288,11 +1317,11 @@
     const { data, error } = await q;
     if (error) throw error;
 
-    const criteriaSet = new Set(criteria.map(x => `${x.wave}||${x.camp}||${x.route}`));
+    const criteriaSet = new Set(criteria.map(x => `${x.wave}||${normalizeCampForDb(x.camp)}||${x.route}`));
 
     return (Array.isArray(data) ? data : []).filter(row => {
       const wave = clean(row.wave).toUpperCase();
-      const camp = clean(row.camp);
+      const camp = normalizeCampForDb(row.camp);
       const route = normalizeRoute(row.route_norm || row.route);
       return criteriaSet.has(`${wave}||${camp}||${route}`);
     });
@@ -1317,11 +1346,11 @@
     const rowMap = new Map();
 
     for (const item of criteria) {
-      const key = `${item.wave}||${item.camp}||${item.route}`;
+      const key = `${item.wave}||${normalizeCampForDb(item.camp)}||${item.route}`;
       rowMap.set(key, item.row);
 
       item.row.wave = item.wave;
-      item.row.camp = item.camp;
+      item.row.camp = item.displayCamp || normalizeCampForDisplay(item.camp);
       item.row.route = item.route;
       item.row.months = {};
     }
@@ -1367,7 +1396,7 @@
     const monthSet = new Set();
 
     for (const row of rawRows) {
-      if (row.camp) campSet.add(row.camp);
+      if (row.camp) campSet.add(normalizeCampForDisplay(row.camp));
       if (row.month_no && !hiddenMonths.has(Number(row.month_no))) monthSet.add(row.month_no);
     }
 

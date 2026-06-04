@@ -57,6 +57,7 @@
     .brand img{
       width:34px;
       height:34px;
+      display:block;
     }
 
     .title{
@@ -82,18 +83,11 @@
       box-shadow:0 18px 60px rgba(0,0,0,.25);
     }
 
-    .row,
-    .presetRow{
+    .row{
       display:flex;
       gap:10px;
       align-items:flex-end;
       flex-wrap:wrap;
-    }
-
-    .presetRow{
-      margin-top:12px;
-      padding-top:12px;
-      border-top:1px solid rgba(255,255,255,.08);
     }
 
     .field{
@@ -120,6 +114,14 @@
       min-width:140px;
     }
 
+    select:disabled{
+      opacity:1;
+      color:#dbeafe;
+      border-color:rgba(96,165,250,.35);
+      background:rgba(37,99,235,.12);
+      cursor:not-allowed;
+    }
+
     input:focus,select:focus{
       border-color:rgba(96,165,250,.55);
       box-shadow:0 0 0 2px rgba(96,165,250,.12);
@@ -130,10 +132,8 @@
       color:#fff;
     }
 
-    .campInput{min-width:180px}
-    .routeInput{min-width:280px}
-    .presetNameField input{min-width:240px}
-    .presetSelectField select{min-width:340px}
+    .campInput{min-width:190px}
+    .routeInput{min-width:320px}
 
     button{
       min-height:42px;
@@ -212,6 +212,13 @@
       color:var(--muted);
       font-size:12px;
       font-weight:800;
+    }
+
+    .weekActions{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
     }
 
     .tableWrap{
@@ -331,13 +338,6 @@
       font-weight:800;
     }
 
-    .weekActions{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-
     .dayHead{
       min-width:124px;
       max-width:124px;
@@ -413,11 +413,9 @@
 
     @media(max-width:900px){
       .top{flex-direction:column;align-items:flex-start}
-      .row,.presetRow{flex-direction:column;align-items:stretch}
+      .row{flex-direction:column;align-items:stretch}
       input,select,button,
-      .campInput,.routeInput,
-      .presetNameField input,
-      .presetSelectField select{
+      .campInput,.routeInput{
         width:100%;
         min-width:0;
       }
@@ -452,13 +450,19 @@
 
         <div class="field">
           <label>Camp</label>
-          <input id="campFilter" class="campInput" placeholder="예: 일산2" />
+          <select id="campFilter" class="campInput">
+            <option value="">캠프 선택</option>
+            <option value="일산2">일산2 - 주간</option>
+            <option value="용인3">용인3 - 주간</option>
+            <option value="대구3">대구3 - 주간</option>
+            <option value="M익산1">M익산1 - 야간</option>
+          </select>
         </div>
 
         <div class="field">
-          <label>주야간</label>
-          <select id="waveFilter">
-            <option value="">전체</option>
+          <label>주간/야간</label>
+          <select id="waveFilter" disabled>
+            <option value="">자동 선택</option>
             <option value="W2">주간</option>
             <option value="W1">야간</option>
           </select>
@@ -473,26 +477,12 @@
         <button id="clearBtn" class="secondary">초기화</button>
       </div>
 
-      <div class="presetRow">
-        <div class="field presetNameField">
-          <label>프리셋 이름</label>
-          <input id="presetNameInput" placeholder="예: 일산2 주간 126/130 회수율" />
-        </div>
-
-        <div class="field presetSelectField">
-          <label>저장된 프리셋</label>
-          <select id="savedPresetSelect">
-            <option value="">저장된 프리셋 없음</option>
-          </select>
-        </div>
-
-        <button id="savePresetBtn" class="secondary" type="button">프리셋 저장</button>
-        <button id="loadPresetBtn" class="secondary" type="button">불러와서 조회</button>
-        <button id="deletePresetBtn" class="danger" type="button">프리셋 삭제</button>
-      </div>
-
       <div class="hint" id="periodHint">
         쿠팡 정산월 기준입니다. 예: 4월 데이터 = 3월 26일 ~ 4월 25일.
+      </div>
+
+      <div class="hint">
+        Camp 선택 시 주간/야간은 자동 선택됩니다. M익산1은 DB 조회 시 자동으로 <b>M_익산1</b>로 변환됩니다.
       </div>
 
       <div class="status" id="statusText">대기 중</div>
@@ -552,7 +542,14 @@
 
   const DAILY_TABLE = "maroowell_freshbag_ration";
   const TOTAL_TABLE = "maroowell_freshbag_ration_month_total";
-  const PRESET_STORAGE_KEY = "mw:maroowell_freshbag_ratio:presets:v3";
+
+  const CAMP_WAVE_MAP = {
+    "일산2":"W2",
+    "용인3":"W2",
+    "대구3":"W2",
+    "M익산1":"W1",
+    "M_익산1":"W1"
+  };
 
   let supabaseClient = null;
   let currentUser = null;
@@ -570,6 +567,14 @@
     return String(v ?? "").trim();
   }
 
+  function compact(v) {
+    return clean(v).replace(/\s+/g, "");
+  }
+
+  function campKey(v) {
+    return compact(v).replace(/_/g, "").toUpperCase();
+  }
+
   function esc(v) {
     return String(v ?? "")
       .replaceAll("&","&amp;")
@@ -583,6 +588,29 @@
     return String(v || "")
       .toUpperCase()
       .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function campDbValue(value) {
+    const raw = compact(value);
+    const key = campKey(raw);
+
+    if (key === campKey("M익산1") || key === campKey("M_익산1")) return "M_익산1";
+
+    return clean(value);
+  }
+
+  function waveForCamp(value) {
+    const dbCamp = campDbValue(value);
+    return CAMP_WAVE_MAP[dbCamp] || CAMP_WAVE_MAP[clean(value)] || "";
+  }
+
+  function syncWaveFromCamp() {
+    const camp = clean($("campFilter").value);
+    const wave = waveForCamp(camp);
+
+    $("waveFilter").value = wave || "";
+
+    return wave;
   }
 
   function waveLabel(v) {
@@ -628,13 +656,8 @@
     const n = Number(value);
     if (!Number.isFinite(n)) return false;
 
-    if (field === "gajoong1") {
-      return n >= 95;
-    }
-
-    if (field === "gajoong2") {
-      return clean(wave).toUpperCase() === "W1" ? n >= 75 : n >= 85;
-    }
+    if (field === "gajoong1") return n >= 95;
+    if (field === "gajoong2") return clean(wave).toUpperCase() === "W1" ? n >= 75 : n >= 85;
 
     return false;
   }
@@ -690,6 +713,8 @@
     }).join("");
 
     $("monthFilter").value = String(thisMonth);
+    $("campFilter").value = "";
+    $("waveFilter").value = "";
     updatePeriodHint();
   }
 
@@ -778,8 +803,9 @@
   }
 
   function applyCommonFilters(query) {
-    const camp = clean($("campFilter").value);
-    const wave = clean($("waveFilter").value);
+    const selectedCamp = clean($("campFilter").value);
+    const camp = campDbValue(selectedCamp);
+    const wave = waveForCamp(selectedCamp) || clean($("waveFilter").value);
     const routes = routeListFromInput();
 
     let q = query;
@@ -893,6 +919,13 @@
 
   async function loadData() {
     updatePeriodHint();
+    syncWaveFromCamp();
+
+    if (!clean($("campFilter").value)) {
+      setStatus("캠프를 선택하세요.", "bad");
+      return;
+    }
+
     setStatus("회수율 조회 중...", "warn");
 
     totalRows = await fetchTotalRows();
@@ -903,8 +936,12 @@
     renderWeeklyTables();
     renderSummary();
 
+    const selectedCamp = clean($("campFilter").value);
+    const dbCamp = campDbValue(selectedCamp);
+    const dbCampText = selectedCamp !== dbCamp ? ` / DB camp ${dbCamp}` : "";
+
     setStatus(
-      `조회 완료: 월누적 ${totalRows.length.toLocaleString()}건 / 일자별 ${dailyRows.length.toLocaleString()}건 / 표시 행 ${routeRows.length.toLocaleString()}개`,
+      `조회 완료: 월누적 ${totalRows.length.toLocaleString()}건 / 일자별 ${dailyRows.length.toLocaleString()}건 / 표시 행 ${routeRows.length.toLocaleString()}개${dbCampText}`,
       "ok"
     );
   }
@@ -926,7 +963,7 @@
 
     thead.innerHTML = `
       <tr>
-        <th>주야간</th>
+        <th>주간/야간</th>
         <th>Camp</th>
         <th>Route</th>
         <th>누적 회수율</th>
@@ -1054,7 +1091,7 @@
             <table class="weekTable" data-week-table="${week.seq}">
               <thead>
                 <tr>
-                  <th>주야간</th>
+                  <th>주간/야간</th>
                   <th>Camp</th>
                   <th>Route</th>
                   ${headers}
@@ -1119,7 +1156,7 @@
     const p = getSelectedPeriod();
 
     const columns = [
-      { key:"wave", label:"주야간", width:90 },
+      { key:"wave", label:"주간/야간", width:90 },
       { key:"camp", label:"Camp", width:130 },
       { key:"route", label:"Route", width:110 },
       { key:"ratio", label:"누적 회수율", width:180 },
@@ -1263,7 +1300,7 @@
     const dmap = dailyMap();
 
     const columns = [
-      { key:"wave", label:"주야간", width:90 },
+      { key:"wave", label:"주간/야간", width:90 },
       { key:"camp", label:"Camp", width:120 },
       { key:"route", label:"Route", width:110 },
       ...week.days.map(day => ({
@@ -1425,164 +1462,6 @@
     }
   }
 
-  function safeLocalStorageGet(key, fallback) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return fallback;
-      return JSON.parse(raw);
-    } catch {
-      return fallback;
-    }
-  }
-
-  function safeLocalStorageSet(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function getSavedPresets() {
-    const list = safeLocalStorageGet(PRESET_STORAGE_KEY, []);
-    return Array.isArray(list) ? list : [];
-  }
-
-  function setSavedPresets(list) {
-    return safeLocalStorageSet(PRESET_STORAGE_KEY, Array.isArray(list) ? list : []);
-  }
-
-  function makePresetId() {
-    return "preset_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
-  }
-
-  function buildPreset(name) {
-    const presetName = clean(name);
-    if (!presetName) throw new Error("프리셋 이름을 입력하세요.");
-
-    return {
-      id:"",
-      name:presetName,
-      updatedAt:new Date().toISOString(),
-      year:$("yearFilter").value || "",
-      month:$("monthFilter").value || "",
-      camp:clean($("campFilter").value),
-      wave:clean($("waveFilter").value),
-      route:clean($("routeFilter").value)
-    };
-  }
-
-  function renderPresetOptions(selectedId = "") {
-    const presets = getSavedPresets()
-      .slice()
-      .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
-
-    if (!presets.length) {
-      $("savedPresetSelect").innerHTML = `<option value="">저장된 프리셋 없음</option>`;
-      return;
-    }
-
-    $("savedPresetSelect").innerHTML = [
-      `<option value="">저장된 프리셋 선택</option>`,
-      ...presets.map(preset => {
-        const date = String(preset.updatedAt || "").slice(0, 10);
-        return `<option value="${esc(preset.id)}">${esc(preset.name)} · ${esc(date)}</option>`;
-      })
-    ].join("");
-
-    if (selectedId) $("savedPresetSelect").value = selectedId;
-  }
-
-  function savePreset() {
-    const preset = buildPreset($("presetNameInput").value);
-    const presets = getSavedPresets();
-
-    const selectedId = $("savedPresetSelect").value;
-    const selectedIndex = presets.findIndex(item => item.id === selectedId);
-    const sameNameIndex = presets.findIndex(item => item.name === preset.name);
-
-    if (selectedIndex >= 0) {
-      const ok = confirm(`선택된 프리셋을 덮어쓸까요?\n\n${presets[selectedIndex].name}`);
-      if (!ok) return;
-
-      preset.id = selectedId;
-      presets[selectedIndex] = {
-        ...presets[selectedIndex],
-        ...preset,
-        updatedAt:new Date().toISOString()
-      };
-    } else if (sameNameIndex >= 0) {
-      const ok = confirm(`같은 이름의 프리셋이 있습니다. 덮어쓸까요?\n\n${preset.name}`);
-      if (!ok) return;
-
-      preset.id = presets[sameNameIndex].id;
-      presets[sameNameIndex] = {
-        ...presets[sameNameIndex],
-        ...preset,
-        updatedAt:new Date().toISOString()
-      };
-    } else {
-      preset.id = makePresetId();
-      presets.unshift(preset);
-    }
-
-    setSavedPresets(presets);
-    renderPresetOptions(preset.id);
-    setStatus(`프리셋 저장 완료: ${preset.name}`, "ok");
-  }
-
-  function applyPreset(preset) {
-    if (!preset) return;
-
-    if (preset.year) $("yearFilter").value = String(preset.year);
-    if (preset.month) $("monthFilter").value = String(preset.month);
-
-    $("campFilter").value = preset.camp || "";
-    $("waveFilter").value = preset.wave || "";
-    $("routeFilter").value = preset.route || "";
-    $("presetNameInput").value = preset.name || "";
-
-    updatePeriodHint();
-  }
-
-  async function loadPresetAndQuery() {
-    const selectedId = $("savedPresetSelect").value;
-
-    if (!selectedId) throw new Error("불러올 프리셋을 선택하세요.");
-
-    const preset = getSavedPresets().find(item => item.id === selectedId);
-    if (!preset) throw new Error("저장된 프리셋을 찾을 수 없습니다.");
-
-    applyPreset(preset);
-    await loadData();
-  }
-
-  function deletePreset() {
-    const selectedId = $("savedPresetSelect").value;
-
-    if (!selectedId) {
-      setStatus("삭제할 프리셋을 선택하세요.", "bad");
-      return;
-    }
-
-    const presets = getSavedPresets();
-    const preset = presets.find(item => item.id === selectedId);
-
-    if (!preset) {
-      setStatus("삭제할 프리셋을 찾을 수 없습니다.", "bad");
-      return;
-    }
-
-    const ok = confirm(`프리셋을 삭제할까요?\n\n${preset.name}`);
-    if (!ok) return;
-
-    setSavedPresets(presets.filter(item => item.id !== selectedId));
-    renderPresetOptions();
-    $("presetNameInput").value = "";
-    setStatus("프리셋 삭제 완료", "ok");
-  }
-
   function clearAll() {
     const now = new Date();
 
@@ -1591,8 +1470,6 @@
     $("campFilter").value = "";
     $("waveFilter").value = "";
     $("routeFilter").value = "";
-    $("presetNameInput").value = "";
-    $("savedPresetSelect").value = "";
 
     totalRows = [];
     dailyRows = [];
@@ -1628,24 +1505,29 @@
     $("clearBtn").addEventListener("click", clearAll);
     $("copyTotalImageBtn").addEventListener("click", () => run(copyTotalImage));
 
-    $("savePresetBtn").addEventListener("click", () => run(async () => savePreset()));
-    $("loadPresetBtn").addEventListener("click", () => run(loadPresetAndQuery));
-    $("deletePresetBtn").addEventListener("click", deletePreset);
+    $("campFilter").addEventListener("change", () => {
+      syncWaveFromCamp();
+      if (clean($("campFilter").value)) run(loadData);
+    });
 
-    $("savedPresetSelect").addEventListener("change", () => {
-      const selectedId = $("savedPresetSelect").value;
-      const preset = getSavedPresets().find(item => item.id === selectedId);
-      if (preset) $("presetNameInput").value = preset.name || "";
+    $("routeFilter").addEventListener("input", () => {
+      const input = $("routeFilter");
+      const before = input.value;
+      const next = before
+        .toUpperCase()
+        .replace(/[^0-9A-Z가-힣,\s/|_]/g, "");
+      if (before !== next) input.value = next;
     });
 
     ["yearFilter", "monthFilter"].forEach(id => {
-      $(id).addEventListener("change", updatePeriodHint);
+      $(id).addEventListener("change", () => {
+        updatePeriodHint();
+        if (clean($("campFilter").value)) run(loadData);
+      });
     });
 
-    ["campFilter", "routeFilter"].forEach(id => {
-      $(id).addEventListener("keydown", e => {
-        if (e.key === "Enter") run(loadData);
-      });
+    $("routeFilter").addEventListener("keydown", e => {
+      if (e.key === "Enter") run(loadData);
     });
 
     $("weekContainer").addEventListener("click", e => {
@@ -1672,12 +1554,11 @@
       const ok = await checkMaroowellAccess();
       if (!ok) return;
 
-      renderPresetOptions();
       renderTotalTable();
       renderWeeklyTables();
       renderSummary();
 
-      setStatus("마루웰 권한 확인 완료. 조건을 입력하고 조회하세요.", "ok");
+      setStatus("마루웰 권한 확인 완료. 캠프를 선택하면 주간/야간이 자동 선택되고 바로 조회됩니다.", "ok");
     });
   } catch (e) {
     document.documentElement.style.visibility = "visible";

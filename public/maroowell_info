@@ -1035,8 +1035,8 @@
         dom.hiddenColumnBar.className = "hiddenColumnBar";
         dom.hiddenColumnBar.innerHTML = `
           <span class="hiddenLabel">숨김 열</span>
-          ${hidden.map(col => `<button class="hiddenChip" type="button" data-show-col="${escapeHtml(col.key)}">${escapeHtml(col.label)} 다시 보기</button>`).join("")}
           <button class="hiddenChip all" type="button" data-show-all-cols="1">전체 열 보기</button>
+          ${hidden.map(col => `<button class="hiddenChip" type="button" data-show-col="${escapeHtml(col.key)}">${escapeHtml(col.label)} 다시 보기</button>`).join("")}
         `;
       }
 
@@ -1077,7 +1077,9 @@
         renderHiddenColumnBar();
       }
 
-      function applyFilters() {
+      function applyFilters(options = {}) {
+        const renderStructure = options?.renderStructure !== false;
+
         state.filteredRows = state.rows.filter(row => {
           if (row.pk_id && state.deletedIds.has(row.pk_id)) return false;
           if (!dom.toggleIncludeResigned.checked && isResigned(row)) return false;
@@ -1091,7 +1093,7 @@
           return true;
         });
 
-        renderTableStructure();
+        if (renderStructure) renderTableStructure();
         renderTable();
         updatePills();
 
@@ -1454,19 +1456,34 @@
         dom.toggleIncludeResigned.addEventListener("change", applyFilters);
         dom.toggleOnlyChanged.addEventListener("change", applyFilters);
 
+        dom.tableHead.addEventListener("compositionstart", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLInputElement)) return;
+          if (!target.dataset.filter) return;
+          target.dataset.composing = "1";
+        });
+
+        dom.tableHead.addEventListener("compositionend", (e) => {
+          const target = e.target;
+          if (!(target instanceof HTMLInputElement)) return;
+          const key = target.dataset.filter;
+          if (!key) return;
+
+          target.dataset.composing = "";
+          state.filters[key] = target.value;
+          applyFilters({ renderStructure:false });
+        });
+
         dom.tableHead.addEventListener("input", (e) => {
           const target = e.target;
           if (!(target instanceof HTMLInputElement)) return;
           const key = target.dataset.filter;
           if (!key) return;
+
+          if (e.isComposing || target.dataset.composing === "1") return;
+
           state.filters[key] = target.value;
-          applyFilters();
-          const next = dom.tableHead.querySelector(`.filterInput[data-filter="${CSS.escape(key)}"]`);
-          if (next) {
-            next.focus();
-            const len = next.value.length;
-            next.setSelectionRange(len, len);
-          }
+          applyFilters({ renderStructure:false });
         });
 
         dom.tableHead.addEventListener("click", (e) => {

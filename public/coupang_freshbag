@@ -841,6 +841,61 @@
     @media(max-width:900px){.wrap{padding:12px 10px 28px!important}.top{flex-direction:column!important;align-items:stretch!important;padding:13px 14px!important;border-radius:20px!important}.brand{align-items:flex-start!important}.brand img,.brand a{width:30px!important;height:30px!important;min-width:30px!important}.title{font-size:21px!important;line-height:1.12!important}.sub{font-size:12px!important}.card{padding:12px!important;border-radius:18px!important}.row,.presetRow{flex-direction:column!important;align-items:stretch!important}input,select,button,.presetNameField input,.presetSelectField select{width:100%!important;min-width:0!important}button{justify-content:center!important;text-align:center!important}}
   </style>
 
+
+  <style id="mw-freshbag-no-sticky-columns-fix">
+    /* 모바일/PC 공통: 좌측 컬럼 고정 해제. 전체 표가 한 덩어리로 가로 스크롤됨 */
+    #resultTable th.actionCol,
+    #resultTable td.actionCol,
+    #resultTable th.sticky1,
+    #resultTable td.sticky1,
+    #resultTable th.sticky2,
+    #resultTable td.sticky2,
+    #resultTable th.sticky3,
+    #resultTable td.sticky3{
+      position:static !important;
+      left:auto !important;
+      right:auto !important;
+      z-index:auto !important;
+    }
+
+    #resultTable thead th{
+      position:sticky !important;
+      top:0 !important;
+    }
+
+    #resultTable thead tr.monthSubRow th{
+      top:34px !important;
+    }
+
+    #resultTable th.actionCol,
+    #resultTable td.actionCol{
+      width:66px !important;
+      min-width:66px !important;
+      max-width:66px !important;
+    }
+
+    #resultTable th.sticky1,
+    #resultTable td.sticky1{
+      width:76px !important;
+      min-width:76px !important;
+      max-width:76px !important;
+    }
+
+    #resultTable th.sticky2,
+    #resultTable td.sticky2{
+      width:88px !important;
+      min-width:88px !important;
+      max-width:88px !important;
+    }
+
+    #resultTable th.sticky3,
+    #resultTable td.sticky3{
+      width:78px !important;
+      min-width:78px !important;
+      max-width:78px !important;
+    }
+  </style>
+
 </head>
 
 <body>
@@ -2088,21 +2143,22 @@
     setStatus("조회 행을 화면에서 제거했습니다. DB 데이터는 변경되지 않았습니다.", "ok");
   }
 
-  function getMonthsWithData(maxMonth = 12) {
-    const months = [];
+  function getMonthsWithData() {
+    const set = new Set();
 
-    for (let m = 1; m <= maxMonth; m++) {
-      if (hiddenMonths.has(m)) continue;
+    for (const row of tableRows) {
+      for (let m = 1; m <= 12; m++) {
+        if (hiddenMonths.has(m)) continue;
 
-      const hasData = tableRows.some(row => {
         const month = row.months[m] || {};
-        return clean(month.gajoong1) || clean(month.gajoong2);
-      });
+        const g1 = clean(month.gajoong1);
+        const g2 = clean(month.gajoong2);
 
-      if (hasData) months.push(m);
+        if (g1 || g2) set.add(m);
+      }
     }
 
-    return months;
+    return Array.from(set).sort((a, b) => a - b);
   }
 
   function getLastMonthWithData() {
@@ -2240,7 +2296,7 @@
   }
 
   async function copyTableImage() {
-    const months = getMonthsWithData(12);
+    const months = getMonthsWithData();
 
     if (!tableRows.length) {
       setStatus("복사할 행이 없습니다.", "bad");
@@ -2252,17 +2308,30 @@
       return;
     }
 
+    /*
+      6.4 이전 안정 로직 기반.
+      - HTML 캡처/html2canvas 아님
+      - 직접 canvas에 표를 그림
+      - 단 분할 없음
+      - 캔버스 scale=2 고정
+      - 데이터 없는 월은 제외
+      - 월이 1~2개뿐이면 이미지 폭이 너무 좁아 모바일/카톡 미리보기에서 뭉개지므로
+        X축 컬럼 폭만 넓혀 한 장 세로 이미지 품질을 보정함.
+    */
+    const widthBoost = months.length <= 1 ? 1.85 : months.length === 2 ? 1.35 : 1;
+    const wv = (n) => Math.round(n * widthBoost);
+
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 70 },
-      { key: "camp", label: "Camp", width: 82 },
-      { key: "route", label: "Route", width: 72 }
+      { key: "wave", label: "주간/야간", width: wv(70) },
+      { key: "camp", label: "Camp", width: wv(82) },
+      { key: "route", label: "Route", width: wv(72) }
     ];
 
     const monthColumns = [];
 
     for (const m of months) {
-      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: 54, first:true });
-      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: 54, first:false });
+      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: wv(54), first:true });
+      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: wv(54), first:false });
     }
 
     const columns = [...fixedColumns, ...monthColumns];
@@ -2277,20 +2346,12 @@
     const canvasWidth = tableWidth + padding * 2;
     const canvasHeight = titleHeight + monthHeaderHeight + subHeaderHeight + tableRows.length * rowHeight + padding * 2;
 
-    /*
-      이미지 복사 안정화:
-      예전 버전에서 선명하게 동작하던 방식으로 복구.
-      - 단 분할 없음
-      - 가변 스케일 없음
-      - 브라우저/카톡이 과도하게 리샘플링하지 않도록 scale=2 고정
-      - CSS transform / devicePixelRatio 미사용
-    */
     const scale = 2;
     const canvas = document.createElement("canvas");
     canvas.width = canvasWidth * scale;
     canvas.height = canvasHeight * scale;
 
-    const ctx = canvas.getContext("2d", { alpha:false });
+    const ctx = canvas.getContext("2d");
     ctx.scale(scale, scale);
 
     ctx.fillStyle = "#ffffff";
@@ -2327,7 +2388,7 @@
     }
 
     for (const m of months) {
-      const w = 108;
+      const w = wv(108);
       drawCell(ctx, x, y, w, monthHeaderHeight, {
         text: `${m}월`,
         bg: "#dbeafe",
@@ -2408,9 +2469,10 @@
     const monthBoundaryStart = padding + fixedColumns.reduce((sum, col) => sum + col.width, 0);
     const monthBoundaryTop = padding + titleHeight;
     const monthBoundaryBottom = canvasHeight - padding;
+    const oneMonthWidth = wv(108);
 
     for (let i = 0; i <= months.length; i++) {
-      const boundaryX = monthBoundaryStart + i * 108;
+      const boundaryX = monthBoundaryStart + i * oneMonthWidth;
       drawMonthBoundary(ctx, boundaryX, monthBoundaryTop, monthBoundaryBottom);
     }
 
@@ -2428,7 +2490,7 @@
         })
       ]);
 
-      setStatus(`이미지 복사 완료: 예전 선명 복사 로직 / 데이터 있는 월만 / ${months.join(", ")}월`, "ok");
+      setStatus(`이미지 복사 완료: 6.4 이전 방식 / 한 장 세로 / 데이터 있는 월만 / ${months.join(", ")}월`, "ok");
     } catch (e) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

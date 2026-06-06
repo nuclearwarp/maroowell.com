@@ -896,9 +896,8 @@
     }
   </style>
 
-
-  <style id="mw-freshbag-table-font-compact-fix">
-    /* 표 글씨 1px 축소: 미해당/해당X 잘림 완화 */
+  <style id="mw-freshbag-ultra-compact-quality-fix">
+    /* 화면 표: 월 데이터 칸 좌우 폭 축소 + 글씨 1px 축소 유지 */
     #resultTable{
       font-size:12px !important;
     }
@@ -906,20 +905,27 @@
     #resultTable th,
     #resultTable td{
       font-size:12px !important;
-      letter-spacing:-0.02em !important;
+      letter-spacing:-0.03em !important;
     }
 
     #resultTable thead tr.monthSubRow th{
       font-size:11px !important;
     }
 
-    #resultTable .monthValue{
+    #resultTable th.monthValue,
+    #resultTable td.monthValue{
+      width:48px !important;
+      min-width:48px !important;
+      max-width:48px !important;
+      padding-left:2px !important;
+      padding-right:2px !important;
       font-size:12px !important;
     }
 
-    #resultTable .small,
-    #resultTable button.small{
-      font-size:11px !important;
+    #resultTable th.monthGroup{
+      width:96px !important;
+      min-width:96px !important;
+      max-width:96px !important;
     }
   </style>
 
@@ -2227,11 +2233,11 @@
     ctx.font = font;
     ctx.textBaseline = "middle";
 
-    const safeText = fitText(ctx, text, w - 8);
+    const safeText = fitText(ctx, text, w - 4);
 
     if (align === "left") {
       ctx.textAlign = "left";
-      ctx.fillText(safeText, x + 7, y + h / 2);
+      ctx.fillText(safeText, x + 4, y + h / 2);
     } else {
       ctx.textAlign = "center";
       ctx.fillText(safeText, x + w / 2, y + h / 2);
@@ -2318,7 +2324,7 @@
 
   function canvasToBlob(canvas) {
     return new Promise(resolve => {
-      canvas.toBlob(blob => resolve(blob), "image/png");
+      canvas.toBlob(blob => resolve(blob), "image/png", 1);
     });
   }
 
@@ -2336,50 +2342,46 @@
     }
 
     /*
-      6.4 이전 안정 로직 기반.
-      - HTML 캡처/html2canvas 아님
-      - 직접 canvas에 표를 그림
-      - 단 분할 없음
-      - 캔버스 scale=2 고정
+      화질 개선 최종 방향:
+      - 화면에 보이는 CSS 크기는 타이트하게 줄임
+      - 실제 PNG 픽셀은 scale=4로 크게 생성
+      - 한 장 세로 이미지 유지
+      - 해당/해당X/미해당 칸 좌우 폭 축소
       - 데이터 없는 월은 제외
-      - 월이 1~2개뿐이면 이미지 폭이 너무 좁아 모바일/카톡 미리보기에서 뭉개지므로
-        X축 컬럼 폭만 넓혀 한 장 세로 이미지 품질을 보정함.
     */
-    const monthBoost = months.length <= 1 ? 1.48 : months.length === 2 ? 1.18 : 1;
-    const monthWidth = (n) => Math.round(n * monthBoost);
-
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 50 },
-      { key: "camp", label: "Camp", width: 60 },
-      { key: "route", label: "Route", width: 50 }
+      { key: "wave", label: "주간/야간", width: 44 },
+      { key: "camp", label: "Camp", width: 54 },
+      { key: "route", label: "Route", width: 46 }
     ];
 
     const monthColumns = [];
 
     for (const m of months) {
-      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: monthWidth(54), first:true });
-      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: monthWidth(54), first:false });
+      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: 44, first:true });
+      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: 44, first:false });
     }
 
     const columns = [...fixedColumns, ...monthColumns];
 
-    const titleHeight = 52;
-    const monthHeaderHeight = 28;
-    const subHeaderHeight = 28;
-    const rowHeight = 32;
-    const padding = 14;
+    const titleHeight = 48;
+    const monthHeaderHeight = 26;
+    const subHeaderHeight = 25;
+    const rowHeight = 30;
+    const padding = 12;
 
     const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
     const canvasWidth = tableWidth + padding * 2;
     const canvasHeight = titleHeight + monthHeaderHeight + subHeaderHeight + tableRows.length * rowHeight + padding * 2;
 
-    const scale = 2;
+    const scale = 4;
     const canvas = document.createElement("canvas");
     canvas.width = canvasWidth * scale;
     canvas.height = canvasHeight * scale;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha:false });
     ctx.scale(scale, scale);
+    ctx.imageSmoothingEnabled = false;
 
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
@@ -2391,14 +2393,14 @@
     ].filter(Boolean);
 
     ctx.fillStyle = "#0f172a";
-    ctx.font = "800 22px Arial, 'Noto Sans KR', sans-serif";
+    ctx.font = "800 20px 'Noto Sans KR', Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText("프레시백 현황 조회", padding, padding + 14);
+    ctx.fillText("프레시백 현황 조회", padding, padding + 13);
 
     ctx.fillStyle = "#64748b";
-    ctx.font = "600 13px Arial, 'Noto Sans KR', sans-serif";
-    ctx.fillText(titleParts.join(" / "), padding, padding + 38);
+    ctx.font = "600 12px 'Noto Sans KR', Arial, sans-serif";
+    ctx.fillText(titleParts.join(" / "), padding, padding + 35);
 
     let y = padding + titleHeight;
     let x = padding;
@@ -2409,19 +2411,19 @@
         bg: "#eaf2fb",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 10px Arial, 'Noto Sans KR', sans-serif"
+        font: "700 10px 'Noto Sans KR', Arial, sans-serif"
       });
       x += col.width;
     }
 
     for (const m of months) {
-      const w = monthWidth(108);
+      const w = 88;
       drawCell(ctx, x, y, w, monthHeaderHeight, {
         text: `${m}월`,
         bg: "#dbeafe",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 12px Arial, 'Noto Sans KR', sans-serif",
+        font: "700 12px 'Noto Sans KR', Arial, sans-serif",
         lineWidth: 1
       });
       x += w;
@@ -2436,7 +2438,7 @@
         bg: "#eff6ff",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 10px Arial, 'Noto Sans KR', sans-serif",
+        font: "700 10px 'Noto Sans KR', Arial, sans-serif",
         lineWidth: 1
       });
       x += col.width;
@@ -2462,7 +2464,7 @@
           bg: "#f8fafc",
           color: col.key === "route" ? "#1d4ed8" : "#0f172a",
           border: "#d8e0ee",
-          font: "700 10px Arial, 'Noto Sans KR', sans-serif"
+          font: "700 10px 'Noto Sans KR', Arial, sans-serif"
         });
 
         x += col.width;
@@ -2479,7 +2481,7 @@
           bg: style.bg,
           color: style.color,
           border: "#d8e0ee",
-          font: "700 10px Arial, 'Noto Sans KR', sans-serif",
+          font: "700 10px 'Noto Sans KR', Arial, sans-serif",
           lineWidth: 1
         });
 
@@ -2496,10 +2498,9 @@
     const monthBoundaryStart = padding + fixedColumns.reduce((sum, col) => sum + col.width, 0);
     const monthBoundaryTop = padding + titleHeight;
     const monthBoundaryBottom = canvasHeight - padding;
-    const oneMonthWidth = monthWidth(108);
 
     for (let i = 0; i <= months.length; i++) {
-      const boundaryX = monthBoundaryStart + i * oneMonthWidth;
+      const boundaryX = monthBoundaryStart + i * 88;
       drawMonthBoundary(ctx, boundaryX, monthBoundaryTop, monthBoundaryBottom);
     }
 
@@ -2517,7 +2518,7 @@
         })
       ]);
 
-      setStatus(`이미지 복사 완료: 한 장 세로 / 고정컬럼 타이트 / 데이터 있는 월만 / ${months.join(", ")}월`, "ok");
+      setStatus(`이미지 복사 완료: 4배 해상도 / 타이트 폭 / 한 장 세로 / ${months.join(", ")}월`, "ok");
     } catch (e) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

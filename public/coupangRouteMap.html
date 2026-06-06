@@ -508,7 +508,7 @@
         max-height:min(86vh, 820px);
       }
     }
-  
+
     /* =========================================================
        MAROOWELL WHITE DESIGN OVERRIDE
        - 기능 JS/HTML 로직 유지
@@ -1452,8 +1452,6 @@
       }
     }
 
-  
-    /* 버튼 넘침 방지: 문경감홍사과체 기준 버튼 글씨 11px 고정 */
     .btn,
     .miniBtn,
     .createBtn,
@@ -1465,8 +1463,6 @@
       font-size:11px !important;
     }
 
-  
-    /* 헤더 파비콘 정리: zipcode_search처럼 배경 박스 없이 아이콘만 깔끔하게 표시 */
     .title a{
       width:34px !important;
       height:34px !important;
@@ -1507,14 +1503,13 @@
       }
     }
 
-  
-    /* 지도 위 메뉴 토글: 헤더가 아니라 지도 좌측 상단에 고정 */
+    /* 지도 위 버튼은 사이드바가 닫힌 상태에서만 메뉴 열기로 표시 */
     .titleText{
       min-width:0 !important;
       flex:1 1 auto !important;
       white-space:nowrap !important;
-      overflow:visible !important;
-      text-overflow:clip !important;
+      overflow:hidden !important;
+      text-overflow:ellipsis !important;
     }
 
     .titleActions{
@@ -1522,7 +1517,7 @@
     }
 
     .sidebar-fab{
-      display:inline-flex !important;
+      display:none !important;
       position:absolute !important;
       top:10px !important;
       left:10px !important;
@@ -1559,7 +1554,47 @@
       display:none !important;
     }
 
+    .wrap.sidebar-hidden .sidebar-fab{
+      display:inline-flex !important;
+    }
+
     @media (max-width: 860px){
+      .title{
+        display:flex !important;
+        align-items:center !important;
+        flex-wrap:nowrap !important;
+        gap:7px !important;
+      }
+
+      .titleText{
+        flex:1 1 auto !important;
+        min-width:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
+      }
+
+      .titleActions{
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+        gap:5px !important;
+        flex:0 0 auto !important;
+        min-width:max-content !important;
+      }
+
+      #logoutBtn,
+      #sidebarHideBtn{
+        height:32px !important;
+        min-width:0 !important;
+        padding:0 9px !important;
+        font-size:11px !important;
+        line-height:1 !important;
+      }
+
+      #sidebarHideBtn.mobileOnly{
+        display:inline-flex !important;
+      }
+
       .sidebar-fab{
         top:10px !important;
         left:10px !important;
@@ -1569,8 +1604,26 @@
         font-size:11px !important;
       }
 
-      .map-controls{
+      .wrap:not(.sidebar-hidden) .sidebar-fab{
+        display:none !important;
+      }
+
+      .wrap.sidebar-hidden .map-controls{
         left:112px !important;
+      }
+
+      .wrap:not(.sidebar-hidden) .map-controls{
+        left:auto !important;
+      }
+    }
+
+    @media (min-width: 861px){
+      #sidebarHideBtn.mobileOnly{
+        display:none !important;
+      }
+
+      .wrap:not(.sidebar-hidden) .sidebar-fab{
+        display:none !important;
       }
     }
 
@@ -1588,6 +1641,7 @@
       <span class="titleText">라우트 편집기</span>
       <div class="titleActions">
         <button id="logoutBtn" class="topActionBtn danger" type="button" title="로그아웃">로그아웃</button>
+        <button id="sidebarHideBtn" class="topActionBtn secondary mobileOnly" type="button" title="메뉴 접기">메뉴 접기</button>
       </div>
     </div>
 
@@ -1693,7 +1747,7 @@
   </div>
 
   <div class="map">
-    <button id="sidebarFabBtn" class="sidebar-fab" type="button" title="메뉴 접기">메뉴 접기</button>
+    <button id="sidebarFabBtn" class="sidebar-fab" type="button" title="메뉴 열기">메뉴 열기</button>
 
     <div id="mapWrap">
       <div id="map"></div>
@@ -1909,11 +1963,19 @@
   const mqMobile = window.matchMedia("(max-width: 860px)");
 
   function syncSidebarButtons(hidden){
-    if (sidebarFabBtn){
-      sidebarFabBtn.style.display = "inline-flex";
-      sidebarFabBtn.textContent = hidden ? "메뉴 열기" : "메뉴 접기";
-      sidebarFabBtn.title = hidden ? "메뉴 열기" : "메뉴 접기";
+    if (sidebarHideBtn){
+      sidebarHideBtn.textContent = "메뉴 접기";
+      sidebarHideBtn.title = "메뉴 접기";
+      sidebarHideBtn.setAttribute("aria-label", "메뉴 접기");
     }
+
+    if (sidebarFabBtn){
+      sidebarFabBtn.style.display = hidden ? "inline-flex" : "none";
+      sidebarFabBtn.textContent = "메뉴 열기";
+      sidebarFabBtn.title = "메뉴 열기";
+      sidebarFabBtn.setAttribute("aria-label", "메뉴 열기");
+    }
+
     setTimeout(() => {
       try{
         const center = map?.getCenter?.();
@@ -1936,7 +1998,7 @@
   applySidebarPref();
   if (mqMobile.addEventListener) mqMobile.addEventListener("change", applySidebarPref);
   sidebarHideBtn?.addEventListener("click", ()=> setSidebarHidden(true));
-  sidebarFabBtn?.addEventListener("click", ()=> setSidebarHidden(!wrapEl?.classList.contains("sidebar-hidden")));
+  sidebarFabBtn?.addEventListener("click", ()=> setSidebarHidden(false));
 
   async function doLogout(){
     try{ await mwSupabase?.auth?.signOut?.(); }catch{}
@@ -3098,24 +3160,6 @@
         <div style="color:var(--muted);font-size:11px">${addr.zipcode ? `우편번호: ${escapeHtml(addr.zipcode)}` : ""}</div>`;
       addressList.appendChild(item);
     });
-  }
-
-  function kstYYYYMMDDHHMM(){
-    const now = new Date();
-    const kst = new Date(now.getTime() + 9*60*60*1000);
-    const yyyy = String(kst.getUTCFullYear());
-    const mm = String(kst.getUTCMonth()+1).padStart(2,"0");
-    const dd = String(kst.getUTCDate()).padStart(2,"0");
-    const HH = String(kst.getUTCHours()).padStart(2,"0");
-    const MM = String(kst.getUTCMinutes()).padStart(2,"0");
-    return `${yyyy}${mm}${dd}${HH}${MM}`;
-  }
-
-  function getShareOrigin(){
-    const configured = window.MARUWELL_CONFIG?.SHARE_ORIGIN;
-    if (configured) return String(configured).trim();
-    if (location.hostname.endsWith("maroowell.com")) return "https://maroowell.com";
-    return location.origin;
   }
 
   async function generateShareLink(){

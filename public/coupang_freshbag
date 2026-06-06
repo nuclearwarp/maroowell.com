@@ -896,10 +896,23 @@
     }
   </style>
 
-  <style id="mw-freshbag-ultra-compact-quality-fix">
-    /* 화면 표: 월 데이터 칸 좌우 폭 축소 + 글씨 1px 축소 유지 */
-    #resultTable{
+  <style id="mw-freshbag-mobile-copy-quality-final-fix">
+    /* 화면 표: 해당/미해당 칸 좌우 폭 추가 축소 */
+    #resultTable th.monthValue,
+    #resultTable td.monthValue{
+      width:44px !important;
+      min-width:44px !important;
+      max-width:44px !important;
+      padding-left:1px !important;
+      padding-right:1px !important;
       font-size:12px !important;
+      letter-spacing:-0.04em !important;
+    }
+
+    #resultTable th.monthGroup{
+      width:88px !important;
+      min-width:88px !important;
+      max-width:88px !important;
     }
 
     #resultTable th,
@@ -910,22 +923,6 @@
 
     #resultTable thead tr.monthSubRow th{
       font-size:11px !important;
-    }
-
-    #resultTable th.monthValue,
-    #resultTable td.monthValue{
-      width:48px !important;
-      min-width:48px !important;
-      max-width:48px !important;
-      padding-left:2px !important;
-      padding-right:2px !important;
-      font-size:12px !important;
-    }
-
-    #resultTable th.monthGroup{
-      width:96px !important;
-      min-width:96px !important;
-      max-width:96px !important;
     }
   </style>
 
@@ -2233,11 +2230,11 @@
     ctx.font = font;
     ctx.textBaseline = "middle";
 
-    const safeText = fitText(ctx, text, w - 4);
+    const safeText = fitText(ctx, text, w - 3);
 
     if (align === "left") {
       ctx.textAlign = "left";
-      ctx.fillText(safeText, x + 4, y + h / 2);
+      ctx.fillText(safeText, x + 3, y + h / 2);
     } else {
       ctx.textAlign = "center";
       ctx.fillText(safeText, x + w / 2, y + h / 2);
@@ -2342,42 +2339,48 @@
     }
 
     /*
-      화질 개선 최종 방향:
-      - 화면에 보이는 CSS 크기는 타이트하게 줄임
-      - 실제 PNG 픽셀은 scale=4로 크게 생성
+      모바일 화질 문제의 핵심:
+      Android/모바일 앱이 긴 PNG를 붙여넣을 때 세로 2048px 근처로 다시 줄이면서
+      긴 표의 글자가 깨짐. canvas scale을 올려도 최종 리사이즈에서 다시 뭉개짐.
+      그래서 모바일/긴 표 복사에서는 rowHeight 자체를 줄여 전체 세로 길이를 줄인다.
       - 한 장 세로 이미지 유지
-      - 해당/해당X/미해당 칸 좌우 폭 축소
-      - 데이터 없는 월은 제외
+      - 다단 분할 없음
+      - 화면 표와 별도: 복사용 canvas만 모바일 압축 대응형으로 렌더링
     */
+    const isMobileCopy =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+      tableRows.length >= 60;
+
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 44 },
-      { key: "camp", label: "Camp", width: 54 },
-      { key: "route", label: "Route", width: 46 }
+      { key: "wave", label: "주간/야간", width: isMobileCopy ? 40 : 44 },
+      { key: "camp", label: "Camp", width: isMobileCopy ? 50 : 54 },
+      { key: "route", label: "Route", width: isMobileCopy ? 42 : 46 }
     ];
 
+    const monthCellWidth = isMobileCopy ? 40 : 44;
     const monthColumns = [];
 
     for (const m of months) {
-      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: 44, first:true });
-      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: 44, first:false });
+      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: monthCellWidth, first:true });
+      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: monthCellWidth, first:false });
     }
 
     const columns = [...fixedColumns, ...monthColumns];
 
-    const titleHeight = 48;
-    const monthHeaderHeight = 26;
-    const subHeaderHeight = 25;
-    const rowHeight = 30;
-    const padding = 12;
+    const titleHeight = isMobileCopy ? 38 : 48;
+    const monthHeaderHeight = isMobileCopy ? 20 : 26;
+    const subHeaderHeight = isMobileCopy ? 20 : 25;
+    const rowHeight = isMobileCopy ? 18 : 30;
+    const padding = isMobileCopy ? 8 : 12;
 
     const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
     const canvasWidth = tableWidth + padding * 2;
     const canvasHeight = titleHeight + monthHeaderHeight + subHeaderHeight + tableRows.length * rowHeight + padding * 2;
 
-    const scale = 4;
+    const scale = isMobileCopy ? 4 : 4;
     const canvas = document.createElement("canvas");
-    canvas.width = canvasWidth * scale;
-    canvas.height = canvasHeight * scale;
+    canvas.width = Math.ceil(canvasWidth * scale);
+    canvas.height = Math.ceil(canvasHeight * scale);
 
     const ctx = canvas.getContext("2d", { alpha:false });
     ctx.scale(scale, scale);
@@ -2393,17 +2396,34 @@
     ].filter(Boolean);
 
     ctx.fillStyle = "#0f172a";
-    ctx.font = "800 20px 'Noto Sans KR', Arial, sans-serif";
+    ctx.font = isMobileCopy
+      ? "800 14px 'Noto Sans KR', Arial, sans-serif"
+      : "800 20px 'Noto Sans KR', Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText("프레시백 현황 조회", padding, padding + 13);
+    ctx.fillText("프레시백 현황 조회", padding, padding + (isMobileCopy ? 10 : 13));
 
     ctx.fillStyle = "#64748b";
-    ctx.font = "600 12px 'Noto Sans KR', Arial, sans-serif";
-    ctx.fillText(titleParts.join(" / "), padding, padding + 35);
+    ctx.font = isMobileCopy
+      ? "600 9px 'Noto Sans KR', Arial, sans-serif"
+      : "600 12px 'Noto Sans KR', Arial, sans-serif";
+    ctx.fillText(titleParts.join(" / "), padding, padding + (isMobileCopy ? 28 : 35));
 
     let y = padding + titleHeight;
     let x = padding;
+
+    const fixedHeaderFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
+    const monthHeaderFont = isMobileCopy
+      ? "700 9px 'Noto Sans KR', Arial, sans-serif"
+      : "700 12px 'Noto Sans KR', Arial, sans-serif";
+    const subHeaderFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
+    const rowFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
 
     for (const col of fixedColumns) {
       drawCell(ctx, x, y, col.width, monthHeaderHeight + subHeaderHeight, {
@@ -2411,22 +2431,23 @@
         bg: "#eaf2fb",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 10px 'Noto Sans KR', Arial, sans-serif"
+        font: fixedHeaderFont
       });
       x += col.width;
     }
 
+    const monthGroupWidth = monthCellWidth * 2;
+
     for (const m of months) {
-      const w = 88;
-      drawCell(ctx, x, y, w, monthHeaderHeight, {
+      drawCell(ctx, x, y, monthGroupWidth, monthHeaderHeight, {
         text: `${m}월`,
         bg: "#dbeafe",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 12px 'Noto Sans KR', Arial, sans-serif",
+        font: monthHeaderFont,
         lineWidth: 1
       });
-      x += w;
+      x += monthGroupWidth;
     }
 
     y += monthHeaderHeight;
@@ -2438,7 +2459,7 @@
         bg: "#eff6ff",
         color: "#0f172a",
         border: "#cbd5e1",
-        font: "700 10px 'Noto Sans KR', Arial, sans-serif",
+        font: subHeaderFont,
         lineWidth: 1
       });
       x += col.width;
@@ -2464,7 +2485,7 @@
           bg: "#f8fafc",
           color: col.key === "route" ? "#1d4ed8" : "#0f172a",
           border: "#d8e0ee",
-          font: "700 10px 'Noto Sans KR', Arial, sans-serif"
+          font: rowFont
         });
 
         x += col.width;
@@ -2481,7 +2502,7 @@
           bg: style.bg,
           color: style.color,
           border: "#d8e0ee",
-          font: "700 10px 'Noto Sans KR', Arial, sans-serif",
+          font: rowFont,
           lineWidth: 1
         });
 
@@ -2500,7 +2521,7 @@
     const monthBoundaryBottom = canvasHeight - padding;
 
     for (let i = 0; i <= months.length; i++) {
-      const boundaryX = monthBoundaryStart + i * 88;
+      const boundaryX = monthBoundaryStart + i * monthGroupWidth;
       drawMonthBoundary(ctx, boundaryX, monthBoundaryTop, monthBoundaryBottom);
     }
 
@@ -2518,7 +2539,10 @@
         })
       ]);
 
-      setStatus(`이미지 복사 완료: 4배 해상도 / 타이트 폭 / 한 장 세로 / ${months.join(", ")}월`, "ok");
+      setStatus(
+        `이미지 복사 완료: ${isMobileCopy ? "모바일 압축 대응" : "PC 고해상도"} / 한 장 세로 / ${months.join(", ")}월`,
+        "ok"
+      );
     } catch (e) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

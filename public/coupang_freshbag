@@ -1050,9 +1050,15 @@
 
   const $ = (id) => document.getElementById(id);
   const cfg = window.MARUWELL_CONFIG || {};
+  const FRESHBAG_API_BASE = String(
+    cfg.BACKENDS?.freshbag ||
+    cfg.FRESHBAG_API ||
+    "https://freshbag.brain-0f6.workers.dev"
+  ).replace(/\/+$/, "");
 
   let supabaseClient = null;
   let currentUser = null;
+  let currentAccessToken = "";
   let rawRows = [];
   let tableRows = [];
   let localSeq = 1;
@@ -1342,10 +1348,51 @@
     const { data, error } = await supabaseClient.auth.getSession();
     if (error) throw error;
 
-    currentUser = data?.session?.user;
-    if (!currentUser) throw new Error("로그인이 필요합니다.");
+    const session = data?.session;
+    currentUser = session?.user;
+    currentAccessToken = session?.access_token || "";
+
+    if (!currentUser || !currentAccessToken) throw new Error("로그인이 필요합니다.");
 
     $("userPill").textContent = currentUser.email || currentUser.id;
+  }
+
+
+  async function freshbagApi(path, body = {}) {
+    if (!currentAccessToken) {
+      await checkSession();
+    }
+
+    const res = await fetch(FRESHBAG_API_BASE + path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + currentAccessToken
+      },
+      body: JSON.stringify(body),
+      cache: "no-store"
+    });
+
+    const text = await res.text();
+    let data = null;
+
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = text;
+      }
+    }
+
+    if (!res.ok) {
+      const msg =
+        (data && typeof data === "object" && (data.error || data.message || data.detail)) ||
+        (typeof data === "string" ? data : "") ||
+        `HTTP ${res.status}`;
+      throw new Error(String(msg));
+    }
+
+    return data;
   }
 
   function createBlankRow() {
@@ -1739,68 +1786,25 @@
 
   async function fetchRowsByCriteria(criteria) {
     const year = Number($("yearFilter").value);
-    const waves = unique(criteria.map(x => x.wave));
-    const camps = unique(criteria.map(x => normalizeCampForDb(x.camp)));
-    const routes = unique(criteria.map(x => x.route));
-    const isAllRoutes = criteria.some(item => item.allRoutes) || routes.length === 0;
 
-    let q = supabaseClient
-      .from("coupang_freshbag")
-      .select(`
-        id,
-        data_year,
-        month_no,
-        data_month,
-        period_label,
-        wave,
-        camp,
-        route,
-        route_norm,
-        gajoong1,
-        gajoong2,
-        source_file_name,
-        created_at,
-        updated_at
-      `)
-      .eq("data_year", year)
-      .in("wave", waves)
-      .in("camp", camps)
-      .order("camp", { ascending: true })
-      .order("wave", { ascending: true })
-      .order("route_norm", { ascending: true })
-      .order("month_no", { ascending: true });
+    const payloadCriteria = criteria.map(item => ({
+      wave: item.wave,
+      camp: item.camp,
+      displayCamp: item.displayCamp,
+      route: item.route,
+      allRoutes: item.allRoutes === true
+    }));
 
-    if (!isAllRoutes && routes.length) {
-      q = q.in("route_norm", routes);
-    }
-
-    const { data, error } = await q;
-    if (error) throw error;
-
-    const rows = Array.isArray(data) ? data : [];
-
-    if (isAllRoutes) {
-      const campWaveSet = new Set(criteria.map(x => `${x.wave}||${normalizeCampForDb(x.camp)}`));
-
-      return rows.filter(row => {
-        const wave = clean(row.wave).toUpperCase();
-        const camp = normalizeCampForDb(row.camp);
-        return campWaveSet.has(`${wave}||${camp}`);
-      });
-    }
-
-    const criteriaSet = new Set(criteria.map(x => `${x.wave}||${normalizeCampForDb(x.camp)}||${x.route}`));
-
-    return rows.filter(row => {
-      const wave = clean(row.wave).toUpperCase();
-      const camp = normalizeCampForDb(row.camp);
-      const route = normalizeRoute(row.route_norm || row.route);
-      return criteriaSet.has(`${wave}||${camp}||${route}`);
+    const result = await freshbagApi("/freshbag/query", {
+      year,
+      criteria: payloadCriteria
     });
+
+    return Array.isArray(result?.rows) ? result.rows : [];
   }
 
   async function loadData() {
-    setStatus("조건 기준으로 조회 중... Route가 비어 있으면 Camp 전체를 조회합니다.");
+    setStatus("freshbag 백엔드로 조회 중... Route가 비어 있으면 Camp 전체를 조회합니다.");
 
     const criteria = validateCriteria();
     rawRows = await fetchRowsByCriteria(criteria);
@@ -2696,7 +2700,7 @@
       renderPresetOptions();
 
       document.documentElement.style.visibility = "visible";
-      setStatus("기본 4행이 준비되었습니다. Route를 입력하면 라우트별 조회, Route 없이 Camp만 입력하면 Camp 전체 조회가 가능합니다.", "ok");
+      setStatus("기본 4행이 준비되었습니다. 조회는 freshbag 백엔드를 통해 실행됩니다.", "ok");
     });
   } catch (e) {
     document.documentElement.style.visibility = "visible";

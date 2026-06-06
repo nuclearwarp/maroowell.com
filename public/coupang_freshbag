@@ -2253,42 +2253,42 @@
     }
 
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 78 },
-      { key: "camp", label: "Camp", width: 90 },
-      { key: "route", label: "Route", width: 78 }
+      { key: "wave", label: "주간/야간", width: 70 },
+      { key: "camp", label: "Camp", width: 82 },
+      { key: "route", label: "Route", width: 72 }
     ];
 
     const monthColumns = [];
 
     for (const m of months) {
-      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: 62, first:true });
-      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: 62, first:false });
+      monthColumns.push({ month: m, field: "gajoong1", label: "가중1", width: 54, first:true });
+      monthColumns.push({ month: m, field: "gajoong2", label: "가중2", width: 54, first:false });
     }
 
     const columns = [...fixedColumns, ...monthColumns];
 
-    const titleHeight = 58;
-    const monthHeaderHeight = 30;
-    const subHeaderHeight = 30;
-    const rowHeight = 34;
+    const titleHeight = 52;
+    const monthHeaderHeight = 28;
+    const subHeaderHeight = 28;
+    const rowHeight = 32;
     const padding = 18;
 
     const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
     const canvasWidth = tableWidth + padding * 2;
     const canvasHeight = titleHeight + monthHeaderHeight + subHeaderHeight + tableRows.length * rowHeight + padding * 2;
 
-    /* 단 분할 금지: 길어도 한 장 세로 이미지로 복사.
-       대신 고배율 렌더링으로 모바일/카톡 확대 시 글자가 깨지는 것을 줄입니다. */
-    const preferredScale = 4;
-    const maxCanvasSide = 32000;
-    const maxPixels = 150000000;
-    const scaleBySide = Math.min(maxCanvasSide / canvasWidth, maxCanvasSide / canvasHeight);
-    const scaleByPixels = Math.sqrt(maxPixels / Math.max(1, canvasWidth * canvasHeight));
-    const scale = Math.max(2.5, Math.min(preferredScale, scaleBySide, scaleByPixels));
-
+    /*
+      이미지 복사 안정화:
+      예전 버전에서 선명하게 동작하던 방식으로 복구.
+      - 단 분할 없음
+      - 가변 스케일 없음
+      - 브라우저/카톡이 과도하게 리샘플링하지 않도록 scale=2 고정
+      - CSS transform / devicePixelRatio 미사용
+    */
+    const scale = 2;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(canvasWidth * scale));
-    canvas.height = Math.max(1, Math.round(canvasHeight * scale));
+    canvas.width = canvasWidth * scale;
+    canvas.height = canvasHeight * scale;
 
     const ctx = canvas.getContext("2d", { alpha:false });
     ctx.scale(scale, scale);
@@ -2306,11 +2306,11 @@
     ctx.font = "800 22px Arial, 'Noto Sans KR', sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText("프레시백 현황 조회", padding, padding + 15);
+    ctx.fillText("프레시백 현황 조회", padding, padding + 14);
 
     ctx.fillStyle = "#64748b";
     ctx.font = "600 13px Arial, 'Noto Sans KR', sans-serif";
-    ctx.fillText(`${titleParts.join(" / ")} / ${tableRows.length}행`, padding, padding + 42);
+    ctx.fillText(titleParts.join(" / "), padding, padding + 38);
 
     let y = padding + titleHeight;
     let x = padding;
@@ -2327,7 +2327,7 @@
     }
 
     for (const m of months) {
-      const w = 124;
+      const w = 108;
       drawCell(ctx, x, y, w, monthHeaderHeight, {
         text: `${m}월`,
         bg: "#dbeafe",
@@ -2410,7 +2410,7 @@
     const monthBoundaryBottom = canvasHeight - padding;
 
     for (let i = 0; i <= months.length; i++) {
-      const boundaryX = monthBoundaryStart + i * 124;
+      const boundaryX = monthBoundaryStart + i * 108;
       drawMonthBoundary(ctx, boundaryX, monthBoundaryTop, monthBoundaryBottom);
     }
 
@@ -2428,7 +2428,7 @@
         })
       ]);
 
-      setStatus(`이미지 복사 완료: 한 장 세로 이미지 / 데이터 있는 월만 / ${tableRows.length}행 / ${Math.round(scale * 100)}% 해상도`, "ok");
+      setStatus(`이미지 복사 완료: 예전 선명 복사 로직 / 데이터 있는 월만 / ${months.join(", ")}월`, "ok");
     } catch (e) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2440,6 +2440,7 @@
       setStatus("브라우저가 이미지 클립보드 복사를 막아서 PNG 파일로 다운로드했습니다.", "warn");
     }
   }
+
 
   function clearAll() {
     const now = new Date().getFullYear();

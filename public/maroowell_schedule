@@ -850,6 +850,94 @@
     }
     /* ===== MAROOWELL SCHEDULE WHITE DESIGN OVERRIDE END ===== */
 
+  
+    /* ===== SCHEDULE FUNCTION FIX OVERRIDE - 2026-06-07 ===== */
+
+    /* 사람별 색상 복구: JS에서 넣은 inline !important 색상이 그대로 보이도록 함 */
+    .scheduleTable .cellEdit.hasValue:not(.offConflict):not(.parentLocked):not(.childLocked){
+      color:#0f172a;
+    }
+
+    /* 주차 선택 팝업은 스크롤 컨테이너 안이 아니라 화면 전체 기준으로 표시 */
+    .toolbar,
+    .topbar,
+    .weekPickerWrap{
+      overflow:visible!important;
+    }
+
+    .weekPopup{
+      position:fixed!important;
+      z-index:2147482500!important;
+      top:auto;
+      left:auto;
+      width:min(360px,calc(100vw - 24px))!important;
+      max-width:calc(100vw - 24px)!important;
+      max-height:min(72vh,520px)!important;
+      overflow:hidden!important;
+      border:1px solid #cbd5e1!important;
+      background:#ffffff!important;
+      color:#0f172a!important;
+      box-shadow:0 22px 70px rgba(15,23,42,.22)!important;
+    }
+
+    .weekPopup.open{
+      display:block!important;
+    }
+
+    .weekOptionList{
+      max-height:min(48vh,350px)!important;
+      overflow:auto!important;
+    }
+
+    /* 실제/가라 날짜 input 중복 표시 제거: date input 원문은 숨기고 yyyy.mm.dd 라벨만 표시 */
+    .dateMini{
+      position:relative!important;
+    }
+
+    .dateMini input{
+      color:transparent!important;
+      caret-color:transparent!important;
+      text-shadow:none!important;
+      padding-left:2px!important;
+      padding-right:2px!important;
+    }
+
+    .dateMini input::-webkit-calendar-picker-indicator{
+      cursor:pointer!important;
+      opacity:0!important;
+      width:0!important;
+      margin:0!important;
+      padding:0!important;
+    }
+
+    .dateMini::after{
+      content:attr(data-date-label)!important;
+      position:absolute!important;
+      left:31px!important;
+      right:4px!important;
+      top:50%!important;
+      transform:translateY(-50%)!important;
+      color:#0f172a!important;
+      font-size:11px!important;
+      font-weight:400!important;
+      text-align:center!important;
+      pointer-events:none!important;
+      white-space:nowrap!important;
+      overflow:hidden!important;
+      text-overflow:clip!important;
+    }
+
+    /* 405 / 406 / 407처럼 통라우트 번호가 바뀌는 지점에 구분선 표시 */
+    .scheduleTable tr.routeGroupSep > td{
+      border-top:3px solid #94a3b8!important;
+    }
+
+    .scheduleTable tr.routeGroupSep .routeCell{
+      box-shadow:inset 0 3px 0 #94a3b8!important;
+    }
+
+    /* ===== SCHEDULE FUNCTION FIX OVERRIDE END ===== */
+
   </style>
 </head>
 
@@ -1243,22 +1331,8 @@
 
       function responsiveDateMiniLabel(iso,label){
         if(!iso)return "-";
-        const input=label?.querySelector?.("input");
-        const inputWidth=Number(input?.getBoundingClientRect?.().width || input?.clientWidth || 0);
-        const labelWidth=Number(label?.getBoundingClientRect?.().width || label?.clientWidth || 0);
-        const visualWidth=inputWidth || Math.max(0,labelWidth - 34);
-
-        /*
-          실제/가라 날짜는 input 폭이 조금만 확보돼도 yyyy-mm-dd 전체를 보여준다.
-          기존 142px 기준은 너무 보수적이라 65px 안팎에서도 06-06으로 줄어드는 문제가 있었다.
-        */
-        if(visualWidth >= 58){
-          label?.setAttribute("data-date-mode","full");
-          return iso;
-        }
-
-        label?.setAttribute("data-date-mode","short");
-        return compactDateLabel(iso);
+        label?.setAttribute("data-date-mode","full");
+        return dateDot(iso);
       }
 
       function updateDateMiniLabel(input){
@@ -1288,6 +1362,12 @@
       function routeBaseLabel(route,sub){return normalizeRoutePart(route)+normalizeRoutePart(sub)}
       function routeChildLabel(route,sub,subSub){return routeBaseLabel(route,sub)+normalizeRoutePart(subSub)}
       function isOffRoute(v){return normalizeRouteLabel(v)===normalizeRouteLabel(OFF_ROUTE_LABEL)}
+      function routeMajorGroup(v){
+        const n=normalizeRouteLabel(v);
+        if(!n || isOffRoute(n))return "";
+        const m=n.match(/^(\d{3})/);
+        return m ? m[1] : "";
+      }
       function sortText(a,b){return String(a||"").localeCompare(String(b||""),"ko",{numeric:true,sensitivity:"base"})}
 
       function setState(kind,text){els.statePill.className="pill "+(kind||"ok");els.statePill.textContent=text||"READY"}
@@ -2540,14 +2620,19 @@
             <tbody>
         `;
 
+        let previousRouteMajorGroup="";
         rows.forEach((row,rowIndex)=>{
+          const currentRouteMajorGroup=routeMajorGroup(row.label);
+          const routeGroupSepClass=currentRouteMajorGroup && previousRouteMajorGroup && currentRouteMajorGroup!==previousRouteMajorGroup ? "routeGroupSep" : "";
+          if(currentRouteMajorGroup) previousRouteMajorGroup=currentRouteMajorGroup;
+
           const hasChildren=row.type==="parent"&&row.children&&row.children.length>0;
           const isExpanded=state.expanded.has(row.key);
           const routeClass=row.type==="child"?"childRoute":"";
           const offClass=row.isOff?"off":"";
           const lockedParentClass=(row.type==="parent" && hasChildren && state.weekDates.some(date=>isParentCellLocked(row,date))) ? "lockedParent" : "";
 
-          html+=`<tr class="${routeClass}">`;
+          html+=`<tr class="${routeClass} ${routeGroupSepClass}">`;
 
           if(rowIndex===0){
             html+=`<td class="weekCell" rowspan="${weekRowSpan}">${esc(state.weekLabel)}</td>`;
@@ -2591,7 +2676,7 @@
               <td>
                 <input
                   class="cellEdit ${has?"hasValue":""} ${dirty&&!locked?"dirty":""} ${conflict?"offConflict":""} ${parentLocked?"parentLocked":""} ${childLocked?"childLocked":""}"
-                  style="${!locked&&has&&!conflict?`background:${bg};color:${color};`:""}"
+                  style="${!locked&&has&&!conflict?`background:${bg}!important;color:${color}!important;`:""}"
                   value="${esc(val)}"
                   placeholder="-"
                   autocomplete="off"
@@ -2687,22 +2772,22 @@
         input.classList.toggle("offConflict",conflict);
 
         if(!has){
-          input.style.background="";
-          input.style.color="";
+          input.style.removeProperty("background");
+          input.style.removeProperty("color");
           input.title="";
           return;
         }
 
         if(conflict){
-          input.style.background="";
-          input.style.color="";
+          input.style.removeProperty("background");
+          input.style.removeProperty("color");
           input.title=`확인 필요: 휴무자인 ${conflicts.join(", ")}이(가) 같은 날짜 배정에 남아 있습니다.`;
           return;
         }
 
         const bg=colorForValue(value);
-        input.style.background=bg;
-        input.style.color=textColorForBg(bg);
+        input.style.setProperty("background", bg, "important");
+        input.style.setProperty("color", textColorForBg(bg), "important");
         input.title=cellTitle(value);
       }
 
@@ -3810,12 +3895,45 @@
         setStatus("초기화 완료");
       }
 
+      function positionWeekPicker(){
+        if(!els.weekPopup || !els.weekButton)return;
+
+        const rect=els.weekButton.getBoundingClientRect();
+        const width=Math.min(360,window.innerWidth-24);
+        const popupHeight=Math.min(520,window.innerHeight-24);
+
+        let left=rect.left;
+        if(left+width>window.innerWidth-12)left=window.innerWidth-width-12;
+
+        let top=rect.bottom+8;
+        if(top+popupHeight>window.innerHeight-12){
+          top=Math.max(12,rect.top-popupHeight-8);
+        }
+
+        els.weekPopup.style.left=`${Math.max(12,left)}px`;
+        els.weekPopup.style.top=`${Math.max(12,top)}px`;
+        els.weekPopup.style.width=`${width}px`;
+        els.weekPopup.style.maxHeight=`${popupHeight}px`;
+      }
+
       function openWeekPicker(){
         renderWeekOptions();
         els.weekPopup.classList.add("open");
+        positionWeekPicker();
         requestAnimationFrame(()=>els.weekManualInput.focus());
       }
-      function closeWeekPicker(){els.weekPopup.classList.remove("open")}
+
+      function closeWeekPicker(){
+        els.weekPopup.classList.remove("open");
+      }
+
+      window.addEventListener("resize",()=>{
+        if(els.weekPopup?.classList.contains("open"))positionWeekPicker();
+      });
+
+      window.addEventListener("scroll",()=>{
+        if(els.weekPopup?.classList.contains("open"))positionWeekPicker();
+      },true);
 
 
       function setToolbarHidden(hidden){

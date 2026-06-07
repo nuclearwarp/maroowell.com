@@ -938,12 +938,12 @@
 
     /* ===== SCHEDULE FUNCTION FIX OVERRIDE END ===== */
 
-  
-    /* ===== SCHEDULE TOOLBAR SCROLL RESTORE - 2026-06-07 ===== */
+    /* ===== SCHEDULE WEEK PICKER PORTAL FINAL - 2026-06-07 ===== */
     /*
-      직전 수정에서 주차 팝업 때문에 .toolbar overflow:visible을 강제로 줬는데,
-      그 영향으로 상단 툴바의 가로 스크롤이 사라져 우측 버튼이 잘렸음.
-      주차 팝업은 fixed라 toolbar overflow를 풀 필요가 없으므로 가로 스크롤 복구.
+      주차 선택창 최종 처리:
+      - 팝업 DOM을 JS에서 body 직속으로 이동
+      - 상단 툴바는 가로 스크롤 유지
+      - 주차 팝업은 모든 div 위에 fixed overlay로 표시
     */
 
     .toolbar{
@@ -963,20 +963,6 @@
       min-width:max-content!important;
     }
 
-    .topbar{
-      overflow:visible!important;
-    }
-
-    .weekPickerWrap{
-      overflow:visible!important;
-    }
-
-    .weekPopup{
-      position:fixed!important;
-      z-index:2147482500!important;
-    }
-
-    /* 버튼이 잘리지 않도록 툴바 내부 항목은 축소 금지 */
     .toolbar .btn,
     .toolbar button,
     .toolbar .field,
@@ -989,7 +975,38 @@
       flex-shrink:0!important;
     }
 
-    /* ===== SCHEDULE TOOLBAR SCROLL RESTORE END ===== */
+    .weekPopup{
+      position:fixed!important;
+      z-index:2147483600!important;
+      display:none!important;
+      width:min(360px,calc(100vw - 24px))!important;
+      max-width:calc(100vw - 24px)!important;
+      max-height:min(72vh,520px)!important;
+      overflow:hidden!important;
+      border:1px solid #cbd5e1!important;
+      border-radius:16px!important;
+      background:#ffffff!important;
+      color:#0f172a!important;
+      box-shadow:0 26px 90px rgba(15,23,42,.28)!important;
+      transform:none!important;
+      contain:none!important;
+      isolation:isolate!important;
+    }
+
+    .weekPopup.open{
+      display:block!important;
+    }
+
+    .weekOptionList{
+      max-height:min(48vh,350px)!important;
+      overflow:auto!important;
+    }
+
+    .weekPopup *{
+      box-sizing:border-box!important;
+    }
+
+    /* ===== SCHEDULE WEEK PICKER PORTAL FINAL END ===== */
 
   </style>
 </head>
@@ -3948,8 +3965,16 @@
         setStatus("초기화 완료");
       }
 
+      function ensureWeekPickerPortal(){
+        if(!els.weekPopup)return;
+        if(els.weekPopup.parentElement!==document.body){
+          document.body.appendChild(els.weekPopup);
+        }
+      }
+
       function positionWeekPicker(){
         if(!els.weekPopup || !els.weekButton)return;
+        ensureWeekPickerPortal();
 
         const rect=els.weekButton.getBoundingClientRect();
         const width=Math.min(360,window.innerWidth-24);
@@ -3970,6 +3995,7 @@
       }
 
       function openWeekPicker(){
+        ensureWeekPickerPortal();
         renderWeekOptions();
         els.weekPopup.classList.add("open");
         positionWeekPicker();

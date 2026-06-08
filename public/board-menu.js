@@ -11,9 +11,9 @@
     { key:"zipcode_search", label:"우편번호 검색기", path:"/zipcode_search", aliases:["/zipcode_search","/zipcode_search.html"], public:true, desc:"우편번호 / 지도 조회" },
     { key:"route", label:"라우트 편집기", path:"/coupangRouteMap.html", aliases:["/coupangRouteMap","/coupangRouteMap.html"], public:true, desc:"라우트 / 벤더 / 입차지 편집" },
     { key:"coupang-camps", label:"쿠팡 캠프 조회", path:"/coupang_camp", aliases:["/coupang_camp","/coupang_camp.html"], public:true, desc:"쿠팡 캠프 / 주소조회" },
-    { key:"freshbag-view", label:"프레시백 현황 조회", path:"/coupang_freshbag", aliases:["/coupang_freshbag","/coupang_freshbag.html"], public:true, desc:"프레시백 가중요인 현황 조회" },
+    { key:"freshbag-view", label:"프레시백 현황 조회", path:"/coupang_freshbag", aliases:["/coupang_freshbag","/coupang_freshbag.html"], public:true, desc:"프레시백 가중요인 현황 조회 / 업로드" },
     { key:"cleansing_history", label:"클렌징 히스토리", path:"/cleansing_history", aliases:["/cleansing_history","/cleansing_history.html"], requireClhi:true, desc:"클렌징 히스토리 조회" },
-    { key:"freshbag-upload", label:"프레시백 현황 업로드", path:"/coupang_freshbag_upload", aliases:["/coupang_freshbag_upload","/coupang_freshbag_upload.html"], requireSuperAdmin:true, desc:"프레시백 엑셀 업로드" },
+
     { key:"mw-route-info", label:"마루웰 라우트정보", path:"/maroowell_route_info", aliases:["/maroowell_route_info","/maroowell_route_info.html"], requireMaroowell:true, desc:"마루웰 라우트 정보 조회" },
     { key:"mw-freshbag-ratio", label:"마루웰 회수율", path:"/maroowell_freshbag_ratio", aliases:["/maroowell_freshbag_ratio","/maroowell_freshbag_ratio.html"], requireMaroowell:true, desc:"마루웰 프레시백 회수율 조회" },
     { key:"mw-freshbag-ratio-upload", label:"마루웰 회수율 업로드", path:"/maroowell_freshbag_ratio_upload", aliases:["/maroowell_freshbag_ratio_upload","/maroowell_freshbag_ratio_upload.html"], requireSuperAdmin:true, desc:"마루웰 회수율 엑셀 업로드" },

@@ -972,6 +972,81 @@
     }
   </style>
 
+
+
+  <style id="mw-freshbag-integrated-toggle-style">
+    .topActions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex:0 0 auto;
+    }
+
+    .modeToggleBtn{
+      min-width:92px;
+      height:38px;
+      padding:0 16px;
+      border-radius:999px;
+      border:1px solid #bfdbfe;
+      background:#eff6ff;
+      color:#1d4ed8;
+      font-weight:700;
+    }
+
+    .modeToggleBtn:hover{
+      background:#dbeafe;
+      border-color:#93c5fd;
+    }
+
+    .modePanel[hidden]{display:none!important}
+    .modePanel.active{display:block}
+
+    .uploadPanel{
+      margin-top:16px;
+      border:1px solid #d8e0ee;
+      border-radius:22px;
+      overflow:hidden;
+      background:#ffffff;
+      box-shadow:0 12px 30px rgba(15,23,42,.08);
+      min-height:calc(100vh - 144px);
+    }
+
+    .uploadFrame{
+      display:block;
+      width:100%;
+      min-height:calc(100vh - 146px);
+      height:calc(100vh - 146px);
+      border:0;
+      background:#ffffff;
+    }
+
+    @media(max-width:900px){
+      .topActions{width:100%;justify-content:space-between;gap:8px}
+      .modeToggleBtn{height:36px;min-width:86px;padding:0 13px}
+      .uploadPanel{margin-top:12px;border-radius:18px;min-height:calc(100vh - 130px)}
+      .uploadFrame{min-height:calc(100vh - 132px);height:calc(100vh - 132px)}
+    }
+  </style>
+
+
+  <style id="mw-freshbag-route-separator-clean-fix">
+    /*
+      라우트 구분선 보정
+      - 기존 border-top + cell border-bottom이 겹쳐 두 줄처럼 보이는 문제 제거
+      - 화면 표에서는 inset shadow 한 줄만 사용
+      - 이미지 복사 로직은 drawSeparator()에서 별도 단일 라인으로 처리
+    */
+    #resultTable tr.routeSep td{
+      border-top:0 !important;
+      box-shadow:inset 0 2px 0 #8fa1b8 !important;
+    }
+
+    #resultTable tr.campSep td{
+      border-top:0 !important;
+      box-shadow:inset 0 3px 0 #64748b !important;
+    }
+  </style>
+
 </head>
 
 <body>
@@ -984,9 +1059,13 @@
           <div class="sub">연도 / 캠프 / 주간·야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 조회조건을 프리셋으로 저장할 수 있습니다.</div>
         </div>
       </div>
-      <div class="pill" id="userPill">세션 확인 중</div>
+      <div class="topActions">
+        <button id="freshbagModeToggle" class="secondary modeToggleBtn" type="button" hidden>업로드</button>
+        <div class="pill" id="userPill">세션 확인 중</div>
+      </div>
     </div>
 
+    <div id="queryPanel" class="modePanel active">
     <div class="card">
       <div class="row">
         <div class="field">
@@ -1059,6 +1138,11 @@
         </table>
       </div>
     </div>
+    </div>
+
+    <div id="uploadPanel" class="modePanel uploadPanel" hidden>
+      <iframe id="freshbagUploadFrame" class="uploadFrame" title="프레시백 현황 업로드" data-src="/coupang_freshbag_upload"></iframe>
+    </div>
   </div>
 
 <script>
@@ -1080,6 +1164,8 @@
   let tableRows = [];
   let localSeq = 1;
   let hiddenMonths = new Set();
+  let canUploadMode = false;
+  let currentMode = "query";
 
   const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v3";
   const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v3";
@@ -1372,6 +1458,100 @@
     if (!currentUser || !currentAccessToken) throw new Error("로그인이 필요합니다.");
 
     $("userPill").textContent = currentUser.email || currentUser.id;
+  }
+
+  async function fetchFreshbagAccess() {
+    if (!currentAccessToken) await checkSession();
+
+    try {
+      const res = await fetch(FRESHBAG_API_BASE + "/access", {
+        method:"GET",
+        headers:{"Authorization":"Bearer " + currentAccessToken},
+        cache:"no-store"
+      });
+      const text = await res.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+
+      if (res.ok && data && data.ok !== false) {
+        return data;
+      }
+    } catch {}
+
+    try {
+      const { data, error } = await supabaseClient.rpc("mw_my_access").maybeSingle();
+      if (!error && data) {
+        const level = Number(data.max_role_level || data.role_level || 0);
+        return {
+          ok:true,
+          loggedIn:true,
+          email:currentUser?.email || "",
+          canEdit:data.is_maroowell === true && data.is_admin === true && level >= 90,
+          access:{
+            is_maroowell:data.is_maroowell === true,
+            is_admin:data.is_admin === true,
+            max_role_level:level
+          }
+        };
+      }
+    } catch {}
+
+    return {ok:true, loggedIn:!!currentUser, canEdit:false};
+  }
+
+  async function setupModeToggle() {
+    const btn = $("freshbagModeToggle");
+    if (!btn) return;
+
+    const access = await fetchFreshbagAccess();
+    canUploadMode = access?.canEdit === true;
+
+    btn.hidden = !canUploadMode;
+    if (!canUploadMode) {
+      setMode("query");
+      return;
+    }
+
+    btn.addEventListener("click", () => {
+      setMode(currentMode === "query" ? "upload" : "query");
+    });
+  }
+
+  function setMode(mode) {
+    currentMode = mode === "upload" ? "upload" : "query";
+    const queryPanel = $("queryPanel");
+    const uploadPanel = $("uploadPanel");
+    const btn = $("freshbagModeToggle");
+
+    if (queryPanel) queryPanel.hidden = currentMode !== "query";
+    if (uploadPanel) uploadPanel.hidden = currentMode !== "upload";
+
+    if (btn) btn.textContent = currentMode === "query" ? "업로드" : "조회";
+
+    if (currentMode === "upload") {
+      ensureUploadFrameLoaded();
+      setStatus("업로드 화면입니다. 조회 화면으로 돌아가려면 상단의 조회 버튼을 누르세요.", "ok");
+    } else if (rawRows.length === 0) {
+      setStatus("기본 4행이 준비되었습니다. 조회는 freshbag 백엔드를 통해 실행됩니다.", "ok");
+    }
+  }
+
+  function ensureUploadFrameLoaded() {
+    const frame = $("freshbagUploadFrame");
+    if (!frame || frame.src) return;
+    frame.src = frame.dataset.src || "/coupang_freshbag_upload";
+    frame.addEventListener("load", () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const style = doc.createElement("style");
+        style.textContent = `
+          .wrap{max-width:none!important;margin:0!important;padding:16px!important;}
+          .top{display:none!important;}
+        `;
+        doc.head.appendChild(style);
+      } catch {}
+    }, { once:true });
   }
 
 
@@ -2293,37 +2473,30 @@
 
   function drawSeparator(ctx, x, y, w, type) {
     if (!type) return;
+
+    /*
+      이미지 복사용 구분선 보정.
+      기존 방식은 cell border 위에 굵은 선 2개를 추가로 그려서
+      모바일 복사 이미지에서 라우트 구분선이 지저분한 이중선처럼 보였다.
+      현재 행의 top border 영역을 먼저 흰색으로 정리한 뒤,
+      라우트 변경은 얇은 단일선, 캠프 변경은 조금 더 굵은 단일선만 그린다.
+    */
     ctx.save();
 
-    if (type === "camp") {
-      ctx.strokeStyle = "#f8fafc";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(x, y + 1.5);
-      ctx.lineTo(x + w, y + 1.5);
-      ctx.stroke();
+    const isCamp = type === "camp";
+    const coverHeight = isCamp ? 4 : 3;
+    const lineWidth = isCamp ? 1.7 : 1.25;
+    const lineColor = isCamp ? "#64748b" : "#8fa1b8";
 
-      ctx.strokeStyle = "#94a3b8";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(x, y + 5.5);
-      ctx.lineTo(x + w, y + 5.5);
-      ctx.stroke();
-    } else {
-      ctx.strokeStyle = "#94a3b8";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x, y + 1.5);
-      ctx.lineTo(x + w, y + 1.5);
-      ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x, y - 1, w, coverHeight);
 
-      ctx.strokeStyle = "#64748b";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, y + 4.5);
-      ctx.lineTo(x + w, y + 4.5);
-      ctx.stroke();
-    }
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, y + lineWidth / 2);
+    ctx.lineTo(x + w, y + lineWidth / 2);
+    ctx.stroke();
 
     ctx.restore();
   }
@@ -2375,63 +2548,6 @@
     });
   }
 
-  function isMobileImageDelivery() {
-    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
-  }
-
-  async function deliverImageBlob(blob, fileName, statusText) {
-    const mobile = isMobileImageDelivery();
-
-    /*
-      모바일 Chrome/카톡 클립보드는 긴 PNG를 붙여넣는 과정에서 강제로 재압축/리사이즈하는 경우가 있어
-      모바일에서는 clipboard.write를 우선 사용하지 않고 Web Share API로 원본 PNG 파일을 직접 넘긴다.
-      PC에서는 기존처럼 클립보드 복사.
-    */
-    if (mobile && navigator.share && window.File) {
-      const file = new File([blob], fileName, { type: "image/png" });
-
-      try {
-        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: "프레시백 현황 조회",
-            text: "프레시백 현황 이미지"
-          });
-
-          setStatus(`${statusText} / 모바일 원본 PNG 공유 완료`, "ok");
-          return;
-        }
-      } catch (e) {
-        // 사용자가 공유창을 닫은 경우 또는 앱이 파일 공유를 거부한 경우 다운로드로 fallback.
-        console.warn("mobile share failed", e);
-      }
-    }
-
-    if (!mobile && navigator.clipboard?.write && window.ClipboardItem) {
-      try {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            "image/png": blob
-          })
-        ]);
-
-        setStatus(`${statusText} / 클립보드 복사 완료`, "ok");
-        return;
-      } catch (e) {
-        console.warn("clipboard image copy failed", e);
-      }
-    }
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    setStatus(`${statusText} / 원본 PNG 다운로드 완료`, "warn");
-  }
-
   async function copyTableImage() {
     const months = getMonthsWithData();
 
@@ -2446,19 +2562,25 @@
     }
 
     /*
-      모바일 화질 최종 우회:
-      - 이미지 자체는 한 장 세로 이미지 유지
-      - canvas는 충분한 원본 해상도(scale=4)로 생성
-      - 모바일에서는 클립보드 복사가 아니라 Web Share API로 원본 PNG 파일을 전달
-      - PC는 기존처럼 클립보드 복사
+      모바일 화질 문제의 핵심:
+      Android/모바일 앱이 긴 PNG를 붙여넣을 때 세로 2048px 근처로 다시 줄이면서
+      긴 표의 글자가 깨짐. canvas scale을 올려도 최종 리사이즈에서 다시 뭉개짐.
+      그래서 모바일/긴 표 복사에서는 rowHeight 자체를 줄여 전체 세로 길이를 줄인다.
+      - 한 장 세로 이미지 유지
+      - 다단 분할 없음
+      - 화면 표와 별도: 복사용 canvas만 모바일 압축 대응형으로 렌더링
     */
+    const isMobileCopy =
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "") ||
+      tableRows.length >= 60;
+
     const fixedColumns = [
-      { key: "wave", label: "주간/야간", width: 50 },
-      { key: "camp", label: "Camp", width: 58 },
-      { key: "route", label: "Route", width: 50 }
+      { key: "wave", label: "주간/야간", width: isMobileCopy ? 40 : 44 },
+      { key: "camp", label: "Camp", width: isMobileCopy ? 50 : 54 },
+      { key: "route", label: "Route", width: isMobileCopy ? 42 : 46 }
     ];
 
-    const monthCellWidth = 48;
+    const monthCellWidth = isMobileCopy ? 40 : 44;
     const monthColumns = [];
 
     for (const m of months) {
@@ -2468,17 +2590,17 @@
 
     const columns = [...fixedColumns, ...monthColumns];
 
-    const titleHeight = 48;
-    const monthHeaderHeight = 26;
-    const subHeaderHeight = 25;
-    const rowHeight = 30;
-    const padding = 12;
+    const titleHeight = isMobileCopy ? 38 : 48;
+    const monthHeaderHeight = isMobileCopy ? 20 : 26;
+    const subHeaderHeight = isMobileCopy ? 20 : 25;
+    const rowHeight = isMobileCopy ? 18 : 30;
+    const padding = isMobileCopy ? 8 : 12;
 
     const tableWidth = columns.reduce((sum, col) => sum + col.width, 0);
     const canvasWidth = tableWidth + padding * 2;
     const canvasHeight = titleHeight + monthHeaderHeight + subHeaderHeight + tableRows.length * rowHeight + padding * 2;
 
-    const scale = 4;
+    const scale = isMobileCopy ? 4 : 4;
     const canvas = document.createElement("canvas");
     canvas.width = Math.ceil(canvasWidth * scale);
     canvas.height = Math.ceil(canvasHeight * scale);
@@ -2497,22 +2619,34 @@
     ].filter(Boolean);
 
     ctx.fillStyle = "#0f172a";
-    ctx.font = "800 20px 'Noto Sans KR', Arial, sans-serif";
+    ctx.font = isMobileCopy
+      ? "800 14px 'Noto Sans KR', Arial, sans-serif"
+      : "800 20px 'Noto Sans KR', Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText("프레시백 현황 조회", padding, padding + 13);
+    ctx.fillText("프레시백 현황 조회", padding, padding + (isMobileCopy ? 10 : 13));
 
     ctx.fillStyle = "#64748b";
-    ctx.font = "600 12px 'Noto Sans KR', Arial, sans-serif";
-    ctx.fillText(titleParts.join(" / "), padding, padding + 35);
+    ctx.font = isMobileCopy
+      ? "600 9px 'Noto Sans KR', Arial, sans-serif"
+      : "600 12px 'Noto Sans KR', Arial, sans-serif";
+    ctx.fillText(titleParts.join(" / "), padding, padding + (isMobileCopy ? 28 : 35));
 
     let y = padding + titleHeight;
     let x = padding;
 
-    const fixedHeaderFont = "700 10px 'Noto Sans KR', Arial, sans-serif";
-    const monthHeaderFont = "700 12px 'Noto Sans KR', Arial, sans-serif";
-    const subHeaderFont = "700 10px 'Noto Sans KR', Arial, sans-serif";
-    const rowFont = "700 11px 'Noto Sans KR', Arial, sans-serif";
+    const fixedHeaderFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
+    const monthHeaderFont = isMobileCopy
+      ? "700 9px 'Noto Sans KR', Arial, sans-serif"
+      : "700 12px 'Noto Sans KR', Arial, sans-serif";
+    const subHeaderFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
+    const rowFont = isMobileCopy
+      ? "700 8.5px 'Noto Sans KR', Arial, sans-serif"
+      : "700 10px 'Noto Sans KR', Arial, sans-serif";
 
     for (const col of fixedColumns) {
       drawCell(ctx, x, y, col.width, monthHeaderHeight + subHeaderHeight, {
@@ -2621,10 +2755,27 @@
       return;
     }
 
-    const fileName = `freshbag_${$("yearFilter").value || "year"}_${Date.now()}.png`;
-    const statusText = `이미지 생성 완료: 원본 ${canvas.width}×${canvas.height}px / 한 장 세로 / ${months.join(", ")}월`;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "image/png": blob
+        })
+      ]);
 
-    await deliverImageBlob(blob, fileName, statusText);
+      setStatus(
+        `이미지 복사 완료: ${isMobileCopy ? "모바일 압축 대응" : "PC 고해상도"} / 한 장 세로 / ${months.join(", ")}월`,
+        "ok"
+      );
+    } catch (e) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `freshbag_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setStatus("브라우저가 이미지 클립보드 복사를 막아서 PNG 파일로 다운로드했습니다.", "warn");
+    }
   }
 
 
@@ -2735,6 +2886,7 @@
 
     run(async () => {
       await checkSession();
+      await setupModeToggle();
       initDefaultRows();
       renderPresetOptions();
 

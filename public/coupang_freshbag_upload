@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="ko">
 <head>
+  <script>
+    (() => {
+      try {
+        if (new URLSearchParams(location.search).get("embed") === "1") {
+          document.documentElement.classList.add("mw-embed");
+        }
+      } catch {}
+    })();
+  </script>
   <script src="/config.js"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -124,6 +133,36 @@
     .top{
       background:rgba(255,255,255,.96) !important;
     }
+
+    html.mw-embed,
+    html.mw-embed body{
+      min-height:100%;
+      background:transparent !important;
+    }
+
+    html.mw-embed .wrap{
+      max-width:none !important;
+      padding:0 !important;
+      margin:0 !important;
+    }
+
+    html.mw-embed .top{
+      display:none !important;
+    }
+
+    html.mw-embed .card:first-child{
+      margin-top:0 !important;
+    }
+
+    html.mw-embed .grid{
+      grid-template-columns:minmax(330px,430px) 1fr;
+    }
+
+    @media(max-width:980px){
+      html.mw-embed .grid{
+        grid-template-columns:1fr;
+      }
+    }
   </style>
 
 </head>
@@ -181,7 +220,8 @@
   function renderPreview(rows){const thead=$("previewTable").querySelector("thead");const tbody=$("previewTable").querySelector("tbody");thead.innerHTML=`<tr><th>data_month</th><th>Wave</th><th>Camp</th><th>Route</th><th>route_norm</th><th>가중1</th><th>가중2</th></tr>`;const sample=rows.slice(0,300);if(!sample.length){tbody.innerHTML=`<tr><td colspan="7">추출 데이터 없음</td></tr>`;updateSummary([]);return}tbody.innerHTML=sample.map(row=>`<tr><td>${esc(row.data_month)}</td><td>${esc(row.wave)}</td><td>${esc(row.camp)}</td><td>${esc(row.route)}</td><td>${esc(row.route_norm)}</td><td class="${row.gajoong1==="해당"?"yes":row.gajoong1==="미해당"?"no":""}">${esc(row.gajoong1)}</td><td class="${row.gajoong2==="해당"?"yes":row.gajoong2==="미해당"?"no":""}">${esc(row.gajoong2)}</td></tr>`).join("");updateSummary(rows)}
   async function parseFile(){const file=$("fileInput").files?.[0];if(!file)throw new Error("파일을 선택하세요.");fileName=file.name;setStatus("파일 분석 중...");const {sheetName,rows}=await readWorkbook(file);const result=parseRows(rows);parsedRows=result.rows;renderPreview(parsedRows);log({file:file.name,sheet:sheetName,mode:result.mode,headerRow:result.headerRow,periodLabel:result.periodLabel,extractedRows:result.count,api:FRESHBAG_API_BASE,sample:parsedRows.slice(0,5)});setStatus(`분석 완료: ${parsedRows.length.toLocaleString()}건 추출`,"ok")}
   function chunkUploadRows(arr,size){const out=[];for(let i=0;i<arr.length;i+=size)out.push(arr.slice(i,i+size));return out}
-  async function uploadRows(){if(!parsedRows.length)throw new Error("먼저 파일 분석을 실행하세요.");const batchSize=1500;const batches=chunkUploadRows(parsedRows,batchSize);let done=0;setStatus(`freshbag 백엔드 업로드 중... 0/${parsedRows.length.toLocaleString()}건`);const results=[];for(let i=0;i<batches.length;i++){const batch=batches[i];const result=await freshbagApi("/freshbag/upsert",{rows:batch,batch_size:2000});const uploaded=Number(result?.upserted||batch.length);done+=uploaded;results.push(result);setStatus(`freshbag 백엔드 업로드 중... ${done.toLocaleString()}/${parsedRows.length.toLocaleString()}건 (${i+1}/${batches.length})`)}setStatus(`업로드 완료: ${done.toLocaleString()}건`,"ok");log({upload:"done",api:FRESHBAG_API_BASE,total:parsedRows.length,done,batchSize,batches:batches.length,results:results.slice(-3)})}
+  function uploadPercent(done,total){if(!total)return 0;return Math.min(100,Math.max(0,Math.round((done/total)*100)))}
+  async function uploadRows(){if(!parsedRows.length)throw new Error("먼저 파일 분석을 실행하세요.");const batchSize=1500;const batches=chunkUploadRows(parsedRows,batchSize);let done=0;setStatus("freshbag 백엔드 업로드 중... 0%");const results=[];for(let i=0;i<batches.length;i++){const batch=batches[i];const result=await freshbagApi("/freshbag/upsert",{rows:batch,batch_size:2000});const uploaded=Number(result?.upserted||batch.length);done+=uploaded;results.push(result);setStatus(`freshbag 백엔드 업로드 중... ${uploadPercent(done,parsedRows.length)}%`)}setStatus(`업로드 완료: 100% · 총 ${done.toLocaleString()}건`,"ok");log({upload:"done",api:FRESHBAG_API_BASE,total:parsedRows.length,done,batchSize,batches:batches.length,results:results.slice(-3)})}
   async function saveAlias(){const camp=normalizeCampForDb($("aliasCamp").value);const current=clean($("aliasCurrent").value);const old=clean($("aliasOld").value);const memo=clean($("aliasMemo").value);if(!camp||!current||!old)throw new Error("Camp / 현재 라우트 / 이전 라우트를 입력하세요.");const row={camp,route_label:current,route_norm:normalizeRoute(current),alias_route_label:old,alias_route_norm:normalizeRoute(old),memo:memo||null};setAliasStatus("freshbag 백엔드로 매핑 저장 중...");const result=await freshbagApi("/freshbag/alias/upsert",{row});setAliasStatus("매핑 저장 완료","ok");log({alias:"saved",api:FRESHBAG_API_BASE,row,result})}
   function clearAll(){parsedRows=[];fileName="";$("fileInput").value="";$("previewTable").querySelector("thead").innerHTML="";$("previewTable").querySelector("tbody").innerHTML="";updateSummary([]);log("초기화 완료");setStatus("대기 중")}
   function run(fn,target="main"){fn().catch(e=>{console.error(e);if(target==="alias")setAliasStatus(e.message||String(e),"bad");else setStatus(e.message||String(e),"bad")})}

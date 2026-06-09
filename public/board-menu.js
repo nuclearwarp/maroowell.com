@@ -237,6 +237,15 @@
       .mw-denied-actions{margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
       .mw-denied-btn{height:40px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#162744;color:#e6eefc;cursor:pointer;font-weight:900}
       .mw-denied-btn.danger{background:rgba(107,27,27,.35);border-color:rgba(255,60,60,.22);color:#ffccd3}
+      .mw-freshbag-top-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-left:auto}
+      .mw-freshbag-view-switcher{min-height:32px!important;height:32px!important;padding:0 13px!important;border-radius:999px!important;border:1px solid #bfdbfe!important;background:#eff6ff!important;color:#1d4ed8!important;font-size:12px!important;font-weight:750!important;box-shadow:none!important;white-space:nowrap!important}
+      .mw-freshbag-view-switcher:hover{background:#dbeafe!important;border-color:#93c5fd!important;color:#1d4ed8!important}
+      .mw-freshbag-view-switcher.upload-active{border-color:#bbf7d0!important;background:#f0fdf4!important;color:#15803d!important}
+      #mwFreshbagQueryPanel{display:block}
+      #mwFreshbagQueryPanel[hidden],#mwFreshbagUploadPanel[hidden]{display:none!important}
+      #mwFreshbagUploadPanel{display:block;margin-top:0}
+      .mw-freshbag-upload-frame{display:block;width:100%;height:calc(100vh - 112px);min-height:720px;border:0;border-radius:20px;background:#f6f8fc;box-shadow:0 12px 30px rgba(15,23,42,.08)}
+      @media(max-width:900px){.mw-freshbag-top-actions{width:100%;justify-content:flex-start}.mw-freshbag-view-switcher{width:auto!important}.mw-freshbag-upload-frame{height:calc(100vh - 160px);min-height:680px;border-radius:18px}}
     `;
     document.head.appendChild(style);
   }
@@ -325,6 +334,99 @@
     }
   }
 
+  function injectFreshbagUploadSwitcher() {
+    const currentPath = normalizePath(location.pathname || "/");
+    const isFreshbagView = currentPath === "/coupang_freshbag" || currentPath === "/coupang_freshbag.html";
+
+    if (!isFreshbagView || document.getElementById("mwFreshbagViewSwitcher")) return;
+
+    injectStyles();
+
+    const wrap = document.querySelector(".wrap");
+    const top = wrap?.querySelector(":scope > .top");
+    const userPill = document.getElementById("userPill");
+
+    if (!wrap || !top || !userPill) return;
+
+    const queryPanel = document.createElement("div");
+    queryPanel.id = "mwFreshbagQueryPanel";
+
+    let node = top.nextSibling;
+    while (node) {
+      const next = node.nextSibling;
+      queryPanel.appendChild(node);
+      node = next;
+    }
+    wrap.appendChild(queryPanel);
+
+    const uploadPanel = document.createElement("div");
+    uploadPanel.id = "mwFreshbagUploadPanel";
+    uploadPanel.hidden = true;
+    uploadPanel.innerHTML = `
+      <iframe
+        id="mwFreshbagUploadFrame"
+        class="mw-freshbag-upload-frame"
+        title="프레시백 현황 업로드"
+        data-src="/coupang_freshbag_upload"
+        loading="lazy"
+      ></iframe>
+    `;
+    wrap.appendChild(uploadPanel);
+
+    const actions = document.createElement("div");
+    actions.className = "mw-freshbag-top-actions";
+    userPill.parentNode.insertBefore(actions, userPill);
+
+    const btn = document.createElement("button");
+    btn.id = "mwFreshbagViewSwitcher";
+    btn.type = "button";
+    btn.className = "mw-freshbag-view-switcher";
+    btn.textContent = "업로드";
+
+    actions.appendChild(btn);
+    actions.appendChild(userPill);
+
+    const titleEl = top.querySelector(".title");
+    const subEl = top.querySelector(".sub");
+    const defaultTitle = titleEl?.textContent || "프레시백 현황 조회";
+    const defaultSub = subEl?.textContent || "";
+    const uploadTitle = "프레시백 현황 업로드";
+    const uploadSub = "엑셀 업로드 화면으로 전환했습니다. 조회 화면으로 돌아가려면 우측 버튼을 누르세요.";
+
+    const setMode = (mode, updateHash = true) => {
+      const uploadMode = mode === "upload";
+      const frame = document.getElementById("mwFreshbagUploadFrame");
+
+      queryPanel.hidden = uploadMode;
+      uploadPanel.hidden = !uploadMode;
+      btn.textContent = uploadMode ? "조회 화면" : "업로드";
+      btn.classList.toggle("upload-active", uploadMode);
+      btn.setAttribute("aria-pressed", uploadMode ? "true" : "false");
+
+      if (titleEl) titleEl.textContent = uploadMode ? uploadTitle : defaultTitle;
+      if (subEl) subEl.textContent = uploadMode ? uploadSub : defaultSub;
+
+      if (uploadMode && frame && !frame.getAttribute("src")) {
+        frame.setAttribute("src", frame.dataset.src || "/coupang_freshbag_upload");
+      }
+
+      if (updateHash && history?.replaceState) {
+        const nextUrl = uploadMode
+          ? `${location.pathname}${location.search}#upload`
+          : `${location.pathname}${location.search}`;
+        history.replaceState(null, "", nextUrl);
+      }
+    };
+
+    btn.addEventListener("click", () => {
+      setMode(uploadPanel.hidden ? "upload" : "query");
+    });
+
+    if (location.hash === "#upload") {
+      setMode("upload", false);
+    }
+  }
+
   async function init() {
     const current = findCurrentPage();
     const access = await loadAccess();
@@ -335,6 +437,7 @@
     }
 
     renderMenu(access);
+    injectFreshbagUploadSwitcher();
   }
 
   if (document.readyState === "loading") {

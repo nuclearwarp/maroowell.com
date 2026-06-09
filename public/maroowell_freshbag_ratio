@@ -414,6 +414,31 @@
     .ratioBad{background:#fff;color:#dc2626}
     .ratioEmpty{color:#94a3b8;background:#f8fafc;font-weight:400 !important}
 
+    .ratioSubSep td{
+      border-top:2px solid #bfdbfe !important;
+    }
+
+    .ratioRouteSep td{
+      border-top:4px double #64748b !important;
+    }
+
+    .ratioCampSep td{
+      border-top:4px double #334155 !important;
+    }
+
+    .ratioSubSep td.dayCell,
+    .ratioSubSep td .ratioLine,
+    .ratioSubSep td:not(.fixedCell){
+      box-shadow:inset 0 1px 0 rgba(37,99,235,.10);
+    }
+
+    .ratioRouteSep td.dayCell,
+    .ratioRouteSep td:not(.fixedCell),
+    .ratioCampSep td.dayCell,
+    .ratioCampSep td:not(.fixedCell){
+      box-shadow:inset 0 2px 0 rgba(71,85,105,.12);
+    }
+
     .weekBlock{margin-top:18px}
 
     .weekTitle{
@@ -712,6 +737,49 @@
     return String(v || "")
       .toUpperCase()
       .replace(/[^0-9A-Z가-힣]/g, "");
+  }
+
+  function routeGroup(v) {
+    const s = normalizeRoute(v);
+    const m = s.match(/^(\d+)/);
+    return m ? m[1] : s;
+  }
+
+  function rowSeparatorClass(list, index) {
+    if (index <= 0) return "";
+
+    const prev = list[index - 1];
+    const row = list[index];
+
+    const prevCamp = clean(prev?.camp);
+    const thisCamp = clean(row?.camp);
+    const prevWave = clean(prev?.wave).toUpperCase();
+    const thisWave = clean(row?.wave).toUpperCase();
+
+    if ((prevCamp && thisCamp && prevCamp !== thisCamp) || (prevWave && thisWave && prevWave !== thisWave)) {
+      return "ratioCampSep";
+    }
+
+    const prevGroup = routeGroup(prev?.route_norm || prev?.route);
+    const thisGroup = routeGroup(row?.route_norm || row?.route);
+
+    if (prevGroup && thisGroup && prevGroup !== thisGroup) {
+      return "ratioRouteSep";
+    }
+
+    return "ratioSubSep";
+  }
+
+  function sortRatioRows(rows) {
+    const waveOrder = { W2:1, W1:2 };
+
+    return rows.slice().sort((a, b) => {
+      return (
+        String(a.camp || "").localeCompare(String(b.camp || ""), "ko", { numeric:true }) ||
+        ((waveOrder[String(a.wave || "").toUpperCase()] || 9) - (waveOrder[String(b.wave || "").toUpperCase()] || 9)) ||
+        String(normalizeRoute(a.route_norm || a.route)).localeCompare(String(normalizeRoute(b.route_norm || b.route)), "ko", { numeric:true })
+      );
+    });
   }
 
   function campDbValue(value) {
@@ -1121,8 +1189,10 @@
       return;
     }
 
-    tbody.innerHTML = totalRows.map(row => `
-      <tr>
+    const displayRows = sortRatioRows(totalRows);
+
+    tbody.innerHTML = displayRows.map((row, index) => `
+      <tr class="${rowSeparatorClass(displayRows, index)}">
         <td class="fixedCell">${esc(waveLabel(row.wave))}</td>
         <td class="fixedCell">${esc(row.camp)}</td>
         <td class="fixedCell routeCell">${esc(normalizeRoute(row.route_norm || row.route))}</td>
@@ -1197,12 +1267,12 @@
 
     container.innerHTML = weeks.map(week => {
       const headers = week.days.map(day => {
-        return `<th class="dayHead">${day.inPeriod ? esc(formatKoreanDate(day.iso)) : ""}</th>`;
+        return `<th class="dayHead" data-in-period="${day.inPeriod ? "1" : "0"}">${day.inPeriod ? esc(formatKoreanDate(day.iso)) : ""}</th>`;
       }).join("");
 
-      const bodyRows = routeRows.map(routeRow => {
+      const bodyRows = routeRows.map((routeRow, index) => {
         const cells = week.days.map(day => {
-          if (!day.inPeriod) return `<td class="emptyDay"></td>`;
+          if (!day.inPeriod) return `<td class="emptyDay" data-empty-week-day="1"></td>`;
 
           const item = dmap.get(`${routeRow.key}||${day.iso}`);
 
@@ -1214,7 +1284,7 @@
         }).join("");
 
         return `
-          <tr>
+          <tr class="${rowSeparatorClass(routeRows, index)}">
             <td class="fixedCell">${esc(waveLabel(routeRow.wave))}</td>
             <td class="fixedCell">${esc(routeRow.camp)}</td>
             <td class="fixedCell routeCell">${esc(routeRow.route)}</td>
@@ -1250,7 +1320,36 @@
     }).join("");
   }
 
-  async function copyElementImage(element, label) {
+  function trimEmptyWeekColumnsForCopy(root) {
+    const table = root?.querySelector("table.weekTable");
+    if (!table) return;
+
+    const headerCells = Array.from(table.querySelectorAll("thead tr:first-child th"));
+    const removeIndexes = [];
+
+    headerCells.forEach((th, index) => {
+      if (index < 3) return;
+
+      const isOutOfPeriod =
+        th.dataset.inPeriod === "0" ||
+        !clean(th.textContent);
+
+      if (isOutOfPeriod) {
+        removeIndexes.push(index);
+      }
+    });
+
+    removeIndexes
+      .sort((a, b) => b - a)
+      .forEach(index => {
+        table.querySelectorAll("tr").forEach(tr => {
+          const cell = tr.children[index];
+          if (cell) cell.remove();
+        });
+      });
+  }
+
+  async function copyElementImage(element, label, options = {}) {
     if (!element) {
       setStatus("이미지로 복사할 영역을 찾지 못했습니다.", "bad");
       return;
@@ -1263,40 +1362,75 @@
 
     setStatus(`${label} 이미지 생성 중...`, "warn");
 
-    const canvas = await html2canvas(element, {
-      backgroundColor:"#ffffff",
-      scale:Math.max(2, Math.min(4, window.devicePixelRatio || 2)),
-      useCORS:true
-    });
+    let captureElement = element;
+    let tempWrap = null;
 
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png", 1));
+    if (options.trimEmptyWeekColumns) {
+      tempWrap = document.createElement("div");
+      tempWrap.style.position = "fixed";
+      tempWrap.style.left = "-100000px";
+      tempWrap.style.top = "0";
+      tempWrap.style.background = "#ffffff";
+      tempWrap.style.padding = "0";
+      tempWrap.style.zIndex = "-1";
 
-    if (!blob) {
-      setStatus("이미지 생성에 실패했습니다.", "bad");
-      return;
-    }
+      const clone = element.cloneNode(true);
+      clone.id = "";
+      clone.style.maxHeight = "none";
+      clone.style.overflow = "visible";
+      clone.style.width = "max-content";
 
-    if (navigator.clipboard?.write && window.ClipboardItem && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")) {
-      try {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": blob })
-        ]);
-        setStatus(`${label} 이미지 클립보드 복사 완료`, "ok");
-        return;
-      } catch (e) {
-        console.warn("clipboard image copy failed", e);
+      const cloneTable = clone.querySelector("table");
+      if (cloneTable) {
+        cloneTable.style.width = "max-content";
+        cloneTable.style.minWidth = "0";
       }
+
+      tempWrap.appendChild(clone);
+      document.body.appendChild(tempWrap);
+
+      trimEmptyWeekColumnsForCopy(clone);
+      captureElement = clone;
     }
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `maroowell_freshbag_ratio_${Date.now()}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setStatus(`${label} 이미지 PNG 저장 완료`, "ok");
+    try {
+      const canvas = await html2canvas(captureElement, {
+        backgroundColor:"#ffffff",
+        scale:Math.max(2, Math.min(4, window.devicePixelRatio || 2)),
+        useCORS:true
+      });
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png", 1));
+
+      if (!blob) {
+        setStatus("이미지 생성에 실패했습니다.", "bad");
+        return;
+      }
+
+      if (navigator.clipboard?.write && window.ClipboardItem && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")) {
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ "image/png": blob })
+          ]);
+          setStatus(`${label} 이미지 클립보드 복사 완료`, "ok");
+          return;
+        } catch (e) {
+          console.warn("clipboard image copy failed", e);
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `maroowell_freshbag_ratio_${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatus(`${label} 이미지 PNG 저장 완료`, "ok");
+    } finally {
+      if (tempWrap) tempWrap.remove();
+    }
   }
 
   function initRatioUploadSwitchIfAllowed() {
@@ -1462,6 +1596,12 @@
 
   $("campFilter").addEventListener("change", () => {
     syncWaveFromCamp();
+
+    if (clean($("campFilter").value)) {
+      run(loadData);
+    } else {
+      setStatus("캠프를 선택하세요.", "warn");
+    }
   });
 
   ["yearFilter", "monthFilter"].forEach(id => {
@@ -1481,7 +1621,7 @@
     if (!btn) return;
 
     const week = btn.dataset.week;
-    run(() => copyElementImage($(`weekCaptureTarget${week}`), `${week}주차 회수율`));
+    run(() => copyElementImage($(`weekCaptureTarget${week}`), `${week}주차 회수율`, { trimEmptyWeekColumns:true }));
   });
 
   $("deniedHomeBtn").addEventListener("click", () => {

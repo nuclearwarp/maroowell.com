@@ -989,6 +989,91 @@
 
 </style>
 
+  <style id="mw-freshbag-upload-switch-style">
+    .mw-freshbag-top-actions{
+      display:flex !important;
+      align-items:center !important;
+      justify-content:flex-end !important;
+      gap:8px !important;
+      flex-wrap:wrap !important;
+      margin-left:auto !important;
+    }
+
+    #mwFreshbagUploadSwitchBtn{
+      min-height:32px !important;
+      height:32px !important;
+      width:auto !important;
+      min-width:auto !important;
+      padding:0 13px !important;
+      border-radius:999px !important;
+      border:1px solid #bfdbfe !important;
+      background:#eff6ff !important;
+      color:#1d4ed8 !important;
+      font-family:var(--mw-font, "Noto Sans KR", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif) !important;
+      font-size:12px !important;
+      font-weight:800 !important;
+      line-height:30px !important;
+      box-shadow:0 6px 14px rgba(15,23,42,.06) !important;
+      cursor:pointer !important;
+      white-space:nowrap !important;
+    }
+
+    #mwFreshbagUploadSwitchBtn:hover{
+      background:#dbeafe !important;
+      border-color:#93c5fd !important;
+      color:#1d4ed8 !important;
+    }
+
+    #mwFreshbagUploadSwitchBtn.is-upload{
+      border-color:#bbf7d0 !important;
+      background:#f0fdf4 !important;
+      color:#15803d !important;
+    }
+
+    #mwFreshbagViewPanel[hidden],
+    #mwFreshbagUploadPanel[hidden]{
+      display:none !important;
+    }
+
+    #mwFreshbagUploadPanel{
+      display:block;
+      margin-top:0;
+    }
+
+    .mw-freshbag-upload-frame{
+      display:block;
+      width:100%;
+      height:calc(100vh - 112px);
+      min-height:720px;
+      border:0;
+      border-radius:20px;
+      background:#f6f8fc;
+      box-shadow:0 12px 30px rgba(15,23,42,.08);
+    }
+
+    @media(max-width:900px){
+      .mw-freshbag-top-actions{
+        width:100% !important;
+        justify-content:flex-start !important;
+      }
+
+      #mwFreshbagUploadSwitchBtn{
+        width:auto !important;
+        height:30px !important;
+        min-height:30px !important;
+        padding:0 10px !important;
+        font-size:11px !important;
+        line-height:28px !important;
+      }
+
+      .mw-freshbag-upload-frame{
+        height:calc(100vh - 160px);
+        min-height:680px;
+        border-radius:18px;
+      }
+    }
+  </style>
+
 </head>
 
 <body>
@@ -1093,6 +1178,7 @@
   let supabaseClient = null;
   let currentUser = null;
   let currentAccessToken = "";
+  let currentAccess = null;
   let rawRows = [];
   let tableRows = [];
   let localSeq = 1;
@@ -1389,6 +1475,135 @@
     if (!currentUser || !currentAccessToken) throw new Error("로그인이 필요합니다.");
 
     $("userPill").textContent = currentUser.email || currentUser.id;
+  }
+
+  function isSuperAdminAccess(access = currentAccess) {
+    return (
+      access?.is_maroowell === true &&
+      access?.is_admin === true &&
+      Number(access?.max_role_level || 0) >= 90
+    );
+  }
+
+  async function loadMyAccess() {
+    currentAccess = {
+      is_maroowell: false,
+      is_admin: false,
+      max_role_level: 0,
+      is_dragon_car_admin: false
+    };
+
+    if (!supabaseClient || !currentUser) return currentAccess;
+
+    try {
+      const { data, error } = await supabaseClient.rpc("mw_my_access").maybeSingle();
+      if (error) throw error;
+
+      currentAccess = {
+        is_maroowell: data?.is_maroowell === true,
+        is_admin: data?.is_admin === true,
+        max_role_level: Number(data?.max_role_level || 0),
+        is_dragon_car_admin: data?.is_dragon_car_admin === true
+      };
+    } catch (e) {
+      console.warn("mw_my_access failed", e);
+    }
+
+    return currentAccess;
+  }
+
+  function initFreshbagUploadSwitchIfAllowed() {
+    if (!isSuperAdminAccess()) return;
+
+    const wrap = document.querySelector(".wrap");
+    const top = wrap?.querySelector(":scope > .top");
+    const userPill = $("userPill");
+
+    if (!wrap || !top || !userPill) return;
+    if ($("mwFreshbagUploadSwitchBtn")) return;
+
+    const viewPanel = document.createElement("div");
+    viewPanel.id = "mwFreshbagViewPanel";
+
+    let node = top.nextSibling;
+    while (node) {
+      const next = node.nextSibling;
+      viewPanel.appendChild(node);
+      node = next;
+    }
+    wrap.appendChild(viewPanel);
+
+    const uploadPanel = document.createElement("div");
+    uploadPanel.id = "mwFreshbagUploadPanel";
+    uploadPanel.hidden = true;
+    uploadPanel.innerHTML = `
+      <iframe
+        id="mwFreshbagUploadFrame"
+        class="mw-freshbag-upload-frame"
+        title="프레시백 현황 업로드"
+        data-src="/coupang_freshbag_upload"
+        loading="lazy"
+      ></iframe>
+    `;
+    wrap.appendChild(uploadPanel);
+
+    const actions = document.createElement("div");
+    actions.className = "mw-freshbag-top-actions";
+
+    const btn = document.createElement("button");
+    btn.id = "mwFreshbagUploadSwitchBtn";
+    btn.type = "button";
+    btn.textContent = "Upload";
+
+    userPill.parentNode.insertBefore(actions, userPill);
+    actions.appendChild(btn);
+    actions.appendChild(userPill);
+
+    const titleEl = top.querySelector(".title");
+    const subEl = top.querySelector(".sub");
+    const viewTitle = titleEl?.textContent || "프레시백 현황 조회";
+    const viewSub = subEl?.textContent || "";
+
+    function setMode(mode, updateHash = true) {
+      const uploadMode = mode === "upload";
+      const frame = $("mwFreshbagUploadFrame");
+
+      viewPanel.hidden = uploadMode;
+      uploadPanel.hidden = !uploadMode;
+
+      btn.textContent = uploadMode ? "View" : "Upload";
+      btn.classList.toggle("is-upload", uploadMode);
+      btn.setAttribute("aria-pressed", uploadMode ? "true" : "false");
+
+      if (titleEl) {
+        titleEl.textContent = uploadMode ? "프레시백 현황 업로드" : viewTitle;
+      }
+
+      if (subEl) {
+        subEl.textContent = uploadMode
+          ? "엑셀 업로드 화면입니다. View 버튼을 누르면 조회 화면으로 돌아갑니다."
+          : viewSub;
+      }
+
+      if (uploadMode && frame && !frame.getAttribute("src")) {
+        frame.setAttribute("src", frame.dataset.src || "/coupang_freshbag_upload");
+      }
+
+      if (updateHash && window.history?.replaceState) {
+        const nextUrl = uploadMode
+          ? `${location.pathname}${location.search}#upload`
+          : `${location.pathname}${location.search}`;
+        history.replaceState(null, "", nextUrl);
+      }
+    }
+
+    btn.addEventListener("click", () => {
+      setMode(uploadPanel.hidden ? "upload" : "view");
+    });
+
+    if (location.hash === "#upload") {
+      setMode("upload", false);
+    }
   }
 
 
@@ -2747,6 +2962,8 @@
 
     run(async () => {
       await checkSession();
+      await loadMyAccess();
+      initFreshbagUploadSwitchIfAllowed();
       initDefaultRows();
       renderPresetOptions();
 

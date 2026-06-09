@@ -1546,16 +1546,42 @@
     const uploadPanel = document.createElement("div");
     uploadPanel.id = "mwFreshbagUploadPanel";
     uploadPanel.hidden = true;
+
+    const uploadFrameSrcBase = "/coupang_freshbag_upload?embed=1";
     uploadPanel.innerHTML = `
       <iframe
         id="mwFreshbagUploadFrame"
         class="mw-freshbag-upload-frame"
         title="프레시백 현황 업로드"
-        data-src="/coupang_freshbag_upload"
-        loading="lazy"
+        data-src="${uploadFrameSrcBase}"
+        src="${uploadFrameSrcBase}&preload=1"
       ></iframe>
     `;
     wrap.appendChild(uploadPanel);
+
+    const uploadFrame = $("mwFreshbagUploadFrame");
+    let uploadLoadTimer = 0;
+
+    function buildUploadFrameSrc(reason = "load") {
+      const sep = uploadFrameSrcBase.includes("?") ? "&" : "?";
+      return `${uploadFrameSrcBase}${sep}t=${Date.now()}&r=${encodeURIComponent(reason)}`;
+    }
+
+    function reloadUploadFrame(reason = "reload") {
+      if (!uploadFrame) return;
+      uploadFrame.dataset.loaded = "";
+      uploadFrame.setAttribute("src", buildUploadFrameSrc(reason));
+    }
+
+    if (uploadFrame) {
+      uploadFrame.addEventListener("load", () => {
+        uploadFrame.dataset.loaded = "1";
+        if (uploadLoadTimer) {
+          clearTimeout(uploadLoadTimer);
+          uploadLoadTimer = 0;
+        }
+      });
+    }
 
     function removeDuplicateUploadButtons() {
       const buttons = Array.from(top.querySelectorAll("button"));
@@ -1628,8 +1654,20 @@
           : viewSub;
       }
 
-      if (uploadMode && frame && !frame.getAttribute("src")) {
-        frame.setAttribute("src", frame.dataset.src || "/coupang_freshbag_upload");
+      if (uploadMode && frame) {
+        if (!frame.getAttribute("src")) {
+          reloadUploadFrame("empty-src");
+        }
+
+        if (frame.dataset.loaded !== "1") {
+          if (uploadLoadTimer) clearTimeout(uploadLoadTimer);
+
+          uploadLoadTimer = setTimeout(() => {
+            if (frame.dataset.loaded !== "1") {
+              reloadUploadFrame("retry-visible");
+            }
+          }, 900);
+        }
       }
 
       if (updateHash && window.history?.replaceState) {

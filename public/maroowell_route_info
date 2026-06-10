@@ -326,6 +326,11 @@
       cursor:pointer;
       white-space:nowrap;
       box-shadow:0 1px 0 rgba(255,255,255,.85),0 4px 12px rgba(15,23,42,.04);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      line-height:1.1;
     }
 
     button:hover{background:#f8fbff;border-color:#93c5fd}
@@ -486,6 +491,34 @@
       background:#eff6ff;
       border-color:#60a5fa;
       color:#1d4ed8;
+    }
+
+    .floatingPaneToggle{
+      position:absolute;
+      top:12px;
+      z-index:22;
+      display:none;
+      min-height:38px !important;
+      padding:0 16px !important;
+      background:rgba(255,255,255,.96) !important;
+      border:1px solid #d8e0ee !important;
+      color:#0f172a !important;
+      box-shadow:0 8px 22px rgba(15,23,42,.14) !important;
+      backdrop-filter:blur(8px);
+    }
+
+    .leftOpenBtn{left:12px}
+    .rightOpenBtn{right:164px}
+
+    .app.left-collapsed .leftOpenBtn,
+    .app.right-collapsed .rightOpenBtn{
+      display:inline-flex;
+    }
+
+    .polygonActionRow button{
+      min-width:0;
+      padding-left:10px !important;
+      padding-right:10px !important;
     }
 
     .routeMapLabel{
@@ -908,6 +941,16 @@
         padding:0 10px;
       }
 
+      .floatingPaneToggle{
+        top:8px;
+        min-height:32px !important;
+        font-size:11px !important;
+        padding:0 10px !important;
+      }
+
+      .leftOpenBtn{left:8px}
+      .rightOpenBtn{right:128px}
+
       .rightTopBar{
         margin-bottom:10px;
       }
@@ -928,7 +971,7 @@
 </head>
 
 <body>
-<div class="app" id="app">
+<div class="app right-collapsed" id="app">
   <aside class="left" id="leftPane">
     <div class="title">
       <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
@@ -942,7 +985,7 @@
     <div class="card">
       <div class="cardTitle">
         <span>조회 조건</span>
-        <small>백엔드 분리</small>
+        <small>검색</small>
       </div>
 
       <div class="field">
@@ -989,6 +1032,8 @@
 
   <main class="mapPane">
     <div id="map"></div>
+    <button id="openLeftBtn" type="button" class="floatingPaneToggle leftOpenBtn">좌측 열기</button>
+    <button id="openRightBtn" type="button" class="floatingPaneToggle rightOpenBtn">우측 열기</button>
     <div class="mapControls">
       <button id="toggleMapTypeBtn" type="button">위성</button>
       <button id="toggleRoadviewBtn" type="button">로드뷰</button>
@@ -1023,7 +1068,7 @@
         <small id="polygonInfoText">선택 없음</small>
       </div>
       <div class="status" id="drawInfoText">폴리곤 그리기를 누른 뒤 지도에서 점을 찍으세요.</div>
-      <div class="row" style="margin-top:8px">
+      <div class="row polygonActionRow" style="margin-top:8px">
         <button id="startDrawBtn" type="button" class="secondary">폴리곤 그리기</button>
         <button id="finishDrawBtn" type="button" class="ok">완료</button>
         <button id="cancelDrawBtn" type="button" class="danger">취소</button>
@@ -3096,6 +3141,8 @@
 
   $("toggleLeftBtn").addEventListener("click", () => togglePane("left"));
   $("toggleRightBtn").addEventListener("click", () => togglePane("right"));
+  $("openLeftBtn").addEventListener("click", () => togglePane("left"));
+  $("openRightBtn").addEventListener("click", () => togglePane("right"));
   $("toggleMapTypeBtn").addEventListener("click", setMapType);
   $("toggleRoadviewBtn").addEventListener("click", toggleRoadviewOverlay);
   $("fitAllBtn").addEventListener("click", fitAll);
@@ -3159,6 +3206,31 @@
     renderBulkRows();
   });
 
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+
+    if ($("imageModal")?.classList.contains("open")) {
+      $("imageModal").classList.remove("open");
+      $("imagePreviewImg").src = "";
+      return;
+    }
+
+    if ($("bulkModal")?.classList.contains("open")) {
+      hideBulkModal();
+      return;
+    }
+
+    if (drawMode) {
+      cancelDrawMode();
+      return;
+    }
+
+    setPointPickMode(false, false);
+    clearSelection(true);
+    setStatus("선택을 해제했습니다.", "ok");
+    setPointStatus("");
+  });
+
   $("deniedHomeBtn").addEventListener("click", () => {
     location.href = cfg.PATHS?.index || "/zipcode_search";
   });
@@ -3181,11 +3253,14 @@
       if (!ok) return;
 
       await initMap();
+      setTimeout(() => {
+        try { map?.relayout(); } catch {}
+      }, 180);
       renderCounts();
       renderRouteList();
       renderPointList();
 
-      setStatus("routeinfo 백엔드 분리 모드 준비 완료. Camp와 Route를 입력해 조회하세요.", "ok");
+      setStatus("Camp와 Route를 입력해 조회하세요.", "warn");
     });
   } catch (e) {
     document.documentElement.style.visibility = "visible";

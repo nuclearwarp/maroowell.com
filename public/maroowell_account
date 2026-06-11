@@ -83,6 +83,20 @@
       function renderDailyTable(){const rows=state.stats?.dailyRows||[],h=["배송일자","요일","캠프","주/야","노선","배송","반품","총수량"];headers(els.dailyTable,h);if(!rows.length){empty(els.dailyTable,h.length,"조회된 일별 통계가 없습니다.");els.dailyNote.textContent="0행";return}setTableCaption(els.dailyTable,tableStatsText(rows,"daily"));els.dailyTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.weekday)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td>${esc(r.route)}</td><td class="money">${qtyWithAvg(r.parcel,r.days,"money")}</td><td>${qtyWithAvg(r.return,r.days)}</td><td class="money">${qtyWithAvg(r.quantity,r.days,"money")}</td></tr>`).join("");els.dailyNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}
       function renderWeekdayTable(){const rows=state.stats?.weekdayRows||[],h=["요일","캠프","주/야","노선","일자","배송","반품","총수량"];headers(els.weekdayTable,h);if(!rows.length){empty(els.weekdayTable,h.length,"조회된 요일별 통계가 없습니다.");els.weekdayNote.textContent="0행";return}setTableCaption(els.weekdayTable,tableStatsText(rows,"weekday"));els.weekdayTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.weekday)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td>${esc(r.route)}</td><td>${count(r.days)}</td><td class="money">${qtyWithAvg(r.parcel,r.days,"money")}</td><td>${qtyWithAvg(r.return,r.days)}</td><td class="money">${qtyWithAvg(r.quantity,r.days,"money")}</td></tr>`).join("");els.weekdayNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}
       function renderMonthlyTable(){const rows=state.stats?.monthlyRows||[],h=["정산월","캠프","주/야","노선","일자","배송","반품","총수량","일평균"];headers(els.monthlyTable,h);if(!rows.length){empty(els.monthlyTable,h.length,"조회된 월별 통계가 없습니다.");els.monthlyNote.textContent="0행";return}setTableCaption(els.monthlyTable,tableStatsText(rows,"monthly"));els.monthlyTable.querySelector("tbody").innerHTML=rows.map(r=>`<tr><td>${esc(r.month)}</td><td>${esc(r.camp)}</td><td>${esc(r.wave)}</td><td>${esc(r.route)}</td><td>${count(r.days)}</td><td class="money">${qtyWithAvg(r.parcel,r.days,"money")}</td><td>${qtyWithAvg(r.return,r.days)}</td><td class="money">${qtyWithAvg(r.quantity,r.days,"money")}</td><td class="warnText">${r.avg_day.toLocaleString("ko-KR",{maximumFractionDigits:1})}</td></tr>`).join("");els.monthlyNote.textContent=`${rows.length.toLocaleString("ko-KR")}행`}function renderAll(){renderSummary();renderRouteTable();renderDailyTable();renderWeekdayTable();renderMonthlyTable()}function resetTables(){state.rows=[];state.rawRows=[];state.filteredRows=[];state.stats=null;setStatus("정산 연도와 월 범위를 선택하고 조회를 누르세요.");renderAll()}
+      async function ensureMaroowellFontLoaded(){
+        try{
+          if(document.fonts?.load){
+            await Promise.all([
+              document.fonts.load("400 11px '문경감홍사과체'"),
+              document.fonts.load("500 13px '문경감홍사과체'"),
+              document.fonts.load("600 18px '문경감홍사과체'"),
+              document.fonts.load("700 22px '문경감홍사과체'")
+            ]);
+          }
+          await document.fonts?.ready;
+        }catch{}
+      }
+
       function parseCellLines(cell){
         const qtyMain = cell.querySelector?.(".qtyMain")?.textContent?.trim();
         const qtyAvg = cell.querySelector?.(".qtyAvg")?.textContent?.trim();
@@ -161,10 +175,10 @@
         const measureCanvas = document.createElement("canvas");
         const mctx = measureCanvas.getContext("2d");
 
-        const fontMain = "500 13px Arial, 'Noto Sans KR', sans-serif";
-        const fontHead = "600 13px Arial, 'Noto Sans KR', sans-serif";
-        const fontAvg = "400 11px Arial, 'Noto Sans KR', sans-serif";
-        const fontCaption = "500 13px Arial, 'Noto Sans KR', sans-serif";
+        const fontMain = "500 13px '문경감홍사과체', 'Noto Sans KR', Arial, sans-serif";
+        const fontHead = "600 13px '문경감홍사과체', 'Noto Sans KR', Arial, sans-serif";
+        const fontAvg = "400 11px '문경감홍사과체', 'Noto Sans KR', Arial, sans-serif";
+        const fontCaption = "500 13px '문경감홍사과체', 'Noto Sans KR', Arial, sans-serif";
 
         const colWidths = Array.from({ length:colCount }, () => 68);
 
@@ -296,7 +310,7 @@
         }
 
         try{
-          await document.fonts?.ready;
+          await ensureMaroowellFontLoaded();
 
           const canvas = makeTableCanvas(table);
           const blob = await canvasToBlobPromise(canvas);
@@ -328,8 +342,208 @@
         }
       }
 
-      function graphContextLabel(rows){const camp=clean(els.currentCampInput.value),route=clean(els.currentRouteInput.value);if(camp||route)return` (${[camp,route].filter(Boolean).join(", ")})`;const camps=Array.from(new Set((rows||[]).map(r=>clean(r.camp)).filter(Boolean))),routes=Array.from(new Set((rows||[]).map(r=>clean(r.route)).filter(Boolean)));if(camps.length===1&&routes.length===1)return` (${camps[0]}, ${routes[0]})`;if(camps.length===1)return` (${camps[0]})`;return""}function graphData(kind){if(!state.stats)return{title:"그래프",rows:[],metric:"quantity",kind:"route"};if(kind==="route"){const rows=state.stats.routeRows.slice(0,30);return{title:"노선별 총수량",rows:rows.map(r=>({label:`${r.camp} ${r.wave} ${r.route}`,value:r.quantity,source:r})),metric:"quantity",kind:"route"}}if(kind==="daily"){const rows=state.stats.dailyRows;return{title:`일별 총수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.date,value:r.quantity,source:r})),metric:"quantity",kind:"daily"}}if(kind==="weekday"){const rows=state.stats.weekdayRows;return{title:`요일별 평균수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.weekday,value:r.avg_day,source:r})),metric:"avg_day",kind:"weekday"}}if(kind==="monthlyAvg"){const rows=state.stats.monthlyRows;return{title:`월별 일평균${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.month,value:r.avg_day,source:r})),metric:"avg_day",kind:"monthly"}}const rows=state.stats.monthlyRows;return{title:`월별 총수량${graphContextLabel(rows)}`,rows:rows.map(r=>({label:r.month,value:r.quantity,source:r})),metric:"quantity",kind:"monthly"}}
-      function drawGraph(kind){const data=graphData(kind);state.currentGraph=kind;els.graphTitle.textContent=data.title;const canvas=els.graphCanvas,rows=data.rows,width=Math.max(900,rows.length*68+160),height=620;canvas.width=width*2;canvas.height=height*2;canvas.style.width=width+"px";canvas.style.height=height+"px";const ctx=canvas.getContext("2d");ctx.scale(2,2);ctx.fillStyle="#fff";ctx.fillRect(0,0,width,height);ctx.fillStyle="#111827";ctx.font="600 22px system-ui";ctx.fillText(data.title,24,36);const parts=statParts(rows.map(r=>r.source).filter(Boolean),data.kind,data.metric);let cursor=24;ctx.font="500 13px system-ui";parts.forEach(p=>{ctx.fillStyle=p.color||"#334155";ctx.fillText(p.text,cursor,62);cursor+=ctx.measureText(p.text).width});if(!rows.length){ctx.fillStyle="#111827";ctx.font="500 16px system-ui";ctx.fillText("조회된 그래프 데이터가 없습니다.",24,105);return}const max=Math.max(...rows.map(r=>Number(r.value)||0),1),chartX=70,chartY=100,chartW=width-100,chartH=360;ctx.strokeStyle="#cbd5e1";ctx.beginPath();ctx.moveTo(chartX,chartY);ctx.lineTo(chartX,chartY+chartH);ctx.lineTo(chartX+chartW,chartY+chartH);ctx.stroke();ctx.fillStyle="#64748b";ctx.font="400 11px system-ui";for(let i=0;i<=4;i++){const y=chartY+chartH-(chartH*i/4),v=max*i/4;ctx.fillText(data.metric==="avg_day"?Number(v).toLocaleString("ko-KR",{maximumFractionDigits:1}):Math.round(v).toLocaleString("ko-KR"),8,y+4);ctx.strokeStyle="#e2e8f0";ctx.beginPath();ctx.moveTo(chartX,y);ctx.lineTo(chartX+chartW,y);ctx.stroke()}const gap=8,barW=Math.max(20,(chartW-(rows.length+1)*gap)/Math.max(rows.length,1));rows.forEach((r,i)=>{const x=chartX+gap+i*(barW+gap),value=Number(r.value)||0,h=chartH*(value/max),y=chartY+chartH-h;ctx.fillStyle=data.metric==="avg_day"?"#16a34a":"#2563eb";ctx.fillRect(x,y,barW,h);ctx.fillStyle="#111827";ctx.font="500 11px system-ui";ctx.textAlign="center";ctx.fillText(data.metric==="avg_day"?value.toLocaleString("ko-KR",{maximumFractionDigits:1}):Math.round(value).toLocaleString("ko-KR"),x+barW/2,Math.max(y-6,chartY+12));ctx.save();ctx.translate(x+barW/2,chartY+chartH+14);ctx.rotate(-Math.PI/4);ctx.textAlign="right";ctx.font="400 10px system-ui";ctx.fillText(r.label,0,0);ctx.restore()});ctx.textAlign="left"}function openGraph(kind){drawGraph(kind);els.graphModal.classList.add("show")}function closeGraph(){els.graphModal.classList.remove("show")}async function copyGraph(){const canvas=els.graphCanvas;if(!canvas.width){alert("복사할 그래프가 없습니다.");return}canvas.toBlob(async blob=>{if(!blob){alert("그래프 이미지 생성 실패");return}if(navigator.clipboard&&window.ClipboardItem){await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);alert("그래프 이미지를 클립보드에 복사했습니다.");return}const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="account_graph.png";a.click();URL.revokeObjectURL(a.href)},"image/png")}
+      function graphContextLabel(rows){const camp=clean(els.currentCampInput.value),route=clean(els.currentRouteInput.value);if(camp||route)return` (${[camp,route].filter(Boolean).join(", ")})`;const camps=Array.from(new Set((rows||[]).map(r=>clean(r.camp)).filter(Boolean))),routes=Array.from(new Set((rows||[]).map(r=>clean(r.route)).filter(Boolean)));if(camps.length===1&&routes.length===1)return` (${camps[0]}, ${routes[0]})`;if(camps.length===1)return` (${camps[0]})`;return""}function graphData(kind){
+        if(!state.stats){
+          return {
+            title:"그래프",
+            rows:[],
+            metric:"quantity",
+            kind:"route"
+          };
+        }
+
+        if(kind==="route"){
+          const rows=state.stats.routeRows.slice(0,30);
+          return {
+            title:"노선별 총수량",
+            rows:rows.map(r=>({
+              label:`${r.camp} ${r.wave} ${r.route}`,
+              value:r.quantity,
+              source:r
+            })),
+            metric:"quantity",
+            kind:"route"
+          };
+        }
+
+        if(kind==="daily"){
+          const rows=state.stats.dailyRows;
+          return {
+            title:`일별 총수량${graphContextLabel(rows)}`,
+            rows:rows.map(r=>({
+              label:r.date,
+              value:r.quantity,
+              source:r
+            })),
+            metric:"quantity",
+            kind:"daily"
+          };
+        }
+
+        if(kind==="weekday"){
+          const rows=state.stats.weekdayRows;
+          return {
+            title:`요일별 평균수량${graphContextLabel(rows)}`,
+            rows:rows.map(r=>({
+              label:r.weekday,
+              value:r.avg_day,
+              source:r
+            })),
+            metric:"avg_day",
+            kind:"weekday"
+          };
+        }
+
+        if(kind==="monthlyAvg"){
+          const rows=state.stats.monthlyRows;
+          return {
+            title:`월별 일평균${graphContextLabel(rows)}`,
+            rows:rows.map(r=>({
+              label:r.month,
+              value:r.avg_day,
+              source:r
+            })),
+            metric:"avg_day",
+            kind:"monthly"
+          };
+        }
+
+        const rows=state.stats.monthlyRows;
+        return {
+          title:`월별 총수량${graphContextLabel(rows)}`,
+          rows:rows.map(r=>({
+            label:r.month,
+            value:r.quantity,
+            source:r
+          })),
+          metric:"quantity",
+          kind:"monthly"
+        };
+      }
+
+      function fitCanvasText(ctx,text,maxWidth){
+        let s=String(text ?? "");
+
+        if(ctx.measureText(s).width <= maxWidth) return s;
+
+        while(s.length > 0 && ctx.measureText(s + "…").width > maxWidth){
+          s=s.slice(0,-1);
+        }
+
+        return s ? s + "…" : "";
+      }
+
+      function formatGraphValue(value,metric){
+        return metric==="avg_day"
+          ? Number(value || 0).toLocaleString("ko-KR",{maximumFractionDigits:1})
+          : Math.round(Number(value || 0)).toLocaleString("ko-KR");
+      }
+
+      function drawGraph(kind){
+        const data=graphData(kind);
+        state.currentGraph=kind;
+        els.graphTitle.textContent=data.title;
+
+        const canvas=els.graphCanvas;
+        const rows=data.rows;
+        const graphFont="'문경감홍사과체','Noto Sans KR',system-ui,-apple-system,Segoe UI,sans-serif";
+        const width=Math.max(920,rows.length*88+180);
+        const height=620;
+
+        canvas.width=width*2;
+        canvas.height=height*2;
+        canvas.style.width=width+"px";
+        canvas.style.height=height+"px";
+
+        const ctx=canvas.getContext("2d",{alpha:false});
+        ctx.scale(2,2);
+        ctx.fillStyle="#ffffff";
+        ctx.fillRect(0,0,width,height);
+
+        ctx.fillStyle="#111827";
+        ctx.font=`700 24px ${graphFont}`;
+        ctx.textAlign="left";
+        ctx.textBaseline="middle";
+        ctx.fillText(data.title,24,34);
+
+        if(!rows.length){
+          ctx.fillStyle="#111827";
+          ctx.font=`500 16px ${graphFont}`;
+          ctx.fillText("조회된 그래프 데이터가 없습니다.",24,92);
+          return;
+        }
+
+        const max=Math.max(...rows.map(r=>Number(r.value)||0),1);
+        const chartX=72;
+        const chartY=78;
+        const chartW=width-112;
+        const chartH=390;
+
+        ctx.strokeStyle="#cbd5e1";
+        ctx.lineWidth=1;
+        ctx.beginPath();
+        ctx.moveTo(chartX,chartY);
+        ctx.lineTo(chartX,chartY+chartH);
+        ctx.lineTo(chartX+chartW,chartY+chartH);
+        ctx.stroke();
+
+        ctx.fillStyle="#64748b";
+        ctx.font=`400 11px ${graphFont}`;
+        ctx.textAlign="right";
+        ctx.textBaseline="middle";
+
+        for(let i=0;i<=4;i++){
+          const y=chartY+chartH-(chartH*i/4);
+          const v=max*i/4;
+
+          ctx.fillText(formatGraphValue(v,data.metric),chartX-10,y);
+
+          ctx.strokeStyle="#e2e8f0";
+          ctx.beginPath();
+          ctx.moveTo(chartX,y);
+          ctx.lineTo(chartX+chartW,y);
+          ctx.stroke();
+        }
+
+        const gap=14;
+        const barW=Math.max(30,(chartW-(rows.length+1)*gap)/Math.max(rows.length,1));
+
+        rows.forEach((r,i)=>{
+          const x=chartX+gap+i*(barW+gap);
+          const value=Number(r.value)||0;
+          const h=chartH*(value/max);
+          const y=chartY+chartH-h;
+          const barColor=data.metric==="avg_day" ? "#16a34a" : "#2563eb";
+
+          ctx.fillStyle=barColor;
+          ctx.fillRect(x,y,barW,h);
+
+          const valueText=formatGraphValue(value,data.metric);
+          ctx.font=`700 18px ${graphFont}`;
+          ctx.textAlign="center";
+          ctx.textBaseline="middle";
+
+          if(h >= 34){
+            ctx.fillStyle="#ffffff";
+            ctx.fillText(valueText,x+barW/2,y+h/2);
+          }else{
+            ctx.fillStyle="#0f172a";
+            ctx.fillText(valueText,x+barW/2,Math.max(chartY+12,y-12));
+          }
+
+          ctx.fillStyle="#111827";
+          ctx.font=`500 12px ${graphFont}`;
+          ctx.textBaseline="top";
+
+          const label=fitCanvasText(ctx,r.label,barW+18);
+          ctx.fillText(label,x+barW/2,chartY+chartH+16);
+        });
+
+        ctx.textAlign="left";
+        ctx.textBaseline="alphabetic";
+      }
+
+      async function openGraph(kind){await ensureMaroowellFontLoaded();drawGraph(kind);els.graphModal.classList.add("show")}function closeGraph(){els.graphModal.classList.remove("show")}async function copyGraph(){const canvas=els.graphCanvas;if(!canvas.width){alert("복사할 그래프가 없습니다.");return}canvas.toBlob(async blob=>{if(!blob){alert("그래프 이미지 생성 실패");return}if(navigator.clipboard&&window.ClipboardItem){await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);alert("그래프 이미지를 클립보드에 복사했습니다.");return}const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="account_graph.png";a.click();URL.revokeObjectURL(a.href)},"image/png")}
       function bind(){els.btnLogout.addEventListener("click",logout);els.deniedLogoutBtn.addEventListener("click",logout);els.deniedHomeBtn.addEventListener("click",()=>{location.href=HOME_PATH});els.btnLoad.addEventListener("click",loadRows);els.btnReset.addEventListener("click",resetTables);els.btnCloseGraph.addEventListener("click",closeGraph);els.graphModal.addEventListener("click",e=>{if(e.target===els.graphModal)closeGraph()});els.btnCopyGraph.addEventListener("click",copyGraph);document.querySelectorAll("[data-copy-table]").forEach(btn=>btn.addEventListener("click",()=>copyTable(btn.dataset.copyTable)));document.querySelectorAll("[data-graph]").forEach(btn=>btn.addEventListener("click",()=>openGraph(btn.dataset.graph)));const upperRouteInput=el=>{const s=el.selectionStart,e=el.selectionEnd,v=el.value.toUpperCase();if(el.value!==v){el.value=v;try{el.setSelectionRange(s,e)}catch{}}};[els.currentRouteInput,els.pastRoutesInput].forEach(el=>el.addEventListener("input",()=>upperRouteInput(el)));[els.waveSelect,els.currentCampInput,els.currentRouteInput,els.pastRoutesInput,els.searchInput].forEach(el=>{el.addEventListener("input",()=>{if(state.rawRows.length)buildStats()});el.addEventListener("change",()=>{if(state.rawRows.length)buildStats()})});[els.yearSelect,els.startMonthSelect,els.endMonthSelect].forEach(el=>el.addEventListener("change",resetTables));els.searchInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&state.rawRows.length)buildStats()})}
       async function boot(){initPeriodSelects();bind();renderAll();try{await checkAccess()}catch(e){console.error(e);showAccessDenied(e.message||String(e))}}boot();
     })();

@@ -65,7 +65,35 @@
       function isLossRow(row){const s=clean(row.source_sheet).replace(/\s+/g,"").toLowerCase(),c=clean(row.classify).replace(/\s+/g,"").toLowerCase();return s==="분실파손list"||c==="분실파손"||c.includes("분실")||c.includes("파손")}function isRawRow(row){return !isLossRow(row)}function isExcludedStatsRow(row){const c=clean(row.classify).replace(/\s+/g,""),r=clean(row.route);return c.includes("미계약")||!r||r==="-"||r==="–"||r==="—"}function normalizeWave(v){const raw=clean(v).toUpperCase();if(raw==="WAVE2"||raw==="2W"||raw==="주간")return"주간";if(raw==="WAVE1"||raw==="1W"||raw==="야간")return"야간";return clean(v)||"-"}
       function routeTokens(v){return clean(v).split(/[,\s/]+/).map(clean).filter(Boolean)}function leadingDigits(v){const m=clean(v).match(/^(\d+)/);return m?m[1]:clean(v)}function subPrefix(v){const m=clean(v).match(/^(\d+[A-Za-z가-힣]+)/);return m?m[1].toUpperCase():leadingDigits(v).toUpperCase()}function patternList(v){return clean(v).split(/[,\s]+/).map(clean).filter(Boolean)}function patternIsBase(p){return /^\d+$/.test(clean(p))}function routeMatches(route,pattern){const p=clean(pattern).toUpperCase();if(!p)return false;return routeTokens(route).some(t=>{const u=t.toUpperCase();return patternIsBase(p)?leadingDigits(u)===p:u===p||subPrefix(u)===p||u.startsWith(p)})}
       function splitPastRefs(v){return clean(v).split(/[,\n]+/).map(clean).filter(Boolean).map(x=>{const parts=x.split(/[\/|]/).map(clean).filter(Boolean);return parts.length>=2?{camp:parts[0],route:parts.slice(1).join("")||parts[1]}:{camp:"",route:parts[0]||""}}).filter(x=>x.route)}function targetRefs(){const currentCamp=clean(els.currentCampInput.value),currentRoutes=patternList(els.currentRouteInput.value),refs=[];currentRoutes.forEach(route=>refs.push({camp:currentCamp,route,current:true}));splitPastRefs(els.pastRoutesInput.value).forEach(ref=>refs.push({...ref,current:false}));return refs}function fetchRefs(){const refs=targetRefs(),currentCamp=clean(els.currentCampInput.value);if(currentCamp&&!refs.length)refs.push({camp:currentCamp,route:"",current:true});return refs}function rowMatchesRefs(row,refs){if(!refs.length)return true;return refs.some(ref=>{if(ref.camp&&loose(row.camp)!==loose(ref.camp))return false;if(!clean(ref.route))return true;return routeMatches(row.route,ref.route)})}
-      function groupForRow(row,refs){const currentCamp=clean(els.currentCampInput.value),currentRoutes=patternList(els.currentRouteInput.value);if(refs.length&&currentRoutes.length)return{camp:currentCamp||clean(row.camp)||"-",route:currentRoutes.join(","),original:`${clean(row.camp)||"-"}/${clean(row.route)||"-"}`};const token=routeTokens(row.route)[0]||clean(row.route)||"-";return{camp:clean(row.camp)||"-",route:leadingDigits(token)||token,original:`${clean(row.camp)||"-"}/${clean(row.route)||"-"}`}}
+      function groupForRow(row,refs){
+        const currentCamp=clean(els.currentCampInput.value);
+        const currentRoutes=patternList(els.currentRouteInput.value);
+        const campOnlyRef=refs.length===1&&refs[0]?.current===true&&!clean(refs[0]?.route);
+
+        if(campOnlyRef){
+          return{
+            camp:currentCamp||clean(row.camp)||"-",
+            route:"전체",
+            original:`${clean(row.camp)||"-"}/${clean(row.route)||"-"}`
+          };
+        }
+
+        if(refs.length&&currentRoutes.length){
+          return{
+            camp:currentCamp||clean(row.camp)||"-",
+            route:currentRoutes.join(","),
+            original:`${clean(row.camp)||"-"}/${clean(row.route)||"-"}`
+          };
+        }
+
+        const token=routeTokens(row.route)[0]||clean(row.route)||"-";
+
+        return{
+          camp:clean(row.camp)||"-",
+          route:leadingDigits(token)||token,
+          original:`${clean(row.camp)||"-"}/${clean(row.route)||"-"}`
+        };
+      }
       function newMetric(extra={}){return{rows:0,parcel:0,return:0,quantity:0,dateSet:new Set(),originalSet:new Set(),first_date:"",last_date:"",...extra}}function addMetric(m,row){const parcel=num(row.parcel),ret=num(row.return),date=clean(row.delivery_date);m.rows++;m.parcel+=parcel;m.return+=ret;m.quantity+=parcel+ret;if(date){m.dateSet.add(date);if(!m.first_date||date<m.first_date)m.first_date=date;if(!m.last_date||date>m.last_date)m.last_date=date}const og=clean(row.__originalGroup||`${row.camp}/${row.route}`);if(og)m.originalSet.add(og)}function finalizeMetric(m){const days=m.dateSet?.size||0;return{...m,days,avg_day:days?m.quantity/days:0,original_groups:Array.from(m.originalSet||[]).sort((a,b)=>a.localeCompare(b,"ko",{numeric:true,sensitivity:"base"})).join(", ")}}
       function initPeriodSelects(){els.yearSelect.innerHTML=`<option value="">전체 연도</option>`+Array.from({length:7},(_,i)=>2024+i).map(y=>`<option value="${y}">${y}년</option>`).join("");const opts=`<option value="">전체 월</option>`+Array.from({length:12},(_,i)=>`<option value="${i+1}">${i+1}월</option>`).join("");els.startMonthSelect.innerHTML=opts;els.endMonthSelect.innerHTML=opts;const now=new Date(),y=now.getFullYear();els.yearSelect.value=(y>=2024&&y<=2030)?String(y):"";els.startMonthSelect.value=String(now.getMonth()+1);els.endMonthSelect.value=String(now.getMonth()+1)}function selectedPeriod(){const y=clean(els.yearSelect.value);let s=clean(els.startMonthSelect.value),e=clean(els.endMonthSelect.value);if(s&&e&&Number(s)>Number(e)){const t=s;s=e;e=t}return{year:y?Number(y):null,startMonth:s?Number(s):null,endMonth:e?Number(e):null}}function periodLabel(p){const y=p.year?`${p.year}년`:"전체 연도";if(!p.startMonth&&!p.endMonth)return`${y} 전체 월`;if(p.startMonth&&p.endMonth)return`${y} ${p.startMonth}월~${p.endMonth}월`;if(p.startMonth)return`${y} ${p.startMonth}월 이후`;return`${y} ${p.endMonth}월 이전`}
       function showAccessDenied(msg){els.accessDeniedText.textContent=msg||"최고관리자 권한이 필요합니다.";els.accessDeniedEmail.textContent=state.user?.email?`현재 계정: ${state.user.email}`:"로그인 계정을 확인할 수 없습니다.";els.accessDenied.classList.add("show");document.documentElement.style.visibility="visible"}async function logout(){try{if(supabaseClient)await supabaseClient.auth.signOut()}catch{}location.href=LOGIN_PATH}
@@ -634,7 +662,7 @@ function canvasToBlobPromise(canvas){
           return {
             title:`일별 총수량${graphContextLabel(rows)}`,
             rows:rows.map(r=>({
-              label:r.date,
+              label:shortDateLabel(r.date),
               value:r.quantity,
               source:r
             })),
@@ -694,6 +722,12 @@ function canvasToBlobPromise(canvas){
         }
 
         return s ? s + "…" : "";
+      }
+
+      function shortDateLabel(value){
+        const s=clean(value);
+        const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[2]}-${m[3]}` : s;
       }
 
       function formatGraphValue(value,metric){
@@ -822,6 +856,8 @@ function canvasToBlobPromise(canvas){
         }
 
         const max=Math.max(...rows.map(r=>Number(r.value)||0),1);
+        const extremeStats=graphStats(rows,data.metric);
+        const hasExtremeColors=extremeStats&&Number(extremeStats.max.value)!==Number(extremeStats.min.value);
         const chartX=72;
         const chartY=Math.max(98, statsBottom + 24);
         const chartW=width-112;
@@ -867,23 +903,36 @@ function canvasToBlobPromise(canvas){
           ctx.fillRect(x,y,barW,h);
 
           const valueText=formatGraphValue(value,data.metric);
+          const isMaxValue=hasExtremeColors&&value===Number(extremeStats.max.value);
+          const isMinValue=hasExtremeColors&&value===Number(extremeStats.min.value);
+          const valueColor=isMaxValue?"#2563eb":isMinValue?"#dc2626":h>=34?"#ffffff":"#0f172a";
+          const valueX=x+barW/2;
+          const valueY=h>=34?y+h/2:Math.max(chartY+12,y-12);
+
           ctx.font=`700 18px ${graphFont}`;
           ctx.textAlign="center";
           ctx.textBaseline="middle";
 
-          if(h >= 34){
-            ctx.fillStyle="#ffffff";
-            ctx.fillText(valueText,x+barW/2,y+h/2);
-          }else{
-            ctx.fillStyle="#0f172a";
-            ctx.fillText(valueText,x+barW/2,Math.max(chartY+12,y-12));
+          if(isMaxValue||isMinValue){
+            ctx.save();
+            ctx.lineWidth=5;
+            ctx.strokeStyle="#ffffff";
+            ctx.lineJoin="round";
+            ctx.strokeText(valueText,valueX,valueY);
+            ctx.restore();
           }
 
+          ctx.fillStyle=valueColor;
+          ctx.fillText(valueText,valueX,valueY);
+
+          const labelFontSize=data.kind==="daily"?9:16;
+          const labelMaxWidth=data.kind==="daily"?barW+16:barW+26;
+
           ctx.fillStyle=isSundayText(r.label) ? "#dc2626" : "#111827";
-          ctx.font=`600 16px ${graphFont}`;
+          ctx.font=`600 ${labelFontSize}px ${graphFont}`;
           ctx.textBaseline="top";
 
-          const label=fitCanvasText(ctx,r.label,barW+26);
+          const label=fitCanvasText(ctx,r.label,labelMaxWidth);
           ctx.fillText(label,x+barW/2,chartY+chartH+16);
         });
 

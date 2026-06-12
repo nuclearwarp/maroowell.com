@@ -18,7 +18,7 @@
     { key:"mw-freshbag-ratio", label:"마루웰 회수율", path:"/maroowell_freshbag_ratio", aliases:["/maroowell_freshbag_ratio","/maroowell_freshbag_ratio.html"], requireMaroowell:true, desc:"마루웰 프레시백 회수율 조회" },
     { key:"mw-route", label:"마루웰 라우트 단가", path:"/maroowell_route", aliases:["/maroowell_route","/maroowell_route.html"], requireRoleLevel:60, desc:"라우트 단가 / 주소 / 원청 관리" },
     { key:"mw-payout", label:"마루웰 정산", path:"/maroowell_payout", aliases:["/maroowell_payout","/maroowell_payout.html"], requireSuperAdmin:true, desc:"마루웰 정산 관리" },
-    { key:"mw-account", label:"정산 데이터 조회", path:"/maroowell_account", aliases:["/maroowell_account","/maroowell_account.html"], requireRoleLevel:30, desc:"정산 통계 조회" },
+    { key:"mw-account", label:"배송/반품 통계 조회", path:"/maroowell_account", aliases:["/maroowell_account","/maroowell_account.html"], requireRoleLevel:30, desc:"배송/반품 일별,월별,라우트별 통계 조회" },
     { key:"mw-account-upload", label:"정산 업로드", path:"/maroowell_account_upload", aliases:["/maroowell_account_upload","/maroowell_account_upload.html"], requireSuperAdmin:true, desc:"정산 업로드" },
     { key:"dragon-index", label:"용차", path:"/dragon_car_index", aliases:["/dragon_car_index","/dragon_car_index.html"], requireDragonCarAdmin:true, desc:"용차 관리" },
     { key:"dragon-schedule", label:"용차 스케줄", path:"/dragon_car_schedule", aliases:["/dragon_car_schedule","/dragon_car_schedule.html"], requireTeamOrDragonCarAdmin:true, desc:"용차 기사 출근 / 휴무 스케줄" },

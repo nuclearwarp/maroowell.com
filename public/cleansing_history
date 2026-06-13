@@ -488,7 +488,7 @@
     .hide{display:none!important}
 
     .captureCloneWrap{
-      position:fixed;
+      position:absolute;
       left:-100000px;
       top:0;
       z-index:-1;
@@ -496,8 +496,10 @@
       background:#fff;
       padding:0;
       width:max-content;
-      height:max-content;
-      overflow:hidden;
+      min-width:max-content;
+      height:auto;
+      min-height:max-content;
+      overflow:visible;
     }
 
     .captureTable{
@@ -762,6 +764,7 @@
   let me = {};
   let rows = [];
   let editingId = "";
+  let sessionBridge = null;
 
   const esc = v => String(v ?? "")
     .replaceAll("&", "&amp;")
@@ -1021,7 +1024,7 @@
     const href = esc(zipUrl(zips));
 
     return zips
-      .map(zip => `<a class="zipLink" href="${href}" target="_blank">${esc(zip)}</a>`)
+      .map(zip => `<a class="zipLink" href="${href}" target="_blank" rel="opener">${esc(zip)}</a>`)
       .join("");
   }
 
@@ -1154,6 +1157,203 @@
         detectSessionInUrl: true
       }
     });
+
+    try {
+      supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (event === "SIGNED_OUT") {
+          sessionBridge?.broadcastAuthState("SIGNED_OUT");
+          return;
+        }
+
+        if (session?.access_token) {
+          sessionBridge?.broadcastAuthState("SESSION_UPDATED");
+        }
+      });
+    } catch {}
+  }
+
+
+  function getSupabaseProjectRef(url) {
+    try {
+      const host = new URL(url).hostname || "";
+      return host.split(".")[0] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function createSupabaseSessionBridge(url) {
+    const projectRef = getSupabaseProjectRef(url);
+    const prefixes = projectRef ? [
+      "sb-" + projectRef + "-auth-token",
+      "sb-" + projectRef + "-auth-token-code-verifier"
+    ] : [];
+
+    const origin = window.location.origin;
+    const channelName = projectRef ? ("mw-auth-bridge:" + projectRef) : "";
+    const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+
+    let channel = null;
+    let started = false;
+
+    function matchesKey(key) {
+      return !!key && prefixes.some(prefix => key === prefix || key.startsWith(prefix));
+    }
+
+    function readEntries(storage) {
+      const target = storage || window.sessionStorage;
+      const out = [];
+
+      try {
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+
+          if (!matchesKey(key)) continue;
+
+          out.push({
+            key,
+            value: target.getItem(key)
+          });
+        }
+      } catch {}
+
+      return out;
+    }
+
+    function hasSession(storage) {
+      return readEntries(storage).some(row =>
+        row.key.includes("-auth-token") &&
+        !row.key.includes("code-verifier") &&
+        !!row.value
+      );
+    }
+
+    function clearSession(storage) {
+      const target = storage || window.sessionStorage;
+
+      try {
+        const keys = [];
+
+        for (let i = 0; i < target.length; i++) {
+          const key = target.key(i);
+
+          if (matchesKey(key)) {
+            keys.push(key);
+          }
+        }
+
+        keys.forEach(key => target.removeItem(key));
+      } catch {}
+    }
+
+    function responsePayload(requestId) {
+      return {
+        type: "MW_SESSION_RESPONSE",
+        projectRef,
+        requestId,
+        entries: readEntries(window.sessionStorage),
+        fromTabId: tabId
+      };
+    }
+
+    function replyToWindowRequest(msg, eventSource) {
+      if (!eventSource || !hasSession(window.sessionStorage)) return;
+
+      try {
+        eventSource.postMessage(responsePayload(msg.requestId), origin);
+      } catch {}
+    }
+
+    function replyToChannelRequest(msg) {
+      if (!channel || !hasSession(window.sessionStorage)) return;
+
+      try {
+        channel.postMessage(responsePayload(msg.requestId));
+      } catch {}
+    }
+
+    function handleSyncState(state) {
+      if (state === "SIGNED_OUT") {
+        clearSession(window.sessionStorage);
+      }
+    }
+
+    function onWindowMessage(event) {
+      if (event.origin !== origin) return;
+
+      const msg = event.data || {};
+
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        replyToWindowRequest(msg, event.source);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function onChannelMessage(event) {
+      const msg = event.data || {};
+
+      if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+
+      if (msg.type === "MW_SESSION_REQUEST") {
+        replyToChannelRequest(msg);
+        return;
+      }
+
+      if (msg.type === "MW_AUTH_SYNC") {
+        handleSyncState(msg.state);
+      }
+    }
+
+    function start() {
+      if (started || !projectRef) return;
+
+      started = true;
+      window.addEventListener("message", onWindowMessage);
+
+      try {
+        if ("BroadcastChannel" in window) {
+          channel = new BroadcastChannel(channelName);
+          channel.addEventListener("message", onChannelMessage);
+        }
+      } catch {}
+    }
+
+    function broadcastAuthState(state) {
+      if (!projectRef) return;
+
+      start();
+
+      const payload = {
+        type: "MW_AUTH_SYNC",
+        projectRef,
+        state,
+        fromTabId: tabId
+      };
+
+      try {
+        channel?.postMessage(payload);
+      } catch {}
+    }
+
+    return {
+      start,
+      broadcastAuthState
+    };
+  }
+
+  function startSessionBridge() {
+    if (sessionBridge) return sessionBridge;
+
+    sessionBridge = createSupabaseSessionBridge(cfg.SUPABASE_URL);
+    sessionBridge.start();
+
+    return sessionBridge;
   }
 
   async function getSession() {
@@ -1660,6 +1860,23 @@
     return `cleansing_history_${week}_${wave}`.replace(/[\\/:*?"<>|]/g, "_") + ".png";
   }
 
+
+  function nextAnimationFrame() {
+    return new Promise(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+  }
+
+  async function waitCaptureReady() {
+    try {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+    } catch {}
+
+    await nextAnimationFrame();
+  }
+
   async function copyImage() {
     if (!rows.length) {
       alert("복사할 조회 결과가 없습니다.");
@@ -1688,23 +1905,64 @@
     wrap.appendChild(tableClone);
     document.body.appendChild(wrap);
 
-    const tableRect = tableClone.getBoundingClientRect();
-    const captureWidth = Math.ceil(Math.max(tableClone.scrollWidth, tableRect.width));
-    const captureHeight = Math.ceil(Math.max(tableClone.scrollHeight, tableRect.height));
-
-    tableClone.style.width = captureWidth + "px";
-    wrap.style.width = captureWidth + "px";
-    wrap.style.height = captureHeight + "px";
-
     try {
-      const blob = await htmlToImage.toBlob(tableClone, {
+      await waitCaptureReady();
+
+      let tableRect = tableClone.getBoundingClientRect();
+      let captureWidth = Math.ceil(Math.max(
+        tableClone.scrollWidth,
+        tableRect.width,
+        wrap.scrollWidth
+      )) + 2;
+
+      let captureHeight = Math.ceil(Math.max(
+        tableClone.scrollHeight,
+        tableRect.height,
+        wrap.scrollHeight
+      )) + 18;
+
+      tableClone.style.width = captureWidth + "px";
+      tableClone.style.maxWidth = "none";
+      wrap.style.width = captureWidth + "px";
+      wrap.style.minWidth = captureWidth + "px";
+      wrap.style.height = captureHeight + "px";
+      wrap.style.minHeight = captureHeight + "px";
+
+      await waitCaptureReady();
+
+      tableRect = tableClone.getBoundingClientRect();
+      captureWidth = Math.ceil(Math.max(
+        tableClone.scrollWidth,
+        tableRect.width,
+        wrap.scrollWidth,
+        captureWidth
+      )) + 2;
+
+      captureHeight = Math.ceil(Math.max(
+        tableClone.scrollHeight,
+        tableRect.height,
+        wrap.scrollHeight,
+        captureHeight
+      )) + 18;
+
+      wrap.style.width = captureWidth + "px";
+      wrap.style.minWidth = captureWidth + "px";
+      wrap.style.height = captureHeight + "px";
+      wrap.style.minHeight = captureHeight + "px";
+
+      const blob = await htmlToImage.toBlob(wrap, {
         backgroundColor:"#ffffff",
         pixelRatio:2,
         width:captureWidth,
         height:captureHeight,
+        canvasWidth:captureWidth,
+        canvasHeight:captureHeight,
         style:{
           width:captureWidth + "px",
           height:captureHeight + "px",
+          minWidth:captureWidth + "px",
+          minHeight:captureHeight + "px",
+          overflow:"visible",
           background:"#ffffff"
         },
         cacheBust:true
@@ -1801,6 +2059,7 @@
   async function init() {
     try {
       initSupabase();
+      startSessionBridge();
       bind();
 
       if (await initMe()) {

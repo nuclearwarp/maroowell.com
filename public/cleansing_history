@@ -394,13 +394,13 @@
     .gradeNone{color:#64748b;background:#f8fafc}
 
     .zipLink{
-      color:#1d4ed8;
-      text-decoration:underline;
-      text-underline-offset:2px;
+      color:inherit;
+      text-decoration:none;
+      text-underline-offset:0;
       margin:0 2px 2px;
     }
 
-    .zipLink:hover{color:#1e40af}
+    .zipLink:hover{color:inherit}
 
     .subNum{
       display:block;
@@ -1875,12 +1875,30 @@
   }
 
   function tableCellCopyText(cell) {
+    if (cell?.classList?.contains("zipCell")) {
+      const zipTexts = Array.from(cell.querySelectorAll(".zipLink"))
+        .map(el => (el.textContent || "").trim())
+        .filter(Boolean);
+
+      if (zipTexts.length) return zipTexts.join(" ");
+    }
+
     const clone = cell.cloneNode(true);
 
     clone.querySelectorAll("button").forEach(el => {
       if (el.dataset?.edit || el.dataset?.save) {
         el.remove();
       }
+    });
+
+    clone.querySelectorAll(".subNum").forEach(el => {
+      const text = (el.textContent || "").trim();
+      el.replaceWith(document.createTextNode(text ? "\n" + text : ""));
+    });
+
+    clone.querySelectorAll(".zipLink").forEach(el => {
+      const text = (el.textContent || "").trim();
+      el.replaceWith(document.createTextNode(text ? text + " " : ""));
     });
 
     clone.querySelectorAll("input,select,textarea").forEach(el => {
@@ -1905,6 +1923,50 @@
       .trim();
 
     return raw;
+  }
+
+  function tableCellCanvasParts(cell) {
+    const mainText = (() => {
+      if (cell?.classList?.contains("zipCell")) {
+        const zipTexts = Array.from(cell.querySelectorAll(".zipLink"))
+          .map(el => (el.textContent || "").trim())
+          .filter(Boolean);
+
+        if (zipTexts.length) return zipTexts.join(" ");
+      }
+
+      const clone = cell.cloneNode(true);
+
+      clone.querySelectorAll(".subNum").forEach(el => el.remove());
+      clone.querySelectorAll("button").forEach(el => {
+        if (el.dataset?.edit || el.dataset?.save) el.remove();
+      });
+      clone.querySelectorAll(".zipLink").forEach(el => {
+        const text = (el.textContent || "").trim();
+        el.replaceWith(document.createTextNode(text ? text + " " : ""));
+      });
+      clone.querySelectorAll("input,select,textarea").forEach(el => {
+        let value = "";
+        if (el.tagName === "SELECT") value = el.options?.[el.selectedIndex]?.textContent || el.value || "";
+        else value = el.value || el.textContent || "";
+        el.replaceWith(document.createTextNode(value));
+      });
+      clone.querySelectorAll("br").forEach(el => el.replaceWith(document.createTextNode("\n")));
+
+      return (clone.innerText || clone.textContent || "")
+        .replace(/\u00a0/g, " ")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n[ \t]+/g, "\n")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+    })();
+
+    const subText = Array.from(cell.querySelectorAll(".subNum"))
+      .map(el => (el.textContent || "").trim())
+      .filter(Boolean)
+      .join("\n");
+
+    return { mainText, subText };
   }
 
   function splitLongToken(ctx, token, maxWidth) {
@@ -1979,7 +2041,6 @@
   function cellCanvasColor(cell, row) {
     if (row?.classList?.contains("rowClean")) return "#b91c1c";
     if (row?.classList?.contains("rowWarn")) return "#92400e";
-    if (cell?.querySelector?.(".zipLink")) return "#1d4ed8";
     if (cell?.querySelector?.(".grade1")) return "#15803d";
     if (cell?.querySelector?.(".grade2")) return "#4d7c0f";
     if (cell?.querySelector?.(".grade3")) return "#b45309";
@@ -1991,19 +2052,6 @@
     if (cell?.classList?.contains("priceCell")) return "#a16207";
 
     return "#0f172a";
-  }
-
-  function cellCanvasAlign(cell) {
-    const cls = cell?.classList;
-
-    if (cls?.contains("routeCell") || cls?.contains("zipCell") || cls?.contains("vendorCell")) {
-      return "left";
-    }
-
-    if (cls?.contains("num")) return "right";
-
-    const style = window.getComputedStyle(cell);
-    return style.textAlign || "center";
   }
 
   function buildTableCanvas(table) {
@@ -2070,19 +2118,30 @@
         : `400 10px ${fontFamily}`;
 
       const cells = sourceCells.map((cell, idx) => {
-        const text = tableCellCopyText(cell);
-        const lines = wrapCanvasText(measure, text, Math.max(30, colWidths[idx] - 12));
+        const parts = tableCellCanvasParts(cell);
+
+        measure.font = isHead
+          ? `500 11px ${fontFamily}`
+          : `500 10px ${fontFamily}`;
+        const mainLines = wrapCanvasText(measure, parts.mainText, Math.max(30, colWidths[idx] - 12));
+
+        measure.font = `400 8px ${fontFamily}`;
+        const subLines = parts.subText
+          ? wrapCanvasText(measure, parts.subText, Math.max(30, colWidths[idx] - 12))
+          : [];
+
         const align = isHead ? "center" : cellCanvasAlign(cell);
         const color = isHead ? "#0f172a" : cellCanvasColor(cell, tr);
 
-        return { cell, text, lines, align, color };
+        return { cell, text:parts.mainText, lines:mainLines, subLines, align, color };
       });
 
-      const lineHeight = isHead ? 15 : 14;
+      const lineHeight = isHead ? 15 : 13;
+      const subLineHeight = 10;
       const minHeight = isHead ? 38 : 40;
       const rowHeight = Math.max(
         minHeight,
-        ...cells.map(c => c.lines.length * lineHeight + 14)
+        ...cells.map(c => c.lines.length * lineHeight + c.subLines.length * subLineHeight + (c.subLines.length ? 4 : 0) + 14)
       );
 
       const bg = isHead
@@ -2155,16 +2214,14 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 0.5, y + 0.5, w, h);
 
-        ctx.font = row.isHead
-          ? `500 11px ${fontFamily}`
-          : `400 10px ${fontFamily}`;
-        ctx.fillStyle = info.color;
         ctx.textBaseline = "middle";
 
-        const textH = info.lines.length * row.lineHeight;
+        const subLineHeight = row.isHead ? 0 : 10;
+        const subGap = !row.isHead && info.subLines.length ? 4 : 0;
+        const textH = info.lines.length * row.lineHeight + info.subLines.length * subLineHeight + subGap;
         let ty = y + h / 2 - textH / 2 + row.lineHeight / 2;
 
-        for (const line of info.lines) {
+        const setAlign = () => {
           let tx = x + w / 2;
           ctx.textAlign = "center";
 
@@ -2176,8 +2233,32 @@
             tx = x + w - 7;
           }
 
-          ctx.fillText(line, tx, ty);
+          return tx;
+        };
+
+        ctx.font = row.isHead
+          ? `500 11px ${fontFamily}`
+          : `500 10px ${fontFamily}`;
+        ctx.fillStyle = info.color;
+
+        for (const line of info.lines) {
+          ctx.fillText(line, setAlign(), ty);
           ty += row.lineHeight;
+        }
+
+        if (!row.isHead && info.subLines.length) {
+          ty += subGap;
+          ctx.font = `400 8px ${fontFamily}`;
+          ctx.fillStyle = row.tr?.classList?.contains("rowClean")
+            ? "#b91c1c"
+            : row.tr?.classList?.contains("rowWarn")
+              ? "#92400e"
+              : "#64748b";
+
+          for (const line of info.subLines) {
+            ctx.fillText(line, setAlign(), ty);
+            ty += subLineHeight;
+          }
         }
 
         x += w;

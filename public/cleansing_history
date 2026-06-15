@@ -153,7 +153,7 @@
 
     .bar{
       display:grid;
-      grid-template-columns:120px 140px 105px 140px 165px 150px 105px 100px minmax(160px,1fr) 70px 76px 70px;
+      grid-template-columns:120px 140px 105px 140px 165px 150px 105px 100px minmax(160px,1fr) 78px 84px 112px;
       gap:8px;
       margin:8px 12px 0;
       padding:12px;
@@ -485,6 +485,140 @@
       font-weight:300;
     }
 
+
+    #add{
+      min-width:104px;
+      padding-left:14px;
+      padding-right:14px;
+    }
+
+    .vendorModal{
+      position:fixed;
+      inset:0;
+      z-index:1200;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:rgba(15,23,42,.42);
+      backdrop-filter:blur(10px);
+    }
+
+    .vendorModal.hide{
+      display:none!important;
+    }
+
+    .vendorPanel{
+      width:min(460px,100%);
+      border:1px solid var(--line);
+      border-radius:22px;
+      background:#ffffff;
+      box-shadow:0 24px 80px rgba(15,23,42,.24);
+      overflow:hidden;
+    }
+
+    .vendorPanelHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid #edf2f7;
+      background:linear-gradient(180deg,#ffffff,#f8fafc);
+    }
+
+    .vendorPanelHead h3{
+      margin:0;
+      color:#0f172a;
+      font-size:18px;
+      line-height:1.15;
+      font-weight:520;
+      letter-spacing:-.04em;
+    }
+
+    .vendorPanelHead p{
+      margin:6px 0 0;
+      color:#64748b;
+      font-size:11px;
+      line-height:1.45;
+      font-weight:300;
+    }
+
+    .vendorCloseBtn{
+      width:34px;
+      height:34px;
+      border:1px solid var(--line2);
+      border-radius:999px;
+      background:#fff;
+      color:#0f172a;
+      cursor:pointer;
+      font-size:18px;
+      line-height:1;
+      font-weight:400;
+    }
+
+    .vendorCloseBtn:hover{
+      background:#f8fafc;
+      border-color:#93c5fd;
+    }
+
+    .vendorPanelBody{
+      padding:18px 20px 20px;
+      display:grid;
+      gap:14px;
+    }
+
+    .vendorField{
+      display:grid;
+      gap:7px;
+    }
+
+    .vendorField label{
+      margin:0;
+      color:#64748b;
+      font-size:11px;
+      font-weight:350;
+    }
+
+    .vendorField input{
+      width:100%;
+      height:42px;
+      border:1px solid var(--line2);
+      border-radius:13px;
+      background:#f8fafc;
+      color:#0f172a;
+      padding:0 12px;
+      font-size:12px;
+      font-weight:320;
+      outline:none;
+      font-family:var(--font);
+    }
+
+    .vendorField input:focus{
+      background:#fff;
+      border-color:#60a5fa;
+      box-shadow:0 0 0 3px rgba(37,99,235,.12);
+    }
+
+    .vendorPanelMsg{
+      min-height:20px;
+      color:#64748b;
+      font-size:11px;
+      line-height:1.5;
+      font-weight:300;
+      white-space:pre-wrap;
+    }
+
+    .vendorPanelMsg.ok{color:#15803d}
+    .vendorPanelMsg.err{color:#b91c1c}
+
+    .vendorPanelActions{
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+      padding-top:2px;
+    }
+
     .hide{display:none!important}
 
     .captureCloneWrap{
@@ -749,6 +883,37 @@
       <div id="table"></div>
     </div>
   </main>
+
+  <div class="vendorModal hide" id="vendorModal" role="dialog" aria-modal="true" aria-labelledby="vendorModalTitle">
+    <div class="vendorPanel">
+      <div class="vendorPanelHead">
+        <div>
+          <h3 id="vendorModalTitle">신규 벤더 등록</h3>
+          <p>벤더명과 사업자번호를 입력하면 Route 벤더 DB에 바로 등록됩니다.</p>
+        </div>
+        <button class="vendorCloseBtn" id="vendorModalClose" type="button" aria-label="닫기">×</button>
+      </div>
+
+      <div class="vendorPanelBody">
+        <div class="vendorField">
+          <label for="vendorNewName">벤더명</label>
+          <input id="vendorNewName" placeholder="예: 주식회사 모벤티스" autocomplete="off">
+        </div>
+
+        <div class="vendorField">
+          <label for="vendorNewBiz">사업자번호</label>
+          <input id="vendorNewBiz" placeholder="예: 123-45-67890" autocomplete="off">
+        </div>
+
+        <div class="vendorPanelMsg" id="vendorPanelMsg"></div>
+
+        <div class="vendorPanelActions">
+          <button class="btn" id="vendorModalCancel" type="button">취소</button>
+          <button class="btn ok" id="vendorRegisterSave" type="button">등록</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 <script>
 (() => {
@@ -1794,22 +1959,55 @@
     `;
   }
 
+  function setVendorPanelMsg(message, type = "") {
+    const el = $("vendorPanelMsg");
+
+    if (!el) return;
+
+    el.textContent = message || "";
+    el.className = "vendorPanelMsg" + (type ? " " + type : "");
+  }
+
+  function openVendorPanel() {
+    if (!isSuper()) return;
+
+    $("vendorNewName").value = val("vendor") || "";
+    $("vendorNewBiz").value = val("biz") || "";
+    setVendorPanelMsg("");
+
+    $("vendorModal").classList.remove("hide");
+
+    setTimeout(() => {
+      ($("vendorNewName").value ? $("vendorNewBiz") : $("vendorNewName")).focus();
+    }, 30);
+  }
+
+  function closeVendorPanel() {
+    $("vendorModal").classList.add("hide");
+    setVendorPanelMsg("");
+  }
+
   async function registerVendor() {
     if (!isSuper()) return;
 
-    const name = (prompt("신규 벤더명", val("vendor") || "") || "").trim();
+    const name = $("vendorNewName").value.trim();
+    const businessNumber = $("vendorNewBiz").value.trim();
 
     if (!name) {
-      alert("벤더명을 입력하세요.");
+      setVendorPanelMsg("벤더명을 입력하세요.", "err");
+      $("vendorNewName").focus();
       return;
     }
-
-    const businessNumber = (prompt("사업자번호", val("biz") || "") || "").trim();
 
     if (!businessNumber) {
-      alert("사업자번호를 입력하세요.");
+      setVendorPanelMsg("사업자번호를 입력하세요.", "err");
+      $("vendorNewBiz").focus();
       return;
     }
+
+    const btn = $("vendorRegisterSave");
+    btn.disabled = true;
+    setVendorPanelMsg("신규 벤더 등록 중...");
 
     try {
       const res = await fetch(ROUTE_VENDOR_ENDPOINT, {
@@ -1846,11 +2044,17 @@
       $("vendor").value = savedName;
       $("biz").value = savedBiz;
 
-      alert(`신규 벤더 등록 완료\n${savedName}\n${savedBiz}`);
-      await load();
+      setVendorPanelMsg(`등록 완료\n${savedName}\n${savedBiz}`, "ok");
+
+      setTimeout(() => {
+        closeVendorPanel();
+        load().catch(e => alert(e.message));
+      }, 550);
     } catch (e) {
       console.error(e);
-      alert("신규 벤더 등록 실패: " + (e?.message || e));
+      setVendorPanelMsg("신규 벤더 등록 실패: " + (e?.message || e), "err");
+    } finally {
+      btn.disabled = false;
     }
   }
 
@@ -2128,31 +2332,42 @@
     const headerRow = rowsDom[0];
     const skip = new Set();
 
+    const bodyRows = rowsDom.filter(tr => tr.closest("tbody"));
+    const firstHeaderText = headerRow?.cells?.[0]?.textContent?.replace(/\s+/g, "").trim() || "";
+    const firstBodyText = bodyRows[0]?.cells?.[0]?.textContent?.replace(/\s+/g, "").trim() || "";
+
+    if (
+      isSuper() ||
+      firstHeaderText === "관리" ||
+      firstHeaderText.includes("관리") ||
+      firstBodyText === "수정" ||
+      firstBodyText === "저장" ||
+      bodyRows.some(tr => {
+        const c = tr.cells?.[0];
+        const t = c?.textContent?.replace(/\s+/g, "").trim() || "";
+        return c?.classList?.contains("manageCol") || t === "수정" || t === "저장";
+      })
+    ) {
+      skip.add(0);
+    }
+
     if (headerRow) {
       Array.from(headerRow.cells).forEach((cell, idx) => {
-        const text = (cell.textContent || "").trim();
+        const text = (cell.textContent || "").replace(/\s+/g, "").trim();
         if (cell.classList.contains("manageCol") || text === "관리") {
           skip.add(idx);
         }
       });
     }
 
-    // 관리자 화면에서 첫 열은 "관리/수정" 전용 컬럼이다.
-    // header class가 유실되거나 Canvas 복사 시점에 DOM 상태가 달라도 무조건 제외한다.
-    const firstHeaderText = headerRow?.cells?.[0]?.textContent?.trim() || "";
-    const firstBodyText = rowsDom.find(tr => tr.closest("tbody"))?.cells?.[0]?.textContent?.trim() || "";
-
-    if (
-      firstHeaderText === "관리" ||
-      firstHeaderText.includes("관리") ||
-      firstBodyText === "수정" ||
-      firstBodyText === "저장" ||
-      rowsDom.some(tr => tr.cells?.[0]?.classList?.contains("manageCol"))
-    ) {
-      skip.add(0);
-    }
-
-    const includeCell = (cell, idx) => !skip.has(idx) && !cell.classList.contains("manageCol");
+    const includeCell = (cell, idx) => {
+      const text = (cell?.textContent || "").replace(/\s+/g, "").trim();
+      return !skip.has(idx) &&
+        !cell.classList.contains("manageCol") &&
+        text !== "관리" &&
+        text !== "수정" &&
+        text !== "저장";
+    };
 
     const colCount = headerRow
       ? Array.from(headerRow.cells).filter((cell, idx) => includeCell(cell, idx)).length
@@ -2387,8 +2602,29 @@
       console.error(err);
 
       if (window.htmlToImage?.toBlob) {
+        let fallbackWrap = null;
+
         try {
-          const blob = await htmlToImage.toBlob(sourceTable, {
+          fallbackWrap = document.createElement("div");
+          fallbackWrap.className = "captureCloneWrap";
+
+          const clone = sourceTable.cloneNode(true);
+          clone.classList.add("captureTable");
+
+          clone.querySelectorAll(".manageCol").forEach(el => el.remove());
+          clone.querySelectorAll("tr").forEach(tr => {
+            const first = tr.children?.[0];
+            const text = first?.textContent?.replace(/\s+/g, "").trim() || "";
+
+            if (text === "관리" || text === "수정" || text === "저장") {
+              first.remove();
+            }
+          });
+
+          fallbackWrap.appendChild(clone);
+          document.body.appendChild(fallbackWrap);
+
+          const blob = await htmlToImage.toBlob(fallbackWrap, {
             backgroundColor:"#ffffff",
             pixelRatio:1,
             cacheBust:true,
@@ -2416,6 +2652,8 @@
           }
         } catch (fallbackErr) {
           console.error(fallbackErr);
+        } finally {
+          fallbackWrap?.remove();
         }
       }
 
@@ -2445,9 +2683,26 @@
 
     $("copyImage").onclick = () => copyImage().catch(e => alert(e.message));
 
-    $("add").onclick = () => {
-      registerVendor().catch(e => alert(e.message));
+    $("add").onclick = openVendorPanel;
+    $("vendorModalClose").onclick = closeVendorPanel;
+    $("vendorModalCancel").onclick = closeVendorPanel;
+    $("vendorRegisterSave").onclick = () => registerVendor().catch(e => setVendorPanelMsg(e.message, "err"));
+    $("vendorModal").onclick = e => {
+      if (e.target === $("vendorModal")) closeVendorPanel();
     };
+
+    ["vendorNewName", "vendorNewBiz"].forEach(id => {
+      $(id).addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          registerVendor().catch(err => setVendorPanelMsg(err.message, "err"));
+        }
+
+        if (e.key === "Escape") {
+          closeVendorPanel();
+        }
+      });
+    });
 
     $("table").onclick = e => {
       const saveBtn = e.target.closest("[data-save]");

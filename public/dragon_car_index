@@ -1910,6 +1910,11 @@
       color:#1d4ed8;
     }
 
+    .subtractionSheetTable tr.missingParent td{
+      background:#fff7ed!important;
+      color:#9a3412!important;
+    }
+
 
     @media(max-width:900px){
       body{overflow:auto!important}
@@ -2364,6 +2369,8 @@
           items: [],
           saving: false
         },
+        subtractionRows: [],
+        subtractionParents: new Map(),
         activeSheet: "dragon"
       };
 
@@ -3460,6 +3467,7 @@
         const dateTo = toolbarDateTo.value || "";
 
         return state.rows.filter(row => {
+          if (row.__subtractionOnly) return false;
           if (row.__new) return true;
 
           const keys = [
@@ -3870,6 +3878,7 @@
           }
 
           await loadSubtractionsForRows([row]);
+          await loadAllSubtractions();
           closeDeductionModal();
           render();
           renderSubtractionSheet();
@@ -3902,6 +3911,7 @@
       }
 
       function rowVendorName(row) {
+        if (!row) return "";
         return row.vendor_id ? (vendorNameById(row.vendor_id) || row.order_vendor || "") : (row.order_vendor || "");
       }
 
@@ -3937,59 +3947,54 @@
       }
 
       function renderSubtractionSheet() {
-        const filteredRows = getFilteredRows();
-        const sourceRows = filteredRows.filter(row => row.id);
-        const activeItems = sourceRows.flatMap(row => deductionItems(row));
-        const total = activeItems.reduce((sum, item) => sum + Number(item?.subtraction_price || 0), 0);
+        const items = Array.isArray(state.subtractionRows) ? state.subtractionRows : [];
+        const total = items.reduce((sum, item) => sum + Number(item?.subtraction_price || 0), 0);
+        const parentCount = new Set(items.map(item => Number(item.dragon_car_id)).filter(Boolean)).size;
 
         subtractionSummary.textContent =
-          `표시 용차 ${sourceRows.length.toLocaleString("ko-KR")}건 / 차감 ${activeItems.length.toLocaleString("ko-KR")}건 / 총 ${formatCurrency(total)}`;
+          `DB 차감 ${items.length.toLocaleString("ko-KR")}건 / 연결 용차 ${parentCount.toLocaleString("ko-KR")}건 / 총 ${formatCurrency(total)}`;
 
-        if (!sourceRows.length) {
+        if (!items.length) {
           subtractionSheetBody.innerHTML = `
             <tr>
-              <td class="subtractionEmpty" colspan="16">차감 시트에 표시할 용차 행이 없습니다. 용차 시트에서 조회 조건을 확인하세요.</td>
+              <td class="subtractionEmpty" colspan="16">dragon_car_subtraction DB에 등록된 차감 데이터가 없습니다.</td>
             </tr>
           `;
           return;
         }
 
-        subtractionSheetBody.innerHTML = sourceRows.map(row => {
-          const rowIndex = state.rows.indexOf(row);
-          const items = subtractionItemRowsFor(row);
+        subtractionSheetBody.innerHTML = items.map(item => {
+          const parent = state.subtractionParents.get(Number(item.dragon_car_id)) || {};
+          const confirmClass = item.subtraction_confirm ? "subtractionFlag on" : "subtractionFlag";
+          const paymentClass = item.payment_confirm ? "subtractionFlag on" : "subtractionFlag";
+          const missingParent = !parent.id;
 
-          return items.map((item, itemIndex) => {
-            const isEmpty = !!item.__empty;
-            const showParent = itemIndex === 0;
-            const confirmClass = item.subtraction_confirm ? "subtractionFlag on" : "subtractionFlag";
-            const paymentClass = item.payment_confirm ? "subtractionFlag on" : "subtractionFlag";
-
-            return `
-              <tr data-row="${rowIndex}" data-sub-id="${esc(item.id || "")}">
-                <td>${showParent ? esc(staticDateText(row)) : ""}</td>
-                <td>${showParent ? esc(rowVendorName(row)) : ""}</td>
-                <td>${showParent ? esc(row.order_name || "") : ""}</td>
-                <td>${showParent ? esc(row.camp || "") : ""}</td>
-                <td>${showParent ? esc(row.wave || "") : ""}</td>
-                <td class="subtractionRouteText">${showParent ? esc(routeSheetText(row.route)) : ""}</td>
-                <td>${showParent ? esc(row.delivery_driver || "") : ""}</td>
-                <td>${isEmpty ? '<span class="subtractionMuted">차감 없음</span>' : esc(item.name || "")}</td>
-                <td class="num">${isEmpty ? "" : esc(formatCurrency(item.subtraction_price || 0))}</td>
-                <td>${isEmpty ? "" : esc(item.subtraction_item || "")}</td>
-                <td>${isEmpty ? "" : esc(item.subtraction_account || "")}</td>
-                <td>${isEmpty ? "" : esc(item.subtraction_bank || "")}</td>
-                <td>${isEmpty ? "" : esc(item.subtraction_bank_name || "")}</td>
-                <td><span class="${confirmClass}">${item.subtraction_confirm ? "확인" : "대기"}</span></td>
-                <td><span class="${paymentClass}">${item.payment_confirm ? "확인" : "대기"}</span></td>
-                <td>
-                  ${showParent ? `<button class="subtractionManageBtn" type="button" data-sub-action="deduction" data-row="${rowIndex}">${isEmpty ? "차감 등록" : "관리"}</button>` : ""}
-                </td>
-              </tr>
-            `;
-          }).join("");
+          return `
+            <tr data-sub-id="${esc(item.id || "")}" data-dragon-car-id="${esc(item.dragon_car_id || "")}" class="${missingParent ? "missingParent" : ""}">
+              <td>${esc(staticDateText(parent))}</td>
+              <td>${esc(rowVendorName(parent))}</td>
+              <td>${esc(parent.order_name || "")}</td>
+              <td>${esc(parent.camp || "")}</td>
+              <td>${esc(parent.wave || "")}</td>
+              <td class="subtractionRouteText">${esc(routeSheetText(parent.route))}</td>
+              <td>${esc(parent.delivery_driver || "")}</td>
+              <td>${esc(item.name || "")}</td>
+              <td class="num">${esc(formatCurrency(item.subtraction_price || 0))}</td>
+              <td>${esc(item.subtraction_item || "")}</td>
+              <td>${esc(item.subtraction_account || "")}</td>
+              <td>${esc(item.subtraction_bank || "")}</td>
+              <td>${esc(item.subtraction_bank_name || "")}</td>
+              <td><span class="${confirmClass}">${item.subtraction_confirm ? "확인" : "대기"}</span></td>
+              <td><span class="${paymentClass}">${item.payment_confirm ? "확인" : "대기"}</span></td>
+              <td>
+                <button class="subtractionManageBtn" type="button" data-sub-action="deduction" data-dragon-car-id="${esc(item.dragon_car_id || "")}">
+                  ${missingParent ? "행 없음" : "관리"}
+                </button>
+              </td>
+            </tr>
+          `;
         }).join("");
       }
-
 
       function render() {
         const rows = getFilteredRows();
@@ -4239,6 +4244,102 @@
         }
       }
 
+      async function loadAllSubtractions() {
+        try {
+          const { data, error } = await supabase
+            .from(SUBTRACTION_TABLE)
+            .select("*")
+            .order("created_at", { ascending: false });
+
+          if (error) throw error;
+
+          const rows = Array.isArray(data) ? data : [];
+          state.subtractionRows = rows;
+
+          const ids = Array.from(new Set(
+            rows.map(item => Number(item.dragon_car_id)).filter(id => Number.isFinite(id) && id > 0)
+          ));
+
+          state.subtractionParents = new Map();
+
+          if (ids.length) {
+            const { data: parentData, error: parentError } = await supabase
+              .from(TABLE)
+              .select("*")
+              .in("id", ids);
+
+            if (parentError) throw parentError;
+
+            const grouped = new Map();
+            for (const item of rows) {
+              const key = Number(item.dragon_car_id);
+              if (!grouped.has(key)) grouped.set(key, []);
+              grouped.get(key).push(item);
+            }
+
+            for (const parent of Array.isArray(parentData) ? parentData : []) {
+              const id = Number(parent.id);
+              state.subtractionParents.set(id, {
+                ...parent,
+                order_vendor: parent.vendor_id ? (vendorNameById(parent.vendor_id) || parent.order_vendor || "") : (parent.order_vendor || ""),
+                amount: parent.amount ?? "",
+                __subtractions: grouped.get(id) || [],
+                __amountManual: parent.amount != null && String(parent.amount).trim() !== "",
+                __dirty: false,
+                __new: false,
+                __subtractionOnly: true
+              });
+            }
+          }
+
+          if (state.activeSheet === "subtraction") {
+            renderSubtractionSheet();
+          }
+        } catch (e) {
+          console.error(e);
+          state.subtractionRows = [];
+          state.subtractionParents = new Map();
+          setStatus("용차 차감 DB 불러오기 실패: " + formatDbError(e), "warn");
+        }
+      }
+
+      function rowForSubtractionDragonId(dragonCarId) {
+        const id = Number(dragonCarId);
+        if (!Number.isFinite(id) || id <= 0) return { row:null, rowIndex:-1 };
+
+        let rowIndex = state.rows.findIndex(row => Number(row.id) === id);
+        if (rowIndex >= 0) return { row:state.rows[rowIndex], rowIndex };
+
+        const parent = state.subtractionParents.get(id);
+
+        if (!parent) return { row:null, rowIndex:-1 };
+
+        state.rows.push({
+          ...parent,
+          __subtractionOnly:true,
+          __dirty:false,
+          __new:false
+        });
+
+        rowIndex = state.rows.length - 1;
+
+        return {
+          row:state.rows[rowIndex],
+          rowIndex
+        };
+      }
+
+      function openDeductionByDragonId(dragonCarId) {
+        const found = rowForSubtractionDragonId(dragonCarId);
+
+        if (!found.row || found.rowIndex < 0) {
+          setStatus("연결된 용차 행을 찾지 못했습니다. dragon_car_id: " + dragonCarId, "err");
+          return;
+        }
+
+        openDeductionModal(found.rowIndex);
+      }
+
       async function loadRows() {
         const monthInfo = getSelectedSettlementMonthInfo();
         try {
@@ -4272,6 +4373,7 @@
           }));
 
           await loadSubtractionsForRows(state.rows);
+          await loadAllSubtractions();
 
           render();
           if (monthInfo) {
@@ -4452,11 +4554,10 @@
         const btn = e.target.closest("[data-sub-action]");
         if (!btn) return;
 
-        const rowIndex = Number(btn.dataset.row);
         const action = btn.dataset.subAction;
 
         if (action === "deduction") {
-          openDeductionModal(rowIndex);
+          openDeductionByDragonId(btn.dataset.dragonCarId);
         }
       });
 

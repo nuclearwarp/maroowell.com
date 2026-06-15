@@ -1771,8 +1771,9 @@
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
-      padding:16px 18px;
+      gap:16px;
+      min-height:112px;
+      padding:24px 24px 20px;
       border-bottom:1px solid #edf2f7;
       background:linear-gradient(180deg,#ffffff,#f8fafc);
     }
@@ -1780,17 +1781,17 @@
     .subtractionBoardHead h2{
       margin:0;
       color:#0f172a;
-      font-size:20px;
+      font-size:24px;
       line-height:1.12;
       letter-spacing:-.045em;
       font-weight:520;
     }
 
     .subtractionBoardHead p{
-      margin:6px 0 0;
+      margin:10px 0 0;
       color:#64748b;
-      font-size:12px;
-      line-height:1.35;
+      font-size:13px;
+      line-height:1.45;
       font-weight:380;
     }
 
@@ -1913,6 +1914,156 @@
     .subtractionSheetTable tr.missingParent td{
       background:#fff7ed!important;
       color:#9a3412!important;
+    }
+
+    .subtractionTargetOverlay{
+      position:fixed;
+      inset:0;
+      z-index:10045;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      background:rgba(15,23,42,.42);
+      backdrop-filter:blur(10px);
+    }
+
+    .subtractionTargetOverlay.hidden{
+      display:none!important;
+    }
+
+    .subtractionTargetModal{
+      width:min(760px,calc(100vw - 28px));
+      max-height:min(82vh,720px);
+      display:flex;
+      flex-direction:column;
+      border:1px solid #d8e0ee;
+      border-radius:22px;
+      background:#ffffff;
+      box-shadow:0 26px 90px rgba(15,23,42,.25);
+      overflow:hidden;
+    }
+
+    .subtractionTargetHead{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      padding:18px 20px 14px;
+      border-bottom:1px solid #edf2f7;
+      background:linear-gradient(180deg,#ffffff,#f8fafc);
+    }
+
+    .subtractionTargetHead h3{
+      margin:0;
+      color:#0f172a;
+      font-size:20px;
+      line-height:1.15;
+      letter-spacing:-.045em;
+      font-weight:520;
+    }
+
+    .subtractionTargetHead p{
+      margin:7px 0 0;
+      color:#64748b;
+      font-size:12px;
+      line-height:1.45;
+      font-weight:380;
+    }
+
+    .subtractionTargetClose{
+      width:36px;
+      height:36px;
+      border:1px solid #cbd5e1;
+      border-radius:999px;
+      background:#fff;
+      color:#0f172a;
+      cursor:pointer;
+      font-size:18px;
+    }
+
+    .subtractionTargetClose:hover{
+      background:#f8fafc;
+      border-color:#93c5fd;
+    }
+
+    .subtractionTargetSearchWrap{
+      padding:14px 16px;
+      border-bottom:1px solid #edf2f7;
+      background:#fff;
+    }
+
+    .subtractionTargetSearch{
+      width:100%;
+      height:42px;
+      border:1px solid #cbd5e1;
+      border-radius:14px;
+      background:#f8fafc;
+      color:#0f172a;
+      padding:0 13px;
+      font-family:var(--font);
+      font-size:13px;
+      font-weight:400;
+      outline:none;
+    }
+
+    .subtractionTargetSearch:focus{
+      background:#fff;
+      border-color:#60a5fa;
+      box-shadow:0 0 0 3px rgba(37,99,235,.12);
+    }
+
+    .subtractionTargetList{
+      overflow:auto;
+      padding:12px 16px 16px;
+      display:grid;
+      gap:8px;
+      background:#f8fafc;
+    }
+
+    .subtractionTargetItem{
+      width:100%;
+      border:1px solid #d8e0ee;
+      border-radius:16px;
+      background:#fff;
+      color:#0f172a;
+      padding:12px 14px;
+      text-align:left;
+      font-family:var(--font);
+      cursor:pointer;
+      display:grid;
+      gap:6px;
+      box-shadow:0 4px 12px rgba(15,23,42,.04);
+    }
+
+    .subtractionTargetItem:hover{
+      background:#eff6ff;
+      border-color:#93c5fd;
+    }
+
+    .subtractionTargetTitle{
+      font-size:14px;
+      font-weight:520;
+      line-height:1.25;
+      color:#0f172a;
+    }
+
+    .subtractionTargetMeta{
+      font-size:12px;
+      font-weight:380;
+      line-height:1.45;
+      color:#64748b;
+    }
+
+    .subtractionTargetEmpty{
+      padding:26px 14px;
+      text-align:center;
+      color:#64748b;
+      border:1px dashed #cbd5e1;
+      border-radius:16px;
+      background:#fff;
+      font-size:13px;
+      font-weight:380;
     }
 
 
@@ -2187,6 +2338,7 @@
             <p id="subtractionSummary">차감 데이터 조회 전</p>
           </div>
           <div class="subtractionBoardActions">
+            <button class="btn ok" id="btnAddSubtraction" type="button">차감 추가</button>
             <button class="btn" id="btnBackDragonSheet" type="button">용차 시트</button>
           </div>
         </div>
@@ -2371,6 +2523,11 @@
         },
         subtractionRows: [],
         subtractionParents: new Map(),
+        subtractionTarget: {
+          root: null,
+          input: null,
+          list: null
+        },
         activeSheet: "dragon"
       };
 
@@ -2383,6 +2540,7 @@
       const btnAdd = document.getElementById("btnAdd");
       const btnSaveAll = document.getElementById("btnSaveAll");
       const btnSubtractionSheet = document.getElementById("btnSubtractionSheet");
+      const btnAddSubtraction = document.getElementById("btnAddSubtraction");
       const btnBackDragonSheet = document.getElementById("btnBackDragonSheet");
       const btnLogout = document.getElementById("btnLogout");
       const btnClearFilters = document.getElementById("btnClearFilters");
@@ -3893,6 +4051,147 @@
       }
 
 
+      function targetRowsForSubtraction() {
+        const map = new Map();
+
+        for (const row of state.rows || []) {
+          const id = Number(row?.id);
+          if (Number.isFinite(id) && id > 0) {
+            map.set(id, row);
+          }
+        }
+
+        for (const [id, row] of state.subtractionParents || new Map()) {
+          if (Number.isFinite(Number(id)) && !map.has(Number(id))) {
+            map.set(Number(id), row);
+          }
+        }
+
+        return Array.from(map.values())
+          .filter(row => row?.id)
+          .sort(compareRowsForDisplay);
+      }
+
+      function targetRowSearchText(row) {
+        return normalize([
+          row?.id,
+          staticDateText(row),
+          rowVendorName(row),
+          row?.order_name,
+          row?.camp,
+          row?.wave,
+          row?.route,
+          row?.delivery_driver,
+          row?.dragon_car_note
+        ].join(" "));
+      }
+
+      function targetRowTitle(row) {
+        return [
+          staticDateText(row),
+          row?.camp,
+          row?.wave,
+          row?.route,
+          row?.delivery_driver
+        ].filter(v => v !== null && v !== undefined && String(v).trim() !== "").join(" / ") || `용차 ID ${row?.id}`;
+      }
+
+      function targetRowMeta(row) {
+        return [
+          `ID ${row?.id}`,
+          rowVendorName(row),
+          row?.order_name,
+          row?.settlement_month ? `정산월 ${row.settlement_month}` : ""
+        ].filter(v => v !== null && v !== undefined && String(v).trim() !== "").join(" · ");
+      }
+
+      function ensureSubtractionTargetPicker() {
+        if (state.subtractionTarget.root) return;
+
+        const root = document.createElement("div");
+        root.className = "subtractionTargetOverlay hidden";
+        root.innerHTML = `
+          <div class="subtractionTargetModal" role="dialog" aria-modal="true">
+            <div class="subtractionTargetHead">
+              <div>
+                <h3>차감 추가 대상 선택</h3>
+                <p>현재 불러온 용차 행 또는 차감 DB에 연결된 용차 행을 선택하세요.</p>
+              </div>
+              <button class="subtractionTargetClose" type="button" data-target-action="close">✕</button>
+            </div>
+            <div class="subtractionTargetSearchWrap">
+              <input class="subtractionTargetSearch" type="text" placeholder="날짜 / 벤더 / 기사 / 라우트 / ID 검색">
+            </div>
+            <div class="subtractionTargetList"></div>
+          </div>
+        `;
+
+        document.body.appendChild(root);
+
+        state.subtractionTarget.root = root;
+        state.subtractionTarget.input = root.querySelector(".subtractionTargetSearch");
+        state.subtractionTarget.list = root.querySelector(".subtractionTargetList");
+
+        root.addEventListener("click", (e) => {
+          const closeBtn = e.target.closest('[data-target-action="close"]');
+
+          if (closeBtn || e.target === root) {
+            closeSubtractionTargetPicker();
+            return;
+          }
+
+          const itemBtn = e.target.closest("[data-target-dragon-id]");
+
+          if (!itemBtn) return;
+
+          const dragonCarId = itemBtn.dataset.targetDragonId;
+          closeSubtractionTargetPicker();
+          openDeductionByDragonId(dragonCarId);
+        });
+
+        state.subtractionTarget.input.addEventListener("input", renderSubtractionTargetPicker);
+        state.subtractionTarget.input.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            closeSubtractionTargetPicker();
+          }
+        });
+      }
+
+      function openSubtractionTargetPicker() {
+        ensureSubtractionTargetPicker();
+
+        state.subtractionTarget.input.value = "";
+        state.subtractionTarget.root.classList.remove("hidden");
+        renderSubtractionTargetPicker();
+
+        setTimeout(() => state.subtractionTarget.input.focus(), 30);
+      }
+
+      function closeSubtractionTargetPicker() {
+        if (!state.subtractionTarget.root) return;
+        state.subtractionTarget.root.classList.add("hidden");
+      }
+
+      function renderSubtractionTargetPicker() {
+        ensureSubtractionTargetPicker();
+
+        const q = normalize(state.subtractionTarget.input.value || "");
+        const rows = targetRowsForSubtraction().filter(row => !q || targetRowSearchText(row).includes(q));
+        const list = state.subtractionTarget.list;
+
+        if (!rows.length) {
+          list.innerHTML = `<div class="subtractionTargetEmpty">선택할 용차 행이 없습니다. 용차 시트에서 데이터를 먼저 불러오거나 검색 조건을 확인하세요.</div>`;
+          return;
+        }
+
+        list.innerHTML = rows.slice(0, 100).map(row => `
+          <button class="subtractionTargetItem" type="button" data-target-dragon-id="${esc(row.id)}">
+            <span class="subtractionTargetTitle">${esc(targetRowTitle(row))}</span>
+            <span class="subtractionTargetMeta">${esc(targetRowMeta(row))}</span>
+          </button>
+        `).join("");
+      }
+
       function setActiveSheet(sheet) {
         state.activeSheet = sheet === "subtraction" ? "subtraction" : "dragon";
 
@@ -4709,6 +5008,8 @@
       btnSubtractionSheet.addEventListener("click", () => {
         setActiveSheet(state.activeSheet === "subtraction" ? "dragon" : "subtraction");
       });
+
+      btnAddSubtraction.addEventListener("click", openSubtractionTargetPicker);
 
       btnBackDragonSheet.addEventListener("click", () => {
         setActiveSheet("dragon");

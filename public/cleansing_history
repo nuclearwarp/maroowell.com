@@ -729,7 +729,7 @@
 
     <button class="btn primary" id="search">조회</button>
     <button class="btn" id="reset">초기화</button>
-    <button class="btn ok" id="add">신규</button>
+    <button class="btn ok" id="add">신규 벤더</button>
   </div>
 
   <main class="main" id="main">
@@ -757,6 +757,7 @@
   const $ = id => document.getElementById(id);
   const cfg = window.MARUWELL_CONFIG || {};
   const API = (cfg.CLEANSING_HISTORY_API_BASE || "https://cleansinghistory.maroowell.com").replace(/\/$/, "");
+  const ROUTE_VENDOR_ENDPOINT = "https://route.maroowell.com/vendors";
   const TABLE_HISTORY = "cleansing_history";
   const TABLE_CLHI_ACCESS = "cleansing_history_access";
 
@@ -1793,6 +1794,66 @@
     `;
   }
 
+  async function registerVendor() {
+    if (!isSuper()) return;
+
+    const name = (prompt("신규 벤더명", val("vendor") || "") || "").trim();
+
+    if (!name) {
+      alert("벤더명을 입력하세요.");
+      return;
+    }
+
+    const businessNumber = (prompt("사업자번호", val("biz") || "") || "").trim();
+
+    if (!businessNumber) {
+      alert("사업자번호를 입력하세요.");
+      return;
+    }
+
+    try {
+      const res = await fetch(ROUTE_VENDOR_ENDPOINT, {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
+        },
+        body:JSON.stringify({
+          name,
+          business_number:businessNumber
+        })
+      });
+
+      const text = await res.text();
+      let data = null;
+
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = {
+          ok:false,
+          error:text
+        };
+      }
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
+      }
+
+      const row = data?.row || data || {};
+      const savedName = String(row.name || name).trim();
+      const savedBiz = String(row.business_number || businessNumber).trim();
+
+      $("vendor").value = savedName;
+      $("biz").value = savedBiz;
+
+      alert(`신규 벤더 등록 완료\n${savedName}\n${savedBiz}`);
+      await load();
+    } catch (e) {
+      console.error(e);
+      alert("신규 벤더 등록 실패: " + (e?.message || e));
+    }
+  }
+
   async function save(row) {
     if (!isSuper()) return;
 
@@ -2069,14 +2130,32 @@
 
     if (headerRow) {
       Array.from(headerRow.cells).forEach((cell, idx) => {
-        if (cell.classList.contains("manageCol") || cell.textContent.trim() === "관리") {
+        const text = (cell.textContent || "").trim();
+        if (cell.classList.contains("manageCol") || text === "관리") {
           skip.add(idx);
         }
       });
     }
 
+    // 관리자 화면에서 첫 열은 "관리/수정" 전용 컬럼이다.
+    // header class가 유실되거나 Canvas 복사 시점에 DOM 상태가 달라도 무조건 제외한다.
+    const firstHeaderText = headerRow?.cells?.[0]?.textContent?.trim() || "";
+    const firstBodyText = rowsDom.find(tr => tr.closest("tbody"))?.cells?.[0]?.textContent?.trim() || "";
+
+    if (
+      firstHeaderText === "관리" ||
+      firstHeaderText.includes("관리") ||
+      firstBodyText === "수정" ||
+      firstBodyText === "저장" ||
+      rowsDom.some(tr => tr.cells?.[0]?.classList?.contains("manageCol"))
+    ) {
+      skip.add(0);
+    }
+
+    const includeCell = (cell, idx) => !skip.has(idx) && !cell.classList.contains("manageCol");
+
     const colCount = headerRow
-      ? Array.from(headerRow.cells).filter((_, idx) => !skip.has(idx)).length
+      ? Array.from(headerRow.cells).filter((cell, idx) => includeCell(cell, idx)).length
       : 0;
 
     if (!colCount) {
@@ -2085,7 +2164,7 @@
 
     const rawWidths = headerRow
       ? Array.from(headerRow.cells)
-          .filter((_, idx) => !skip.has(idx))
+          .filter((cell, idx) => includeCell(cell, idx))
           .map(cell => {
             const inlineWidth = parseFloat(cell.style.width || "");
             const rectWidth = cell.getBoundingClientRect?.().width || 0;
@@ -2111,7 +2190,7 @@
     for (const tr of rowsDom) {
       const isHead = tr.closest("thead") != null;
       const isBody = tr.closest("tbody") != null;
-      const sourceCells = Array.from(tr.cells).filter((_, idx) => !skip.has(idx));
+      const sourceCells = Array.from(tr.cells).filter((cell, idx) => includeCell(cell, idx));
 
       measure.font = isHead
         ? `500 11px ${fontFamily}`
@@ -2367,7 +2446,7 @@
     $("copyImage").onclick = () => copyImage().catch(e => alert(e.message));
 
     $("add").onclick = () => {
-      save(null).catch(e => alert(e.message));
+      registerVendor().catch(e => alert(e.message));
     };
 
     $("table").onclick = e => {

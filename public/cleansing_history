@@ -1861,30 +1861,337 @@
   }
 
 
-  function nextAnimationFrame() {
-    return new Promise(resolve => {
-      requestAnimationFrame(() => requestAnimationFrame(resolve));
+  function canvasBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error("이미지 생성 실패"));
+        }, "image/png");
+      } catch (e) {
+        reject(e);
+      }
     });
   }
 
-  async function waitCaptureReady() {
-    try {
-      if (document.fonts?.ready) {
-        await document.fonts.ready;
-      }
-    } catch {}
+  function tableCellCopyText(cell) {
+    const clone = cell.cloneNode(true);
 
-    await nextAnimationFrame();
+    clone.querySelectorAll("button").forEach(el => {
+      if (el.dataset?.edit || el.dataset?.save) {
+        el.remove();
+      }
+    });
+
+    clone.querySelectorAll("input,select,textarea").forEach(el => {
+      let value = "";
+
+      if (el.tagName === "SELECT") {
+        value = el.options?.[el.selectedIndex]?.textContent || el.value || "";
+      } else {
+        value = el.value || el.textContent || "";
+      }
+
+      el.replaceWith(document.createTextNode(value));
+    });
+
+    clone.querySelectorAll("br").forEach(el => el.replaceWith(document.createTextNode("\n")));
+
+    const raw = (clone.innerText || clone.textContent || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim();
+
+    return raw;
+  }
+
+  function splitLongToken(ctx, token, maxWidth) {
+    const out = [];
+    let cur = "";
+
+    for (const ch of String(token || "")) {
+      const test = cur + ch;
+
+      if (cur && ctx.measureText(test).width > maxWidth) {
+        out.push(cur);
+        cur = ch;
+      } else {
+        cur = test;
+      }
+    }
+
+    if (cur) out.push(cur);
+
+    return out;
+  }
+
+  function wrapCanvasText(ctx, text, maxWidth) {
+    const paragraphs = String(text || "")
+      .split(/\n+/)
+      .map(v => v.trim())
+      .filter(Boolean);
+
+    const lines = [];
+
+    for (const paragraph of paragraphs.length ? paragraphs : [""]) {
+      const words = paragraph.split(/\s+/).filter(Boolean);
+
+      if (!words.length) {
+        lines.push("");
+        continue;
+      }
+
+      let line = "";
+
+      for (const word of words) {
+        const candidate = line ? line + " " + word : word;
+
+        if (ctx.measureText(candidate).width <= maxWidth) {
+          line = candidate;
+          continue;
+        }
+
+        if (line) {
+          lines.push(line);
+          line = "";
+        }
+
+        if (ctx.measureText(word).width <= maxWidth) {
+          line = word;
+          continue;
+        }
+
+        const parts = splitLongToken(ctx, word, maxWidth);
+        if (parts.length) {
+          lines.push(...parts.slice(0, -1));
+          line = parts[parts.length - 1] || "";
+        }
+      }
+
+      if (line) lines.push(line);
+    }
+
+    return lines.length ? lines : [""];
+  }
+
+  function cellCanvasColor(cell, row) {
+    if (row?.classList?.contains("rowClean")) return "#b91c1c";
+    if (row?.classList?.contains("rowWarn")) return "#92400e";
+    if (cell?.querySelector?.(".zipLink")) return "#1d4ed8";
+    if (cell?.querySelector?.(".grade1")) return "#15803d";
+    if (cell?.querySelector?.(".grade2")) return "#4d7c0f";
+    if (cell?.querySelector?.(".grade3")) return "#b45309";
+    if (cell?.querySelector?.(".grade4")) return "#be123c";
+    if (cell?.querySelector?.(".gradeNone")) return "#64748b";
+    if (cell?.classList?.contains("green")) return "#047857";
+    if (cell?.classList?.contains("yellow")) return "#a16207";
+    if (cell?.classList?.contains("red")) return "#b91c1c";
+    if (cell?.classList?.contains("priceCell")) return "#a16207";
+
+    return "#0f172a";
+  }
+
+  function cellCanvasAlign(cell) {
+    const cls = cell?.classList;
+
+    if (cls?.contains("routeCell") || cls?.contains("zipCell") || cls?.contains("vendorCell")) {
+      return "left";
+    }
+
+    if (cls?.contains("num")) return "right";
+
+    const style = window.getComputedStyle(cell);
+    return style.textAlign || "center";
+  }
+
+  function buildTableCanvas(table) {
+    const fontFamily = "'문경감홍사과체','Noto Sans KR',Arial,sans-serif";
+    const measure = document.createElement("canvas").getContext("2d");
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+
+    const title = document.querySelector(".head h2")?.textContent?.trim() || "클렌징 히스토리";
+    const subTitle = document.querySelector(".head p")?.textContent?.trim() || "";
+    const summary = $("summary")?.textContent?.trim() || "";
+
+    const rowsDom = Array.from(table.rows || []);
+    const headerRow = rowsDom[0];
+    const skip = new Set();
+
+    if (headerRow) {
+      Array.from(headerRow.cells).forEach((cell, idx) => {
+        if (cell.classList.contains("manageCol") || cell.textContent.trim() === "관리") {
+          skip.add(idx);
+        }
+      });
+    }
+
+    const colCount = headerRow
+      ? Array.from(headerRow.cells).filter((_, idx) => !skip.has(idx)).length
+      : 0;
+
+    if (!colCount) {
+      throw new Error("복사할 표 컬럼을 찾지 못했습니다.");
+    }
+
+    const rawWidths = headerRow
+      ? Array.from(headerRow.cells)
+          .filter((_, idx) => !skip.has(idx))
+          .map(cell => {
+            const inlineWidth = parseFloat(cell.style.width || "");
+            const rectWidth = cell.getBoundingClientRect?.().width || 0;
+            return Math.max(54, Math.ceil(inlineWidth || rectWidth || 80));
+          })
+      : [];
+
+    const minByIdx = [84, 82, 62, 105, 180, 86, 86, 78, 68, 68, 78, 185, 118];
+    const colWidths = rawWidths.map((w, idx) => {
+      const min = minByIdx[idx] || 70;
+      const max = idx === 4 || idx === 11 ? 220 : idx === 3 ? 140 : 150;
+      return Math.max(min, Math.min(max, w));
+    });
+
+    const tableWidth = colWidths.reduce((a, b) => a + b, 0);
+    const outerPad = 18;
+    const headerTitleHeight = 78;
+    const width = tableWidth + outerPad * 2;
+
+    const prepared = [];
+    let bodyRowIndex = 0;
+
+    for (const tr of rowsDom) {
+      const isHead = tr.closest("thead") != null;
+      const isBody = tr.closest("tbody") != null;
+      const sourceCells = Array.from(tr.cells).filter((_, idx) => !skip.has(idx));
+
+      measure.font = isHead
+        ? `500 11px ${fontFamily}`
+        : `400 10px ${fontFamily}`;
+
+      const cells = sourceCells.map((cell, idx) => {
+        const text = tableCellCopyText(cell);
+        const lines = wrapCanvasText(measure, text, Math.max(30, colWidths[idx] - 12));
+        const align = isHead ? "center" : cellCanvasAlign(cell);
+        const color = isHead ? "#0f172a" : cellCanvasColor(cell, tr);
+
+        return { cell, text, lines, align, color };
+      });
+
+      const lineHeight = isHead ? 15 : 14;
+      const minHeight = isHead ? 38 : 40;
+      const rowHeight = Math.max(
+        minHeight,
+        ...cells.map(c => c.lines.length * lineHeight + 14)
+      );
+
+      const bg = isHead
+        ? "#dbeafe"
+        : tr.classList.contains("rowClean")
+          ? "#fff5f5"
+          : tr.classList.contains("rowWarn")
+            ? "#fffbeb"
+            : bodyRowIndex % 2
+              ? "#f8fafc"
+              : "#ffffff";
+
+      prepared.push({
+        tr,
+        isHead,
+        isBody,
+        cells,
+        rowHeight,
+        lineHeight,
+        bg,
+        divider: tr.classList.contains("waveDivider")
+      });
+
+      if (isBody) bodyRowIndex += 1;
+    }
+
+    const tableHeight = prepared.reduce((sum, row) => sum + row.rowHeight, 0);
+    const height = outerPad + headerTitleHeight + tableHeight + outerPad;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(width * dpr);
+    canvas.height = Math.ceil(height * dpr);
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `520 22px ${fontFamily}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(title, outerPad, outerPad);
+
+    ctx.font = `400 11px ${fontFamily}`;
+    ctx.fillStyle = "#64748b";
+    const subtitleLine = [subTitle, summary].filter(Boolean).join(" / ");
+    ctx.fillText(subtitleLine, outerPad, outerPad + 34);
+
+    let y = outerPad + headerTitleHeight;
+
+    for (const row of prepared) {
+      let x = outerPad;
+
+      if (row.divider) {
+        ctx.fillStyle = "#94a3b8";
+        ctx.fillRect(outerPad, y, tableWidth, 3);
+      }
+
+      row.cells.forEach((info, idx) => {
+        const w = colWidths[idx];
+        const h = row.rowHeight;
+
+        ctx.fillStyle = row.bg;
+        ctx.fillRect(x, y, w, h);
+
+        ctx.strokeStyle = "#d8e0ee";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+
+        ctx.font = row.isHead
+          ? `500 11px ${fontFamily}`
+          : `400 10px ${fontFamily}`;
+        ctx.fillStyle = info.color;
+        ctx.textBaseline = "middle";
+
+        const textH = info.lines.length * row.lineHeight;
+        let ty = y + h / 2 - textH / 2 + row.lineHeight / 2;
+
+        for (const line of info.lines) {
+          let tx = x + w / 2;
+          ctx.textAlign = "center";
+
+          if (info.align === "left" || info.align === "start") {
+            ctx.textAlign = "left";
+            tx = x + 7;
+          } else if (info.align === "right" || info.align === "end") {
+            ctx.textAlign = "right";
+            tx = x + w - 7;
+          }
+
+          ctx.fillText(line, tx, ty);
+          ty += row.lineHeight;
+        }
+
+        x += w;
+      });
+
+      y += row.rowHeight;
+    }
+
+    return canvas;
   }
 
   async function copyImage() {
     if (!rows.length) {
       alert("복사할 조회 결과가 없습니다.");
-      return;
-    }
-
-    if (!window.htmlToImage?.toBlob) {
-      alert("이미지 생성 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.");
       return;
     }
 
@@ -1895,82 +2202,13 @@
       return;
     }
 
-    const wrap = document.createElement("div");
-    const tableClone = sourceTable.cloneNode(true);
-
-    wrap.className = "captureCloneWrap";
-    tableClone.classList.add("captureTable");
-    tableClone.querySelectorAll(".manageCol").forEach(el => el.remove());
-
-    wrap.appendChild(tableClone);
-    document.body.appendChild(wrap);
-
     try {
-      await waitCaptureReady();
+      try {
+        if (document.fonts?.ready) await document.fonts.ready;
+      } catch {}
 
-      let tableRect = tableClone.getBoundingClientRect();
-      let captureWidth = Math.ceil(Math.max(
-        tableClone.scrollWidth,
-        tableRect.width,
-        wrap.scrollWidth
-      )) + 2;
-
-      let captureHeight = Math.ceil(Math.max(
-        tableClone.scrollHeight,
-        tableRect.height,
-        wrap.scrollHeight
-      )) + 18;
-
-      tableClone.style.width = captureWidth + "px";
-      tableClone.style.maxWidth = "none";
-      wrap.style.width = captureWidth + "px";
-      wrap.style.minWidth = captureWidth + "px";
-      wrap.style.height = captureHeight + "px";
-      wrap.style.minHeight = captureHeight + "px";
-
-      await waitCaptureReady();
-
-      tableRect = tableClone.getBoundingClientRect();
-      captureWidth = Math.ceil(Math.max(
-        tableClone.scrollWidth,
-        tableRect.width,
-        wrap.scrollWidth,
-        captureWidth
-      )) + 2;
-
-      captureHeight = Math.ceil(Math.max(
-        tableClone.scrollHeight,
-        tableRect.height,
-        wrap.scrollHeight,
-        captureHeight
-      )) + 18;
-
-      wrap.style.width = captureWidth + "px";
-      wrap.style.minWidth = captureWidth + "px";
-      wrap.style.height = captureHeight + "px";
-      wrap.style.minHeight = captureHeight + "px";
-
-      const blob = await htmlToImage.toBlob(wrap, {
-        backgroundColor:"#ffffff",
-        pixelRatio:2,
-        width:captureWidth,
-        height:captureHeight,
-        canvasWidth:captureWidth,
-        canvasHeight:captureHeight,
-        style:{
-          width:captureWidth + "px",
-          height:captureHeight + "px",
-          minWidth:captureWidth + "px",
-          minHeight:captureHeight + "px",
-          overflow:"visible",
-          background:"#ffffff"
-        },
-        cacheBust:true
-      });
-
-      if (!blob) {
-        throw new Error("이미지 생성 실패");
-      }
+      const canvas = buildTableCanvas(sourceTable);
+      const blob = await canvasBlob(canvas);
 
       if (navigator.clipboard && window.ClipboardItem) {
         await navigator.clipboard.write([
@@ -1985,8 +2223,43 @@
       a.download = captureFileName();
       a.click();
       URL.revokeObjectURL(a.href);
-    } finally {
-      wrap.remove();
+    } catch (err) {
+      console.error(err);
+
+      if (window.htmlToImage?.toBlob) {
+        try {
+          const blob = await htmlToImage.toBlob(sourceTable, {
+            backgroundColor:"#ffffff",
+            pixelRatio:1,
+            cacheBust:true,
+            style:{
+              background:"#ffffff",
+              overflow:"visible"
+            }
+          });
+
+          if (blob && navigator.clipboard && window.ClipboardItem) {
+            await navigator.clipboard.write([
+              new ClipboardItem({ "image/png": blob })
+            ]);
+            alert("표 이미지를 클립보드에 복사했습니다.");
+            return;
+          }
+
+          if (blob) {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = captureFileName();
+            a.click();
+            URL.revokeObjectURL(a.href);
+            return;
+          }
+        } catch (fallbackErr) {
+          console.error(fallbackErr);
+        }
+      }
+
+      throw err;
     }
   }
 

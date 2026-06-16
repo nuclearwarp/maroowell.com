@@ -302,7 +302,7 @@
   <script src="/config.js"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>마루웰</title>
+  <title>프레시백 현황 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -927,6 +927,91 @@
   </style>
 
 
+  <style id="mw-freshbag-query-button-colors-and-toast">
+    /* 조회/프리셋 조회 버튼 역할 구분 */
+    #loadBtn{
+      background:linear-gradient(180deg,#3b82f6,#2563eb) !important;
+      border-color:#2563eb !important;
+      color:#ffffff !important;
+      box-shadow:0 8px 18px rgba(37,99,235,.20) !important;
+    }
+
+    #loadBtn:hover{
+      background:linear-gradient(180deg,#2563eb,#1d4ed8) !important;
+      border-color:#1d4ed8 !important;
+      color:#ffffff !important;
+    }
+
+    #loadPresetBtn{
+      background:linear-gradient(180deg,#14b8a6,#0d9488) !important;
+      border-color:#0d9488 !important;
+      color:#ffffff !important;
+      box-shadow:0 8px 18px rgba(13,148,136,.20) !important;
+    }
+
+    #loadPresetBtn:hover{
+      background:linear-gradient(180deg,#0d9488,#0f766e) !important;
+      border-color:#0f766e !important;
+      color:#ffffff !important;
+    }
+
+    #loadBtn:disabled,
+    #loadPresetBtn:disabled{
+      opacity:.68 !important;
+      cursor:not-allowed !important;
+      box-shadow:none !important;
+    }
+
+    .mwFreshbagToast{
+      position:fixed !important;
+      left:50% !important;
+      bottom:22px !important;
+      transform:translate(-50%, 12px) !important;
+      z-index:9999 !important;
+      min-width:210px !important;
+      max-width:calc(100vw - 40px) !important;
+      min-height:42px !important;
+      padding:0 16px !important;
+      border-radius:999px !important;
+      display:flex !important;
+      align-items:center !important;
+      justify-content:center !important;
+      text-align:center !important;
+      background:rgba(15,23,42,.92) !important;
+      color:#ffffff !important;
+      font-family:var(--mw-font) !important;
+      font-size:13px !important;
+      font-weight:700 !important;
+      box-shadow:0 16px 44px rgba(15,23,42,.24) !important;
+      opacity:0 !important;
+      pointer-events:none !important;
+      transition:opacity .16s ease, transform .16s ease !important;
+      backdrop-filter:blur(10px) !important;
+    }
+
+    .mwFreshbagToast.show{
+      opacity:1 !important;
+      transform:translate(-50%, 0) !important;
+    }
+
+    .mwFreshbagToast.ok{
+      background:rgba(21,128,61,.94) !important;
+    }
+
+    .mwFreshbagToast.warn{
+      background:rgba(161,98,7,.94) !important;
+    }
+
+    @media(max-width:900px){
+      .mwFreshbagToast{
+        bottom:16px !important;
+        min-width:190px !important;
+        font-size:12px !important;
+      }
+    }
+  </style>
+
+
   <style id="mw-freshbag-copy-button-purple-fix">
     /* 이미지 복사 버튼: 조회/행추가/삭제와 역할이 겹치지 않게 보라색 계열 */
     #copyBtn,
@@ -1093,7 +1178,7 @@
         <a href="#" id="mwBoardMenuToggle"><img src="/favicon.ico" alt="MarooWell"></a>
         <div>
           <div class="title">프레시백 현황 조회</div>
-          <div class="sub">연도 / 캠프 / 주간·야간 / 라우트 기준으로 월별 가중요인 표를 조회하고, 조회조건을 프리셋으로 저장 가능</div>
+          <div class="sub">연도 / 캠프 / 주간·야간 / 라우트 행 기준으로 월별 가중요인 표를 조회하고, 조회조건을 프리셋으로 저장할 수 있습니다.</div>
         </div>
       </div>
       <div class="pill" id="userPill">세션 확인 중</div>
@@ -1193,6 +1278,8 @@
   let tableRows = [];
   let localSeq = 1;
   let hiddenMonths = new Set();
+  let lastQueryWasAllRoutes = false;
+  let freshbagToastTimer = null;
 
   const PRESET_STORAGE_KEY = "mw:coupang_freshbag:query_presets:v3";
   const LAST_QUERY_STORAGE_KEY = "mw:coupang_freshbag:last_query:v3";
@@ -1257,6 +1344,25 @@
   function setStatus(msg, type = "") {
     $("statusText").textContent = msg;
     $("statusText").className = type ? "status " + type : "status";
+  }
+
+  function showFreshbagToast(message, type = "ok") {
+    let toast = document.getElementById("mwFreshbagToast");
+
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "mwFreshbagToast";
+      toast.className = "mwFreshbagToast";
+      document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.className = `mwFreshbagToast ${type} show`;
+
+    clearTimeout(freshbagToastTimer);
+    freshbagToastTimer = setTimeout(() => {
+      toast.classList.remove("show");
+    }, 1600);
   }
 
   function esc(v) {
@@ -1978,6 +2084,7 @@
     }
 
     rawRows = [];
+    lastQueryWasAllRoutes = false;
     renderTable();
     renderSummary();
   }
@@ -1997,7 +2104,7 @@
 
     applyPresetToScreen(preset);
     setStatus(`프리셋 불러오기 완료: ${preset.name}. 조회 중...`, "warn");
-    await loadData();
+    await loadData({ resetBeforeQuery:true });
   }
 
   function deleteSelectedPreset() {
@@ -2050,7 +2157,30 @@
 
     applyPresetToScreen(preset);
     setStatus("최근 조회조건 불러오기 완료. 조회 중...", "warn");
-    await loadData();
+    await loadData({ resetBeforeQuery:true });
+  }
+
+  function clearFetchedValuesOnly() {
+    rawRows = [];
+
+    for (const row of tableRows) {
+      row.months = {};
+    }
+
+    renderTable();
+    renderSummary();
+  }
+
+  function prepareBeforeQuery() {
+    if (!rawRows.length) return;
+
+    if (lastQueryWasAllRoutes) {
+      rawRows = [];
+      initDefaultRows();
+      return;
+    }
+
+    clearFetchedValuesOnly();
   }
 
   function getCriteriaRows() {
@@ -2133,10 +2263,15 @@
     return Array.isArray(result?.rows) ? result.rows : [];
   }
 
-  async function loadData() {
+  async function loadData(options = {}) {
+    if (options.resetBeforeQuery) {
+      prepareBeforeQuery();
+    }
+
     setStatus("freshbag 백엔드로 조회 중... Route가 비어 있으면 Camp 전체를 조회합니다.");
 
     const criteria = validateCriteria();
+    lastQueryWasAllRoutes = criteria.allRoutes === true;
     rawRows = await fetchRowsByCriteria(criteria);
 
     applyFetchedRowsToTable(criteria, rawRows);
@@ -2699,6 +2834,7 @@
     if (mobile) {
       downloadImageBlob(blob, fileName);
       setStatus(`${statusText} / 모바일 원본 PNG 저장 완료`, "ok");
+      showFreshbagToast("이미지 저장 완료", "ok");
       return;
     }
 
@@ -2711,6 +2847,7 @@
         ]);
 
         setStatus(`${statusText} / 클립보드 복사 완료`, "ok");
+        showFreshbagToast("이미지 복사 완료", "ok");
         return;
       } catch (e) {
         console.warn("clipboard image copy failed", e);
@@ -2719,6 +2856,7 @@
 
     downloadImageBlob(blob, fileName);
     setStatus(`${statusText} / 원본 PNG 다운로드 완료`, "warn");
+    showFreshbagToast("이미지 다운로드 완료", "warn");
   }
 
 
@@ -2946,6 +3084,7 @@
     $("savedPresetSelect").value = "";
 
     rawRows = [];
+    lastQueryWasAllRoutes = false;
     initDefaultRows();
     setStatus("초기화 완료. Route 없이 Camp만 입력하면 Camp 전체 조회가 가능합니다.", "ok");
   }
@@ -2962,7 +3101,7 @@
   initYearOptions();
   loadHiddenMonths();
 
-  $("loadBtn").addEventListener("click", () => run(loadData));
+  $("loadBtn").addEventListener("click", () => run(() => loadData({ resetBeforeQuery:true })));
   $("addRowBtn").addEventListener("click", addRow);
   $("clearBtn").addEventListener("click", clearAll);
   $("copyBtn").addEventListener("click", () => run(copyTableImage));
@@ -3029,13 +3168,13 @@
 
   ["yearFilter", "waveFilter"].forEach(id => {
     $(id).addEventListener("change", () => {
-      if (rawRows.length > 0) run(loadData);
+      if (rawRows.length > 0) run(() => loadData({ resetBeforeQuery:true }));
       else renderTable();
     });
   });
 
   $("campFilter").addEventListener("keydown", e => {
-    if (e.key === "Enter") run(loadData);
+    if (e.key === "Enter") run(() => loadData({ resetBeforeQuery:true }));
   });
 
   try {

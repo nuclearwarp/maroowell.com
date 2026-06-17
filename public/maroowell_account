@@ -6,7 +6,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="referrer" content="origin" />
-  <title>마루웰</title>
+  <title>정산 통계 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
@@ -32,7 +32,7 @@
 <body>
   <div class="app">
     <header class="topbar">
-      <div class="brand"><a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기"><img src="/favicon.ico" alt="Maroowell" /></a><div class="brandText"><h1>배송/반품 통계 조회</h1><p>월별·일별·요일별·노선별 배송/반품 수량 통계</p></div></div>
+      <div class="brand"><a id="mwBoardMenuToggle" class="logoButton" href="#" title="게시판 열기" aria-label="게시판 열기"><img src="/favicon.ico" alt="Maroowell" /></a><div class="brandText"><h1>정산 통계 조회</h1><p>월별·일별·요일별·노선별 배송/반품 수량 통계</p></div></div>
       <div class="topSpacer"></div><div id="userBadge" class="userBadge">-</div><button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </header>
     <main class="wrap">
@@ -40,7 +40,7 @@
         <div class="field"><label for="yearSelect">정산 연도</label><select id="yearSelect" class="select"></select></div>
         <div class="field"><label for="startMonthSelect">시작 월</label><select id="startMonthSelect" class="select"></select></div>
         <div class="field"><label for="endMonthSelect">종료 월</label><select id="endMonthSelect" class="select"></select></div>
-        <div class="field"><label for="waveSelect">주/야</label><select id="waveSelect" class="select"><option value="">전체</option><option value="주간">주간</option><option value="야간">야간</option><option value="WAVE2">WAVE2</option><option value="WAVE1">WAVE1</option></select></div>
+        <div class="field"><label for="waveSelect">주/야</label><select id="waveSelect" class="select"><option value="">전체</option><option value="주간">주간</option><option value="야간">야간</option><option value="심야">심야</option><option value="WAVE2">WAVE2</option><option value="WAVE1">WAVE1</option></select></div>
         <div class="field"><label for="currentCampInput">현재 캠프</label><select id="currentCampInput" class="select">
           <option value="">캠프 선택</option>
           <option value="일산2">일산2</option>
@@ -68,7 +68,7 @@
       const state={session:null,user:null,access:null,rows:[],rawRows:[],filteredRows:[],stats:null,currentGraph:null};
       const supabaseClient=SUPABASE_URL&&SUPABASE_ANON_KEY&&window.supabase?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
       function clean(v){return String(v??"").trim()}function loose(v){return clean(v).replace(/[\s_\-]/g,"").toLowerCase()}function esc(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;")}function num(v){const n=Number(v||0);return Number.isFinite(n)?n:0}function int(v){return Math.round(num(v))}function count(v){return int(v).toLocaleString("ko-KR")}function weekdayOf(date){const d=new Date(`${date}T00:00:00`);return Number.isFinite(d.getTime())?d.getDay():-1}function weekdayLabel(date){const wd=weekdayOf(date);return wd>=0?WEEKDAYS[wd]:""}function isoMonth(date){return clean(date).slice(0,7)}function setStatus(t,type){els.statusText.textContent=t||"";els.statusText.className=type?`status ${type}`:"status"}function setBusy(b){els.btnLoad.disabled=b;els.stateText.textContent=b?"처리 중":"READY"}
-      function isLossRow(row){const s=clean(row.source_sheet).replace(/\s+/g,"").toLowerCase(),c=clean(row.classify).replace(/\s+/g,"").toLowerCase();return s==="분실파손list"||c==="분실파손"||c.includes("분실")||c.includes("파손")}function isRawRow(row){return !isLossRow(row)}function isExcludedStatsRow(row){const c=clean(row.classify).replace(/\s+/g,""),r=clean(row.route);return c.includes("미계약")||!r||r==="-"||r==="–"||r==="—"}function normalizeWave(v){const raw=clean(v).toUpperCase();if(raw==="WAVE2"||raw==="2W"||raw==="주간")return"주간";if(raw==="WAVE1"||raw==="1W"||raw==="야간")return"야간";return clean(v)||"-"}
+      function isLossRow(row){const s=clean(row.source_sheet).replace(/\s+/g,"").toLowerCase(),c=clean(row.classify).replace(/\s+/g,"").toLowerCase();return s==="분실파손list"||c==="분실파손"||c.includes("분실")||c.includes("파손")}function isRawRow(row){return !isLossRow(row)}function isExcludedStatsRow(row){const c=clean(row.classify).replace(/\s+/g,""),r=clean(row.route);return c.includes("미계약")||!r||r==="-"||r==="–"||r==="—"}function normalizeWave(v){const raw=clean(v).toUpperCase().replace(/\s+/g,"");if(raw==="WAVE2"||raw==="2W"||raw==="W2"||raw==="주간"||raw==="DAY")return"주간";if(raw==="WAVE1"||raw==="1W"||raw==="W1"||raw==="야간"||raw==="심야"||raw==="새벽"||raw==="NIGHT")return"야간";return clean(v)||"-"}
       function routeTokens(v){return clean(v).split(/[,\s/]+/).map(clean).filter(Boolean)}function leadingDigits(v){const m=clean(v).match(/^(\d+)/);return m?m[1]:clean(v)}function subPrefix(v){const m=clean(v).match(/^(\d+[A-Za-z가-힣]+)/);return m?m[1].toUpperCase():leadingDigits(v).toUpperCase()}function patternList(v){return clean(v).split(/[,\s]+/).map(clean).filter(Boolean)}function patternIsBase(p){return /^\d+$/.test(clean(p))}function routeMatches(route,pattern){const p=clean(pattern).toUpperCase();if(!p)return false;return routeTokens(route).some(t=>{const u=t.toUpperCase();return patternIsBase(p)?leadingDigits(u)===p:u===p||subPrefix(u)===p||u.startsWith(p)})}
       function splitPastRefs(v){return clean(v).split(/[,\n]+/).map(clean).filter(Boolean).map(x=>{const parts=x.split(/[\/|]/).map(clean).filter(Boolean);return parts.length>=2?{camp:parts[0],route:parts.slice(1).join("")||parts[1]}:{camp:"",route:parts[0]||""}}).filter(x=>x.route)}function targetRefs(){const currentCamp=clean(els.currentCampInput.value),currentRoutes=patternList(els.currentRouteInput.value),refs=[];currentRoutes.forEach(route=>refs.push({camp:currentCamp,route,current:true}));splitPastRefs(els.pastRoutesInput.value).forEach(ref=>refs.push({...ref,current:false}));return refs}function fetchRefs(){const refs=targetRefs(),currentCamp=clean(els.currentCampInput.value);if(currentCamp&&!refs.length)refs.push({camp:currentCamp,route:"",current:true});return refs}function rowMatchesRefs(row,refs){if(!refs.length)return true;return refs.some(ref=>{if(ref.camp&&loose(row.camp)!==loose(ref.camp))return false;if(!clean(ref.route))return true;return routeMatches(row.route,ref.route)})}
       function groupForRow(row,refs){
@@ -105,9 +105,61 @@
       function showAccessDenied(msg){els.accessDeniedText.textContent=msg||"최고관리자 권한이 필요합니다.";els.accessDeniedEmail.textContent=state.user?.email?`현재 계정: ${state.user.email}`:"로그인 계정을 확인할 수 없습니다.";els.accessDenied.classList.add("show");document.documentElement.style.visibility="visible"}async function logout(){try{if(supabaseClient)await supabaseClient.auth.signOut()}catch{}location.href=LOGIN_PATH}
       async function accountApi(path,body={}){if(!state.session?.access_token)throw new Error("로그인이 필요합니다.");const res=await fetch(ACCOUNT_API_BASE+path,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+state.session.access_token},body:JSON.stringify(body),cache:"no-store"});const text=await res.text();let data=null;if(text){try{data=JSON.parse(text)}catch{data=text}}if(!res.ok||data?.ok===false){const msg=(data&&typeof data==="object"&&(data.error||data.message||data.detail))||(typeof data==="string"?data:"")||`HTTP ${res.status}`;throw new Error(String(msg))}return data}
       async function checkAccess(){if(!supabaseClient){showAccessDenied("Supabase 설정을 찾지 못했습니다. config.js를 확인하세요.");return false}const{data:sessionData,error:sessionError}=await supabaseClient.auth.getSession();if(sessionError)throw sessionError;state.session=sessionData?.session||null;state.user=state.session?.user||null;if(!state.user){location.href=`${LOGIN_PATH}?next=${encodeURIComponent(location.pathname)}`;return false}els.userBadge.textContent=state.user.email||state.user.id||"로그인";const result=await accountApi("/account/access",{});state.access=result.access||null;document.documentElement.style.visibility="visible";return true}
+      function waveSelectValueForNormalized(wave){
+        const normalized = normalizeWave(wave);
+        if(normalized === "주간") return "주간";
+        if(normalized === "야간") return "야간";
+        return clean(wave);
+      }
+
+      function rowsMatchingRefsOnly(){
+        const refs = fetchRefs();
+        return state.rawRows.filter(row => rowMatchesRefs(row, refs));
+      }
+
+      function autoFixWaveIfSingleAvailable(){
+        const selected = clean(els.waveSelect.value);
+
+        if(!selected || !state.rawRows.length) return false;
+
+        const refRows = rowsMatchingRefsOnly();
+
+        if(!refRows.length) return false;
+
+        const waves = Array.from(new Set(
+          refRows
+            .map(row => normalizeWave(row.wave))
+            .filter(w => w && w !== "-")
+        ));
+
+        if(waves.length !== 1) return false;
+
+        const onlyWave = waves[0];
+        const selectedNorm = normalizeWave(selected);
+
+        if(selectedNorm === onlyWave) return false;
+
+        const next = waveSelectValueForNormalized(onlyWave);
+
+        if(!next) return false;
+
+        els.waveSelect.value = next;
+        return true;
+      }
+
+      function autoWaveForCampBeforeLoad(){
+        const camp = loose(els.currentCampInput.value);
+
+        if(camp !== "m익산1") return;
+
+        if(normalizeWave(els.waveSelect.value) !== "야간"){
+          els.waveSelect.value = "야간";
+        }
+      }
+
       function baseFilteredRows(){const q=clean(els.searchInput.value).toLowerCase(),qLoose=loose(els.searchInput.value),wave=clean(els.waveSelect.value),waveNorm=normalizeWave(wave),refs=fetchRefs();return state.rawRows.filter(row=>{if(wave&&normalizeWave(row.wave)!==waveNorm&&clean(row.wave)!==wave)return false;if(!rowMatchesRefs(row,refs))return false;if(q){const values=[row.classify,row.id,row.route,row.delivery_date,row.camp,row.wave,normalizeWave(row.wave)].map(clean),hay=values.join(" ").toLowerCase(),hayLoose=values.map(loose).join(" ");if(!hay.includes(q)&&!hayLoose.includes(qLoose))return false}return true})}
-      function buildStats(){const refs=targetRefs(),filtered=baseFilteredRows();state.filteredRows=filtered;const total=newMetric(),routeMap=new Map(),dailyMap=new Map(),weekdayMap=new Map(),monthlyMap=new Map();filtered.forEach(row=>{const group=groupForRow(row,refs),wave=normalizeWave(row.wave),date=clean(row.delivery_date),month=isoMonth(date)||`${row.date_year||""}-${String(row.date_month||"").padStart(2,"0")}`,weekday=weekdayLabel(date);row.__originalGroup=group.original;addMetric(total,row);const rk=`${group.camp}||${wave}||${group.route}`;if(!routeMap.has(rk))routeMap.set(rk,newMetric({camp:group.camp,wave,route:group.route}));addMetric(routeMap.get(rk),row);if(date){const dk=`${date}||${group.camp}||${wave}||${group.route}`;if(!dailyMap.has(dk))dailyMap.set(dk,newMetric({date,weekday,camp:group.camp,wave,route:group.route}));addMetric(dailyMap.get(dk),row)}if(weekday){const wn=weekdayOf(date),wk=`${wn}||${weekday}||${group.camp}||${wave}||${group.route}`;if(!weekdayMap.has(wk))weekdayMap.set(wk,newMetric({weekday_no:wn,weekday,camp:group.camp,wave,route:group.route}));addMetric(weekdayMap.get(wk),row)}if(month){const mk=`${month}||${group.camp}||${wave}||${group.route}`;if(!monthlyMap.has(mk))monthlyMap.set(mk,newMetric({month,camp:group.camp,wave,route:group.route}));addMetric(monthlyMap.get(mk),row)}});const cmp=(a,b)=>String(a||"").localeCompare(String(b||""),"ko",{numeric:true,sensitivity:"base"}),wo=v=>normalizeWave(v)==="주간"?0:normalizeWave(v)==="야간"?1:2,byRoute=(a,b)=>cmp(a.camp,b.camp)||(wo(a.wave)-wo(b.wave))||cmp(a.route,b.route);state.stats={total:finalizeMetric(total),routeRows:Array.from(routeMap.values()).map(finalizeMetric).sort(byRoute),dailyRows:Array.from(dailyMap.values()).map(finalizeMetric).sort((a,b)=>a.date.localeCompare(b.date)||byRoute(a,b)),weekdayRows:Array.from(weekdayMap.values()).map(finalizeMetric).sort((a,b)=>a.weekday_no-b.weekday_no||byRoute(a,b)),monthlyRows:Array.from(monthlyMap.values()).map(finalizeMetric).sort((a,b)=>a.month.localeCompare(b.month)||byRoute(a,b))};renderAll()}
-      async function loadRows(){const p=selectedPeriod();setBusy(true);setStatus(`${periodLabel(p)} 정산 데이터를 조회하는 중입니다...`);try{const result=await accountApi("/account/query",{period:p,refs:fetchRefs()});const rows=Array.isArray(result.rows)?result.rows:[];state.rows=rows;const rawAll=rows.filter(isRawRow);state.rawRows=rawAll.filter(row=>!isExcludedStatsRow(row));buildStats();const loss=rows.filter(isLossRow).length,excluded=rawAll.length-state.rawRows.length;setStatus(`조회 완료: 정산Raw ${state.rawRows.length.toLocaleString("ko-KR")}행 기준으로 통계를 생성했습니다. / 분실·파손 ${loss.toLocaleString("ko-KR")}행, 미계약·공란 노선 ${excluded.toLocaleString("ko-KR")}행은 수량 통계에서 제외했습니다.`,"ok")}catch(err){console.error(err);setStatus(`조회 실패: ${err.message||err}`,"err");if(String(err.message||"").includes("권한")||String(err.message||"").toLowerCase().includes("permission"))showAccessDenied(err.message||String(err))}finally{setBusy(false)}}
+      function buildStats(){const refs=targetRefs();let filtered=baseFilteredRows();if(!filtered.length&&state.rawRows.length&&autoFixWaveIfSingleAvailable())filtered=baseFilteredRows();state.filteredRows=filtered;const total=newMetric(),routeMap=new Map(),dailyMap=new Map(),weekdayMap=new Map(),monthlyMap=new Map();filtered.forEach(row=>{const group=groupForRow(row,refs),wave=normalizeWave(row.wave),date=clean(row.delivery_date),month=isoMonth(date)||`${row.date_year||""}-${String(row.date_month||"").padStart(2,"0")}`,weekday=weekdayLabel(date);row.__originalGroup=group.original;addMetric(total,row);const rk=`${group.camp}||${wave}||${group.route}`;if(!routeMap.has(rk))routeMap.set(rk,newMetric({camp:group.camp,wave,route:group.route}));addMetric(routeMap.get(rk),row);if(date){const dk=`${date}||${group.camp}||${wave}||${group.route}`;if(!dailyMap.has(dk))dailyMap.set(dk,newMetric({date,weekday,camp:group.camp,wave,route:group.route}));addMetric(dailyMap.get(dk),row)}if(weekday){const wn=weekdayOf(date),wk=`${wn}||${weekday}||${group.camp}||${wave}||${group.route}`;if(!weekdayMap.has(wk))weekdayMap.set(wk,newMetric({weekday_no:wn,weekday,camp:group.camp,wave,route:group.route}));addMetric(weekdayMap.get(wk),row)}if(month){const mk=`${month}||${group.camp}||${wave}||${group.route}`;if(!monthlyMap.has(mk))monthlyMap.set(mk,newMetric({month,camp:group.camp,wave,route:group.route}));addMetric(monthlyMap.get(mk),row)}});const cmp=(a,b)=>String(a||"").localeCompare(String(b||""),"ko",{numeric:true,sensitivity:"base"}),wo=v=>normalizeWave(v)==="주간"?0:normalizeWave(v)==="야간"?1:2,byRoute=(a,b)=>cmp(a.camp,b.camp)||(wo(a.wave)-wo(b.wave))||cmp(a.route,b.route);state.stats={total:finalizeMetric(total),routeRows:Array.from(routeMap.values()).map(finalizeMetric).sort(byRoute),dailyRows:Array.from(dailyMap.values()).map(finalizeMetric).sort((a,b)=>a.date.localeCompare(b.date)||byRoute(a,b)),weekdayRows:Array.from(weekdayMap.values()).map(finalizeMetric).sort((a,b)=>a.weekday_no-b.weekday_no||byRoute(a,b)),monthlyRows:Array.from(monthlyMap.values()).map(finalizeMetric).sort((a,b)=>a.month.localeCompare(b.month)||byRoute(a,b))};renderAll()}
+      async function loadRows(){const p=selectedPeriod();setBusy(true);setStatus(`${periodLabel(p)} 정산 데이터를 조회하는 중입니다...`);try{const result=await accountApi("/account/query",{period:p,refs:fetchRefs()});const rows=Array.isArray(result.rows)?result.rows:[];state.rows=rows;const rawAll=rows.filter(isRawRow);state.rawRows=rawAll.filter(row=>!isExcludedStatsRow(row));buildStats();const loss=rows.filter(isLossRow).length,excluded=rawAll.length-state.rawRows.length;setStatus(`조회 완료: 정산Raw ${state.rawRows.length.toLocaleString("ko-KR")}행 / 표시 ${state.filteredRows.length.toLocaleString("ko-KR")}행 기준으로 통계를 생성했습니다. / 분실·파손 ${loss.toLocaleString("ko-KR")}행, 미계약·공란 노선 ${excluded.toLocaleString("ko-KR")}행은 수량 통계에서 제외했습니다.`,"ok")}catch(err){console.error(err);setStatus(`조회 실패: ${err.message||err}`,"err");if(String(err.message||"").includes("권한")||String(err.message||"").toLowerCase().includes("permission"))showAccessDenied(err.message||String(err))}finally{setBusy(false)}}
       function summaryPill(label,value,cls){return`<div class="pill ${cls||""}"><span>${esc(label)}</span><b class="${cls||""}">${esc(value)}</b></div>`}function metricValue(row,metric){
         if(metric==="avg_day") return num(row.avg_day);
         if(metric==="parcel") return num(row.parcel);
@@ -1042,7 +1094,7 @@ function canvasToBlobPromise(canvas){
       }
 
       async function openGraph(kind){await ensureMaroowellFontLoaded();drawGraph(kind);els.graphModal.classList.add("show")}function closeGraph(){els.graphModal.classList.remove("show")}async function copyGraph(){const canvas=els.graphCanvas;if(!canvas.width){alert("복사할 그래프가 없습니다.");return}canvas.toBlob(async blob=>{if(!blob){alert("그래프 이미지 생성 실패");return}if(navigator.clipboard&&window.ClipboardItem){await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);alert("그래프 이미지를 클립보드에 복사했습니다.");return}const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="account_graph.png";a.click();URL.revokeObjectURL(a.href)},"image/png")}
-      function bind(){els.btnLogout.addEventListener("click",logout);els.deniedLogoutBtn.addEventListener("click",logout);els.deniedHomeBtn.addEventListener("click",()=>{location.href=HOME_PATH});els.btnLoad.addEventListener("click",loadRows);els.btnReset.addEventListener("click",resetTables);els.btnCloseGraph.addEventListener("click",closeGraph);els.graphModal.addEventListener("click",e=>{if(e.target===els.graphModal)closeGraph()});els.btnCopyGraph.addEventListener("click",copyGraph);document.querySelectorAll("[data-copy-table]").forEach(btn=>btn.addEventListener("click",()=>copyTable(btn.dataset.copyTable)));document.querySelectorAll("[data-graph]").forEach(btn=>btn.addEventListener("click",()=>openGraph(btn.dataset.graph)));const upperRouteInput=el=>{const s=el.selectionStart,e=el.selectionEnd,v=el.value.toUpperCase();if(el.value!==v){el.value=v;try{el.setSelectionRange(s,e)}catch{}}};[els.currentRouteInput,els.pastRoutesInput].forEach(el=>el.addEventListener("input",()=>upperRouteInput(el)));[els.waveSelect,els.currentRouteInput,els.pastRoutesInput,els.searchInput].forEach(el=>{el.addEventListener("input",()=>{if(state.rawRows.length)buildStats()});el.addEventListener("change",()=>{if(state.rawRows.length)buildStats()})});els.currentCampInput.addEventListener("change",()=>{if(clean(els.currentCampInput.value)){loadRows()}else{resetTables()}});[els.yearSelect,els.startMonthSelect,els.endMonthSelect].forEach(el=>el.addEventListener("change",resetTables));els.searchInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&state.rawRows.length)buildStats()})}
+      function bind(){els.btnLogout.addEventListener("click",logout);els.deniedLogoutBtn.addEventListener("click",logout);els.deniedHomeBtn.addEventListener("click",()=>{location.href=HOME_PATH});els.btnLoad.addEventListener("click",()=>{autoWaveForCampBeforeLoad();loadRows()});els.btnReset.addEventListener("click",resetTables);els.btnCloseGraph.addEventListener("click",closeGraph);els.graphModal.addEventListener("click",e=>{if(e.target===els.graphModal)closeGraph()});els.btnCopyGraph.addEventListener("click",copyGraph);document.querySelectorAll("[data-copy-table]").forEach(btn=>btn.addEventListener("click",()=>copyTable(btn.dataset.copyTable)));document.querySelectorAll("[data-graph]").forEach(btn=>btn.addEventListener("click",()=>openGraph(btn.dataset.graph)));const upperRouteInput=el=>{const s=el.selectionStart,e=el.selectionEnd,v=el.value.toUpperCase();if(el.value!==v){el.value=v;try{el.setSelectionRange(s,e)}catch{}}};[els.currentRouteInput,els.pastRoutesInput].forEach(el=>el.addEventListener("input",()=>upperRouteInput(el)));[els.waveSelect,els.currentRouteInput,els.pastRoutesInput,els.searchInput].forEach(el=>{el.addEventListener("input",()=>{if(state.rawRows.length)buildStats()});el.addEventListener("change",()=>{if(state.rawRows.length)buildStats()})});els.currentCampInput.addEventListener("change",()=>{autoWaveForCampBeforeLoad();if(clean(els.currentCampInput.value)){loadRows()}else{resetTables()}});[els.yearSelect,els.startMonthSelect,els.endMonthSelect].forEach(el=>el.addEventListener("change",resetTables));els.searchInput.addEventListener("keydown",e=>{if(e.key==="Enter"&&state.rawRows.length)buildStats()})}
       async function boot(){initPeriodSelects();bind();renderAll();try{await checkAccess()}catch(e){console.error(e);showAccessDenied(e.message||String(e))}}boot();
     })();
   </script>

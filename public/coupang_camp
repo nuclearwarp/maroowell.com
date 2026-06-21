@@ -523,6 +523,32 @@
       background:#fff !important;
     }
 
+    .copyToast{
+      position:fixed;
+      left:50%;
+      bottom:28px;
+      z-index:12000;
+      transform:translate(-50%, 18px);
+      min-width:150px;
+      max-width:calc(100vw - 32px);
+      padding:12px 18px;
+      border-radius:999px;
+      background:rgba(15,23,42,.92);
+      color:#ffffff;
+      font-size:14px;
+      font-weight:750;
+      text-align:center;
+      box-shadow:0 18px 40px rgba(15,23,42,.24);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .18s ease, transform .18s ease;
+    }
+
+    .copyToast.show{
+      opacity:1;
+      transform:translate(-50%, 0);
+    }
+
     .accessDenied{
       position:fixed;
       inset:0;
@@ -803,6 +829,8 @@
     </footer>
   </div>
 
+  <div id="copyToast" class="copyToast" role="status" aria-live="polite">복사 완료!</div>
+
   <div id="accessDenied" class="accessDenied">
     <div class="accessCard">
       <h2>접근할 수 없습니다</h2>
@@ -904,7 +932,8 @@
         btnQrClose: $("#btnQrClose"),
         btnQrCloseBottom: $("#btnQrCloseBottom"),
         btnQrCopy: $("#btnQrCopy"),
-        btnQrDownload: $("#btnQrDownload")
+        btnQrDownload: $("#btnQrDownload"),
+        copyToast: $("#copyToast")
       };
 
       const supabase = SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase
@@ -947,6 +976,21 @@
         dom.statusText.className = tone ? "statusText " + tone : "statusText";
         dom.pillReady.textContent = tone === "err" ? "ERROR" : tone === "warn" ? "WAIT" : "READY";
         dom.pillReady.className = tone === "err" ? "pill warn" : "pill ok";
+      }
+
+      let toastTimer = null;
+
+      function showToast(message = "복사 완료!") {
+        const toast = dom.copyToast;
+        if (!toast) return;
+
+        toast.textContent = message;
+        toast.classList.add("show");
+
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.classList.remove("show");
+        }, 1300);
       }
 
       function setLoading(on, text) {
@@ -2144,10 +2188,12 @@
         if (navigator.clipboard && window.ClipboardItem) {
           await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
           setStatus("QR 이미지 복사 완료", "ok");
+          showToast("복사 완료!");
           return;
         }
 
         downloadQrImage();
+        showToast("다운로드로 대체했어요");
       }
 
       async function downloadQrImage() {

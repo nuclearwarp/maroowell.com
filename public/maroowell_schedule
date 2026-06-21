@@ -73,26 +73,63 @@
       height:42px;border-radius:12px;border:1px solid var(--line2);background:#0b1220;
       display:grid;grid-template-columns:minmax(104px,1fr) minmax(104px,1fr) 58px;gap:4px;align-items:center;padding:5px;min-width:0
     }
-    .dateMini{display:grid;grid-template-columns:28px minmax(64px,1fr);gap:2px;align-items:center;min-width:0;position:relative;cursor:pointer}
-    .dateMini b{color:#bfdbfe;font-size:11px;font-weight:1000;line-height:1.05;text-align:center;letter-spacing:-.04em}
-    .dateMini input{
-      width:100%;min-width:0;height:30px;border-radius:9px;border:1px solid rgba(255,255,255,.15);
-      background:#07101d;color:#eaf2ff;padding:0 2px;font-size:11px;font-weight:900;outline:none;text-align:center
-    }
-    .dateMini input:focus{border-color:rgba(96,165,250,.75);box-shadow:0 0 0 2px rgba(96,165,250,.13)}
-    .dateMini input{
+    .dateMini{
+      display:grid;
+      grid-template-columns:28px minmax(64px,1fr);
+      gap:2px;
+      align-items:center;
+      min-width:0;
+      min-height:30px;
+      position:relative;
       cursor:pointer;
+      border-radius:9px;
+      user-select:none;
+      -webkit-user-select:none;
+    }
+    .dateMini b{
+      color:#bfdbfe;
+      font-size:11px;
+      font-weight:1000;
+      line-height:1.05;
+      text-align:center;
+      letter-spacing:-.04em;
+      position:relative;
+      z-index:2;
+      pointer-events:none;
+    }
+    .dateMini input{
+      position:absolute;
+      inset:0;
+      z-index:3;
+      width:100%;
+      min-width:0;
+      height:100%;
+      border-radius:9px;
+      border:1px solid rgba(255,255,255,.15);
+      background:#07101d;
       color:transparent!important;
       caret-color:transparent!important;
-      padding-left:2px!important;
-      padding-right:2px!important;
+      padding:0!important;
+      font-size:11px;
+      font-weight:900;
+      outline:none;
+      text-align:center;
+      cursor:pointer;
+      opacity:.01;
+    }
+    .dateMini:focus-within input{
+      border-color:rgba(96,165,250,.75);
+      box-shadow:0 0 0 2px rgba(96,165,250,.13);
     }
     .dateMini input::-webkit-calendar-picker-indicator{
-      cursor:pointer;
-      opacity:0;
-      width:0;
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
       margin:0;
       padding:0;
+      opacity:0;
+      cursor:pointer;
     }
     .dateMini::after{
       content:attr(data-date-label);
@@ -100,6 +137,7 @@
       left:31px;
       right:3px;
       top:50%;
+      z-index:2;
       transform:translateY(-50%);
       color:#eaf2ff;
       font-size:12px;
@@ -1424,7 +1462,8 @@
         if(typeof input.showPicker==="function"){
           try{input.showPicker();return}catch{}
         }
-        try{input.click()}catch{}
+        // showPicker 미지원 브라우저에서는 포커스만 둔다.
+        // click() fallback은 click handler 재귀를 만들 수 있어 사용하지 않는다.
       }
 
       function normalizeRoutePart(v){return clean(v).replace(/[^0-9A-Za-z가-힣]/g,"").toUpperCase()}
@@ -3988,14 +4027,23 @@
           if(!input)return;
           input.addEventListener("input",()=>updateDateMiniLabel(input));
           input.addEventListener("change",()=>updateDateMiniLabel(input));
-          input.addEventListener("click",e=>{
+
+          const dateMini=input.closest(".dateMini");
+          const openPickerFromUserAction=e=>{
             e.preventDefault();
+            e.stopPropagation();
             openNativeDatePicker(input);
+          };
+
+          input.addEventListener("click",openPickerFromUserAction);
+          dateMini?.addEventListener("click",openPickerFromUserAction);
+          dateMini?.addEventListener("keydown",e=>{
+            if(e.key==="Enter"||e.key===" "){
+              openPickerFromUserAction(e);
+            }
           });
-          input.closest(".dateMini")?.addEventListener("click",e=>{
-            e.preventDefault();
-            openNativeDatePicker(input);
-          });
+          dateMini?.setAttribute("tabindex","0");
+          dateMini?.setAttribute("role","button");
         });
 
         els.btnExcelDateGenerate?.addEventListener("click",()=>{

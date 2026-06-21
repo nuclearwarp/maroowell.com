@@ -2155,28 +2155,22 @@
         return added;
       }
 
-      async function loadAllMaroowellInfoRowsForAccountLookup(){
-        if(state._mwInfoAccountLookupLoaded) return 0;
-        if(!supabase) return 0;
+            async function loadAllMaroowellInfoRowsForAccountLookup(){
+        if(state._mwInfoAccountLookupLoaded){
+          return appendInfoRowsToDrivers(state._mwInfoRowsForLookup || []);
+        }
 
         try{
-          const { data, error } = await supabase
-            .from("maroowell_info")
-            .select("*")
-            .range(0,9999);
+          const json = await apiFetch("/schedule/info-accounts");
+          const data = Array.isArray(json.rows) ? json.rows : [];
 
-          if(error){
-            console.warn("[MetaAdmin Excel] maroowell_info lookup failed", error);
-            return 0;
-          }
-
-          state._mwInfoAccountLookupLoaded=true;
-          state._mwInfoRowsForLookup=Array.isArray(data) ? data : [];
+          state._mwInfoAccountLookupLoaded = true;
+          state._mwInfoRowsForLookup = data;
           indexMaroowellInfoRows(state._mwInfoRowsForLookup);
 
           return appendInfoRowsToDrivers(state._mwInfoRowsForLookup);
         }catch(e){
-          console.warn("[MetaAdmin Excel] maroowell_info lookup failed", e);
+          console.warn("[MetaAdmin Excel] maroowell_info backend lookup failed", e);
           return 0;
         }
       }
@@ -3202,106 +3196,49 @@
         return row?.is_active===false && !clean(row?.driver_name) && !clean(row?.driver_display_name);
       }
 
-      async function deleteScheduleSaveRow(row){
-        const {error,count}=await supabase
-          .from("maroowell_schedule")
-          .delete({count:"exact"})
-          .eq("schedule_date",row.schedule_date)
-          .eq("camp",row.camp)
-          .eq("wave",row.wave)
-          .eq("route_label",row.route_label);
-
-        if(error)throw error;
-        return Number(count || 0);
+            async function deleteScheduleSaveRow(row){
+        // 백엔드 완전분리 후 프론트에서 Supabase DB delete를 직접 실행하지 않는다.
+        // 실제 삭제 처리는 /schedule/save Worker가 is_active:false payload를 받아 처리한다.
+        return 0;
       }
 
-      async function saveScheduleRowsOneByOne(payload,upsertError){
-        let saved=0;
-        let deleted=0;
-        let skipped=0;
-
+            async function saveScheduleRowsOneByOne(payload,upsertError){
+        // 백엔드 완전분리 후 row-by-row fallback도 Worker에서 처리한다.
+        // 이 함수는 이전 호출부 호환을 위해 남겨두지만 DB 직접 접근은 하지 않는다.
         if(upsertError){
-          console.warn("[maroowell_schedule] batch upsert failed. fallback to row-by-row save.",upsertError);
+          console.warn("[maroowell_schedule] backend save fallback placeholder", upsertError);
         }
-
-        for(const row of payload){
-          if(isBlankScheduleSaveRow(row)){
-            deleted+=await deleteScheduleSaveRow(row);
-            saved++;
-            continue;
-          }
-
-          const {data:found,error:findError}=await supabase
-            .from("maroowell_schedule")
-            .select("id")
-            .eq("schedule_date",row.schedule_date)
-            .eq("camp",row.camp)
-            .eq("wave",row.wave)
-            .eq("route_label",row.route_label)
-            .order("updated_at",{ascending:false})
-            .limit(1);
-
-          if(findError)throw findError;
-
-          const existingId=found?.[0]?.id || "";
-
-          if(existingId){
-            const {error:updateError}=await supabase
-              .from("maroowell_schedule")
-              .update(row)
-              .eq("id",existingId);
-
-            if(updateError)throw updateError;
-            saved++;
-            continue;
-          }
-
-          const {error:insertError}=await supabase
-            .from("maroowell_schedule")
-            .insert(row);
-
-          if(insertError)throw insertError;
-          saved++;
-        }
-
-        return {saved,deleted,skipped,mode:"row_by_row"};
+        const result = await apiFetch("/schedule/save", {
+          method:"POST",
+          body:JSON.stringify({rows:payload || []})
+        });
+        return {
+          saved:Number(result.saved || 0),
+          deleted:Number(result.deleted || 0),
+          skipped:Number(result.skipped || 0),
+          mode:result.mode || "backend"
+        };
       }
 
-      async function saveScheduleRowsDirect(items){
-        if(!supabase)throw new Error("Supabase 설정을 찾을 수 없습니다.");
-
-        const payload=items
+            async function saveScheduleRowsDirect(items){
+        const payload = items
           .map(makeSupabaseScheduleSaveRow)
-          .filter(row=>row.schedule_date && row.camp && row.wave && row.route_label);
+          .filter(row => row.schedule_date && row.camp && row.wave && row.route_label);
 
-        if(!payload.length)return {saved:0,deleted:0,skipped:0,mode:"empty"};
-
-        const deletePayload=payload.filter(isBlankScheduleSaveRow);
-        const upsertPayload=payload.filter(row=>!isBlankScheduleSaveRow(row));
-
-        let deleted=0;
-        for(const row of deletePayload){
-          deleted+=await deleteScheduleSaveRow(row);
+        if(!payload.length){
+          return {saved:0,deleted:0,skipped:0,mode:"empty"};
         }
 
-        if(!upsertPayload.length){
-          return {saved:deletePayload.length,deleted,skipped:0,mode:"delete_only"};
-        }
+        const result = await apiFetch("/schedule/save", {
+          method:"POST",
+          body:JSON.stringify({rows:payload})
+        });
 
-        const {error}=await supabase
-          .from("maroowell_schedule")
-          .upsert(upsertPayload,{
-            onConflict:"schedule_date,camp,wave,route_label"
-          });
-
-        if(!error)return {saved:upsertPayload.length+deletePayload.length,deleted,skipped:0,mode:"upsert_delete"};
-
-        const fallback=await saveScheduleRowsOneByOne(upsertPayload,error);
         return {
-          saved:fallback.saved+deletePayload.length,
-          deleted:deleted+(fallback.deleted||0),
-          skipped:fallback.skipped||0,
-          mode:"row_by_row_delete"
+          saved:Number(result.saved || 0),
+          deleted:Number(result.deleted || 0),
+          skipped:Number(result.skipped || 0),
+          mode:result.mode || "backend"
         };
       }
 

@@ -1299,7 +1299,17 @@
 
         try {
           const j = await apiFetch("/access", { method: "GET", auth: true });
-          state.canEdit = parseCanEditAccess(j);
+          const explicitCanEdit = parseCanEditAccess(j);
+
+          // coupang_camp Worker의 /access 응답은 버전별로 canEdit 필드명이 다를 수 있다.
+          // 인증된 세션으로 /access 자체가 성공했다면 프론트 편집 UI는 열어두고,
+          // 실제 DB 저장 권한은 /camps/batch 백엔드에서 최종 검증한다.
+          state.canEdit = explicitCanEdit || j?.ok === true || j?.allowed === true || j?.canAccess === true || j?.can_access === true;
+
+          // 마루웰 최고관리자 계정은 응답 필드명이 애매해도 프론트 버튼을 열어둔다.
+          if (!state.canEdit && /(^brain@maroowell\.com$|^maroowell1@maroowell\.com$|^nuclear_warp@naver\.com$)/i.test(state.viewerEmail)) {
+            state.canEdit = true;
+          }
         } catch (e) {
           console.warn("[coupang_camp] access check failed", e);
           state.canEdit = false;

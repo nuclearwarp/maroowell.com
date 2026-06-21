@@ -1757,18 +1757,32 @@
       }
 
       function findBaseCampRowForQr(row) {
+        const camp = normalizeText(row?.camp);
         const mbCamp = normalizeText(row?.mb_camp);
         const ownCode = normalizeText(row?.code);
 
-        // 본캠프 행이면 그대로 사용.
+        // 이미 본캠프 행이면 그대로 사용.
         if (!mbCamp || mbCamp === "본캠프") {
           return row;
         }
 
-        // 모캠/하위캠프 행이면 mb_camp에 적힌 본캠프명을 기준으로 본캠프 행을 찾는다.
+        // 핵심:
+        // 모캠/MB 행(예: camp=김포1, mb_camp=식사동MB, code=MC68)을 눌러도
+        // QR은 같은 camp의 본캠프 행(예: camp=김포1, mb_camp=본캠프, code=SG42)을 기준으로 만든다.
+        const sameCampRows = state.rows.filter(item => normalizeText(item.camp) === camp);
+
+        const baseBySameCamp =
+          sameCampRows.find(item => normalizeText(item.mb_camp) === "본캠프" && normalizeText(item.code)) ||
+          sameCampRows.find(item => /본캠프/i.test(normalizeText(item.mb_camp)) && normalizeText(item.code)) ||
+          sameCampRows.find(item => !normalizeText(item.mb_camp) && normalizeText(item.code));
+
+        if (baseBySameCamp) return baseBySameCamp;
+
+        // 예외 호환:
+        // mb_camp 값 자체가 본캠프명으로 들어온 데이터가 있을 수 있어서 기존 방식도 유지한다.
         const byMainCampName = state.rows.filter(item => {
-          const camp = normalizeText(item.camp);
-          return camp && camp === mbCamp;
+          const itemCamp = normalizeText(item.camp);
+          return itemCamp && itemCamp === mbCamp;
         });
 
         const baseWithCode =
@@ -1778,13 +1792,14 @@
         if (baseWithCode) return baseWithCode;
 
         const byCodeOrDesc = state.rows.find(item => {
-          const camp = normalizeText(item.camp);
+          const itemCamp = normalizeText(item.camp);
           const code = normalizeText(item.code);
           const desc = normalizeText(item.description);
           return normalizeText(item.mb_camp) === "본캠프" && (
-            camp === mbCamp ||
+            itemCamp === mbCamp ||
             code === mbCamp ||
-            desc === mbCamp
+            desc === mbCamp ||
+            (camp && itemCamp === camp)
           );
         });
 

@@ -190,6 +190,13 @@
       cursor:not-allowed;
     }
 
+    #btnAddRow:disabled,
+    #btnSaveAll:disabled{
+      display:inline-block;
+      opacity:.42;
+      filter:grayscale(.18);
+    }
+
     .toolbar{
       display:flex;
       align-items:center;
@@ -681,10 +688,10 @@
       </div>
       <div class="spacer"></div>
       <button id="btnReload" class="btn primary" type="button">불러오기</button>
-      <button id="btnAddRow" class="btn ok" type="button" style="display:none">행 추가</button>
-      <button id="btnSaveAll" class="btn ok" type="button" style="display:none">전체 저장</button>
+      <button id="btnAddRow" class="btn ok" type="button">행 추가</button>
+      <button id="btnSaveAll" class="btn ok" type="button">전체 저장</button>
       <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
-      <button id="btnLogout" class="btn danger" type="button" style="display:none">로그아웃</button>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
     </header>
 
     <section class="toolbar">
@@ -912,6 +919,8 @@
         dom.btnSaveAll.disabled = !!on || !state.canEdit;
         dom.btnExportCsv.disabled = !!on;
         dom.btnClearFilters.disabled = !!on;
+
+        updateEditButtons();
 
         if (on) setStatus(text || "처리 중...", "warn");
       }
@@ -1188,6 +1197,77 @@
         });
       }
 
+      function parseCanEditAccess(j) {
+        const access = j?.access || j?.user || j?.data || {};
+        const roleLevel = Number(
+          j?.max_role_level ??
+          j?.role_level ??
+          j?.level ??
+          access?.max_role_level ??
+          access?.role_level ??
+          access?.level ??
+          0
+        ) || 0;
+
+        const roleText = [
+          j?.role,
+          j?.role_name,
+          j?.position,
+          j?.position_title,
+          access?.role,
+          access?.role_name,
+          access?.position,
+          access?.position_title
+        ].map(v => String(v || "").toLowerCase()).join(" ");
+
+        return Boolean(
+          j?.canEdit === true ||
+          j?.can_edit === true ||
+          j?.can_write === true ||
+          j?.editable === true ||
+          j?.isAdmin === true ||
+          j?.is_admin === true ||
+          j?.admin === true ||
+          j?.isSuperAdmin === true ||
+          j?.is_super_admin === true ||
+          j?.super_admin === true ||
+          access?.canEdit === true ||
+          access?.can_edit === true ||
+          access?.can_write === true ||
+          access?.editable === true ||
+          access?.isAdmin === true ||
+          access?.is_admin === true ||
+          access?.admin === true ||
+          access?.isSuperAdmin === true ||
+          access?.is_super_admin === true ||
+          access?.super_admin === true ||
+          roleLevel >= 90 ||
+          roleText.includes("admin") ||
+          roleText.includes("super") ||
+          roleText.includes("관리자") ||
+          roleText.includes("최고관리자")
+        );
+      }
+
+      function updateEditButtons() {
+        if (!state.loggedIn) {
+          dom.btnLogout.style.display = "none";
+          dom.btnAddRow.style.display = "none";
+          dom.btnSaveAll.style.display = "none";
+          return;
+        }
+
+        dom.btnLogout.style.display = "inline-block";
+        dom.btnAddRow.style.display = "inline-block";
+        dom.btnSaveAll.style.display = "inline-block";
+
+        dom.btnAddRow.disabled = state.loading || !state.canEdit;
+        dom.btnSaveAll.disabled = state.loading || !state.canEdit;
+
+        dom.btnAddRow.title = state.canEdit ? "새 행 추가" : "추가·수정·삭제는 최고관리자만 가능합니다.";
+        dom.btnSaveAll.title = state.canEdit ? "전체 저장" : "추가·수정·삭제는 최고관리자만 가능합니다.";
+      }
+
       async function getSessionAndAccess() {
         state.loggedIn = false;
         state.viewerEmail = "";
@@ -1211,29 +1291,19 @@
         }
 
         if (!state.loggedIn) {
-          state.canEdit = false;
-          dom.btnLogout.style.display = "none";
-          dom.btnAddRow.style.display = "none";
-          dom.btnSaveAll.style.display = "none";
+          updateEditButtons();
           return;
         }
 
-        dom.btnLogout.style.display = "inline-block";
-
         try {
           const j = await apiFetch("/access", { method: "GET", auth: true });
-          state.canEdit = j?.canEdit === true;
-        } catch {
+          state.canEdit = parseCanEditAccess(j);
+        } catch (e) {
+          console.warn("[coupang_camp] access check failed", e);
           state.canEdit = false;
         }
 
-        if (!state.canEdit) {
-          dom.btnAddRow.style.display = "none";
-          dom.btnSaveAll.style.display = "none";
-        } else {
-          dom.btnAddRow.style.display = "inline-block";
-          dom.btnSaveAll.style.display = "inline-block";
-        }
+        updateEditButtons();
       }
 
       async function apiFetch(path, options = {}) {

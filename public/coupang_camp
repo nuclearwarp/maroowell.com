@@ -9,7 +9,6 @@
   <title>쿠팡 캠프 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 
   <style>
     @font-face{
@@ -1778,7 +1777,6 @@
 
         if (baseWithCode) return baseWithCode;
 
-        // 혹시 camp명이 아니라 코드/설명 쪽에 본캠프 기준값이 들어온 경우 대비.
         const byCodeOrDesc = state.rows.find(item => {
           const camp = normalizeText(item.camp);
           const code = normalizeText(item.code);
@@ -1790,6 +1788,7 @@
           );
         });
 
+        // 그래도 못 찾으면 현재 행 코드라도 사용한다.
         return byCodeOrDesc || row;
       }
 
@@ -1800,8 +1799,9 @@
         const address = normalizeText(baseRow?.address) || normalizeText(row?.address);
         const code = normalizeText(baseRow?.code) || normalizeText(row?.code) || camp;
 
-        // QR 실제 스캔값은 캠프명이 아니라 캠프 코드다.
-        // 모캠/하위캠프는 위 findBaseCampRowForQr()에서 본캠프 행의 code를 우선 사용한다.
+        // 실제 QR 스캔값은 캠프 코드다.
+        // 예: 강서1 -> SG06
+        // 모캠/하위캠프는 본캠프 행을 찾아 본캠프 code를 우선 사용한다.
         return {
           code,
           camp,
@@ -1822,25 +1822,269 @@
         };
       }
 
-      async function renderRealQrCanvas(canvas, text) {
-        if (!canvas) throw new Error("QR 캔버스가 없습니다.");
+      function makeQrVersion1L(text) {
+        // QR Code Version 1-L, byte mode.
+        // 캠프 코드는 보통 SG06/CL04처럼 짧아서 Version 1-L로 충분하다.
+        const raw = normalizeText(text);
+        const bytes = Array.from(new TextEncoder().encode(raw));
 
-        const qrText = normalizeText(text);
-        if (!qrText) throw new Error("QR로 만들 캠프 코드가 없습니다.");
+        if (!bytes.length) throw new Error("QR로 만들 캠프 코드가 없습니다.");
+        if (bytes.length > 17) throw new Error("캠프 코드가 너무 깁니다. QR 생성 가능한 길이를 초과했습니다.");
 
-        if (!window.QRCode || typeof window.QRCode.toCanvas !== "function") {
-          throw new Error("QR 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.");
+        const dataCodewords = 19;
+        const ecCodewords = 7;
+        const bits = [];
+
+        const pushBits = (val, len) => {
+          for (let i = len - 1; i >= 0; i--) {
+            bits.push((val >>> i) & 1);
+          }
+        };
+
+        pushBits(0b0100, 4); // byte mode
+        pushBits(bytes.length, 8); // version 1 byte-count length
+
+        for (const b of bytes) {
+          pushBits(b, 8);
         }
 
-        await window.QRCode.toCanvas(canvas, qrText, {
-          width: 220,
-          margin: 2,
-          errorCorrectionLevel: "M",
-          color: {
-            dark: "#111827",
-            light: "#ffffff"
+        const maxBits = dataCodewords * 8;
+        const terminator = Math.min(4, maxBits - bits.length);
+        pushBits(0, terminator);
+
+        while (bits.length % 8 !== 0) bits.push(0);
+
+        const data = [];
+        for (let i = 0; i < bits.length; i += 8) {
+          let v = 0;
+          for (let j = 0; j < 8; j++) v = (v << 1) | bits[i + j];
+          data.push(v);
+        }
+
+        for (let pad = 0; data.length < dataCodewords; pad++) {
+          data.push(pad % 2 === 0 ? 0xec : 0x11);
+        }
+
+        const ec = reedSolomonCompute(data, ecCodewords);
+        const allCodewords = data.concat(ec);
+
+        const size = 21;
+        const modules = Array.from({ length: size }, () => Array(size).fill(false));
+        const reserved = Array.from({ length: size }, () => Array(size).fill(false));
+
+        const setFunction = (x, y, dark) => {
+          if (x < 0 || y < 0 || x >= size || y >= size) return;
+          modules[y][x] = !!dark;
+          reserved[y][x] = true;
+        };
+
+        const drawFinder = (x, y) => {
+          for (let dy = -1; dy <= 7; dy++) {
+            for (let dx = -1; dx <= 7; dx++) {
+              const xx = x + dx;
+              const yy = y + dy;
+              if (xx < 0 || yy < 0 || xx >= size || yy >= size) continue;
+
+              const dark =
+                (dx >= 0 && dx <= 6 && (dy === 0 || dy === 6)) ||
+                (dy >= 0 && dy <= 6 && (dx === 0 || dx === 6)) ||
+                (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4);
+
+              setFunction(xx, yy, dark);
+            }
           }
-        });
+        };
+
+        drawFinder(0, 0);
+        drawFinder(size - 7, 0);
+        drawFinder(0, size - 7);
+
+        for (let i = 0; i < size; i++) {
+          if (!reserved[6][i]) setFunction(i, 6, i % 2 === 0);
+          if (!reserved[i][6]) setFunction(6, i, i % 2 === 0);
+        }
+
+        // Format info reserved areas
+        for (let i = 0; i < 9; i++) {
+          if (i !== 6) {
+            reserved[8][i] = true;
+            reserved[i][8] = true;
+          }
+        }
+        for (let i = 0; i < 8; i++) {
+          reserved[8][size - 1 - i] = true;
+          reserved[size - 1 - i][8] = true;
+        }
+
+        // Dark module
+        setFunction(8, size - 8, true);
+
+        const dataBits = [];
+        for (const cw of allCodewords) {
+          for (let i = 7; i >= 0; i--) {
+            dataBits.push((cw >>> i) & 1);
+          }
+        }
+
+        const mask = 0;
+        let bitIndex = 0;
+
+        for (let right = size - 1; right >= 1; right -= 2) {
+          if (right === 6) right--;
+
+          const upward = ((right + 1) & 2) === 0;
+
+          for (let vert = 0; vert < size; vert++) {
+            const y = upward ? size - 1 - vert : vert;
+
+            for (let j = 0; j < 2; j++) {
+              const x = right - j;
+
+              if (reserved[y][x]) continue;
+
+              let dark = bitIndex < dataBits.length ? !!dataBits[bitIndex] : false;
+              bitIndex++;
+
+              if (qrMaskBit(mask, x, y)) dark = !dark;
+
+              modules[y][x] = dark;
+            }
+          }
+        }
+
+        drawFormatBits(modules, reserved, size, mask);
+
+        return modules;
+      }
+
+      function qrMaskBit(mask, x, y) {
+        if (mask === 0) return ((x + y) % 2) === 0;
+        if (mask === 1) return (y % 2) === 0;
+        if (mask === 2) return (x % 3) === 0;
+        return ((x + y) % 2) === 0;
+      }
+
+      function drawFormatBits(modules, reserved, size, mask) {
+        // Error correction L = 01b
+        const eclBits = 0b01;
+        const data = (eclBits << 3) | mask;
+        const bits = qrFormatBits(data);
+
+        const set = (x, y, i) => {
+          modules[y][x] = ((bits >>> i) & 1) !== 0;
+          reserved[y][x] = true;
+        };
+
+        for (let i = 0; i <= 5; i++) set(8, i, i);
+        set(8, 7, 6);
+        set(8, 8, 7);
+        set(7, 8, 8);
+        for (let i = 9; i < 15; i++) set(14 - i, 8, i);
+
+        for (let i = 0; i < 8; i++) set(size - 1 - i, 8, i);
+        for (let i = 8; i < 15; i++) set(8, size - 15 + i, i);
+
+        modules[size - 8][8] = true;
+        reserved[size - 8][8] = true;
+      }
+
+      function qrFormatBits(data) {
+        let d = data << 10;
+        const generator = 0x537;
+
+        for (let i = 14; i >= 10; i--) {
+          if (((d >>> i) & 1) !== 0) {
+            d ^= generator << (i - 10);
+          }
+        }
+
+        return ((data << 10) | d) ^ 0x5412;
+      }
+
+      function gfMultiply(x, y) {
+        let z = 0;
+
+        while (y > 0) {
+          if (y & 1) z ^= x;
+          x <<= 1;
+          if (x & 0x100) x ^= 0x11d;
+          y >>>= 1;
+        }
+
+        return z & 0xff;
+      }
+
+      function gfPow(x, power) {
+        let y = 1;
+        for (let i = 0; i < power; i++) y = gfMultiply(y, x);
+        return y;
+      }
+
+      function reedSolomonGenerator(degree) {
+        let result = [1];
+
+        for (let i = 0; i < degree; i++) {
+          const factor = [1, gfPow(2, i)];
+          const next = Array(result.length + 1).fill(0);
+
+          for (let j = 0; j < result.length; j++) {
+            next[j] ^= gfMultiply(result[j], factor[0]);
+            next[j + 1] ^= gfMultiply(result[j], factor[1]);
+          }
+
+          result = next;
+        }
+
+        return result.slice(1);
+      }
+
+      function reedSolomonCompute(data, degree) {
+        const generator = reedSolomonGenerator(degree);
+        const result = Array(degree).fill(0);
+
+        for (const b of data) {
+          const factor = b ^ result.shift();
+          result.push(0);
+
+          for (let i = 0; i < degree; i++) {
+            result[i] ^= gfMultiply(generator[i], factor);
+          }
+        }
+
+        return result;
+      }
+
+      function renderQrCanvas(canvas, text, label) {
+        if (!canvas) throw new Error("QR 캔버스가 없습니다.");
+
+        const modules = makeQrVersion1L(text);
+        const ctx = canvas.getContext("2d");
+        const size = canvas.width;
+        const n = modules.length;
+        const quiet = 4;
+        const scale = Math.floor(size / (n + quiet * 2));
+        const realSize = scale * (n + quiet * 2);
+        const offset = Math.floor((size - realSize) / 2);
+
+        ctx.clearRect(0, 0, size, size);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, size, size);
+
+        ctx.fillStyle = "#111827";
+        for (let y = 0; y < n; y++) {
+          for (let x = 0; x < n; x++) {
+            if (!modules[y][x]) continue;
+            ctx.fillRect(offset + (x + quiet) * scale, offset + (y + quiet) * scale, scale, scale);
+          }
+        }
+
+        // 스캔값과 별도로 화면 식별용 라벨만 작게 표시한다.
+        if (label) {
+          ctx.fillStyle = "#2563eb";
+          ctx.font = '700 12px "Noto Sans KR", sans-serif';
+          ctx.textAlign = "center";
+          ctx.fillText(String(label).slice(0, 14), size / 2, size - 8);
+        }
       }
 
       async function openQrForRow(id) {
@@ -1858,7 +2102,7 @@
           state.currentQr = payload;
           dom.qrTitle.textContent = `${payload.label || payload.code} QR`;
           dom.qrMeta.innerHTML = payload.metaHtml;
-          await renderRealQrCanvas(dom.qrCanvas, payload.qrText);
+          renderQrCanvas(dom.qrCanvas, payload.qrText, payload.label || payload.code);
           dom.qrModal.classList.add("show");
           dom.qrModal.setAttribute("aria-hidden", "false");
           setStatus(`QR 생성 완료: ${payload.qrText}`, "ok");

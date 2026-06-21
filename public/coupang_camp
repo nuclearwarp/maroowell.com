@@ -9,6 +9,7 @@
   <title>쿠팡 캠프 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 
   <style>
     @font-face{
@@ -1756,109 +1757,116 @@
         location.href = LOGIN_PATH;
       }
 
+      function findBaseCampRowForQr(row) {
+        const mbCamp = normalizeText(row?.mb_camp);
+        const ownCode = normalizeText(row?.code);
+
+        // 본캠프 행이면 그대로 사용.
+        if (!mbCamp || mbCamp === "본캠프") {
+          return row;
+        }
+
+        // 모캠/하위캠프 행이면 mb_camp에 적힌 본캠프명을 기준으로 본캠프 행을 찾는다.
+        const byMainCampName = state.rows.filter(item => {
+          const camp = normalizeText(item.camp);
+          return camp && camp === mbCamp;
+        });
+
+        const baseWithCode =
+          byMainCampName.find(item => normalizeText(item.mb_camp) === "본캠프" && normalizeText(item.code)) ||
+          byMainCampName.find(item => normalizeText(item.code));
+
+        if (baseWithCode) return baseWithCode;
+
+        // 혹시 camp명이 아니라 코드/설명 쪽에 본캠프 기준값이 들어온 경우 대비.
+        const byCodeOrDesc = state.rows.find(item => {
+          const camp = normalizeText(item.camp);
+          const code = normalizeText(item.code);
+          const desc = normalizeText(item.description);
+          return normalizeText(item.mb_camp) === "본캠프" && (
+            camp === mbCamp ||
+            code === mbCamp ||
+            desc === mbCamp
+          );
+        });
+
+        return byCodeOrDesc || row;
+      }
+
       function qrPayloadForRow(row) {
-        const camp = normalizeText(row.camp);
-        const mbCamp = normalizeText(row.mb_camp);
-        const address = normalizeText(row.address);
-        const code = normalizeText(row.code);
+        const baseRow = findBaseCampRowForQr(row);
 
-        // QR 내용은 복잡한 JSON이 아니라 본캠프 행 기준으로 캠프명/주소만 넣는다.
-        // 본캠프명은 표시용으로만 보조 사용하고, 실제 스캔 텍스트는 캠프 + 주소 2줄로 단순화한다.
-        const qrCamp = camp || mbCamp || code;
-        const qrAddress = address;
-        const qrText = [qrCamp, qrAddress].filter(Boolean).join("\n");
+        const camp = normalizeText(baseRow?.camp) || normalizeText(row?.camp);
+        const address = normalizeText(baseRow?.address) || normalizeText(row?.address);
+        const code = normalizeText(baseRow?.code) || normalizeText(row?.code) || camp;
 
+        // QR 실제 스캔값은 캠프명이 아니라 캠프 코드다.
+        // 모캠/하위캠프는 위 findBaseCampRowForQr()에서 본캠프 행의 code를 우선 사용한다.
         return {
           code,
-          camp: qrCamp,
-          mbCamp,
-          address: qrAddress,
-          label: qrCamp || code || "camp",
-          qrText: qrText || qrCamp || code || "",
+          camp,
+          address,
+          label: camp || code || "camp",
+          qrText: code,
+          baseCamp: baseRow,
           metaHtml: `
             <div class="qrMetaLine">
               <span class="qrMetaKey">캠프</span>
-              <span class="qrMetaVal">${escapeHtml(qrCamp || "-")}</span>
+              <span class="qrMetaVal">${escapeHtml(camp || "-")}</span>
             </div>
             <div class="qrMetaLine">
               <span class="qrMetaKey">주소</span>
-              <span class="qrMetaVal">${escapeHtml(qrAddress || "-")}</span>
+              <span class="qrMetaVal">${escapeHtml(address || "-")}</span>
             </div>
           `
         };
       }
 
-      function drawQrPlaceholder(canvas, text, label) {
-        const ctx = canvas.getContext("2d");
-        const size = canvas.width;
+      async function renderRealQrCanvas(canvas, text) {
+        if (!canvas) throw new Error("QR 캔버스가 없습니다.");
 
-        ctx.clearRect(0, 0, size, size);
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, size, size);
-        ctx.strokeStyle = "#0f172a";
-        ctx.lineWidth = 8;
-        ctx.strokeRect(8, 8, size - 16, size - 16);
+        const qrText = normalizeText(text);
+        if (!qrText) throw new Error("QR로 만들 캠프 코드가 없습니다.");
 
-        const seed = Array.from(text).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
-        const cell = 10;
-        const start = 24;
-        const count = 17;
-
-        ctx.fillStyle = "#0f172a";
-
-        function marker(x, y) {
-          ctx.fillRect(x, y, 44, 44);
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(x + 8, y + 8, 28, 28);
-          ctx.fillStyle = "#0f172a";
-          ctx.fillRect(x + 16, y + 16, 12, 12);
+        if (!window.QRCode || typeof window.QRCode.toCanvas !== "function") {
+          throw new Error("QR 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.");
         }
 
-        marker(24, 24);
-        marker(size - 68, 24);
-        marker(24, size - 68);
-
-        for (let y = 0; y < count; y++) {
-          for (let x = 0; x < count; x++) {
-            const px = start + x * cell;
-            const py = start + y * cell;
-
-            const inMarker =
-              (x < 5 && y < 5) ||
-              (x > 11 && y < 5) ||
-              (x < 5 && y > 11);
-
-            if (inMarker) continue;
-
-            if (((x * 17 + y * 31 + seed) % 5) < 2) {
-              ctx.fillRect(px, py, 8, 8);
-            }
+        await window.QRCode.toCanvas(canvas, qrText, {
+          width: 220,
+          margin: 2,
+          errorCorrectionLevel: "M",
+          color: {
+            dark: "#111827",
+            light: "#ffffff"
           }
-        }
-
-        ctx.fillStyle = "#2563eb";
-        ctx.font = '700 13px "Noto Sans KR", sans-serif';
-        ctx.textAlign = "center";
-        ctx.fillText(String(label || "").slice(0, 16), size / 2, size - 12);
+        });
       }
 
-      function openQrForRow(id) {
+      async function openQrForRow(id) {
         const row = findRow(id);
         if (!row) return;
 
         const payload = qrPayloadForRow(row);
 
-        if (!payload.qrText && !payload.label) {
-          setStatus("QR을 만들 캠프명 또는 주소가 없습니다.", "err");
+        if (!payload.qrText) {
+          setStatus("QR을 만들 캠프 코드가 없습니다.", "err");
           return;
         }
 
-        state.currentQr = payload;
-        dom.qrTitle.textContent = `${payload.label || payload.code} QR`;
-        dom.qrMeta.innerHTML = payload.metaHtml;
-        drawQrPlaceholder(dom.qrCanvas, payload.qrText, payload.label || payload.code);
-        dom.qrModal.classList.add("show");
-        dom.qrModal.setAttribute("aria-hidden", "false");
+        try {
+          state.currentQr = payload;
+          dom.qrTitle.textContent = `${payload.label || payload.code} QR`;
+          dom.qrMeta.innerHTML = payload.metaHtml;
+          await renderRealQrCanvas(dom.qrCanvas, payload.qrText);
+          dom.qrModal.classList.add("show");
+          dom.qrModal.setAttribute("aria-hidden", "false");
+          setStatus(`QR 생성 완료: ${payload.qrText}`, "ok");
+        } catch (e) {
+          console.error(e);
+          setStatus(e.message || String(e), "err");
+          alert(e.message || String(e));
+        }
       }
 
       function closeQrModal() {
@@ -1929,7 +1937,7 @@
         dom.sheetBody.addEventListener("click", e => {
           const qrBtn = e.target.closest("[data-qr-id]");
           if (qrBtn) {
-            openQrForRow(qrBtn.dataset.qrId);
+            void openQrForRow(qrBtn.dataset.qrId);
             return;
           }
 

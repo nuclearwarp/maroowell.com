@@ -1245,24 +1245,41 @@
       }
 
       function getStoredSupabaseSession() {
-        try {
-          const candidates = [];
+        const candidates = [];
 
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i) || "";
-            if (!/sb-|supabase|auth-token/i.test(key)) continue;
+        const collect = storage => {
+          if (!storage) return;
 
-            const value = localStorage.getItem(key);
-            if (!value || !value.includes("access_token")) continue;
+          try {
+            for (let i = 0; i < storage.length; i++) {
+              const key = storage.key(i) || "";
+              if (!/sb-|supabase|auth-token|gotrue/i.test(key)) continue;
 
-            candidates.push(value);
+              const value = storage.getItem(key);
+              if (!value || !value.includes("access_token")) continue;
+
+              candidates.push({
+                key,
+                value,
+                storageName: storage === sessionStorage ? "sessionStorage" : "localStorage"
+              });
+            }
+          } catch {}
+        };
+
+        // board-menu.js는 Supabase 세션을 sessionStorage로 잡고 있음.
+        // 이 페이지도 같은 세션을 읽어야 /access 호출이 가능하다.
+        collect(sessionStorage);
+        collect(localStorage);
+
+        for (const item of candidates) {
+          const session = extractSessionFromStoredValue(item.value);
+
+          if (session?.access_token) {
+            session.source = `${item.storageName}:${item.key}`;
+            return session;
           }
-
-          for (const value of candidates) {
-            const session = extractSessionFromStoredValue(value);
-            if (session?.access_token) return session;
-          }
-        } catch {}
+        }
 
         return null;
       }
@@ -1293,7 +1310,7 @@
         if (stored?.access_token) {
           return {
             ...stored,
-            source: "localStorage"
+            source: stored.source || "storedSupabaseSession"
           };
         }
 

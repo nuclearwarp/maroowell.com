@@ -1197,6 +1197,109 @@
         });
       }
 
+      function isKnownAdminEmail(email) {
+        return /(^brain@maroowell\.com$|^maroowell1@maroowell\.com$|^nuclear_warp@naver\.com$)/i.test(String(email || "").trim());
+      }
+
+      function decodeJwtPayload(token) {
+        try {
+          const part = String(token || "").split(".")[1];
+          if (!part) return {};
+          const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+          const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+          return JSON.parse(decodeURIComponent(escape(atob(padded))));
+        } catch {
+          return {};
+        }
+      }
+
+      function extractSessionFromStoredValue(value) {
+        try {
+          const parsed = typeof value === "string" ? JSON.parse(value) : value;
+          const session =
+            parsed?.currentSession ||
+            parsed?.session ||
+            parsed?.data?.session ||
+            parsed;
+
+          const accessToken =
+            session?.access_token ||
+            parsed?.access_token ||
+            parsed?.currentSession?.access_token;
+
+          if (!accessToken) return null;
+
+          const user = session?.user || parsed?.user || {};
+          const payload = decodeJwtPayload(accessToken);
+
+          return {
+            access_token: accessToken,
+            user: {
+              id: user?.id || payload.sub || "",
+              email: user?.email || payload.email || ""
+            }
+          };
+        } catch {
+          return null;
+        }
+      }
+
+      function getStoredSupabaseSession() {
+        try {
+          const candidates = [];
+
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i) || "";
+            if (!/sb-|supabase|auth-token/i.test(key)) continue;
+
+            const value = localStorage.getItem(key);
+            if (!value || !value.includes("access_token")) continue;
+
+            candidates.push(value);
+          }
+
+          for (const value of candidates) {
+            const session = extractSessionFromStoredValue(value);
+            if (session?.access_token) return session;
+          }
+        } catch {}
+
+        return null;
+      }
+
+      async function resolveAuthSession() {
+        if (supabase) {
+          try {
+            const { data } = await supabase.auth.getSession();
+            const session = data?.session;
+            const user = session?.user;
+
+            if (session?.access_token) {
+              return {
+                access_token: session.access_token,
+                user: {
+                  id: user?.id || "",
+                  email: user?.email || decodeJwtPayload(session.access_token).email || ""
+                },
+                source: "supabase.auth.getSession"
+              };
+            }
+          } catch (e) {
+            console.warn("[coupang_camp] supabase getSession failed", e);
+          }
+        }
+
+        const stored = getStoredSupabaseSession();
+        if (stored?.access_token) {
+          return {
+            ...stored,
+            source: "localStorage"
+          };
+        }
+
+        return null;
+      }
+
       function parseCanEditAccess(j) {
         const access = j?.access || j?.user || j?.data || {};
         const roleLevel = Number(
@@ -1209,6 +1312,14 @@
           0
         ) || 0;
 
+        const email = String(
+          j?.email ||
+          j?.user?.email ||
+          access?.email ||
+          state.viewerEmail ||
+          ""
+        ).trim();
+
         const roleText = [
           j?.role,
           j?.role_name,
@@ -1217,10 +1328,15 @@
           access?.role,
           access?.role_name,
           access?.position,
-          access?.position_title
+          access?.position_title,
+          access?.raw?.role,
+          access?.raw?.role_name,
+          access?.raw?.position,
+          access?.raw?.position_title
         ].map(v => String(v || "").toLowerCase()).join(" ");
 
         return Boolean(
+          isKnownAdminEmail(email) ||
           j?.canEdit === true ||
           j?.can_edit === true ||
           j?.can_write === true ||
@@ -1231,6 +1347,7 @@
           j?.isSuperAdmin === true ||
           j?.is_super_admin === true ||
           j?.super_admin === true ||
+          access?.hardcodedAdminEmail === true ||
           access?.canEdit === true ||
           access?.can_edit === true ||
           access?.can_write === true ||
@@ -1241,6 +1358,8 @@
           access?.isSuperAdmin === true ||
           access?.is_super_admin === true ||
           access?.super_admin === true ||
+          access?.is_super_admin === true ||
+          access?.raw?.is_super_admin === true ||
           roleLevel >= 90 ||
           roleText.includes("admin") ||
           roleText.includes("super") ||
@@ -1262,8 +1381,8 @@
         dom.btnSaveAll.disabled = state.loading || !editable;
 
         if (!state.loggedIn) {
-          dom.btnAddRow.title = "로그인 후 최고관리자 권한에서 사용할 수 있습니다.";
-          dom.btnSaveAll.title = "로그인 후 최고관리자 권한에서 사용할 수 있습니다.";
+          dom.btnAddRow.title = "로그인 세션을 찾지 못했습니다. 새로고침 또는 재로그인이 필요합니다.";
+          dom.btnSaveAll.title = "로그인 세션을 찾지 못했습니다. 새로고침 또는 재로그인이 필요합니다.";
         } else {
           dom.btnAddRow.title = editable ? "새 행 추가" : "추가·수정·삭제는 최고관리자만 가능합니다.";
           dom.btnSaveAll.title = editable ? "전체 저장" : "추가·수정·삭제는 최고관리자만 가능합니다.";
@@ -1277,42 +1396,39 @@
         state.accessToken = "";
         state.canEdit = false;
 
-        if (supabase) {
-          try {
-            const { data } = await supabase.auth.getSession();
-            const session = data?.session;
-            const user = session?.user;
+        const session = await resolveAuthSession();
 
-            if (session?.access_token && user) {
-              state.loggedIn = true;
-              state.accessToken = session.access_token;
-              state.viewerEmail = user.email || "";
-              state.viewerUserId = user.id || "";
-            }
-          } catch {}
+        if (session?.access_token) {
+          state.loggedIn = true;
+          state.accessToken = session.access_token;
+          state.viewerEmail = session.user?.email || decodeJwtPayload(session.access_token).email || "";
+          state.viewerUserId = session.user?.id || decodeJwtPayload(session.access_token).sub || "";
+          console.info("[coupang_camp] auth session loaded:", session.source, state.viewerEmail || state.viewerUserId || "(no email)");
         }
 
-        if (!state.loggedIn) {
+        if (!state.loggedIn || !state.accessToken) {
           updateEditButtons();
           return;
         }
 
         try {
           const j = await apiFetch("/access", { method: "GET", auth: true });
-          const explicitCanEdit = parseCanEditAccess(j);
+          state.canEdit = parseCanEditAccess(j);
 
-          // coupang_camp Worker의 /access 응답은 버전별로 canEdit 필드명이 다를 수 있다.
-          // 인증된 세션으로 /access 자체가 성공했다면 프론트 편집 UI는 열어두고,
-          // 실제 DB 저장 권한은 /camps/batch 백엔드에서 최종 검증한다.
-          state.canEdit = explicitCanEdit || j?.ok === true || j?.allowed === true || j?.canAccess === true || j?.can_access === true;
-
-          // 마루웰 최고관리자 계정은 응답 필드명이 애매해도 프론트 버튼을 열어둔다.
-          if (!state.canEdit && /(^brain@maroowell\.com$|^maroowell1@maroowell\.com$|^nuclear_warp@naver\.com$)/i.test(state.viewerEmail)) {
+          if (!state.canEdit && isKnownAdminEmail(state.viewerEmail)) {
             state.canEdit = true;
           }
+
+          console.info("[coupang_camp] access loaded:", {
+            email: state.viewerEmail,
+            canEdit: state.canEdit,
+            response: j
+          });
         } catch (e) {
           console.warn("[coupang_camp] access check failed", e);
-          state.canEdit = false;
+
+          // 최고관리자 이메일 fallback. 실제 저장은 /camps/batch Worker에서 다시 검증한다.
+          state.canEdit = isKnownAdminEmail(state.viewerEmail);
         }
 
         updateEditButtons();

@@ -642,11 +642,37 @@
 
     .qrMeta{
       margin-top:14px;
+      display:grid;
+      gap:8px;
       color:#475569;
       font-size:13px;
       font-weight:500;
       line-height:1.45;
-      word-break:break-all;
+      text-align:left;
+      word-break:keep-all;
+      overflow-wrap:anywhere;
+    }
+
+    .qrMetaLine{
+      display:grid;
+      grid-template-columns:54px minmax(0,1fr);
+      align-items:start;
+      gap:8px;
+      padding:8px 10px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+    }
+
+    .qrMetaKey{
+      color:#64748b;
+      font-weight:700;
+      white-space:nowrap;
+    }
+
+    .qrMetaVal{
+      color:#0f172a;
+      font-weight:650;
     }
 
     .qrActions{
@@ -1731,23 +1757,34 @@
       }
 
       function qrPayloadForRow(row) {
-        const code = normalizeText(row.code) || normalizeText(row.camp) || normalizeText(row.mb_camp);
-        const label = normalizeText(row.camp) || normalizeText(row.mb_camp) || code;
+        const camp = normalizeText(row.camp);
+        const mbCamp = normalizeText(row.mb_camp);
         const address = normalizeText(row.address);
-        const lat = normalizeText(row.latitude);
-        const lng = normalizeText(row.longitude);
+        const code = normalizeText(row.code);
+
+        // QR 내용은 복잡한 JSON이 아니라 본캠프 행 기준으로 캠프명/주소만 넣는다.
+        // 본캠프명은 표시용으로만 보조 사용하고, 실제 스캔 텍스트는 캠프 + 주소 2줄로 단순화한다.
+        const qrCamp = camp || mbCamp || code;
+        const qrAddress = address;
+        const qrText = [qrCamp, qrAddress].filter(Boolean).join("\n");
 
         return {
           code,
-          label,
-          text: JSON.stringify({
-            type: "coupang_camp",
-            camp: label,
-            code,
-            address,
-            latitude: lat,
-            longitude: lng
-          })
+          camp: qrCamp,
+          mbCamp,
+          address: qrAddress,
+          label: qrCamp || code || "camp",
+          qrText: qrText || qrCamp || code || "",
+          metaHtml: `
+            <div class="qrMetaLine">
+              <span class="qrMetaKey">캠프</span>
+              <span class="qrMetaVal">${escapeHtml(qrCamp || "-")}</span>
+            </div>
+            <div class="qrMetaLine">
+              <span class="qrMetaKey">주소</span>
+              <span class="qrMetaVal">${escapeHtml(qrAddress || "-")}</span>
+            </div>
+          `
         };
       }
 
@@ -1802,7 +1839,7 @@
         ctx.fillStyle = "#2563eb";
         ctx.font = '700 13px "Noto Sans KR", sans-serif';
         ctx.textAlign = "center";
-        ctx.fillText(label.slice(0, 16), size / 2, size - 12);
+        ctx.fillText(String(label || "").slice(0, 16), size / 2, size - 12);
       }
 
       function openQrForRow(id) {
@@ -1811,15 +1848,15 @@
 
         const payload = qrPayloadForRow(row);
 
-        if (!payload.code && !payload.label) {
-          setStatus("QR을 만들 캠프명 또는 코드가 없습니다.", "err");
+        if (!payload.qrText && !payload.label) {
+          setStatus("QR을 만들 캠프명 또는 주소가 없습니다.", "err");
           return;
         }
 
         state.currentQr = payload;
         dom.qrTitle.textContent = `${payload.label || payload.code} QR`;
-        dom.qrMeta.textContent = payload.text;
-        drawQrPlaceholder(dom.qrCanvas, payload.text, payload.label || payload.code);
+        dom.qrMeta.innerHTML = payload.metaHtml;
+        drawQrPlaceholder(dom.qrCanvas, payload.qrText, payload.label || payload.code);
         dom.qrModal.classList.add("show");
         dom.qrModal.setAttribute("aria-hidden", "false");
       }
@@ -1847,7 +1884,7 @@
       }
 
       async function downloadQrImage() {
-        const payload = state.currentQr || { label:"camp_qr", code:"camp_qr" };
+        const payload = state.currentQr || { label:"camp_qr", code:"camp_qr", camp:"camp_qr" };
         const blob = await canvasToBlob(dom.qrCanvas);
         if (!blob) {
           setStatus("QR 이미지 생성 실패", "err");

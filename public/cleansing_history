@@ -151,6 +151,32 @@
       flex:0 0 auto;
     }
 
+    .filterToggle{
+      display:none;
+      height:32px;
+      min-width:76px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid #cbd5e1;
+      background:#ffffff;
+      color:#0f172a;
+      font-size:10px;
+      font-weight:420;
+      cursor:pointer;
+      white-space:nowrap;
+      flex:0 0 auto;
+      box-shadow:0 1px 0 rgba(255,255,255,.85),0 4px 12px rgba(15,23,42,.05);
+    }
+
+    .filterToggle:hover{
+      background:#f8fbff;
+      border-color:#93c5fd;
+    }
+
+    .bar.isCollapsed{
+      display:none;
+    }
+
     .bar{
       display:grid;
       grid-template-columns:120px 140px 105px 140px 165px 150px 105px 100px minmax(160px,1fr) 78px 84px 112px;
@@ -750,6 +776,9 @@
     @media(max-width:1100px){
       body{
         grid-template-rows:auto auto 1fr;
+        width:100vw;
+        max-width:100vw;
+        overflow:hidden;
       }
 
       .top{
@@ -758,30 +787,127 @@
         border-left:0;
         border-right:0;
         border-top:0;
+        overflow:hidden;
+        gap:8px;
+        padding:9px 10px;
       }
 
-      .bar{
-        grid-template-columns:repeat(2,minmax(140px,1fr));
-        margin:0;
-        border-left:0;
-        border-right:0;
-        border-radius:0 0 18px 18px;
+      .top #user{
+        display:none;
       }
 
-      .main{
-        padding:8px;
+      .title{
+        flex:1 1 auto;
+        min-width:0;
       }
 
       .title h1{
         font-size:17px;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
       .title p{
         display:none;
       }
 
+      .spacer{
+        display:none;
+      }
+
+      .filterToggle{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .bar{
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:7px;
+        margin:0;
+        padding:10px;
+        border-left:0;
+        border-right:0;
+        border-radius:0 0 18px 18px;
+        overflow:hidden;
+      }
+
+      .bar.isCollapsed{
+        display:none;
+      }
+
+      .main{
+        padding:8px 12px 12px 8px;
+        overflow:auto;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior:contain;
+      }
+
+      .board{
+        width:1180px;
+        min-width:1180px;
+        max-width:none;
+        overflow:visible;
+      }
+
+      #table{
+        overflow:visible;
+      }
+
+      table{
+        min-width:1180px;
+      }
+
+      th,
+      td{
+        padding-left:5px;
+        padding-right:5px;
+      }
+
+      .head{
+        position:sticky;
+        left:0;
+        z-index:2;
+        border-radius:18px 18px 0 0;
+      }
+
+      .actions{
+        flex-wrap:nowrap;
+      }
+
       .btn{
         width:100%;
+      }
+
+      .head .btn{
+        width:auto;
+      }
+    }
+
+    @media(max-width:520px){
+      .bar{
+        grid-template-columns:1fr 1fr;
+      }
+
+      .head{
+        align-items:flex-start;
+      }
+
+      .head h2{
+        font-size:17px;
+      }
+
+      .head p{
+        max-width:210px;
+      }
+
+      .actions{
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      .head .btn{
+        width:96px;
       }
     }
   </style>
@@ -799,6 +925,7 @@
     </div>
 
     <div class="spacer"></div>
+    <button id="filterToggle" class="filterToggle" type="button" aria-controls="bar" aria-expanded="true">검색 접기</button>
     <span id="user" class="pill">세션 확인</span>
   </div>
 
@@ -956,7 +1083,9 @@
   const fmtWon = v => {
     if (v === null || v === undefined || v === "") return "";
     const n = Number(v);
-    return Number.isFinite(n) ? "₩" + n.toLocaleString("ko-KR") : String(v);
+    return Number.isFinite(n)
+      ? "₩" + n.toLocaleString("ko-KR", { maximumFractionDigits: 1 })
+      : String(v);
   };
 
   const dailyAverage = value => {
@@ -2682,6 +2811,50 @@
     }
   }
 
+
+  function isMobileLayout() {
+    try {
+      return window.matchMedia("(max-width:1100px)").matches;
+    } catch {
+      return window.innerWidth <= 1100;
+    }
+  }
+
+  function setFilterCollapsed(collapsed) {
+    const bar = $("bar");
+    const btn = $("filterToggle");
+
+    if (!bar || !btn) return;
+
+    bar.classList.toggle("isCollapsed", !!collapsed);
+    btn.textContent = collapsed ? "검색 펼치기" : "검색 접기";
+    btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+
+    try {
+      sessionStorage.setItem("clhiFilterCollapsed", collapsed ? "1" : "0");
+    } catch {}
+  }
+
+  function initFilterToggle() {
+    const btn = $("filterToggle");
+    if (!btn) return;
+
+    let saved = "";
+
+    try {
+      saved = sessionStorage.getItem("clhiFilterCollapsed") || "";
+    } catch {}
+
+    const shouldCollapse = saved ? saved === "1" : false;
+    setFilterCollapsed(shouldCollapse);
+
+    btn.onclick = () => {
+      const bar = $("bar");
+      setFilterCollapsed(!bar?.classList.contains("isCollapsed"));
+    };
+  }
+
+
   function bind() {
     $("search").onclick = () => load().catch(e => alert(e.message));
     $("refresh").onclick = $("search").onclick;
@@ -2770,6 +2943,7 @@
       initSupabase();
       startSessionBridge();
       bind();
+      initFilterToggle();
 
       if (await initMe()) {
         await initWeek();

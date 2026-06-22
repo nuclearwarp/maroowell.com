@@ -177,6 +177,32 @@
       display:none;
     }
 
+    .copyToast{
+      position:fixed;
+      left:50%;
+      bottom:28px;
+      z-index:12000;
+      transform:translate(-50%, 18px);
+      min-width:170px;
+      max-width:calc(100vw - 32px);
+      padding:12px 18px;
+      border-radius:999px;
+      background:rgba(15,23,42,.92);
+      color:#ffffff;
+      font-size:13px;
+      font-weight:700;
+      text-align:center;
+      box-shadow:0 18px 40px rgba(15,23,42,.24);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .18s ease, transform .18s ease;
+    }
+
+    .copyToast.show{
+      opacity:1;
+      transform:translate(-50%, 0);
+    }
+
     .bar{
       display:grid;
       grid-template-columns:120px 140px 105px 140px 165px 150px 105px 100px minmax(160px,1fr) 78px 84px 112px;
@@ -1027,6 +1053,8 @@
       <div id="table"></div>
     </div>
   </main>
+
+  <div id="copyToast" class="copyToast" role="status" aria-live="polite">복사 완료!</div>
 
   <div class="vendorModal hide" id="vendorModal" role="dialog" aria-modal="true" aria-labelledby="vendorModalTitle">
     <div class="vendorPanel">
@@ -2731,18 +2759,90 @@
     return canvas;
   }
 
+
+  let copyToastTimer = null;
+
+  function showCopyToast(message) {
+    const el = $("copyToast");
+
+    if (!el) return;
+
+    el.textContent = message || "복사 완료!";
+    el.classList.add("show");
+
+    if (copyToastTimer) clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(() => {
+      el.classList.remove("show");
+    }, 1400);
+  }
+
+  function downloadBlob(blob) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = captureFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function writeImageBlobToClipboard(blob) {
+    if (!blob) throw new Error("이미지 생성 실패");
+
+    if (!navigator.clipboard || !window.ClipboardItem) {
+      throw new Error("이 브라우저에서 이미지 클립보드 복사를 지원하지 않습니다.");
+    }
+
+    // 모바일 크롬/삼성 브라우저에서 async 이미지 생성 후 포커스가 빠지면
+    // Document is not focused 예외가 발생한다. 쓰기 직전에 다시 포커스만 한번 잡고 재시도한다.
+    try {
+      window.focus?.();
+      document.body?.focus?.({ preventScroll:true });
+      $("copyImage")?.focus?.({ preventScroll:true });
+    } catch {}
+
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({ "image/png": blob })
+      ]);
+      return true;
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+
+      if (/not focused/i.test(msg)) {
+        await new Promise(resolve => setTimeout(resolve, 80));
+
+        try {
+          window.focus?.();
+          $("copyImage")?.focus?.({ preventScroll:true });
+        } catch {}
+
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob })
+        ]);
+
+        return true;
+      }
+
+      throw err;
+    }
+  }
+
+
   async function copyImage() {
     if (!rows.length) {
-      alert("복사할 조회 결과가 없습니다.");
+      showCopyToast("복사할 결과 없음");
       return;
     }
 
     const sourceTable = $("table").querySelector("table");
 
     if (!sourceTable) {
-      alert("복사할 표를 찾지 못했습니다.");
+      showCopyToast("표를 찾지 못함");
       return;
     }
+
+    let blob = null;
 
     try {
       try {
@@ -2750,21 +2850,7 @@
       } catch {}
 
       const canvas = buildTableCanvas(sourceTable);
-      const blob = await canvasBlob(canvas);
-
-      if (navigator.clipboard && window.ClipboardItem) {
-        await navigator.clipboard.write([
-          new ClipboardItem({ "image/png": blob })
-        ]);
-        alert("표 이미지를 클립보드에 복사했습니다.");
-        return;
-      }
-
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = captureFileName();
-      a.click();
-      URL.revokeObjectURL(a.href);
+      blob = await canvasBlob(canvas);
     } catch (err) {
       console.error(err);
 
@@ -2791,7 +2877,7 @@
           fallbackWrap.appendChild(clone);
           document.body.appendChild(fallbackWrap);
 
-          const blob = await htmlToImage.toBlob(fallbackWrap, {
+          blob = await htmlToImage.toBlob(fallbackWrap, {
             backgroundColor:"#ffffff",
             pixelRatio:1,
             cacheBust:true,
@@ -2800,31 +2886,35 @@
               overflow:"visible"
             }
           });
-
-          if (blob && navigator.clipboard && window.ClipboardItem) {
-            await navigator.clipboard.write([
-              new ClipboardItem({ "image/png": blob })
-            ]);
-            alert("표 이미지를 클립보드에 복사했습니다.");
-            return;
-          }
-
-          if (blob) {
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = captureFileName();
-            a.click();
-            URL.revokeObjectURL(a.href);
-            return;
-          }
         } catch (fallbackErr) {
           console.error(fallbackErr);
         } finally {
           fallbackWrap?.remove();
         }
       }
+    }
 
-      throw err;
+    if (!blob) {
+      showCopyToast("이미지 생성 실패");
+      return;
+    }
+
+    try {
+      await writeImageBlobToClipboard(blob);
+      showCopyToast("복사 완료!");
+      return;
+    } catch (err) {
+      console.warn("[cleansing_history] clipboard copy failed, fallback download", err);
+
+      // 모바일 브라우저에서 포커스/권한 문제로 클립보드 이미지 쓰기가 막히면
+      // alert를 띄우지 않고 PNG 다운로드로 안전하게 대체한다.
+      try {
+        downloadBlob(blob);
+        showCopyToast("복사 제한, 다운로드 완료");
+      } catch (downloadErr) {
+        console.error(downloadErr);
+        showCopyToast("복사 실패");
+      }
     }
   }
 
@@ -2892,7 +2982,7 @@
       }
     };
 
-    $("copyImage").onclick = () => copyImage().catch(e => alert(e.message));
+    $("copyImage").onclick = () => copyImage().catch(e => { console.error(e); showCopyToast("복사 실패"); });
 
     $("add").onclick = openVendorPanel;
     $("vendorModalClose").onclick = closeVendorPanel;

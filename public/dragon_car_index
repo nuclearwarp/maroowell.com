@@ -2177,7 +2177,7 @@
 
       <div class="toolGroup">
         <button id="btnClearFilters" class="btn" type="button">필터 초기화</button>
-        <button id="btnExportCsv" class="btn" type="button">CSV 다운로드</button>
+        <button id="btnExportCsv" class="btn" type="button">엑셀 다운</button>
       </div>
     </div>
 
@@ -4690,50 +4690,108 @@
         }
       }
 
+      function excelCell(value, options = {}) {
+        const text = String(value ?? "");
+        const escaped = text
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+
+        const style = options.text
+          ? "mso-number-format:'\\@';white-space:normal;"
+          : "white-space:normal;";
+
+        return `<td style="${style}">${escaped.replace(/\n/g, "<br>")}</td>`;
+      }
+
       function exportCsv() {
         const rows = getFilteredRows();
-        const headers = [
-          "order_date","vendor_name","order_name","camp","wave","route","price","tax_invoice","payment_confirm","settlement_day",
-          "delivery_driver","order_vendor","parcel","return_count","total_count","amount","deduction_total","deduction_detail","settlement_month",
-          "dragon_car_id","dragon_car_pw","dragon_car_note"
-        ];
 
-        const lines = [headers.join(",")];
-
-        for (const row of rows) {
-          const values = [
-            toDateInput(row.order_date),
-            vendorNameById(row.vendor_id),
-            row.order_name || "",
-            row.camp || "",
-            row.wave || "",
-            row.route || "",
-            row.price ?? "",
-            row.tax_invoice ? "발행" : "미발행",
-            row.payment_confirm ? "입금" : "미입금",
-            row.settlement_day || "",
-            row.delivery_driver || "",
-            row.order_vendor || "",
-            toInt(row.parcel),
-            toInt(row.return_count),
-            totalCount(row),
-            amountValue(row) ?? "",
-            deductionTotal(row),
-            deductionSearchText(row),
-            row.settlement_month || "",
-            row.dragon_car_id || "",
-            row.dragon_car_pw || "",
-            row.dragon_car_note || ""
-          ].map(v => '"' + String(v).replace(/"/g, '""') + '"');
-
-          lines.push(values.join(","));
+        if (!rows.length) {
+          alert("다운로드할 데이터가 없습니다.");
+          return;
         }
 
-        const blob = new Blob(["\uFEFF" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+        // 엑셀 다운로드는 화면에 보이는 용차 시트 th 제목 기준으로만 구성한다.
+        // 차감 관련 컬럼은 다운로드에서 완전히 제외한다.
+        const headers = [
+          "Date",
+          "연결 벤더",
+          "Order",
+          "캠프",
+          "주간/야간",
+          "라우트",
+          "단가",
+          "세금계산서",
+          "입금여부",
+          "정산일자",
+          "투입 기사",
+          "배송 수량",
+          "반품 수량",
+          "합계",
+          "금액",
+          "정산월",
+          "ID",
+          "PW",
+          "비고"
+        ];
+
+        const excelRows = rows.map(row => [
+          toDateInput(row.order_date),
+          vendorNameById(row.vendor_id),
+          row.order_name || "",
+          row.camp || "",
+          row.wave || "",
+          row.route || "",
+          row.price ?? "",
+          row.tax_invoice ? "발행" : "미발행",
+          row.payment_confirm ? "입금" : "미입금",
+          row.settlement_day || "",
+          row.delivery_driver || "",
+          toInt(row.parcel),
+          toInt(row.return_count),
+          totalCount(row),
+          amountValue(row) ?? "",
+          row.settlement_month || "",
+          row.dragon_car_id || "",
+          row.dragon_car_pw || "",
+          row.dragon_car_note || ""
+        ]);
+
+        const headerHtml = headers.map(title => `<th>${title}</th>`).join("");
+        const bodyHtml = excelRows.map(values => {
+          return "<tr>" + values.map((value, index) => {
+            // ID/PW/비고는 엑셀에서 자동 숫자 변환하지 않도록 텍스트 형식으로 둔다.
+            return excelCell(value, { text:index >= 16 });
+          }).join("") + "</tr>";
+        }).join("");
+
+        const html = `
+          <!doctype html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              table{border-collapse:collapse;font-family:"Malgun Gothic","Noto Sans KR",Arial,sans-serif;font-size:11pt;}
+              th{background:#dbeafe;font-weight:700;text-align:center;}
+              th,td{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:middle;}
+            </style>
+          </head>
+          <body>
+            <table>
+              <thead><tr>${headerHtml}</tr></thead>
+              <tbody>${bodyHtml}</tbody>
+            </table>
+          </body>
+          </html>
+        `;
+
+        const blob = new Blob(["\uFEFF" + html], { type:"application/vnd.ms-excel;charset=utf-8" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "dragon_car_" + new Date().toISOString().slice(0, 10) + ".csv";
+        a.download = "dragon_car_" + new Date().toISOString().slice(0, 10) + ".xls";
         document.body.appendChild(a);
         a.click();
         a.remove();

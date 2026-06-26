@@ -86,7 +86,7 @@
     <div class="head">
       <img src="/favicon.ico" alt="Maroowell" />
       <div class="title">
-        <b>우편번호 지도 공유</b>
+        <b id="shareTitleText">우편번호 지도 공유</b>
         <small id="subtitle">공유 링크 확인 중...</small>
       </div>
       <button id="infoToggle" class="infoToggle" type="button">정보 접기</button>
@@ -410,6 +410,17 @@
         catch { prompt("공유 링크입니다.", location.href); }
       }
       function formatExpires(v){ const d = new Date(v); if(Number.isNaN(d.getTime())) return "-"; return d.toLocaleString("ko-KR", { timeZone:"Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }); }
+
+      function safePayloadTitle(payload){
+        const value = clean(payload?.title);
+        return value || "우편번호 지도 공유";
+      }
+
+      function safePayloadDescription(payload, zips){
+        const value = clean(payload?.description);
+        return value || `${zips.length}개 우편번호 배송 구역을 확인하세요`;
+      }
+
       function createMap(){
         if(!(window.kakao && kakao.maps)) throw new Error("카카오 지도 SDK 로딩 실패");
         state.map = new kakao.maps.Map($("#map"), { center:new kakao.maps.LatLng(37.5665,126.978), level:8 });
@@ -425,9 +436,13 @@
           state.zips = zips;
           createMap();
           initInfoCollapsed();
+          const shareTitle = safePayloadTitle(payload);
+          const shareDescription = safePayloadDescription(payload, zips);
+
+          $("#shareTitleText").textContent = shareTitle;
           $("#chips").innerHTML = zips.map(zip => `<span class="chip">${esc(zip)}</span>`).join("");
           $("#subtitle").textContent = `${zips.length}개 우편번호 · 72시간 공유`;
-          updateMeta("우편번호 지도 공유", `${zips.length}개 우편번호 배송 구역을 확인하세요`);
+          updateMeta(shareTitle, shareDescription);
           $("#meta").textContent = `만료: ${formatExpires(payload.expires_at || payload.expiresAt)} · 생성자: ${payload.created_by || "-"}`;
           const failed = [];
           for(const zip of zips){ try { await drawZip(zip); } catch(e){ console.warn(e); failed.push(zip); } }

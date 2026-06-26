@@ -447,6 +447,49 @@
       border-color:#fca5a5;
     }
 
+    #shareMapBtn{
+      display:none;
+    }
+
+    #shareMapBtn.share-visible{
+      display:inline-flex;
+      background:linear-gradient(180deg,#22c55e,#16a34a);
+      color:#fff;
+      border-color:#15803d;
+      box-shadow:0 10px 22px rgba(22,163,74,.18);
+    }
+
+    #shareMapBtn.share-visible:hover{
+      background:linear-gradient(180deg,#16b84f,#15803d);
+      border-color:#166534;
+    }
+
+    .shareToast{
+      position:fixed;
+      left:50%;
+      bottom:24px;
+      z-index:2147483000;
+      transform:translate(-50%, 16px);
+      min-width:170px;
+      max-width:calc(100vw - 32px);
+      padding:12px 18px;
+      border-radius:999px;
+      background:rgba(15,23,42,.94);
+      color:#fff;
+      font-size:13px;
+      font-weight:1000;
+      text-align:center;
+      box-shadow:0 18px 42px rgba(15,23,42,.24);
+      opacity:0;
+      pointer-events:none;
+      transition:opacity .18s ease, transform .18s ease;
+    }
+
+    .shareToast.show{
+      opacity:1;
+      transform:translate(-50%, 0);
+    }
+
     button.merge-on{
       background:#ecfdf5;
       border-color:#86efac;
@@ -824,6 +867,7 @@
           <button id="mergeBtn" type="button">병합</button>
           <button id="saveBtn" type="button">저장</button>
           <button id="clearBtn" class="danger" type="button">초기화</button>
+          <button id="shareMapBtn" type="button" title="최고관리자 전용 · 72시간 만료 지도 공유 링크 생성">지도 공유</button>
         </div>
 
         <div class="list" id="zipList"></div>
@@ -845,6 +889,8 @@
       </div>
     </div>
   </div>
+
+  <div id="shareToast" class="shareToast" role="status" aria-live="polite">링크 복사 완료!</div>
 
   <div id="saveModal" class="modal" aria-hidden="true">
     <div class="modalCard" role="dialog" aria-modal="true" aria-label="폴리곤 저장">
@@ -1155,6 +1201,12 @@
 
       const ZIP_API_URL = "https://zip.maroowell.com/?zipcode=";
       const ROUTE_ENDPOINT = "https://route.maroowell.com/route";
+      const ZIP_SHARE_API_BASE = String(
+        (window.MARUWELL_CONFIG || {}).ZIPCODE_SHARE_API_BASE ||
+        (window.MARUWELL_CONFIG || {}).ZIP_SHARE_API_BASE ||
+        "https://zip.maroowell.com"
+      ).replace(/\/+$/, "");
+      const ZIP_SHARE_PAGE_PATH = "/zipcode_share";
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
       const ZIP_FETCH_TIMEOUT_MS = 15000;
@@ -1169,7 +1221,8 @@
           ["#searchBtn", "지도표시"],
           ["#mergeBtn", "병합"],
           ["#saveBtn", "저장"],
-          ["#clearBtn", "초기화"]
+          ["#clearBtn", "초기화"],
+          ["#shareMapBtn", "지도 공유"]
         ];
 
         labels.forEach(([sel, label]) => {
@@ -2176,6 +2229,195 @@
         alert("저장 완료");
       }
 
+      function isSuperAdminAccess(access) {
+        return Boolean(
+          access &&
+          access.is_maroowell === true &&
+          access.is_admin === true &&
+          Number(access.max_role_level || access.role_level || 0) >= 90
+        );
+      }
+
+      async function getCurrentSession() {
+        try {
+          const { data } = await supabase.auth.getSession();
+          return data?.session || null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function refreshShareButtonVisibility() {
+        const btn = $("#shareMapBtn");
+        if (!btn) return;
+
+        btn.classList.remove("share-visible");
+        btn.style.display = "none";
+
+        try {
+          const session = await getCurrentSession();
+          if (!session?.access_token) return;
+
+          const { data, error } = await supabase.rpc("mw_my_access").maybeSingle();
+          if (error) {
+            console.warn("[zipcode_share] access check failed", error);
+            return;
+          }
+
+          if (!isSuperAdminAccess(data)) return;
+
+          btn.classList.add("share-visible");
+          btn.style.display = "inline-flex";
+        } catch (e) {
+          console.warn("[zipcode_share] share button permission check failed", e);
+        }
+      }
+
+      function showShareToast(message = "링크 복사 완료!") {
+        const toast = $("#shareToast");
+        if (!toast) return;
+
+        toast.textContent = message;
+        toast.classList.add("show");
+
+        clearTimeout(showShareToast._timer);
+        showShareToast._timer = setTimeout(() => {
+          toast.classList.remove("show");
+        }, 1500);
+      }
+
+      async function copyShareUrl(url) {
+        try {
+          await navigator.clipboard.writeText(url);
+          return true;
+        } catch {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = url;
+            ta.style.position = "fixed";
+            ta.style.left = "-9999px";
+            ta.style.top = "0";
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            const ok = document.execCommand("copy");
+            ta.remove();
+            return ok;
+          } catch {
+            return false;
+          }
+        }
+      }
+
+      function buildShareUrlFromResponse(data) {
+        const direct =
+          data?.url ||
+          data?.shareUrl ||
+          data?.share_url ||
+          data?.link ||
+          data?.share_link;
+
+        if (direct) return String(direct);
+
+        const token = data?.token || data?.s || data?.share_token || data?.shareToken;
+        const sig = data?.sig || data?.signature;
+
+        if (token && sig) {
+          return `${location.origin}${ZIP_SHARE_PAGE_PATH}?s=${encodeURIComponent(token)}&sig=${encodeURIComponent(sig)}`;
+        }
+
+        return "";
+      }
+
+      function collectShareZipcodes() {
+        const zips = new Set();
+
+        for (const zip of state.selectedZips) {
+          if (/^\d{5}$/.test(String(zip))) zips.add(String(zip));
+        }
+
+        for (const zip of parseZips($("#zipInput")?.value || "")) {
+          zips.add(zip);
+        }
+
+        return [...zips].sort();
+      }
+
+      async function createMapShareLink() {
+        const btn = $("#shareMapBtn");
+        const zips = collectShareZipcodes();
+
+        if (!zips.length) {
+          alert("공유할 우편번호를 먼저 추가하거나 지도표시 해주세요.");
+          return;
+        }
+
+        const session = await getCurrentSession();
+
+        if (!session?.access_token) {
+          alert("로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.");
+          return;
+        }
+
+        try {
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "공유 생성 중...";
+          }
+
+          const res = await fetch(`${ZIP_SHARE_API_BASE}/share/create`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({
+              zips,
+              ttl_hours: 72,
+              merge: state.mergeMode === true,
+              source: "zipcode_search",
+              title: `우편번호 지도 ${zips.slice(0, 4).join(", ")}${zips.length > 4 ? " 외" : ""}`
+            }),
+            cache: "no-store"
+          });
+
+          const text = await res.text();
+          let data = null;
+
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch {}
+
+          if (!res.ok || data?.ok === false) {
+            throw new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
+          }
+
+          const shareUrl = buildShareUrlFromResponse(data);
+
+          if (!shareUrl) {
+            throw new Error("공유 링크 응답이 비어 있습니다.");
+          }
+
+          const copied = await copyShareUrl(shareUrl);
+
+          if (copied) {
+            showShareToast("지도 공유 링크 복사 완료!");
+            alert(`지도 공유 링크를 복사했습니다.\n만료: 72시간\n\n${shareUrl}`);
+          } else {
+            prompt("지도 공유 링크입니다. 복사해서 전달하세요.", shareUrl);
+          }
+        } catch (e) {
+          console.error("[zipcode_share] create failed", e);
+          alert("지도 공유 링크 생성 실패: " + (e?.message || e));
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "지도 공유";
+          }
+        }
+      }
+
+
       function clearAll() {
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
         for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
@@ -2230,6 +2472,7 @@
 
         $("#saveBtn").onclick = openSaveModal;
         $("#clearBtn").onclick = clearAll;
+        $("#shareMapBtn").onclick = createMapShareLink;
 
         $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
         $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
@@ -2285,6 +2528,7 @@
       function initApp() {
         createMap();
         bindUI();
+        refreshShareButtonVisibility();
       }
 
       if (document.readyState === "loading") {

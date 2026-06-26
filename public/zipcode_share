@@ -5,9 +5,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="referrer" content="origin" />
-  <meta property="og:title" content="마루웰 우편번호 지도 공유" />
-  <meta property="og:description" content="공유된 우편번호 폴리곤 지도를 확인합니다." />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="MAROOWELL" />
+  <meta property="og:title" content="우편번호 지도 공유" />
+  <meta property="og:description" content="공유된 우편번호 배송 구역을 확인하세요." />
   <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:secure_url" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
   <title>마루웰 우편번호 지도 공유</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
@@ -31,8 +37,14 @@
     }
     *{box-sizing:border-box}
     html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:var(--font);color:var(--text);background:#f6f8fc;font-weight:900}
-    #map{position:fixed;inset:0}
+    #mapWrap{position:fixed;inset:0;display:flex;background:#eaf0f8;overflow:hidden;overscroll-behavior:contain;touch-action:none}
+    #map,#roadview{flex:1;width:100%;height:100%;min-width:0;min-height:0;overscroll-behavior:contain;touch-action:none}
+    #roadview{display:none}
+    #mapWrap.roadview-open #roadview{display:block}
     .topCard{position:fixed;left:16px;top:16px;z-index:20;width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-radius:22px;background:rgba(255,255,255,.94);box-shadow:var(--shadow);backdrop-filter:blur(12px);overflow:hidden}
+    .topCard.info-collapsed{width:min(420px,calc(100vw - 32px))}
+    .topCard.info-collapsed .body{display:none}
+    .topCard.info-collapsed .head{border-bottom:0}
     .head{display:flex;align-items:center;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line)}
     .head img{width:30px;height:30px;display:block}
     .title{min-width:0;flex:1}
@@ -45,25 +57,32 @@
     .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     button{height:34px;padding:0 12px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-family:var(--font);font-size:12px;font-weight:1000;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.8)}
     button.primary{background:linear-gradient(180deg,#3b82f6,#2563eb);border-color:#2563eb;color:#fff}
-    .mapType{position:fixed;right:16px;top:16px;z-index:21;display:flex;gap:8px}
+    .infoToggle{flex:0 0 auto;height:32px;padding:0 11px;border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}
+    .mapType{position:fixed;right:16px;top:16px;z-index:21;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+    .mapType button{background:rgba(255,255,255,.92);backdrop-filter:blur(8px);box-shadow:0 6px 16px rgba(15,23,42,.10)}
+    .mapType .hint{display:none;align-items:center;min-height:34px;padding:0 12px;border-radius:999px;border:1px solid #cbd5e1;background:rgba(255,255,255,.92);color:#475569;font-size:12px;font-weight:1000;box-shadow:0 6px 16px rgba(15,23,42,.10)}
     .zip-label{display:inline-flex;align-items:center;justify-content:center;min-width:auto;height:auto;padding:3px 8px;border:2px solid #111827;border-radius:999px;background:#fff;color:#0f172a;font-size:11px;font-weight:1000;letter-spacing:-.02em;line-height:1.15;box-shadow:0 3px 10px rgba(15,23,42,.18);white-space:nowrap}
     .error{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,#ffffff,#f6f8fc)}
     .error.show{display:flex}
     .errorCard{width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-radius:22px;background:#fff;box-shadow:var(--shadow);padding:22px}
     .errorCard h1{margin:0 0 10px;font-size:23px}
     .errorCard p{margin:0;color:#64748b;line-height:1.65;font-size:14px;font-weight:900;white-space:pre-wrap}
-    @media(max-width:720px){.topCard{left:10px;top:10px;width:calc(100vw - 20px);border-radius:18px}.mapType{right:10px;top:auto;bottom:16px}.title b{font-size:17px}.head{padding:11px 12px}.body{padding:10px 12px 12px}}
+    @media(max-width:720px){.topCard{left:10px;top:10px;width:calc(100vw - 20px);border-radius:18px}.topCard.info-collapsed{width:calc(100vw - 20px)}.mapType{right:10px;left:10px;top:auto;bottom:16px}.title b{font-size:17px}.head{padding:11px 12px}.body{padding:10px 12px 12px}#mapWrap.roadview-open{flex-direction:column}}
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="topCard">
+  <div id="mapWrap">
+    <div id="map"></div>
+    <div id="roadview"></div>
+  </div>
+  <div id="topCard" class="topCard">
     <div class="head">
       <img src="/favicon.ico" alt="Maroowell" />
       <div class="title">
         <b>우편번호 지도 공유</b>
         <small id="subtitle">공유 링크 확인 중...</small>
       </div>
+      <button id="infoToggle" class="infoToggle" type="button">정보 접기</button>
     </div>
     <div class="body">
       <div id="chips" class="chips"></div>
@@ -74,7 +93,11 @@
       </div>
     </div>
   </div>
-  <div class="mapType"><button id="toggleMapType" type="button">위성</button></div>
+  <div class="mapType">
+    <button id="toggleMapType" type="button">위성</button>
+    <button id="toggleRoadview" type="button">로드뷰</button>
+    <span id="roadviewHint" class="hint">로드뷰: 파란 길(ROADVIEW) 클릭</span>
+  </div>
   <div id="error" class="error"><div class="errorCard"><h1>공유 지도를 열 수 없습니다</h1><p id="errorText">링크가 만료되었거나 잘못되었습니다.</p></div></div>
 
   <script>
@@ -87,7 +110,20 @@
       const ZIP_FETCH_TIMEOUT_MS = 15000;
       const COLORS = ["#ff4b4b","#22c55e","#fbbf24","#3b82f6","#22d3ee","#c084fc","#f472b6","#60a5fa","#34d399","#f97316"];
 
-      const state = { map:null, isSatellite:false, zips:[], polygons:new Map(), labels:new Map(), bounds:null, payload:null };
+      const state = {
+        map:null,
+        isSatellite:false,
+        roadviewOn:false,
+        roadviewOpen:false,
+        roadview:null,
+        roadviewClient:null,
+        roadviewClickHandler:null,
+        zips:[],
+        polygons:new Map(),
+        labels:new Map(),
+        bounds:null,
+        payload:null
+      };
       const $ = sel => document.querySelector(sel);
       const clean = v => String(v ?? "").trim();
       const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
@@ -101,9 +137,14 @@
         const params = new URLSearchParams(location.search);
         const s = clean(params.get("s"));
         const sig = clean(params.get("sig"));
-        if(!s || !sig) throw new Error("공유 토큰이 없습니다.");
 
-        const res = await fetch(`${VERIFY_URL}?s=${encodeURIComponent(s)}&sig=${encodeURIComponent(sig)}`, { method:"GET", cache:"no-store" });
+        if(!s) throw new Error("공유 토큰이 없습니다.");
+
+        const verifyUrl = new URL(VERIFY_URL);
+        verifyUrl.searchParams.set("s", s);
+        if(sig) verifyUrl.searchParams.set("sig", sig);
+
+        const res = await fetch(verifyUrl.toString(), { method:"GET", cache:"no-store" });
         const text = await res.text();
         let json = null;
         try { json = text ? JSON.parse(text) : null; } catch {}
@@ -212,7 +253,132 @@
         drawZipMultiPolygon(zip,wgs);
       }
       function fitAll(){ if(state.map && state.bounds) state.map.setBounds(state.bounds); }
-      function setMapTypeSatellite(on){ state.isSatellite = !!on; if(!state.map) return; state.map.setMapTypeId(state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP); $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성"; }
+
+      function relayoutMapSoon(){
+        window.setTimeout(() => {
+          if(!state.map) return;
+          const c = state.map.getCenter();
+          state.map.relayout();
+          state.map.setCenter(c);
+
+          if(state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function"){
+            state.roadview.relayout();
+          }
+        }, 80);
+      }
+
+      function isMobileLayout(){
+        try { return window.matchMedia("(max-width:720px)").matches; }
+        catch { return window.innerWidth <= 720; }
+      }
+
+      function setInfoCollapsed(next){
+        const card = $("#topCard");
+        const btn = $("#infoToggle");
+        if(!card || !btn) return;
+
+        card.classList.toggle("info-collapsed", !!next);
+        btn.textContent = next ? "정보 열기" : "정보 접기";
+        btn.setAttribute("aria-expanded", next ? "false" : "true");
+        relayoutMapSoon();
+      }
+
+      function initInfoCollapsed(){
+        setInfoCollapsed(isMobileLayout());
+        $("#infoToggle").onclick = () => {
+          setInfoCollapsed(!$("#topCard")?.classList.contains("info-collapsed"));
+        };
+      }
+
+      function setMapTypeSatellite(on){
+        state.isSatellite = !!on;
+        if(!state.map) return;
+
+        state.map.setMapTypeId(state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+        $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
+      }
+
+      function ensureRoadview(){
+        if(state.roadview && state.roadviewClient) return;
+
+        state.roadview = new kakao.maps.Roadview($("#roadview"));
+        state.roadviewClient = new kakao.maps.RoadviewClient();
+      }
+
+      function setRoadviewOverlay(on){
+        if(!state.map) return;
+
+        try {
+          if(on) state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+          else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+        } catch {}
+      }
+
+      function setRoadviewAt(latlng){
+        ensureRoadview();
+
+        const radii = [80, 200, 500, 1200];
+
+        const tryFind = i => {
+          state.roadviewClient.getNearestPanoId(latlng, radii[i], panoId => {
+            if(panoId === null || panoId === undefined){
+              if(i < radii.length - 1) return tryFind(i + 1);
+              alert("이 위치 근처에는 로드뷰가 없습니다.");
+              return;
+            }
+
+            state.roadviewOpen = true;
+            $("#mapWrap").classList.add("roadview-open");
+
+            setTimeout(() => {
+              try { state.roadview.relayout(); } catch {}
+              state.roadview.setPanoId(panoId, latlng);
+            }, 0);
+          });
+        };
+
+        tryFind(0);
+      }
+
+      function setRoadviewOn(on){
+        state.roadviewOn = !!on;
+        if(!state.roadviewOn) state.roadviewOpen = false;
+
+        $("#roadviewHint").style.display = state.roadviewOn ? "inline-flex" : "none";
+        $("#toggleRoadview").textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
+
+        if(!state.roadviewOn){
+          $("#mapWrap").classList.remove("roadview-open");
+        }
+
+        if(state.map){
+          const c = state.map.getCenter();
+          state.map.relayout();
+          state.map.setCenter(c);
+        }
+
+        if(state.roadviewOn){
+          setRoadviewOverlay(true);
+
+          if(!state.roadviewClickHandler && state.map){
+            state.roadviewClickHandler = mouseEvent => {
+              if(!state.roadviewOn) return;
+              if(mouseEvent && mouseEvent.latLng) setRoadviewAt(mouseEvent.latLng);
+            };
+
+            kakao.maps.event.addListener(state.map, "click", state.roadviewClickHandler);
+          }
+        } else {
+          setRoadviewOverlay(false);
+
+          if(state.roadviewClickHandler && state.map){
+            kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
+          }
+
+          state.roadviewClickHandler = null;
+        }
+      }
+
       async function copyLink(){
         try { await navigator.clipboard.writeText(location.href); $("#copyBtn").textContent = "복사 완료"; setTimeout(() => { $("#copyBtn").textContent = "링크 복사"; }, 1300); }
         catch { prompt("공유 링크입니다.", location.href); }
@@ -232,6 +398,7 @@
           state.payload = payload;
           state.zips = zips;
           createMap();
+          initInfoCollapsed();
           $("#chips").innerHTML = zips.map(zip => `<span class="chip">${esc(zip)}</span>`).join("");
           $("#subtitle").textContent = `${zips.length}개 우편번호 · 72시간 공유`;
           $("#meta").textContent = `만료: ${formatExpires(payload.expires_at || payload.expiresAt)} · 생성자: ${payload.created_by || "-"}`;
@@ -242,7 +409,18 @@
           $("#fitBtn").onclick = fitAll;
           $("#copyBtn").onclick = copyLink;
           $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
-          window.addEventListener("resize", () => { if(!state.map) return; const c = state.map.getCenter(); state.map.relayout(); state.map.setCenter(c); });
+          $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);
+          window.addEventListener("resize", () => {
+            if(!state.map) return;
+
+            const c = state.map.getCenter();
+            state.map.relayout();
+            state.map.setCenter(c);
+
+            if(state.roadviewOn && state.roadview && typeof state.roadview.relayout === "function"){
+              state.roadview.relayout();
+            }
+          });
         } catch(e) { console.error(e); showError(e?.message || String(e)); }
       }
       if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", main, {once:true});

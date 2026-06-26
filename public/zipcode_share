@@ -1,1 +1,253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="referrer" content="origin" />
+  <meta property="og:title" content="마루웰 우편번호 지도 공유" />
+  <meta property="og:description" content="공유된 우편번호 폴리곤 지도를 확인합니다." />
+  <meta property="og:image" content="https://maroowell.com/assets/og/maroowell-1200x630.png?v=1" />
+  <title>마루웰 우편번호 지도 공유</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
+  <style>
+    @font-face{
+      font-family:"문경감홍사과체";
+      src:url("/assets/fonts/MungyeongGamhong.woff2") format("woff2"),
+          url("/assets/fonts/MungyeongGamhong.woff") format("woff"),
+          url("/assets/fonts/MungyeongGamhong.ttf") format("truetype");
+      font-weight:400 1000;
+      font-style:normal;
+      font-display:swap;
+    }
+    :root{
+      --font:"문경감홍사과체","Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      --line:#d8e0ee;
+      --text:#0f172a;
+      --muted:#64748b;
+      --shadow:0 16px 46px rgba(15,23,42,.16);
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:var(--font);color:var(--text);background:#f6f8fc;font-weight:900}
+    #map{position:fixed;inset:0}
+    .topCard{position:fixed;left:16px;top:16px;z-index:20;width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-radius:22px;background:rgba(255,255,255,.94);box-shadow:var(--shadow);backdrop-filter:blur(12px);overflow:hidden}
+    .head{display:flex;align-items:center;gap:10px;padding:13px 15px;border-bottom:1px solid var(--line)}
+    .head img{width:30px;height:30px;display:block}
+    .title{min-width:0;flex:1}
+    .title b{display:block;font-size:19px;letter-spacing:-.04em;line-height:1.1}
+    .title small{display:block;margin-top:3px;color:var(--muted);font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .body{padding:12px 15px 14px;display:grid;gap:9px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap;max-height:96px;overflow:auto}
+    .chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:999px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:1000}
+    .meta{color:#475569;font-size:12px;font-weight:900;line-height:1.5}
+    .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button{height:34px;padding:0 12px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font-family:var(--font);font-size:12px;font-weight:1000;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.8)}
+    button.primary{background:linear-gradient(180deg,#3b82f6,#2563eb);border-color:#2563eb;color:#fff}
+    .mapType{position:fixed;right:16px;top:16px;z-index:21;display:flex;gap:8px}
+    .zip-label{display:inline-flex;align-items:center;justify-content:center;min-width:58px;height:28px;padding:0 10px;border:3px solid #111827;border-radius:999px;background:#fff;color:#0f172a;font-size:14px;font-weight:1000;box-shadow:0 3px 10px rgba(15,23,42,.18);white-space:nowrap}
+    .error{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,#ffffff,#f6f8fc)}
+    .error.show{display:flex}
+    .errorCard{width:min(520px,calc(100vw - 32px));border:1px solid var(--line);border-radius:22px;background:#fff;box-shadow:var(--shadow);padding:22px}
+    .errorCard h1{margin:0 0 10px;font-size:23px}
+    .errorCard p{margin:0;color:#64748b;line-height:1.65;font-size:14px;font-weight:900;white-space:pre-wrap}
+    @media(max-width:720px){.topCard{left:10px;top:10px;width:calc(100vw - 20px);border-radius:18px}.mapType{right:10px;top:auto;bottom:16px}.title b{font-size:17px}.head{padding:11px 12px}.body{padding:10px 12px 12px}}
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="topCard">
+    <div class="head">
+      <img src="/favicon.ico" alt="Maroowell" />
+      <div class="title">
+        <b>우편번호 지도 공유</b>
+        <small id="subtitle">공유 링크 확인 중...</small>
+      </div>
+    </div>
+    <div class="body">
+      <div id="chips" class="chips"></div>
+      <div id="meta" class="meta">지도 데이터를 불러오는 중입니다.</div>
+      <div class="actions">
+        <button id="fitBtn" class="primary" type="button">전체 보기</button>
+        <button id="copyBtn" type="button">링크 복사</button>
+      </div>
+    </div>
+  </div>
+  <div class="mapType"><button id="toggleMapType" type="button">위성</button></div>
+  <div id="error" class="error"><div class="errorCard"><h1>공유 지도를 열 수 없습니다</h1><p id="errorText">링크가 만료되었거나 잘못되었습니다.</p></div></div>
 
+  <script>
+    (async function(){
+      "use strict";
+
+      const ZIP_API_BASE = String((window.MARUWELL_CONFIG || {}).ZIP_API_BASE || (window.MARUWELL_CONFIG || {}).ZIPCODE_API_BASE || "https://zip.maroowell.com").replace(/\/+$/, "");
+      const ZIP_API_URL = `${ZIP_API_BASE}/?zipcode=`;
+      const VERIFY_URL = `${ZIP_API_BASE}/share/verify`;
+      const ZIP_FETCH_TIMEOUT_MS = 15000;
+      const COLORS = ["#ff4b4b","#22c55e","#fbbf24","#3b82f6","#22d3ee","#c084fc","#f472b6","#60a5fa","#34d399","#f97316"];
+
+      const state = { map:null, isSatellite:false, zips:[], polygons:new Map(), labels:new Map(), bounds:null, payload:null };
+      const $ = sel => document.querySelector(sel);
+      const clean = v => String(v ?? "").trim();
+      const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[ch]));
+
+      function showError(message){
+        $("#errorText").textContent = message || "링크가 만료되었거나 잘못되었습니다.";
+        $("#error").classList.add("show");
+      }
+
+      async function verifyShare(){
+        const params = new URLSearchParams(location.search);
+        const s = clean(params.get("s"));
+        const sig = clean(params.get("sig"));
+        if(!s || !sig) throw new Error("공유 토큰이 없습니다.");
+
+        const res = await fetch(`${VERIFY_URL}?s=${encodeURIComponent(s)}&sig=${encodeURIComponent(sig)}`, { method:"GET", cache:"no-store" });
+        const text = await res.text();
+        let json = null;
+        try { json = text ? JSON.parse(text) : null; } catch {}
+        if(!res.ok || json?.ok === false) throw new Error(json?.error || json?.message || text || `HTTP ${res.status}`);
+        return json.payload || json;
+      }
+
+      function pickColor(seed){
+        let h = 0;
+        const s = String(seed || "");
+        for(let i=0;i<s.length;i++) h = ((h * 31) + s.charCodeAt(i)) >>> 0;
+        return COLORS[h % COLORS.length];
+      }
+
+      proj4.defs("EPSG:5179", "+proj=tmerc +lat_0=38 +lon_0=127.5 +k=0.9996 +x_0=1000000 +y_0=2000000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs");
+      proj4.defs("EPSG:4326", "+proj=longlat +datum=WGS84 +no_defs");
+
+      function convertPoint(x,y){
+        let lon, lat;
+        try { const out = proj4("EPSG:5179", "EPSG:4326", [Number(x), Number(y)]); lon = out[0]; lat = out[1]; } catch {}
+        if(!isFinite(lat) || !isFinite(lon) || lat < 30 || lat > 45 || lon < 120 || lon > 135){ lon = Number(x); lat = Number(y); }
+        return {lat, lon};
+      }
+      function isPoint(v){ return Array.isArray(v) && v.length >= 2 && isFinite(v[0]) && isFinite(v[1]); }
+      function normalizeToMultiPolygon5179(polygon5179){
+        if(!Array.isArray(polygon5179) || polygon5179.length === 0) return null;
+        if(isPoint(polygon5179[0])) return [[polygon5179]];
+        if(Array.isArray(polygon5179[0]) && polygon5179[0].length && isPoint(polygon5179[0][0])) return [polygon5179];
+        if(Array.isArray(polygon5179[0]) && polygon5179[0].length && Array.isArray(polygon5179[0][0]) && polygon5179[0][0].length && isPoint(polygon5179[0][0][0])) return polygon5179;
+        return null;
+      }
+      function closeRingLngLat(ring){
+        if(!ring || ring.length < 3) return ring;
+        const f = ring[0], l = ring[ring.length - 1];
+        if(f[0] !== l[0] || f[1] !== l[1]) ring.push([f[0], f[1]]);
+        return ring;
+      }
+      function convert5179MultiToWgs84(multi5179){
+        const out = [];
+        for(const poly of multi5179){
+          const ringsOut = [];
+          for(const ring of poly){
+            const ringOut = [];
+            for(const pt of ring){
+              if(!isPoint(pt)) continue;
+              const {lat, lon} = convertPoint(Number(pt[0]), Number(pt[1]));
+              if(!isFinite(lat) || !isFinite(lon)) continue;
+              ringOut.push([lon, lat]);
+            }
+            if(ringOut.length >= 3){ closeRingLngLat(ringOut); if(ringOut.length >= 4) ringsOut.push(ringOut); }
+          }
+          if(ringsOut.length) out.push(ringsOut);
+        }
+        return out.length ? out : null;
+      }
+      function centroidOfLngLatRing(ringLngLat){
+        if(!ringLngLat || ringLngLat.length < 3) return null;
+        const pts = ringLngLat.slice();
+        const f = pts[0], l = pts[pts.length - 1];
+        if(f[0] !== l[0] || f[1] !== l[1]) pts.push([f[0], f[1]]);
+        let area2 = 0, cx6 = 0, cy6 = 0;
+        for(let i=0;i<pts.length-1;i++){ const x0=pts[i][0], y0=pts[i][1], x1=pts[i+1][0], y1=pts[i+1][1]; const f2 = x0*y1 - x1*y0; area2 += f2; cx6 += (x0 + x1) * f2; cy6 += (y0 + y1) * f2; }
+        if(!isFinite(area2) || Math.abs(area2) < 1e-14) return null;
+        return new kakao.maps.LatLng(cy6 / (3 * area2), cx6 / (3 * area2));
+      }
+      function createZipLabelOverlay(zip, color, pos){
+        const el = document.createElement("div");
+        el.className = "zip-label";
+        el.textContent = zip;
+        el.style.borderColor = color;
+        return new kakao.maps.CustomOverlay({ position:pos, content:el, yAnchor:0.5, zIndex:9999 });
+      }
+      function drawZipMultiPolygon(zip, wgsMultiCoords){
+        const color = pickColor(zip);
+        const polys = [], overlays = [];
+        for(const polyRings of wgsMultiCoords){
+          const ringsLatLng = polyRings.map(ring => {
+            const latlngs = ring.map(([lng, lat]) => new kakao.maps.LatLng(lat,lng));
+            if(latlngs.length > 1){ const f = latlngs[0], l = latlngs[latlngs.length - 1]; if(f.getLat() === l.getLat() && f.getLng() === l.getLng()) latlngs.pop(); }
+            return latlngs;
+          }).filter(r => r.length >= 3);
+          if(!ringsLatLng.length) continue;
+          const poly = new kakao.maps.Polygon({ map:state.map, path:ringsLatLng.length === 1 ? ringsLatLng[0] : ringsLatLng, strokeWeight:3, strokeColor:color, strokeOpacity:1, strokeStyle:"solid", fillColor:color, fillOpacity:0.24 });
+          polys.push(poly);
+          const center = centroidOfLngLatRing(polyRings[0]);
+          if(center){ const ov = createZipLabelOverlay(zip,color,center); ov.setMap(state.map); overlays.push(ov); }
+          for(const ring of ringsLatLng) for(const ll of ring) state.bounds.extend(ll);
+        }
+        if(polys.length) state.polygons.set(zip,polys);
+        if(overlays.length) state.labels.set(zip,overlays);
+      }
+      async function fetchWithTimeout(url, options = {}, timeoutMs = ZIP_FETCH_TIMEOUT_MS){
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(new DOMException("timeout","AbortError")), timeoutMs);
+        try { return await fetch(url, {...options, signal:controller.signal}); } finally { window.clearTimeout(timer); }
+      }
+      async function drawZip(zip){
+        const res = await fetchWithTimeout(`${ZIP_API_URL}${encodeURIComponent(zip)}`, {cache:"no-store"});
+        if(!res.ok) throw new Error(`${zip}: HTTP ${res.status}`);
+        const data = await res.json();
+        const polyRaw = (data && (data.polygon5179 ?? data.polygon_5179 ?? data.polygon)) ?? null;
+        const norm = normalizeToMultiPolygon5179(polyRaw);
+        if(!norm) throw new Error(`${zip}: polygon missing`);
+        const wgs = convert5179MultiToWgs84(norm);
+        if(!wgs) throw new Error(`${zip}: convert fail`);
+        drawZipMultiPolygon(zip,wgs);
+      }
+      function fitAll(){ if(state.map && state.bounds) state.map.setBounds(state.bounds); }
+      function setMapTypeSatellite(on){ state.isSatellite = !!on; if(!state.map) return; state.map.setMapTypeId(state.isSatellite ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP); $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성"; }
+      async function copyLink(){
+        try { await navigator.clipboard.writeText(location.href); $("#copyBtn").textContent = "복사 완료"; setTimeout(() => { $("#copyBtn").textContent = "링크 복사"; }, 1300); }
+        catch { prompt("공유 링크입니다.", location.href); }
+      }
+      function formatExpires(v){ const d = new Date(v); if(Number.isNaN(d.getTime())) return "-"; return d.toLocaleString("ko-KR", { timeZone:"Asia/Seoul", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" }); }
+      function createMap(){
+        if(!(window.kakao && kakao.maps)) throw new Error("카카오 지도 SDK 로딩 실패");
+        state.map = new kakao.maps.Map($("#map"), { center:new kakao.maps.LatLng(37.5665,126.978), level:8 });
+        state.bounds = new kakao.maps.LatLngBounds();
+      }
+      async function main(){
+        try {
+          const payload = await verifyShare();
+          if(payload?.type && payload.type !== "zipcode_map") throw new Error("공유 타입이 우편번호 지도가 아닙니다.");
+          const zips = Array.from(new Set((payload.zips || []).map(v => clean(v)).filter(v => /^\d{5}$/.test(v))));
+          if(!zips.length) throw new Error("공유된 우편번호가 없습니다.");
+          state.payload = payload;
+          state.zips = zips;
+          createMap();
+          $("#chips").innerHTML = zips.map(zip => `<span class="chip">${esc(zip)}</span>`).join("");
+          $("#subtitle").textContent = `${zips.length}개 우편번호 · 72시간 공유`;
+          $("#meta").textContent = `만료: ${formatExpires(payload.expires_at || payload.expiresAt)} · 생성자: ${payload.created_by || "-"}`;
+          const failed = [];
+          for(const zip of zips){ try { await drawZip(zip); } catch(e){ console.warn(e); failed.push(zip); } }
+          fitAll();
+          if(failed.length) $("#meta").textContent += ` · 미표시: ${failed.join(", ")}`;
+          $("#fitBtn").onclick = fitAll;
+          $("#copyBtn").onclick = copyLink;
+          $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
+          window.addEventListener("resize", () => { if(!state.map) return; const c = state.map.getCenter(); state.map.relayout(); state.map.setCenter(c); });
+        } catch(e) { console.error(e); showError(e?.message || String(e)); }
+      }
+      if(document.readyState === "loading") document.addEventListener("DOMContentLoaded", main, {once:true});
+      else main();
+    })();
+  </script>
+</body>
+</html>

@@ -2352,6 +2352,22 @@
         return [...zips].sort();
       }
 
+      function defaultShareTitle(zips) {
+        return `우편번호 지도 ${zips.slice(0, 4).join(", ")}${zips.length > 4 ? " 외" : ""}`;
+      }
+
+      function askShareTitle(zips) {
+        const input = prompt(
+          "공유 문구를 입력하세요.\n예: M안성1 - 평택T그룹\n\n비워두면 기본 제목으로 공유됩니다.",
+          ""
+        );
+
+        if (input === null) return null;
+
+        const value = String(input || "").replace(/\s+/g, " ").trim();
+        return value || defaultShareTitle(zips);
+      }
+
       async function createMapShareLink() {
         const btn = $("#shareMapBtn");
         const zips = collectShareZipcodes();
@@ -2360,6 +2376,14 @@
           alert("공유할 우편번호를 먼저 추가하거나 지도표시 해주세요.");
           return;
         }
+
+        const shareTitle = askShareTitle(zips);
+
+        if (shareTitle === null) {
+          return;
+        }
+
+        const shareDescription = `${shareTitle} · ${zips.length}개 우편번호 · 72시간 공유`;
 
         const session = await getCurrentSession();
 
@@ -2385,7 +2409,8 @@
               ttl_hours: 72,
               merge: state.mergeMode === true,
               source: "zipcode_search",
-              title: `우편번호 지도 ${zips.slice(0, 4).join(", ")}${zips.length > 4 ? " 외" : ""}`
+              title: shareTitle,
+              description: shareDescription
             }),
             cache: "no-store"
           });
@@ -2407,13 +2432,14 @@
             throw new Error("공유 링크 응답이 비어 있습니다.");
           }
 
-          const copied = await copyShareUrl(shareUrl);
+          const shareMessage = `${shareTitle}\n${shareUrl}`;
+          const copied = await copyShareUrl(shareMessage);
 
           if (copied) {
-            showShareToast("지도 공유 링크 복사 완료!");
-            alert(`지도 공유 링크를 복사했습니다.\n만료: 72시간\n\n${shareUrl}`);
+            showShareToast("지도 공유 문구 복사 완료!");
+            alert(`지도 공유 문구를 복사했습니다.\n만료: 72시간\n\n${shareMessage}`);
           } else {
-            prompt("지도 공유 링크입니다. 복사해서 전달하세요.", shareUrl);
+            prompt("지도 공유 문구입니다. 복사해서 전달하세요.", shareMessage);
           }
         } catch (e) {
           console.error("[zipcode_share] create failed", e);

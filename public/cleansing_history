@@ -1077,6 +1077,11 @@
           <input id="vendorNewBiz" placeholder="예: 123-45-67890" autocomplete="off">
         </div>
 
+        <div class="vendorField">
+          <label for="vendorNewNickname">닉네임</label>
+          <input id="vendorNewNickname" placeholder="예: 월로지스틱스" autocomplete="off">
+        </div>
+
         <div class="vendorPanelMsg" id="vendorPanelMsg"></div>
 
         <div class="vendorPanelActions">
@@ -1097,12 +1102,15 @@
   const ROUTE_VENDOR_ENDPOINT = "https://route.maroowell.com/vendors";
   const TABLE_HISTORY = "cleansing_history";
   const TABLE_CLHI_ACCESS = "cleansing_history_access";
+  const TABLE_VENDORS = "vendors";
 
   let supabaseClient = null;
   let me = {};
   let rows = [];
   let editingId = "";
   let sessionBridge = null;
+  let vendorByBiz = new Map();
+  let vendorByName = new Map();
 
   const esc = v => String(v ?? "")
     .replaceAll("&", "&amp;")
@@ -1228,6 +1236,132 @@
 
   function noSpace(v) {
     return String(v ?? "").replace(/\s+/g, "");
+  }
+
+  function normVendorName(v) {
+    return noSpace(v).toLowerCase();
+  }
+
+  function normBiz(v) {
+    return String(v ?? "").replace(/[^0-9]/g, "");
+  }
+
+  function vendorDisplayName(row) {
+    const explicit =
+      row?.vendor_nickname ??
+      row?.vendorNickname ??
+      row?.nickname ??
+      row?.vendor_display_name ??
+      row?.vendorDisplayName;
+
+    if (String(explicit ?? "").trim()) {
+      return String(explicit).trim();
+    }
+
+    const biz = normBiz(row?.business_number);
+    const name = normVendorName(row?.vendor_name);
+
+    const byBiz = biz ? vendorByBiz.get(biz) : null;
+    const byName = name ? vendorByName.get(name) : null;
+    const vendor = byBiz || byName || null;
+    const nickname = String(vendor?.nickname || "").trim();
+
+    return nickname || String(row?.vendor_name || "").trim();
+  }
+
+  async function loadVendorNicknames(force = false) {
+    if (!supabaseClient) initSupabase();
+    if (!force && (vendorByBiz.size || vendorByName.size)) return;
+
+    vendorByBiz = new Map();
+    vendorByName = new Map();
+
+    try {
+      const pageSize = 1000;
+
+      for (let from = 0; from < 10000; from += pageSize) {
+        const { data, error } = await supabaseClient
+          .from(TABLE_VENDORS)
+          .select("id,name,business_number,nickname")
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+
+        const list = Array.isArray(data) ? data : [];
+
+        for (const row of list) {
+          const biz = normBiz(row?.business_number);
+          const name = normVendorName(row?.name);
+
+          if (biz) vendorByBiz.set(biz, row);
+          if (name) vendorByName.set(name, row);
+        }
+
+        if (list.length < pageSize) break;
+      }
+    } catch (e) {
+      console.warn("[cleansing_history] vendor nickname load skipped", e);
+    }
+  }
+
+  async function applyVendorNicknames(targetRows) {
+    await loadVendorNicknames();
+
+    for (const row of targetRows || []) {
+      const display = vendorDisplayName(row);
+
+      if (display && display !== String(row?.vendor_name || "").trim()) {
+        row.vendor_nickname = display;
+      }
+    }
+
+    return targetRows;
+  }
+
+  async function saveVendorNicknameFallback(row, nickname, name, businessNumber) {
+    const nick = String(nickname || "").trim();
+    if (!nick || !supabaseClient) return false;
+
+    const payload = { nickname:nick };
+
+    try {
+      if (row?.id) {
+        const { error } = await supabaseClient
+          .from(TABLE_VENDORS)
+          .update(payload)
+          .eq("id", row.id);
+
+        if (!error) return true;
+      }
+    } catch {}
+
+    try {
+      const biz = String(businessNumber || "").trim();
+
+      if (biz) {
+        const { error } = await supabaseClient
+          .from(TABLE_VENDORS)
+          .update(payload)
+          .eq("business_number", biz);
+
+        if (!error) return true;
+      }
+    } catch {}
+
+    try {
+      const vendorName = String(name || "").trim();
+
+      if (vendorName) {
+        const { error } = await supabaseClient
+          .from(TABLE_VENDORS)
+          .update(payload)
+          .eq("name", vendorName);
+
+        if (!error) return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   function weekKey(v) {
@@ -2073,6 +2207,7 @@
     }
 
     rows = data.rows || [];
+    await applyVendorNicknames(rows);
 
     render();
 
@@ -2124,7 +2259,7 @@
               <td>${isEditing(r) ? inputCell(r, "execution_rate_grade") : gradeBadge(r.execution_rate_grade)}</td>
               <td class="${reasonClass(r.reason)}">${isEditing(r) ? inputCell(r, "reason") : esc(r.reason || "")}</td>
               <td class="priceCell yellow">${isEditing(r) ? inputCell(r, "price", "num") : fmtWon(r.price)}</td>
-              <td class="vendorCell">${isEditing(r) ? inputCell(r, "vendor_name") : esc(r.vendor_name || "")}</td>
+              <td class="vendorCell">${isEditing(r) ? inputCell(r, "vendor_name") : esc(vendorDisplayName(r) || "")}</td>
               <td class="mobileHideCol">${isEditing(r) ? inputCell(r, "business_number") : esc(r.business_number || "")}</td>
             </tr>
           `).join("")}
@@ -2147,12 +2282,15 @@
 
     $("vendorNewName").value = val("vendor") || "";
     $("vendorNewBiz").value = val("biz") || "";
+    $("vendorNewNickname").value = "";
     setVendorPanelMsg("");
 
     $("vendorModal").classList.remove("hide");
 
     setTimeout(() => {
-      ($("vendorNewName").value ? $("vendorNewBiz") : $("vendorNewName")).focus();
+      if (!$("vendorNewName").value) $("vendorNewName").focus();
+      else if (!$("vendorNewBiz").value) $("vendorNewBiz").focus();
+      else $("vendorNewNickname").focus();
     }, 30);
   }
 
@@ -2166,6 +2304,7 @@
 
     const name = $("vendorNewName").value.trim();
     const businessNumber = $("vendorNewBiz").value.trim();
+    const nickname = $("vendorNewNickname").value.trim();
 
     if (!name) {
       setVendorPanelMsg("벤더명을 입력하세요.", "err");
@@ -2191,7 +2330,8 @@
         },
         body:JSON.stringify({
           name,
-          business_number:businessNumber
+          business_number:businessNumber,
+          nickname:nickname || null
         })
       });
 
@@ -2214,11 +2354,23 @@
       const row = data?.row || data || {};
       const savedName = String(row.name || name).trim();
       const savedBiz = String(row.business_number || businessNumber).trim();
+      const savedNickname = String(row.nickname || nickname || "").trim();
+
+      if (nickname && !String(row.nickname || "").trim()) {
+        await saveVendorNicknameFallback(row, nickname, savedName, savedBiz);
+      }
+
+      vendorByBiz = new Map();
+      vendorByName = new Map();
+      await loadVendorNicknames(true);
 
       $("vendor").value = savedName;
       $("biz").value = savedBiz;
 
-      setVendorPanelMsg(`등록 완료\n${savedName}\n${savedBiz}`, "ok");
+      setVendorPanelMsg(
+        `등록 완료\n${savedName}\n${savedBiz}${savedNickname ? "\n닉네임: " + savedNickname : ""}`,
+        "ok"
+      );
 
       setTimeout(() => {
         closeVendorPanel();
@@ -2992,7 +3144,7 @@
       if (e.target === $("vendorModal")) closeVendorPanel();
     };
 
-    ["vendorNewName", "vendorNewBiz"].forEach(id => {
+    ["vendorNewName", "vendorNewBiz", "vendorNewNickname"].forEach(id => {
       $(id).addEventListener("keydown", e => {
         if (e.key === "Enter") {
           e.preventDefault();

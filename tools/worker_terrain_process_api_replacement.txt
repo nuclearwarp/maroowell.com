@@ -1,0 +1,778 @@
+// ---------- Copernicus GLO-30 terrain statistics ----------
+//
+// 기존 우편번호 경계 GET, 지도 공유, Supabase 인증 로직은 그대로 유지한다.
+// 프론트가 EPSG:5179 경계를 WGS84로 변환한 뒤 아래 엔드포인트로 전달한다.
+//   POST /terrain
+//   POST /zip/terrain
+// Body:
+//   { zipcode: "13581", geometry: { type: "Polygon|MultiPolygon", coordinates: [...] } }
+//
+// 최초 조회: Supabase 캐시 확인 -> Copernicus Process API -> PNG 픽셀 통계 -> Supabase 저장
+// 재조회: Supabase 캐시만 반환 (Copernicus 요청 없음)
+
+const ZIPCODE_TERRAIN_TABLE = "zipcode_terrain";
+const COPERNICUS_TOKEN_URL =
+  "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
+const COPERNICUS_PROCESS_URL =
+  "https://sh.dataspace.copernicus.eu/api/v1/process";
+const COPERNICUS_DEM_INSTANCE = "COPERNICUS_30";
+const COPERNICUS_TERRAIN_SOURCE = "COPERNICUS_30";
+
+const TERRAIN_RESOLUTION_METERS = 30;
+const TERRAIN_SUPABASE_TIMEOUT_MS = 5000;
+const COPERNICUS_TOKEN_TIMEOUT_MS = 6000;
+const COPERNICUS_PROCESS_TIMEOUT_MS = 20000;
+const TERRAIN_MAX_POINTS = 100000;
+const TERRAIN_MAX_BBOX_DEGREES = 2;
+const TERRAIN_MAX_IMAGE_SIDE = 1024;
+const TERRAIN_MIN_IMAGE_SIDE = 32;
+
+// 고도값을 PNG RGB 24비트 정수로 저장하기 위한 규칙.
+// encoded = round((elevationMeters + 12000) * 10)
+// decoded elevation = encoded / 10 - 12000
+const TERRAIN_HEIGHT_OFFSET = 12000;
+const TERRAIN_HEIGHT_SCALE = 10;
+
+let copernicusTokenCache = {
+  accessToken: "",
+  expiresAt: 0,
+};
+
+const TERRAIN_PROCESS_EVALSCRIPT = `//VERSION=3
+function setup() {
+  return {
+    input: [{
+      bands: ["DEM", "dataMask"]
+    }],
+    output: {
+      id: "default",
+      bands: 4,
+      sampleType: "UINT8"
+    }
+  };
+}
+
+function evaluatePixel(sample) {
+  if (!sample.dataMask) return [0, 0, 0, 0];
+
+  var encoded = Math.round((sample.DEM + ${TERRAIN_HEIGHT_OFFSET}) * ${TERRAIN_HEIGHT_SCALE});
+  encoded = Math.max(0, Math.min(16777215, encoded));
+
+  var r = Math.floor(encoded / 65536);
+  var g = Math.floor((encoded - r * 65536) / 256);
+  var b = encoded - r * 65536 - g * 256;
+
+  return [r, g, b, 255];
+}`;
+
+function finiteNumberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function roundTerrainNumber(value, digits = 2) {
+  const n = finiteNumberOrNull(value);
+  if (n == null) return null;
+  const factor = 10 ** digits;
+  return Math.round(n * factor) / factor;
+}
+
+function normalizeTerrainZipcode(value) {
+  const text = String(value ?? "").trim();
+  return /^\d{5}$/.test(text) ? text : "";
+}
+
+function sameCoordinate(a, b) {
+  return Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length >= 2 &&
+    b.length >= 2 &&
+    Number(a[0]) === Number(b[0]) &&
+    Number(a[1]) === Number(b[1]);
+}
+
+function normalizeTerrainGeometry(rawGeometry) {
+  let geometry = rawGeometry;
+
+  if (geometry?.type === "Feature" && geometry.geometry) {
+    geometry = geometry.geometry;
+  }
+
+  if (!geometry || typeof geometry !== "object") {
+    throw httpError(400, "WGS84 geometry is required");
+  }
+
+  const type = geometry.type;
+  const coordinates = geometry.coordinates;
+
+  if (type !== "Polygon" && type !== "MultiPolygon") {
+    throw httpError(400, "geometry.type must be Polygon or MultiPolygon");
+  }
+
+  if (!Array.isArray(coordinates) || coordinates.length === 0) {
+    throw httpError(400, "geometry.coordinates is empty");
+  }
+
+  let pointCount = 0;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+
+  function normalizeRing(rawRing) {
+    if (!Array.isArray(rawRing) || rawRing.length < 3) {
+      throw httpError(400, "Each polygon ring must have at least 3 points");
+    }
+
+    const ring = [];
+
+    for (const rawPoint of rawRing) {
+      if (!Array.isArray(rawPoint) || rawPoint.length < 2) {
+        throw httpError(400, "Invalid coordinate in geometry");
+      }
+
+      const lon = Number(rawPoint[0]);
+      const lat = Number(rawPoint[1]);
+
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
+        throw httpError(400, "Geometry contains a non-numeric coordinate");
+      }
+
+      if (lon < 120 || lon > 135 || lat < 30 || lat > 45) {
+        throw httpError(400, "Geometry coordinate is outside the supported Korea range");
+      }
+
+      ring.push([lon, lat]);
+      pointCount += 1;
+      minLon = Math.min(minLon, lon);
+      minLat = Math.min(minLat, lat);
+      maxLon = Math.max(maxLon, lon);
+      maxLat = Math.max(maxLat, lat);
+
+      if (pointCount > TERRAIN_MAX_POINTS) {
+        throw httpError(413, `Geometry exceeds ${TERRAIN_MAX_POINTS} points`);
+      }
+    }
+
+    if (!sameCoordinate(ring[0], ring[ring.length - 1])) {
+      ring.push([...ring[0]]);
+      pointCount += 1;
+    }
+
+    if (ring.length < 4) {
+      throw httpError(400, "Polygon ring must contain at least 4 coordinates including closure");
+    }
+
+    return ring;
+  }
+
+  function normalizePolygon(rawPolygon) {
+    if (!Array.isArray(rawPolygon) || rawPolygon.length === 0) {
+      throw httpError(400, "Polygon has no rings");
+    }
+    return rawPolygon.map(normalizeRing);
+  }
+
+  const normalizedCoordinates = type === "Polygon"
+    ? normalizePolygon(coordinates)
+    : coordinates.map(normalizePolygon);
+
+  if (
+    !Number.isFinite(minLon) ||
+    !Number.isFinite(minLat) ||
+    !Number.isFinite(maxLon) ||
+    !Number.isFinite(maxLat)
+  ) {
+    throw httpError(400, "Failed to calculate geometry bounds");
+  }
+
+  if (
+    maxLon - minLon > TERRAIN_MAX_BBOX_DEGREES ||
+    maxLat - minLat > TERRAIN_MAX_BBOX_DEGREES
+  ) {
+    throw httpError(413, "Terrain request area is too large");
+  }
+
+  return {
+    geometry: {
+      type,
+      coordinates: normalizedCoordinates,
+    },
+    bbox: [minLon, minLat, maxLon, maxLat],
+  };
+}
+
+function terrainSupabaseHeaders(env, prefer = "") {
+  const serviceKey = requireEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
+  const headers = {
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  if (prefer) headers.Prefer = prefer;
+  return headers;
+}
+
+function terrainSelectColumns() {
+  return [
+    "zipcode",
+    "min_elevation",
+    "max_elevation",
+    "mean_elevation",
+    "stdev_elevation",
+    "p10_elevation",
+    "p90_elevation",
+    "elevation_range",
+    "effective_range",
+    "sample_count",
+    "no_data_count",
+    "resolution_m",
+    "source",
+    "calculated_at",
+  ].join(",");
+}
+
+async function fetchTerrainCache(env, zipcode) {
+  const supabaseUrl = requireEnv(env, "SUPABASE_URL").replace(/\/+$/, "");
+  const params = new URLSearchParams();
+  params.set("zipcode", `eq.${zipcode}`);
+  params.set("select", terrainSelectColumns());
+  params.set("limit", "1");
+
+  const res = await fetchWithTimeout(
+    `${supabaseUrl}/rest/v1/${ZIPCODE_TERRAIN_TABLE}?${params.toString()}`,
+    {
+      method: "GET",
+      headers: terrainSupabaseHeaders(env),
+      cf: { cacheTtl: 0, cacheEverything: false },
+    },
+    TERRAIN_SUPABASE_TIMEOUT_MS
+  );
+
+  const text = await res.text();
+  let rows = null;
+  try { rows = text ? JSON.parse(text) : []; } catch {}
+
+  if (!res.ok) {
+    throw httpError(502, `Terrain cache lookup failed: ${snippet(text) || `HTTP ${res.status}`}`);
+  }
+
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function upsertTerrainCache(env, row) {
+  const supabaseUrl = requireEnv(env, "SUPABASE_URL").replace(/\/+$/, "");
+  const params = new URLSearchParams();
+  params.set("on_conflict", "zipcode");
+
+  const res = await fetchWithTimeout(
+    `${supabaseUrl}/rest/v1/${ZIPCODE_TERRAIN_TABLE}?${params.toString()}`,
+    {
+      method: "POST",
+      headers: terrainSupabaseHeaders(env, "resolution=merge-duplicates,return=representation"),
+      body: JSON.stringify(row),
+      cf: { cacheTtl: 0, cacheEverything: false },
+    },
+    TERRAIN_SUPABASE_TIMEOUT_MS
+  );
+
+  const text = await res.text();
+  let rows = null;
+  try { rows = text ? JSON.parse(text) : []; } catch {}
+
+  if (!res.ok) {
+    throw httpError(502, `Terrain cache save failed: ${snippet(text) || `HTTP ${res.status}`}`);
+  }
+
+  return Array.isArray(rows) && rows.length ? rows[0] : row;
+}
+
+function terrainRowToResponse(row) {
+  if (!row || typeof row !== "object") return null;
+
+  const minElevation = finiteNumberOrNull(row.min_elevation);
+  const maxElevation = finiteNumberOrNull(row.max_elevation);
+  const meanElevation = finiteNumberOrNull(row.mean_elevation);
+  const p10Elevation = finiteNumberOrNull(row.p10_elevation);
+  const p90Elevation = finiteNumberOrNull(row.p90_elevation);
+
+  if (
+    minElevation == null ||
+    maxElevation == null ||
+    meanElevation == null ||
+    p10Elevation == null ||
+    p90Elevation == null
+  ) {
+    return null;
+  }
+
+  const elevationRange = finiteNumberOrNull(row.elevation_range);
+  const effectiveRange = finiteNumberOrNull(row.effective_range);
+
+  return {
+    source: String(row.source || COPERNICUS_TERRAIN_SOURCE),
+    minElevation: roundTerrainNumber(minElevation),
+    maxElevation: roundTerrainNumber(maxElevation),
+    meanElevation: roundTerrainNumber(meanElevation),
+    stdevElevation: roundTerrainNumber(row.stdev_elevation),
+    p10Elevation: roundTerrainNumber(p10Elevation),
+    p90Elevation: roundTerrainNumber(p90Elevation),
+    elevationRange: roundTerrainNumber(
+      elevationRange == null ? maxElevation - minElevation : elevationRange
+    ),
+    effectiveRange: roundTerrainNumber(
+      effectiveRange == null ? p90Elevation - p10Elevation : effectiveRange
+    ),
+    sampleCount: Math.max(0, Math.trunc(Number(row.sample_count) || 0)),
+    noDataCount: Math.max(0, Math.trunc(Number(row.no_data_count) || 0)),
+    resolutionMeters: Math.max(
+      1,
+      Math.trunc(Number(row.resolution_m) || TERRAIN_RESOLUTION_METERS)
+    ),
+    calculatedAt: row.calculated_at || null,
+  };
+}
+
+async function getCopernicusAccessToken(env, forceRefresh = false) {
+  const now = Date.now();
+
+  if (
+    !forceRefresh &&
+    copernicusTokenCache.accessToken &&
+    copernicusTokenCache.expiresAt > now + 60000
+  ) {
+    return copernicusTokenCache.accessToken;
+  }
+
+  const clientId = requireEnv(env, "COPERNICUS_CLIENT_ID");
+  const clientSecret = requireEnv(env, "COPERNICUS_CLIENT_SECRET");
+
+  const form = new URLSearchParams();
+  form.set("grant_type", "client_credentials");
+  form.set("client_id", clientId);
+  form.set("client_secret", clientSecret);
+
+  const res = await fetchWithTimeout(
+    COPERNICUS_TOKEN_URL,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: form.toString(),
+      cf: { cacheTtl: 0, cacheEverything: false },
+    },
+    COPERNICUS_TOKEN_TIMEOUT_MS
+  );
+
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch {}
+
+  if (!res.ok || !data?.access_token) {
+    throw httpError(
+      502,
+      `Copernicus OAuth failed: ${data?.error_description || data?.error || snippet(text) || `HTTP ${res.status}`}`
+    );
+  }
+
+  const expiresInSeconds = Math.max(60, Number(data.expires_in) || 600);
+  copernicusTokenCache = {
+    accessToken: String(data.access_token),
+    expiresAt: now + expiresInSeconds * 1000,
+  };
+
+  return copernicusTokenCache.accessToken;
+}
+
+function clampTerrainImageSide(value) {
+  return Math.max(
+    TERRAIN_MIN_IMAGE_SIDE,
+    Math.min(TERRAIN_MAX_IMAGE_SIDE, Math.ceil(Number(value) || TERRAIN_MIN_IMAGE_SIDE))
+  );
+}
+
+function buildTerrainImageSize(bbox) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const midLatRad = ((minLat + maxLat) / 2) * Math.PI / 180;
+  const widthMeters = Math.max(1, (maxLon - minLon) * 111320 * Math.cos(midLatRad));
+  const heightMeters = Math.max(1, (maxLat - minLat) * 110574);
+
+  return {
+    width: clampTerrainImageSide(widthMeters / TERRAIN_RESOLUTION_METERS),
+    height: clampTerrainImageSide(heightMeters / TERRAIN_RESOLUTION_METERS),
+  };
+}
+
+function buildCopernicusProcessPayload(normalized) {
+  const size = buildTerrainImageSize(normalized.bbox);
+
+  return {
+    input: {
+      bounds: {
+        geometry: normalized.geometry,
+        properties: {
+          crs: "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
+        },
+      },
+      data: [
+        {
+          type: "dem",
+          dataFilter: {
+            demInstance: COPERNICUS_DEM_INSTANCE,
+          },
+          processing: {
+            upsampling: "BILINEAR",
+            downsampling: "BILINEAR",
+          },
+        },
+      ],
+    },
+    output: {
+      width: size.width,
+      height: size.height,
+      responses: [
+        {
+          identifier: "default",
+          format: { type: "image/png" },
+        },
+      ],
+    },
+    evalscript: TERRAIN_PROCESS_EVALSCRIPT,
+  };
+}
+
+function readUint32BE(bytes, offset) {
+  return (
+    ((bytes[offset] << 24) >>> 0) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function concatUint8Arrays(parts) {
+  const size = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
+async function inflatePngData(compressed) {
+  if (typeof DecompressionStream !== "function") {
+    throw httpError(500, "DecompressionStream is unavailable in this Worker runtime");
+  }
+
+  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function paethPredictor(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function unfilterPngScanlines(raw, width, height, bytesPerPixel) {
+  const stride = width * bytesPerPixel;
+  const expected = height * (stride + 1);
+  if (raw.length < expected) {
+    throw httpError(502, `PNG decompressed data is truncated (${raw.length}/${expected})`);
+  }
+
+  const out = new Uint8Array(height * stride);
+  let srcOffset = 0;
+  let dstOffset = 0;
+
+  for (let y = 0; y < height; y++) {
+    const filter = raw[srcOffset++];
+
+    for (let x = 0; x < stride; x++) {
+      const current = raw[srcOffset++];
+      const left = x >= bytesPerPixel ? out[dstOffset + x - bytesPerPixel] : 0;
+      const up = y > 0 ? out[dstOffset + x - stride] : 0;
+      const upLeft = y > 0 && x >= bytesPerPixel
+        ? out[dstOffset + x - stride - bytesPerPixel]
+        : 0;
+
+      let value;
+      switch (filter) {
+        case 0:
+          value = current;
+          break;
+        case 1:
+          value = (current + left) & 255;
+          break;
+        case 2:
+          value = (current + up) & 255;
+          break;
+        case 3:
+          value = (current + Math.floor((left + up) / 2)) & 255;
+          break;
+        case 4:
+          value = (current + paethPredictor(left, up, upLeft)) & 255;
+          break;
+        default:
+          throw httpError(502, `Unsupported PNG filter type: ${filter}`);
+      }
+
+      out[dstOffset + x] = value;
+    }
+
+    dstOffset += stride;
+  }
+
+  return out;
+}
+
+async function decodeTerrainPng(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+
+  if (bytes.length < 33 || !signature.every((value, index) => bytes[index] === value)) {
+    throw httpError(502, "Copernicus response is not a valid PNG");
+  }
+
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idatParts = [];
+
+  while (offset + 12 <= bytes.length) {
+    const length = readUint32BE(bytes, offset);
+    offset += 4;
+    const type = String.fromCharCode(
+      bytes[offset],
+      bytes[offset + 1],
+      bytes[offset + 2],
+      bytes[offset + 3]
+    );
+    offset += 4;
+
+    if (offset + length + 4 > bytes.length) {
+      throw httpError(502, "PNG chunk is truncated");
+    }
+
+    const data = bytes.subarray(offset, offset + length);
+    offset += length + 4; // CRC 포함
+
+    if (type === "IHDR") {
+      width = readUint32BE(data, 0);
+      height = readUint32BE(data, 4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idatParts.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+  }
+
+  if (!width || !height || !idatParts.length) {
+    throw httpError(502, "PNG does not contain usable image data");
+  }
+
+  if (bitDepth !== 8 || colorType !== 6 || interlace !== 0) {
+    throw httpError(
+      502,
+      `Unsupported PNG layout: bitDepth=${bitDepth}, colorType=${colorType}, interlace=${interlace}`
+    );
+  }
+
+  const decompressed = await inflatePngData(concatUint8Arrays(idatParts));
+  const rgba = unfilterPngScanlines(decompressed, width, height, 4);
+  return { width, height, rgba };
+}
+
+function percentileFromSorted(sorted, percentile) {
+  if (!sorted.length) return null;
+  const position = (sorted.length - 1) * percentile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  const ratio = position - lower;
+  return sorted[lower] * (1 - ratio) + sorted[upper] * ratio;
+}
+
+function calculateTerrainStatsFromRgba(rgba) {
+  const values = [];
+  let noDataCount = 0;
+  let sum = 0;
+  let sumSquares = 0;
+  let minElevation = Infinity;
+  let maxElevation = -Infinity;
+
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const alpha = rgba[i + 3];
+    if (alpha === 0) {
+      noDataCount += 1;
+      continue;
+    }
+
+    const encoded = rgba[i] * 65536 + rgba[i + 1] * 256 + rgba[i + 2];
+    const elevation = encoded / TERRAIN_HEIGHT_SCALE - TERRAIN_HEIGHT_OFFSET;
+
+    if (!Number.isFinite(elevation) || elevation < -500 || elevation > 10000) {
+      noDataCount += 1;
+      continue;
+    }
+
+    values.push(elevation);
+    sum += elevation;
+    sumSquares += elevation * elevation;
+    minElevation = Math.min(minElevation, elevation);
+    maxElevation = Math.max(maxElevation, elevation);
+  }
+
+  if (!values.length) {
+    throw httpError(502, "Copernicus Process API returned no valid elevation pixels");
+  }
+
+  values.sort((a, b) => a - b);
+
+  const meanElevation = sum / values.length;
+  const variance = Math.max(0, sumSquares / values.length - meanElevation * meanElevation);
+  const stdevElevation = Math.sqrt(variance);
+  const p10Elevation = percentileFromSorted(values, 0.10);
+  const p90Elevation = percentileFromSorted(values, 0.90);
+
+  return {
+    minElevation,
+    maxElevation,
+    meanElevation,
+    stdevElevation,
+    p10Elevation,
+    p90Elevation,
+    elevationRange: maxElevation - minElevation,
+    effectiveRange: p90Elevation - p10Elevation,
+    sampleCount: values.length,
+    noDataCount,
+  };
+}
+
+async function requestCopernicusTerrainStatistics(env, normalized) {
+  const payload = buildCopernicusProcessPayload(normalized);
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const forceRefresh = attempt === 1;
+    const accessToken = await getCopernicusAccessToken(env, forceRefresh);
+
+    const res = await fetchWithTimeout(
+      COPERNICUS_PROCESS_URL,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "image/png, application/json",
+        },
+        body: JSON.stringify(payload),
+        cf: { cacheTtl: 0, cacheEverything: false },
+      },
+      COPERNICUS_PROCESS_TIMEOUT_MS
+    );
+
+    if (res.status === 401 && attempt === 0) {
+      copernicusTokenCache = { accessToken: "", expiresAt: 0 };
+      continue;
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch {}
+      const message =
+        data?.error?.message ||
+        data?.error_description ||
+        data?.message ||
+        data?.error ||
+        snippet(text) ||
+        `HTTP ${res.status}`;
+      throw httpError(502, `Copernicus Process API failed: ${message}`);
+    }
+
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.includes("image/png")) {
+      const text = await res.text().catch(() => "");
+      throw httpError(502, `Copernicus Process API returned ${contentType || "unknown content type"}: ${snippet(text)}`);
+    }
+
+    const png = await decodeTerrainPng(await res.arrayBuffer());
+    return calculateTerrainStatsFromRgba(png.rgba);
+  }
+
+  throw httpError(502, "Copernicus authentication retry failed");
+}
+
+function terrainStatsToDatabaseRow(zipcode, stats) {
+  return {
+    zipcode,
+    min_elevation: stats.minElevation,
+    max_elevation: stats.maxElevation,
+    mean_elevation: stats.meanElevation,
+    stdev_elevation: stats.stdevElevation,
+    p10_elevation: stats.p10Elevation,
+    p90_elevation: stats.p90Elevation,
+    elevation_range: stats.elevationRange,
+    effective_range: stats.effectiveRange,
+    sample_count: stats.sampleCount,
+    no_data_count: stats.noDataCount,
+    resolution_m: TERRAIN_RESOLUTION_METERS,
+    source: COPERNICUS_TERRAIN_SOURCE,
+    calculated_at: new Date().toISOString(),
+  };
+}
+
+async function handleTerrainRequest(request, env) {
+  await verifySupabaseUserByJwt(request, env);
+
+  const body = await readJsonBody(request);
+  const zipcode = normalizeTerrainZipcode(body?.zipcode);
+
+  if (!zipcode) {
+    throw httpError(400, "A valid 5-digit zipcode is required");
+  }
+
+  const cachedRow = await fetchTerrainCache(env, zipcode);
+  const cachedTerrain = terrainRowToResponse(cachedRow);
+
+  if (cachedTerrain) {
+    return jsonResp({
+      ok: true,
+      zipcode,
+      cached: true,
+      terrain: cachedTerrain,
+    });
+  }
+
+  const normalized = normalizeTerrainGeometry(
+    body?.geometry || body?.polygon || body?.geojson
+  );
+
+  const stats = await requestCopernicusTerrainStatistics(env, normalized);
+  const row = terrainStatsToDatabaseRow(zipcode, stats);
+  const savedRow = await upsertTerrainCache(env, row);
+  const terrain = terrainRowToResponse(savedRow) || terrainRowToResponse(row);
+
+  return jsonResp({
+    ok: true,
+    zipcode,
+    cached: false,
+    terrain,
+  });
+}

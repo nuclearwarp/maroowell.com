@@ -21,4 +21,9 @@ window.MARUWELL_CONFIG = {
   }
 };
 
+// 우편번호 검색기 전용 상호작용/지형정보 UI 보강 스크립트를 본문보다 먼저 동기 로드한다.
+if (/^\/zipcode_search(?:\.html)?\/?$/i.test(location.pathname || "")) {
+  document.write('<script src="/zipcode-search-enhancements.js?v=20260720-1"><\/script>');
+}
+
 // deploy kick: freshbag restore

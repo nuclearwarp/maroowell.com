@@ -26,4 +26,9 @@ if (/^\/zipcode_search(?:\.html)?\/?$/i.test(location.pathname || "")) {
   document.write('<script src="/zipcode-search-enhancements.js?v=20260720-1"><\/script>');
 }
 
+// 라우트 편집기 전용: 캠프·라우트명 변경 저장 및 공용 지형정보 조회
+if (/^\/coupangRouteMap(?:\.html)?\/?$/i.test(location.pathname || "")) {
+  document.write('<script src="/coupang-route-enhancements.js?v=20260721-1"><\/script>');
+}
+
 // deploy kick: freshbag restore

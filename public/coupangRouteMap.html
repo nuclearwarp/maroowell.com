@@ -1725,6 +1725,63 @@
       }
     }
 
+    /* 지형 정보 */
+    .terrainTargetText{
+      display:block;
+      margin-top:3px;
+      color:#64748b;
+      font-size:11px;
+      font-weight:900;
+      line-height:1.35;
+    }
+    .terrainStatus{
+      padding:9px 10px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+      color:#64748b;
+      font-size:11px;
+      font-weight:900;
+      line-height:1.45;
+    }
+    .terrainStatus[data-kind="loading"]{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
+    .terrainStatus[data-kind="warn"]{background:#fffbeb;border-color:#fde68a;color:#9a5c00;}
+    .terrainStatus[data-kind="error"]{background:#fff1f2;border-color:#fecdd3;color:#be123c;}
+    .terrainStatsGrid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+      margin-top:10px;
+    }
+    .terrainStat{
+      min-width:0;
+      padding:10px;
+      border:1px solid #e2e8f0;
+      border-radius:12px;
+      background:#f8fafc;
+    }
+    .terrainStatLabel{font-size:11px;color:#64748b;font-weight:900;}
+    .terrainStatValue{margin-top:4px;color:#0f172a;font-size:14px;font-weight:1000;}
+    .terrainSlopeTitle{margin:12px 0 7px;color:#475569;font-size:11px;font-weight:900;}
+    .terrainSlopeRow{
+      display:grid;
+      grid-template-columns:48px minmax(0,1fr) 48px;
+      gap:8px;
+      align-items:center;
+      margin:8px 0;
+      color:#475569;
+      font-size:11px;
+      font-weight:900;
+    }
+    .terrainSlopeTrack{height:8px;overflow:hidden;border-radius:999px;background:#e2e8f0;}
+    .terrainSlopeFill{display:block;height:100%;width:0;border-radius:999px;transition:width .18s ease;}
+    .terrainSlopeFill.flat{background:#22c55e;}
+    .terrainSlopeFill.gentle{background:#f59e0b;}
+    .terrainSlopeFill.steep{background:#ef4444;}
+    .terrainSlopePercent{text-align:right;color:#0f172a;}
+    .terrainRefreshRow{display:flex;justify-content:flex-end;margin-top:10px;}
+    #terrainRefreshBtn{flex:0 0 auto;min-width:96px;}
+
   </style>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -1777,7 +1834,60 @@
       </div>
 
       <div class="label" style="margin-top:10px;">
-        Enter 규칙: (입력값 변경됨) → 검색 / (선택 라우트 + 입력값 변경 없음) → 편집모드
+        Enter 규칙: 선택 라우트의 캠프·라우트 번호 변경 후 Enter → 저장 / 변경 없음 → 편집모드
+      </div>
+    </div>
+
+    <div class="group sectionGroup" id="terrainInfoGroup">
+      <button id="terrainInfoToggleBtn" class="sectionHeaderBtn" type="button" aria-expanded="true">
+        <span>
+          지형 정보
+          <small id="terrainTargetText" class="terrainTargetText">캠프·라우트를 불러오면 자동 조회</small>
+        </span>
+        <span class="sectionToggleText">접기</span>
+      </button>
+      <div id="terrainInfoBody" class="sectionBody">
+        <div id="terrainStatus" class="terrainStatus">분석할 폴리곤을 불러오세요.</div>
+
+        <div class="terrainStatsGrid">
+          <div class="terrainStat">
+            <div class="terrainStatLabel">최저 표고</div>
+            <div id="terrainMinValue" class="terrainStatValue">-</div>
+          </div>
+          <div class="terrainStat">
+            <div class="terrainStatLabel">최고 표고</div>
+            <div id="terrainMaxValue" class="terrainStatValue">-</div>
+          </div>
+          <div class="terrainStat">
+            <div class="terrainStatLabel">평균 표고</div>
+            <div id="terrainMeanValue" class="terrainStatValue">-</div>
+          </div>
+          <div class="terrainStat">
+            <div class="terrainStatLabel">고저차</div>
+            <div id="terrainRangeValue" class="terrainStatValue">-</div>
+          </div>
+        </div>
+
+        <div class="terrainSlopeTitle">경사도 분포</div>
+        <div class="terrainSlopeRow">
+          <span>평지</span>
+          <span class="terrainSlopeTrack"><i id="terrainFlatBar" class="terrainSlopeFill flat"></i></span>
+          <strong id="terrainFlatValue" class="terrainSlopePercent">-</strong>
+        </div>
+        <div class="terrainSlopeRow">
+          <span>완경사</span>
+          <span class="terrainSlopeTrack"><i id="terrainGentleBar" class="terrainSlopeFill gentle"></i></span>
+          <strong id="terrainGentleValue" class="terrainSlopePercent">-</strong>
+        </div>
+        <div class="terrainSlopeRow">
+          <span>급경사</span>
+          <span class="terrainSlopeTrack"><i id="terrainSteepBar" class="terrainSlopeFill steep"></i></span>
+          <strong id="terrainSteepValue" class="terrainSlopePercent">-</strong>
+        </div>
+
+        <div class="terrainRefreshRow">
+          <button id="terrainRefreshBtn" class="btn" type="button">지형 다시 조회</button>
+        </div>
       </div>
     </div>
 
@@ -1987,6 +2097,7 @@
   const ADDRESS_ENDPOINT = `${API_BASE}/addresses`;
   const VENDORS_ENDPOINT = `${API_BASE}/vendors`;
   const CAMPS_ENDPOINT = `${API_BASE}/camps`;
+  const TERRAIN_ENDPOINT = "https://zip.maroowell.com/terrain";
 
   const GOLDEN_ANGLE = 137.50776405003785;
 
@@ -2053,6 +2164,22 @@
   const vendorLabelToggleBtn = $("vendorLabelToggleBtn");
   const resetBtn = $("resetBtn");
   const shareBtn = $("shareBtn");
+
+  const terrainInfoGroup = $("terrainInfoGroup");
+  const terrainInfoToggleBtn = $("terrainInfoToggleBtn");
+  const terrainTargetText = $("terrainTargetText");
+  const terrainStatus = $("terrainStatus");
+  const terrainMinValue = $("terrainMinValue");
+  const terrainMaxValue = $("terrainMaxValue");
+  const terrainMeanValue = $("terrainMeanValue");
+  const terrainRangeValue = $("terrainRangeValue");
+  const terrainFlatValue = $("terrainFlatValue");
+  const terrainGentleValue = $("terrainGentleValue");
+  const terrainSteepValue = $("terrainSteepValue");
+  const terrainFlatBar = $("terrainFlatBar");
+  const terrainGentleBar = $("terrainGentleBar");
+  const terrainSteepBar = $("terrainSteepBar");
+  const terrainRefreshBtn = $("terrainRefreshBtn");
 
   const toggleMapTypeBtn = $("toggleMapType");
   const toggleRoadviewBtn = $("toggleRoadview");
@@ -2128,6 +2255,7 @@
 
     setCollapsed(false);
   }
+  bindSectionToggle("terrainInfoGroup", "terrainInfoToggleBtn");
   bindSectionToggle("vendorInfoGroup", "vendorInfoToggleBtn");
   bindSectionToggle("deliveryInfoGroup", "deliveryInfoToggleBtn");
 
@@ -2306,6 +2434,10 @@
   let routeRows = [];
   const overlayById = new Map();
   let selectedRouteId = null;
+
+  let terrainRequestSeq = 0;
+  let terrainLastCacheKey = "";
+  let terrainLastResult = null;
 
   let campDirty=false, codeDirty=false;
   campInput.addEventListener("input", ()=>{ campDirty=true; });
@@ -3087,6 +3219,7 @@
     deliveryAddrInput.value="";
     addressListGroup.style.display="none";
     addressList.innerHTML="";
+    clearTerrainDisplay();
   }
 
   function highlightSelection(){
@@ -3118,8 +3251,9 @@
     deliveryAddrInput.value = String(pack.row.delivery_location_address || "").trim();
 
     selectedInfo.textContent = `선택: ${campInput.value} / ${codeInput.value} (id=${id})`;
-    setStatus("라우트 선택됨 (Enter=편집모드)", "OK");
+    setStatus("라우트 선택됨 · 캠프/라우트 번호 수정 후 저장 가능", "OK");
     loadAddresses().catch(e=>log("주소 로드 실패: "+e.message));
+    loadTerrainForCurrentScope(false).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
 
     if (mqMobile.matches) setSidebarHidden(true);
   }
@@ -3136,6 +3270,7 @@
     deliveryAddrInput.value = "";
     addressListGroup.style.display = "none";
     addressList.innerHTML = "";
+    clearTerrainDisplay("캠프·라우트 전체 지형을 다시 조회하려면 불러오기를 누르세요.");
     setStatus(reason, "OK");
   }
 
@@ -3235,6 +3370,7 @@
 
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
+    loadTerrainForCurrentScope(false).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
     if (mqMobile.matches) setSidebarHidden(true);
   }
 
@@ -3252,15 +3388,274 @@
     return out.length ? out : null;
   }
 
+  function closeTerrainRing(rawRing){
+    const ring = [];
+    for (const point of rawRing || []){
+      const lng = Number(point?.[0]);
+      const lat = Number(point?.[1]);
+      if (Number.isFinite(lng) && Number.isFinite(lat)) ring.push([lng, lat]);
+    }
+    if (ring.length < 3) return null;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) ring.push([first[0], first[1]]);
+    return ring.length >= 4 ? ring : null;
+  }
+
+  function routePacksForTerrain(){
+    if (selectedRouteId){
+      const selectedPack = overlayById.get(selectedRouteId);
+      if (selectedPack?.polygons?.length) return [selectedPack];
+    }
+    return Array.from(overlayById.values()).filter(pack => pack?.polygons?.length);
+  }
+
+  function terrainGeometryFromPacks(packs){
+    const polygons = [];
+    for (const pack of packs || []){
+      for (const polygon of pack?.polygons || []){
+        const ring = closeTerrainRing(
+          polygonPathToArray(polygon).map(ll => [ll.getLng(), ll.getLat()])
+        );
+        if (ring) polygons.push([ring]);
+      }
+    }
+    if (!polygons.length) return null;
+    if (polygons.length === 1) return { type: "Polygon", coordinates: polygons[0] };
+    return { type: "MultiPolygon", coordinates: polygons };
+  }
+
+  async function sha256Hex(value){
+    const bytes = new TextEncoder().encode(String(value ?? ""));
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest))
+      .map(byte => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function terrainNumber(source, ...keys){
+    for (const key of keys){
+      const value = source?.[key];
+      if (value === null || value === undefined || value === "") continue;
+      const number = Number(value);
+      if (Number.isFinite(number)) return number;
+    }
+    return null;
+  }
+
+  function formatTerrainNumber(value, suffix="", digits=1){
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "-";
+    return `${number.toLocaleString("ko-KR", { maximumFractionDigits: digits })}${suffix}`;
+  }
+
+  function setTerrainStatus(message, kind="idle"){
+    if (!terrainStatus) return;
+    terrainStatus.textContent = message || "";
+    terrainStatus.dataset.kind = kind;
+  }
+
+  function setTerrainSlope(barEl, valueEl, value){
+    const percent = Number.isFinite(Number(value))
+      ? Math.max(0, Math.min(100, Number(value)))
+      : null;
+    if (barEl) barEl.style.width = percent == null ? "0%" : `${percent}%`;
+    if (valueEl) valueEl.textContent = percent == null ? "-" : formatTerrainNumber(percent, "%", 1);
+  }
+
+  function clearTerrainDisplay(message="분석할 폴리곤을 불러오세요."){
+    terrainRequestSeq += 1;
+    terrainLastCacheKey = "";
+    terrainLastResult = null;
+    if (terrainTargetText) terrainTargetText.textContent = "캠프·라우트를 불러오면 자동 조회";
+    setTerrainStatus(message, "idle");
+    for (const el of [terrainMinValue, terrainMaxValue, terrainMeanValue, terrainRangeValue]){
+      if (el) el.textContent = "-";
+    }
+    setTerrainSlope(terrainFlatBar, terrainFlatValue, null);
+    setTerrainSlope(terrainGentleBar, terrainGentleValue, null);
+    setTerrainSlope(terrainSteepBar, terrainSteepValue, null);
+  }
+
+  function renderTerrainResult(response, target){
+    const terrain = response?.terrain || response?.data || response || {};
+    const slope = terrain?.slope || terrain?.slopeStats || terrain?.slope_stats || {};
+
+    const minElevation = terrainNumber(terrain, "minElevation", "min_elevation");
+    const maxElevation = terrainNumber(terrain, "maxElevation", "max_elevation");
+    const meanElevation = terrainNumber(terrain, "meanElevation", "mean_elevation");
+    const elevationRange = terrainNumber(
+      terrain,
+      "effectiveRange",
+      "effective_range",
+      "elevationRange",
+      "elevation_range"
+    );
+    const flatPercent = terrainNumber(slope, "flatPercent", "flat_percent") ?? terrainNumber(terrain, "flatPercent", "flat_percent");
+    const gentlePercent = terrainNumber(slope, "gentlePercent", "gentle_percent") ?? terrainNumber(terrain, "gentlePercent", "gentle_percent");
+    const steepPercent = terrainNumber(slope, "steepPercent", "steep_percent") ?? terrainNumber(terrain, "steepPercent", "steep_percent");
+
+    if (terrainTargetText) terrainTargetText.textContent = target.displayName;
+    if (terrainMinValue) terrainMinValue.textContent = formatTerrainNumber(minElevation, "m");
+    if (terrainMaxValue) terrainMaxValue.textContent = formatTerrainNumber(maxElevation, "m");
+    if (terrainMeanValue) terrainMeanValue.textContent = formatTerrainNumber(meanElevation, "m");
+    if (terrainRangeValue) terrainRangeValue.textContent = formatTerrainNumber(elevationRange, "m");
+    setTerrainSlope(terrainFlatBar, terrainFlatValue, flatPercent);
+    setTerrainSlope(terrainGentleBar, terrainGentleValue, gentlePercent);
+    setTerrainSlope(terrainSteepBar, terrainSteepValue, steepPercent);
+
+    setTerrainStatus(response?.cached ? "저장된 지형 정보를 불러왔습니다." : "지형 분석이 완료되었습니다.", "idle");
+  }
+
+  async function getTerrainAccessToken(){
+    if (!mwSupabase?.auth) throw new Error("로그인 정보를 확인할 수 없습니다.");
+    const { data, error } = await mwSupabase.auth.getSession();
+    if (error) throw error;
+    const accessToken = data?.session?.access_token;
+    if (!accessToken) throw new Error("로그인이 만료되었습니다.");
+    return accessToken;
+  }
+
+  async function buildTerrainTarget(packs, geometry){
+    const rows = (packs || []).map(pack => pack.row).filter(Boolean);
+    const camp = String(campInput.value || rows[0]?.camp || "").trim();
+    const codeValues = parseCodes(codeInput.value);
+    const code = codeValues.join(" ");
+    const ids = rows
+      .map(row => row?.id)
+      .filter(value => value !== null && value !== undefined)
+      .map(String)
+      .sort((a, b) => a.localeCompare(b, "en", { numeric:true, sensitivity:"base" }));
+    const subrouteIds = Array.from(new Set(
+      rows
+        .map(row => row?.subroute_id)
+        .filter(value => value !== null && value !== undefined)
+        .map(String)
+    ));
+
+    let scopeType;
+    let scopeKey;
+    let subsubrouteId = null;
+    let subrouteId = null;
+
+    if (rows.length === 1 && ids.length === 1){
+      scopeType = "subsubroute";
+      scopeKey = ids[0];
+      subsubrouteId = Number(ids[0]);
+    } else if (subrouteIds.length === 1){
+      scopeType = "subroute";
+      scopeKey = subrouteIds[0];
+      subrouteId = Number(subrouteIds[0]);
+    } else {
+      scopeType = codeValues.length ? "subroute" : "camp";
+      const membershipSource = ids.length ? ids.join(",") : JSON.stringify(geometry);
+      scopeKey = `set_${(await sha256Hex(`${scopeType}|${membershipSource}`)).slice(0, 32)}`;
+    }
+
+    const geometryHash = await sha256Hex(JSON.stringify(geometry));
+    const displayName = [camp, code || (scopeType === "camp" ? "전체" : "")]
+      .filter(Boolean)
+      .join(" ") || "현재 조회 구역";
+
+    return {
+      scopeType,
+      scopeKey,
+      subsubrouteId: Number.isFinite(subsubrouteId) ? subsubrouteId : null,
+      subrouteId: Number.isFinite(subrouteId) ? subrouteId : null,
+      geometryHash,
+      displayName,
+      camp,
+      code
+    };
+  }
+
+  async function loadTerrainForCurrentScope(force=false){
+    const packs = routePacksForTerrain();
+    const geometry = terrainGeometryFromPacks(packs);
+    if (!geometry){
+      clearTerrainDisplay("분석할 폴리곤이 없습니다.");
+      return;
+    }
+
+    const target = await buildTerrainTarget(packs, geometry);
+    const memoryKey = `${target.scopeType}:${target.scopeKey}:${target.geometryHash}`;
+
+    if (terrainTargetText) terrainTargetText.textContent = target.displayName;
+    if (!force && terrainLastCacheKey === memoryKey && terrainLastResult){
+      renderTerrainResult(terrainLastResult, target);
+      return;
+    }
+
+    const requestSeq = ++terrainRequestSeq;
+    setTerrainStatus("지형 정보를 조회하고 있습니다.", "loading");
+    if (terrainRefreshBtn) terrainRefreshBtn.disabled = true;
+
+    try{
+      const accessToken = await getTerrainAccessToken();
+      const body = {
+        scopeType: target.scopeType,
+        scopeKey: target.scopeKey,
+        scope_type: target.scopeType,
+        scope_key: target.scopeKey,
+        geometry,
+        geometryHash: target.geometryHash,
+        geometry_hash: target.geometryHash,
+        subsubrouteId: target.subsubrouteId,
+        subsubroute_id: target.subsubrouteId,
+        subrouteId: target.subrouteId,
+        subroute_id: target.subrouteId,
+        displayName: target.displayName,
+        display_name: target.displayName,
+        camp: target.camp,
+        code: target.code
+      };
+
+      const response = await fetch(TERRAIN_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify(body),
+        cache: "no-store"
+      });
+
+      const text = await response.text();
+      let data = null;
+      try{ data = text ? JSON.parse(text) : null; }catch{}
+      if (!response.ok){
+        throw new Error(data?.error || data?.message || text || `HTTP ${response.status}`);
+      }
+      if (requestSeq !== terrainRequestSeq) return;
+
+      terrainLastCacheKey = memoryKey;
+      terrainLastResult = data;
+      renderTerrainResult(data, target);
+    }catch(error){
+      if (requestSeq !== terrainRequestSeq) return;
+      setTerrainStatus(`지형 정보 조회 실패: ${error?.message || error}`, "error");
+    }finally{
+      if (requestSeq === terrainRequestSeq && terrainRefreshBtn){
+        terrainRefreshBtn.disabled = false;
+      }
+    }
+  }
+
   async function saveCurrent(){
     if (!selectedRouteId){ setStatus("선택된 라우트가 없습니다.", "WARN"); return; }
     const pack = overlayById.get(selectedRouteId);
     if (!pack?.row){ setStatus("저장할 라우트 정보가 없습니다.", "ERR"); return; }
 
-    const saveCamp = String(pack.row.camp || campInput.value || "").trim();
-    const saveCode = String(pack.row.full_code || pack.row.code || codeInput.value || "").trim();
-    if (!saveCamp){ setStatus("캠프가 없습니다.", "WARN"); return; }
-    if (!saveCode){ setStatus("라우트 코드가 없습니다.", "WARN"); return; }
+    const saveCamp = String(campInput.value || pack.row.camp || "").trim();
+    const inputCodes = parseCodes(codeInput.value);
+    if (!saveCamp){ setStatus("캠프가 없습니다.", "WARN"); campInput.focus(); return; }
+    if (inputCodes.length !== 1){
+      setStatus("저장할 때 라우트 코드는 1개만 입력하세요.", "WARN");
+      codeInput.focus();
+      return;
+    }
+    const saveCode = String(inputCodes[0] || pack.row.full_code || pack.row.code || "").trim();
+    if (!saveCode){ setStatus("라우트 코드가 없습니다.", "WARN"); codeInput.focus(); return; }
 
     const payload = {
       camp: saveCamp,
@@ -3269,10 +3664,34 @@
     };
     if (pack.row.id != null) payload.id = pack.row.id;
 
-    setStatus(pack.row.id != null ? "저장 중..." : "신규 라우트 저장 중...", "OK");
-    await apiJson("POST", ROUTE_ENDPOINT, payload);
-    setStatus("저장 완료", "OK");
+    const isRename = pack.row.id != null && (
+      saveCamp !== String(pack.row.camp || "").trim() ||
+      saveCode !== String(pack.row.full_code || pack.row.code || "").trim()
+    );
+
+    setStatus(
+      pack.row.id != null
+        ? (isRename ? "캠프·라우트 번호 수정 저장 중..." : "저장 중...")
+        : "신규 라우트 저장 중...",
+      "OK"
+    );
+
+    const saved = await apiJson("POST", ROUTE_ENDPOINT, payload);
+    const savedId = saved?.row?.id ?? pack.row.id ?? null;
+
+    campInput.value = saveCamp;
+    codeInput.value = saveCode;
+    campDirty = false;
+    codeDirty = false;
+    terrainLastCacheKey = "";
+    terrainLastResult = null;
+
+    setStatus(isRename ? "캠프·라우트 번호 수정 완료" : "저장 완료", "OK");
     await loadRoutes();
+    if (savedId != null){
+      const matchedId = Array.from(overlayById.keys()).find(id => String(id) === String(savedId));
+      if (matchedId != null) selectRoute(matchedId);
+    }
   }
 
   async function deletePolygon(){
@@ -3694,9 +4113,14 @@
   }
 
   function inputEnterHandler(e){
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" || e.isComposing) return;
     e.preventDefault();
     e.stopPropagation();
+
+    if (selectedRouteId && (campDirty || codeDirty)){
+      saveCurrent().catch(err=>setStatus(err.message,"ERR"));
+      return;
+    }
 
     const canEdit = !!selectedRouteId && !campDirty && !codeDirty;
     if (canEdit){
@@ -3759,6 +4183,11 @@
     setStatus("초기화 완료","OK");
   });
   shareBtn.addEventListener("click", generateShareLink);
+  terrainRefreshBtn?.addEventListener("click", ()=>{
+    terrainLastCacheKey = "";
+    terrainLastResult = null;
+    loadTerrainForCurrentScope(true).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
+  });
 
   vendorSearchInput.addEventListener("keydown",(e)=>{ if(!e.isComposing && e.key==="Enter"){ e.preventDefault(); runVendorSearch(); }});
   vendorSearchBtn.addEventListener("click", runVendorSearch);

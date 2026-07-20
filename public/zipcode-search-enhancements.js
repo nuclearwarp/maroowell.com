@@ -31,8 +31,9 @@
     try {
       rec.poly.setOptions(on ? {
         strokeWeight:Math.max(6,(o.strokeWeight||3)+3), strokeColor:darken(o.strokeColor),
-        strokeOpacity:1, fillColor:o.fillColor, fillOpacity:Math.max(.38,o.fillOpacity||.24), zIndex:1000
-      } : o);
+        strokeOpacity:1, fillColor:o.fillColor, fillOpacity:Math.max(.38,o.fillOpacity||.24), zIndex:1000,
+        clickable:true
+      } : { ...o, clickable:true });
     } catch {}
   }
 
@@ -80,25 +81,70 @@
     if (scroll) scrollInfo(z);
   }
 
-  function assign(z,color) {
+  function assign(z) {
     z=zip(z); if (!z) return;
-    const c=(color||"").toLowerCase();
-    const rec=[...R.all].reverse().find(r=>!r.zip && (!c || !r.color || r.color===c));
+    const rec=[...R.all].reverse().find(r=>!r.zip);
     if (!rec) return;
-    rec.zip=z; if(!R.byZip.has(z)) R.byZip.set(z,[]); R.byZip.get(z).push(rec);
-    try { kakao.maps.event.addListener(rec.poly,"click",()=>{R.ignoreMapUntil=Date.now()+250;select(z,false,true);}); } catch {}
+    rec.zip=z;
+    if(!R.byZip.has(z)) R.byZip.set(z,[]);
+    R.byZip.get(z).push(rec);
+    try { rec.poly.setOptions({ clickable:true }); } catch {}
+    try {
+      kakao.maps.event.addListener(rec.poly,"click",()=>{
+        R.ignoreMapUntil=Date.now()+300;
+        select(z,false,true);
+      });
+    } catch {}
   }
 
   function patchKakao() {
     const K=window.kakao?.maps; if(!K || K.__MW_ZIP_PATCH__) return;
     K.__MW_ZIP_PATCH__=true;
     const OM=K.Map, OP=K.Polygon, OO=K.CustomOverlay;
-    function M(...a){ const m=new OM(...a); R.map=m; try{kakao.maps.event.addListener(m,"click",()=>{if(Date.now()>=R.ignoreMapUntil)clearSelected();});}catch{} return m; }
-    function P(o={}){ const p=new OP(o); R.map=R.map||o.map||null; R.all.push({poly:p,zip:"",color:String(o.strokeColor||o.fillColor||"").toLowerCase(),path:o.path,opt:{strokeWeight:o.strokeWeight||3,strokeColor:o.strokeColor||o.fillColor||"#2563eb",strokeOpacity:o.strokeOpacity??1,strokeStyle:o.strokeStyle||"solid",fillColor:o.fillColor||o.strokeColor||"#2563eb",fillOpacity:o.fillOpacity??.24,zIndex:o.zIndex||0}}); return p; }
-    function O(o={}){ const ov=new OO(o), c=o.content, z=zip(c?.textContent||c?.innerText); if(z){assign(z,c?.style?.borderColor); if(c?.addEventListener){c.style.cursor="pointer";c.addEventListener("click",e=>{e.preventDefault();e.stopPropagation();R.ignoreMapUntil=Date.now()+250;select(z,false,true);});}} return ov; }
+    function M(...a){
+      const m=new OM(...a);
+      R.map=m;
+      try{kakao.maps.event.addListener(m,"click",()=>{if(Date.now()>=R.ignoreMapUntil)clearSelected();});}catch{}
+      return m;
+    }
+    function P(o={}){
+      const options={...o,clickable:true};
+      const p=new OP(options);
+      R.map=R.map||o.map||null;
+      R.all.push({poly:p,zip:"",path:o.path,opt:{strokeWeight:o.strokeWeight||3,strokeColor:o.strokeColor||o.fillColor||"#2563eb",strokeOpacity:o.strokeOpacity??1,strokeStyle:o.strokeStyle||"solid",fillColor:o.fillColor||o.strokeColor||"#2563eb",fillOpacity:o.fillOpacity??.24,zIndex:o.zIndex||0}});
+      return p;
+    }
+    function O(o={}){
+      const ov=new OO(o), c=o.content, z=zip(c?.textContent||c?.innerText);
+      if(z){
+        assign(z);
+        if(c?.addEventListener){
+          c.style.cursor="pointer";
+          c.addEventListener("click",e=>{
+            e.preventDefault();e.stopPropagation();
+            R.ignoreMapUntil=Date.now()+300;
+            select(z,false,true);
+          });
+        }
+      }
+      return ov;
+    }
     M.prototype=OM.prototype; P.prototype=OP.prototype; O.prototype=OO.prototype;
     try{Object.setPrototypeOf(M,OM);Object.setPrototypeOf(P,OP);Object.setPrototypeOf(O,OO);}catch{}
     K.Map=M; K.Polygon=P; K.CustomOverlay=O;
+  }
+
+  function waitAndSelect(z) {
+    let tries=0;
+    const timer=setInterval(()=>{
+      tries++;
+      if ((R.byZip.get(z)||[]).length) {
+        clearInterval(timer);
+        select(z,true,false);
+      } else if (tries>=30) {
+        clearInterval(timer);
+      }
+    },100);
   }
 
   function chipEnhance() {
@@ -106,8 +152,17 @@
       const z=zip(el.querySelector("b")?.textContent); if(!z)return;
       el.dataset.mwZip=z; el.tabIndex=0; el.setAttribute("role","button"); el.title=`${z} 폴리곤 선택`;
       if(el.dataset.mwBound)return; el.dataset.mwBound="1";
-      const go=e=>{if(e.target.closest("button"))return;e.preventDefault(); if((R.byZip.get(z)||[]).length)select(z,true,false); else document.getElementById("searchBtn")?.click();};
-      el.addEventListener("click",go); el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")go(e);});
+      const go=e=>{
+        if(e.target.closest("button"))return;
+        e.preventDefault();
+        if((R.byZip.get(z)||[]).length) select(z,true,false);
+        else {
+          document.getElementById("searchBtn")?.click();
+          waitAndSelect(z);
+        }
+      };
+      el.addEventListener("click",go);
+      el.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")go(e);});
     });
   }
 

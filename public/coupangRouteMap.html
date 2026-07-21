@@ -1771,6 +1771,23 @@
       border-color:#2563eb;
       box-shadow:0 0 0 3px rgba(37,99,235,.12), 0 8px 20px rgba(37,99,235,.10);
     }
+    .terrainRouteCard.is-focus-pulse{
+      animation:terrainRouteFocusPulse .9s ease;
+    }
+    @keyframes terrainRouteFocusPulse{
+      0%{
+        transform:scale(1);
+        box-shadow:0 0 0 0 rgba(37,99,235,.30), 0 8px 20px rgba(37,99,235,.10);
+      }
+      45%{
+        transform:scale(1.015);
+        box-shadow:0 0 0 7px rgba(37,99,235,.12), 0 12px 26px rgba(37,99,235,.16);
+      }
+      100%{
+        transform:scale(1);
+        box-shadow:0 0 0 3px rgba(37,99,235,.12), 0 8px 20px rgba(37,99,235,.10);
+      }
+    }
     .terrainRouteCardHead{
       display:flex;
       align-items:center;
@@ -2889,8 +2906,16 @@
         return;
       }
       if (roadviewOn) return;
+
       const targetId = typeof getTargetId === "function" ? getTargetId() : getTargetId;
-      if (targetId) selectRoute(targetId);
+      if (targetId == null) return;
+
+      selectRoute(targetId, {
+        fitMap: true,
+        scrollTerrain: true,
+        openSidebar: true,
+        pulse: true
+      });
     });
     kakao.maps.event.addListener(polygon, "rightclick", ()=>{
       if (drawMode) popDrawPoint();
@@ -3257,9 +3282,116 @@
     }
   }
 
-  function selectRoute(id){
+  function getRouteBounds(id){
+    const pack = overlayById.get(id);
+    if (!pack?.polygons?.length || !map || !window.kakao?.maps) return null;
+
+    const bounds = new kakao.maps.LatLngBounds();
+    let pointCount = 0;
+
+    for (const polygon of pack.polygons){
+      const path = polygonPathToArray(polygon);
+      for (const latlng of path){
+        if (!latlng || typeof latlng.getLat !== "function") continue;
+        bounds.extend(latlng);
+        pointCount += 1;
+      }
+    }
+
+    return pointCount ? bounds : null;
+  }
+
+  function focusRouteOnMap(id){
+    const bounds = getRouteBounds(id);
+    if (!bounds || !map) return;
+
+    const applyBounds = ()=>{
+      try{
+        map.relayout?.();
+        map.setBounds(bounds, 70, 70, 70, 70);
+
+        window.setTimeout(()=>{
+          try{
+            if (map.getLevel?.() < 3){
+              map.setLevel(3, { anchor: bounds.getCenter() });
+            }
+          }catch{}
+        }, 0);
+      }catch{
+        try{ map.setBounds(bounds); }catch{}
+      }
+    };
+
+    if (mqMobile.matches && !wrapEl?.classList.contains("sidebar-hidden")){
+      window.setTimeout(applyBounds, 120);
+    }else{
+      applyBounds();
+    }
+  }
+
+  function ensureTerrainGroupOpen(){
+    if (!terrainInfoGroup?.classList.contains("is-collapsed")) return;
+    terrainInfoGroup.classList.remove("is-collapsed");
+    terrainInfoToggleBtn?.setAttribute("aria-expanded", "true");
+    const textEl = terrainInfoToggleBtn?.querySelector(".sectionToggleText");
+    if (textEl) textEl.textContent = "접기";
+  }
+
+  function scrollTerrainCardToRoute(id, options={}){
+    if (!terrainResultsList) return;
+
+    const { openSidebar=false, pulse=true } = options;
+
+    if (openSidebar && mqMobile.matches){
+      setSidebarHidden(false);
+    }
+
+    ensureTerrainGroupOpen();
+
+    window.setTimeout(()=>{
+      const routeId = String(id);
+      const card = Array.from(terrainResultsList.querySelectorAll("[data-terrain-route-id]"))
+        .find(el => String(el.getAttribute("data-terrain-route-id")) === routeId);
+      if (!card) return;
+
+      const sidebar = document.querySelector(".left");
+      if (sidebar){
+        const sidebarRect = sidebar.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+        const cardTopInsideSidebar = sidebar.scrollTop + cardRect.top - sidebarRect.top;
+        const centerOffset = Math.max(12, (sidebar.clientHeight - card.offsetHeight) / 2);
+        const maxScroll = Math.max(0, sidebar.scrollHeight - sidebar.clientHeight);
+        const targetTop = Math.max(0, Math.min(maxScroll, cardTopInsideSidebar - centerOffset));
+
+        try{
+          sidebar.scrollTo({ top: targetTop, behavior: "smooth" });
+        }catch{
+          sidebar.scrollTop = targetTop;
+        }
+      }else{
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+
+      if (pulse){
+        card.classList.remove("is-focus-pulse");
+        void card.offsetWidth;
+        card.classList.add("is-focus-pulse");
+        window.setTimeout(()=>card.classList.remove("is-focus-pulse"), 900);
+      }
+    }, 140);
+  }
+
+  function selectRoute(id, options={}){
     const pack = overlayById.get(id);
     if (!pack) return;
+
+    const {
+      fitMap=false,
+      scrollTerrain=false,
+      openSidebar=false,
+      pulse=true
+    } = options;
+
     selectedRouteId=id;
 
     stopEditMode();
@@ -3282,7 +3414,17 @@
     loadAddresses().catch(e=>log("주소 로드 실패: "+e.message));
     syncTerrainCardSelection();
 
-    if (mqMobile.matches) setSidebarHidden(true);
+    if (scrollTerrain){
+      scrollTerrainCardToRoute(id, { openSidebar, pulse });
+    }
+
+    if (fitMap){
+      focusRouteOnMap(id);
+    }
+
+    if (mqMobile.matches && !openSidebar){
+      setSidebarHidden(true);
+    }
   }
 
   function clearSelection(reason="선택 해제"){
@@ -3589,11 +3731,36 @@
 
   function bindTerrainCardEvents(){
     if (!terrainResultsList) return;
+
     terrainResultsList.querySelectorAll("[data-terrain-route-id]").forEach(card => {
-      card.addEventListener("click", () => {
+      card.tabIndex = 0;
+      card.setAttribute("role", "button");
+      card.title = "해당 라우트 폴리곤으로 이동";
+
+      const activate = ()=>{
         const routeId = card.getAttribute("data-terrain-route-id");
-        const matchedId = Array.from(overlayById.keys()).find(id => String(id) === String(routeId));
-        if (matchedId != null) selectRoute(matchedId);
+        const matchedId = Array.from(overlayById.keys())
+          .find(id => String(id) === String(routeId));
+        if (matchedId == null) return;
+
+        selectRoute(matchedId, {
+          fitMap: true,
+          scrollTerrain: false,
+          openSidebar: false,
+          pulse: true
+        });
+
+        card.classList.remove("is-focus-pulse");
+        void card.offsetWidth;
+        card.classList.add("is-focus-pulse");
+        window.setTimeout(()=>card.classList.remove("is-focus-pulse"), 900);
+      };
+
+      card.addEventListener("click", activate);
+      card.addEventListener("keydown", event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activate();
       });
     });
   }

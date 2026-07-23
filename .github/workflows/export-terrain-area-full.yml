@@ -1,21 +1,19 @@
 name: Export terrain area full files
 
 on:
-  push:
+  pull_request:
     branches: ["main"]
     paths:
-      - "public/export-terrain-area-trigger.txt"
+      - "public/export-terrain-area-pr-trigger.txt"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Build full replacement TXT files
         shell: bash
@@ -24,12 +22,12 @@ jobs:
           from pathlib import Path
           import re
 
-          out_dir = Path("exports")
+          out_dir = Path("artifact")
           out_dir.mkdir(exist_ok=True)
 
           path = Path("public/zipcode_search")
           text = path.read_text(encoding="utf-8")
-          text = re.sub(
+          text, count = re.subn(
             r'^      function formatTerrainArea\(value\) \{.*?^      \}',
             '''      function formatTerrainArea(value) {
         const sqm = terrainNumber(value);
@@ -43,6 +41,9 @@ jobs:
             count=1,
             flags=re.M | re.S
           )
+          if count != 1:
+            raise RuntimeError(f"zipcode_search formatTerrainArea count={count}")
+
           old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
           const areaSquareMeters = savedTerrainArea != null
             ? savedTerrainArea
@@ -58,6 +59,9 @@ jobs:
             : zipAreaSquareMeters(zip);'''
           if old in text:
             text = text.replace(old, new, 1)
+          elif "terrain?.polygon_area_m2" not in text:
+            raise RuntimeError("zipcode_search savedTerrainArea block missing")
+
           old_set = '''          state.terrainByZip.set(zip, {
             ...data.terrain,
             cached: data.cached === true,
@@ -78,6 +82,7 @@ jobs:
           });'''
           if old_set in text:
             text = text.replace(old_set, new_set, 1)
+
           text = text.replace("우편번호 면적", "면적")
           if "polygon_area_m2" not in text:
             raise RuntimeError("zipcode_search area mapping missing")
@@ -85,7 +90,7 @@ jobs:
 
           path = Path("public/coupangRouteMap.html")
           text = path.read_text(encoding="utf-8")
-          text = re.sub(
+          text, count = re.subn(
             r'^  function formatTerrainArea\(value\)\{.*?^  \}',
             '''  function formatTerrainArea(value){
     const squareMeters = Number(value);
@@ -99,7 +104,10 @@ jobs:
             count=1,
             flags=re.M | re.S
           )
-          text = re.sub(
+          if count != 1:
+            raise RuntimeError(f"route formatTerrainArea count={count}")
+
+          text, count = re.subn(
             r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}',
             '''  function terrainAreaStatHtml(pack, backendAreaM2=null){
     const localAreaM2 = terrainPackAreaSquareMeters(pack);
@@ -114,6 +122,9 @@ jobs:
             count=1,
             flags=re.M | re.S
           )
+          if count != 1:
+            raise RuntimeError(f"route terrainAreaStatHtml count={count}")
+
           if "polygonAreaM2: terrainNumber(" not in text:
             anchor = '''      elevationRange: terrainNumber(
         terrain,
@@ -141,6 +152,7 @@ jobs:
             if anchor not in text:
               raise RuntimeError("route metrics anchor missing")
             text = text.replace(anchor, insert, 1)
+
           success_anchor = "const metrics = terrainMetricsFromResponse(response);"
           idx = text.find(success_anchor)
           if idx < 0:
@@ -150,17 +162,18 @@ jobs:
           call_idx = text.find(old_call, idx)
           if call_idx >= 0:
             text = text[:call_idx] + new_call + text[call_idx+len(old_call):]
+          elif new_call not in text[idx:]:
+            raise RuntimeError("route success area call missing")
+
           if "metrics.polygonAreaM2" not in text:
             raise RuntimeError("route area output missing")
           (out_dir / "coupangRouteMap_terrain_area_full.txt").write_text(text, encoding="utf-8")
           PY
 
-      - name: Commit exports
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add exports/zipcode_search_terrain_area_full.txt exports/coupangRouteMap_terrain_area_full.txt
-          git diff --cached --check
-          git commit -m "Generate terrain area full replacement files"
-          git push origin HEAD:main
+      - name: Upload full replacement files
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrain-area-full-files
+          path: artifact/*.txt
+          if-no-files-found: error
+          retention-days: 1

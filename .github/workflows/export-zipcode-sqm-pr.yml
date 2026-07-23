@@ -24,48 +24,31 @@ jobs:
 
           text = Path("public/zipcode_search").read_text(encoding="utf-8")
 
-          text, count = re.subn(
-              r'^      function formatTerrainArea\(value\) \{.*?^      \}',
+          text = re.sub(
+              r'(?ms)^\s{6}function formatTerrainArea\(value\) \{.*?^\s{6}\}',
               '''      function formatTerrainArea(value) {
-            const sqm = terrainNumber(value);
-            if (sqm == null || sqm < 0) return "-";
-
-            return `${Math.round(sqm).toLocaleString("ko-KR")}㎡`;
-          }''',
+        const sqm = terrainNumber(value);
+        if (sqm == null || sqm < 0) return "-";
+        return `${Math.round(sqm).toLocaleString("ko-KR")}㎡`;
+      }''',
               text,
               count=1,
-              flags=re.M | re.S,
           )
-          if count != 1:
-              raise RuntimeError(f"formatTerrainArea matches: {count}")
 
-          old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
-          const areaSquareMeters = savedTerrainArea != null
-            ? savedTerrainArea
-            : zipAreaSquareMeters(zip);'''
-          new = '''          const savedTerrainArea = terrainNumber(
+          text = text.replace(
+              'const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);',
+              '''const savedTerrainArea = terrainNumber(
             terrain?.polygonAreaM2 ??
             terrain?.polygon_area_m2 ??
             terrain?.areaSquareMeters ??
             terrain?.area_sqm
-          );
-          const areaSquareMeters = savedTerrainArea != null
-            ? savedTerrainArea
-            : zipAreaSquareMeters(zip);'''
-          if old in text:
-              text = text.replace(old, new, 1)
-          elif "terrain?.polygon_area_m2" not in text:
-              raise RuntimeError("savedTerrainArea block not found")
+          );''',
+              1,
+          )
 
-          old_set = '''          state.terrainByZip.set(zip, {
-            ...data.terrain,
-            cached: data.cached === true,
-            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
-          });'''
-          new_set = '''          state.terrainByZip.set(zip, {
-            ...data.terrain,
-            cached: data.cached === true,
-            areaSquareMeters:
+          text = text.replace(
+              'areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters',
+              '''areaSquareMeters:
               terrainNumber(
                 data?.terrain?.polygonAreaM2 ??
                 data?.terrain?.polygon_area_m2 ??
@@ -73,18 +56,17 @@ jobs:
                 data?.terrain?.area_sqm
               ) ??
               terrainNumber(state.areaByZip.get(zip)) ??
-              areaSquareMeters
-          });'''
-          if old_set in text:
-              text = text.replace(old_set, new_set, 1)
-          elif "data?.terrain?.polygon_area_m2" not in text:
-              raise RuntimeError("terrain state block not found")
+              areaSquareMeters''',
+              1,
+          )
 
           text = text.replace("우편번호 면적", "면적")
 
           out = Path("artifact")
           out.mkdir(exist_ok=True)
-          (out / "zipcode_search_terrain_area_sqm_full.txt").write_text(text, encoding="utf-8")
+          target = out / "zipcode_search_terrain_area_sqm_full.txt"
+          target.write_text(text, encoding="utf-8")
+          print(target, len(text))
           PY
 
       - name: Upload replacement TXT

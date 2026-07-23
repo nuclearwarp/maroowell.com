@@ -1,0 +1,141 @@
+name: Temporary terrain export comment
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '/export-terrain-full')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Generate full replacement files
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          out = Path('exports')
+          out.mkdir(exist_ok=True)
+
+          p = Path('public/zipcode_search')
+          t = p.read_text(encoding='utf-8')
+          t, n = re.subn(r'^      function formatTerrainArea\(value\) \{.*?^      \}', '''      function formatTerrainArea(value) {
+        const sqm = terrainNumber(value);
+        if (sqm == null || sqm < 0) return "-";
+        return `${(sqm / 1000000).toLocaleString("ko-KR", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2
+        })}㎢`;
+      }''', t, count=1, flags=re.M|re.S)
+          if n != 1: raise RuntimeError(f'zipcode formatter {n}')
+          old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          new = '''          const savedTerrainArea = terrainNumber(
+            terrain?.polygonAreaM2 ??
+            terrain?.polygon_area_m2 ??
+            terrain?.areaSquareMeters ??
+            terrain?.area_sqm
+          );
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          if old in t: t = t.replace(old,new,1)
+          old2 = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
+          });'''
+          new2 = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters:
+              terrainNumber(
+                data?.terrain?.polygonAreaM2 ??
+                data?.terrain?.polygon_area_m2 ??
+                data?.terrain?.areaSquareMeters ??
+                data?.terrain?.area_sqm
+              ) ??
+              terrainNumber(state.areaByZip.get(zip)) ??
+              areaSquareMeters
+          });'''
+          if old2 in t: t = t.replace(old2,new2,1)
+          t = t.replace('우편번호 면적','면적')
+          if 'polygon_area_m2' not in t: raise RuntimeError('zipcode area mapping missing')
+          (out/'zipcode_search_terrain_area_full.txt').write_text(t,encoding='utf-8')
+
+          p = Path('public/coupangRouteMap.html')
+          t = p.read_text(encoding='utf-8')
+          t,n = re.subn(r'^  function formatTerrainArea\(value\)\{.*?^  \}', '''  function formatTerrainArea(value){
+    const squareMeters = Number(value);
+    if (!Number.isFinite(squareMeters) || squareMeters < 0) return "-";
+    return `${(squareMeters / 1000000).toLocaleString("ko-KR", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    })}㎢`;
+  }''', t, count=1, flags=re.M|re.S)
+          if n != 1: raise RuntimeError(f'route formatter {n}')
+          t,n = re.subn(r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}', '''  function terrainAreaStatHtml(pack, backendAreaM2=null){
+    const localAreaM2 = terrainPackAreaSquareMeters(pack);
+    const areaM2 = Number.isFinite(Number(backendAreaM2)) ? Number(backendAreaM2) : localAreaM2;
+    return `
+      <div class="terrainStat is-area">
+        <div class="terrainStatLabel">면적</div>
+        <div class="terrainStatValue">${escapeHtml(formatTerrainArea(areaM2))}</div>
+      </div>`;
+  }''', t, count=1, flags=re.M|re.S)
+          if n != 1: raise RuntimeError(f'route area html {n}')
+          if 'polygonAreaM2: terrainNumber(' not in t:
+            anchor='''      elevationRange: terrainNumber(
+        terrain,
+        "effectiveRange",
+        "effective_range",
+        "elevationRange",
+        "elevation_range"
+      ),
+      flatPercent:'''
+            insert='''      elevationRange: terrainNumber(
+        terrain,
+        "effectiveRange",
+        "effective_range",
+        "elevationRange",
+        "elevation_range"
+      ),
+      polygonAreaM2: terrainNumber(
+        terrain,
+        "polygonAreaM2",
+        "polygon_area_m2",
+        "areaSquareMeters",
+        "area_sqm"
+      ),
+      flatPercent:'''
+            if anchor not in t: raise RuntimeError('route metrics anchor missing')
+            t=t.replace(anchor,insert,1)
+          idx=t.find('const metrics = terrainMetricsFromResponse(response);')
+          if idx<0: raise RuntimeError('route metrics success missing')
+          old='${terrainAreaStatHtml(pack)}'; new='${terrainAreaStatHtml(pack, metrics.polygonAreaM2)}'
+          j=t.find(old,idx)
+          if j>=0: t=t[:j]+new+t[j+len(old):]
+          if 'metrics.polygonAreaM2' not in t: raise RuntimeError('route output missing')
+          (out/'coupangRouteMap_terrain_area_full.txt').write_text(t,encoding='utf-8')
+          PY
+
+      - name: Commit exports
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/*.txt
+          git diff --cached --check
+          git commit -m "Generate full terrain area replacement files"
+          git push origin HEAD:main

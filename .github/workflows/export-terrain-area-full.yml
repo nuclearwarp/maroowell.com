@@ -1,10 +1,10 @@
 name: Export terrain area full files
 
 on:
-  pull_request:
+  push:
     branches: ["main"]
     paths:
-      - "public/export-terrain-area-pr-trigger.txt"
+      - "public/export-terrain-area-trigger.txt"
 
 permissions:
   contents: read
@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Build full replacement TXT files
         shell: bash
@@ -25,16 +27,10 @@ jobs:
           out_dir = Path("artifact")
           out_dir.mkdir(exist_ok=True)
 
-          # ---------------------------------------------------------
-          # public/zipcode_search
-          # ---------------------------------------------------------
           path = Path("public/zipcode_search")
           text = path.read_text(encoding="utf-8")
 
-          pattern = re.compile(
-              r'^      function formatTerrainArea\(value\) \{.*?^      \}',
-              re.M | re.S,
-          )
+          pattern = re.compile(r'^      function formatTerrainArea\(value\) \{.*?^      \}', re.M | re.S)
           replacement = '''      function formatTerrainArea(value) {
         const sqm = terrainNumber(value);
         if (sqm == null || sqm < 0) return "-";
@@ -66,6 +62,27 @@ jobs:
           elif "terrain?.polygon_area_m2" not in text:
               raise RuntimeError("zipcode_search savedTerrainArea block not found")
 
+          old_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
+          });'''
+          new_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters:
+              terrainNumber(
+                data?.terrain?.polygonAreaM2 ??
+                data?.terrain?.polygon_area_m2 ??
+                data?.terrain?.areaSquareMeters ??
+                data?.terrain?.area_sqm
+              ) ??
+              terrainNumber(state.areaByZip.get(zip)) ??
+              areaSquareMeters
+          });'''
+          if old_set in text:
+              text = text.replace(old_set, new_set, 1)
+
           text = text.replace("우편번호 면적", "면적")
 
           if "terrain?.polygon_area_m2" not in text:
@@ -75,16 +92,10 @@ jobs:
 
           (out_dir / "zipcode_search_terrain_area_full.txt").write_text(text, encoding="utf-8")
 
-          # ---------------------------------------------------------
-          # public/coupangRouteMap.html
-          # ---------------------------------------------------------
           path = Path("public/coupangRouteMap.html")
           text = path.read_text(encoding="utf-8")
 
-          area_pattern = re.compile(
-              r'^  function formatTerrainArea\(value\)\{.*?^  \}',
-              re.M | re.S,
-          )
+          area_pattern = re.compile(r'^  function formatTerrainArea\(value\)\{.*?^  \}', re.M | re.S)
           area_replacement = '''  function formatTerrainArea(value){
     const squareMeters = Number(value);
     if (!Number.isFinite(squareMeters) || squareMeters < 0) return "-";
@@ -98,10 +109,7 @@ jobs:
           if count != 1:
               raise RuntimeError(f"coupangRouteMap formatTerrainArea matches: {count}")
 
-          stat_pattern = re.compile(
-              r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}',
-              re.M | re.S,
-          )
+          stat_pattern = re.compile(r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}', re.M | re.S)
           stat_replacement = '''  function terrainAreaStatHtml(pack, backendAreaM2=null){
     const localAreaM2 = terrainPackAreaSquareMeters(pack);
     const areaM2 = Number.isFinite(Number(backendAreaM2))

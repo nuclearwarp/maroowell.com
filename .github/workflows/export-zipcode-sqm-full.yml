@@ -1,19 +1,22 @@
 name: Export zipcode sqm full file
 
 on:
-  pull_request:
+  push:
     branches: ["main"]
     paths:
-      - "public/export-zipcode-sqm-trigger.txt"
+      - "public/export-zipcode-sqm-trigger-main.txt"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Build full replacement TXT
         shell: bash
@@ -84,15 +87,18 @@ jobs:
           if "㎢" in text[text.find("function formatTerrainArea"):text.find("function formatTerrainArea")+500]:
               raise RuntimeError("km2 remains in area formatter")
 
-          out = Path("artifact")
+          out = Path("exports")
           out.mkdir(exist_ok=True)
           (out / "zipcode_search_terrain_area_sqm_full.txt").write_text(text, encoding="utf-8")
           PY
 
-      - name: Upload full replacement file
-        uses: actions/upload-artifact@v4
-        with:
-          name: zipcode-search-sqm-full
-          path: artifact/zipcode_search_terrain_area_sqm_full.txt
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit full replacement TXT
+        shell: bash
+        run: |
+          rm -f public/export-zipcode-sqm-trigger-main.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/zipcode_search_terrain_area_sqm_full.txt public/export-zipcode-sqm-trigger-main.txt
+          git diff --cached --check
+          git commit -m "Export zipcode square meter full replacement"
+          git push origin HEAD:main

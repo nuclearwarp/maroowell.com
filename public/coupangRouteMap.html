@@ -3685,25 +3685,21 @@
 
   function formatTerrainArea(value){
     const squareMeters = Number(value);
-    if (!Number.isFinite(squareMeters) || squareMeters < 0) return "폴리곤 로드 후 계산";
+    if (!Number.isFinite(squareMeters) || squareMeters < 0) return "-";
 
-    const safeSquareMeters = Math.max(0, squareMeters);
-    const squareMetersText = `${Math.round(safeSquareMeters).toLocaleString("ko-KR")}㎡`;
-    if (safeSquareMeters < 10000) return squareMetersText;
-
-    const squareKilometers = safeSquareMeters / 1000000;
-    const squareKilometersText = squareKilometers.toLocaleString("ko-KR", {
-      minimumFractionDigits: squareKilometers < 1 ? 3 : 2,
-      maximumFractionDigits: squareKilometers < 1 ? 3 : 2
-    });
-    return `${squareKilometersText}㎢ · ${squareMetersText}`;
+    return `${Math.round(squareMeters).toLocaleString("ko-KR")}㎡`;
   }
 
-  function terrainAreaStatHtml(pack){
+  function terrainAreaStatHtml(pack, backendAreaM2=null){
+    const localAreaM2 = terrainPackAreaSquareMeters(pack);
+    const areaM2 = Number.isFinite(Number(backendAreaM2))
+      ? Number(backendAreaM2)
+      : localAreaM2;
+
     return `
       <div class="terrainStat is-area">
-        <div class="terrainStatLabel">구역 면적</div>
-        <div class="terrainStatValue">${escapeHtml(formatTerrainArea(terrainPackAreaSquareMeters(pack)))}</div>
+        <div class="terrainStatLabel">면적</div>
+        <div class="terrainStatValue">${escapeHtml(formatTerrainArea(areaM2))}</div>
       </div>`;
   }
 
@@ -3726,6 +3722,13 @@
         "effective_range",
         "elevationRange",
         "elevation_range"
+      ),
+      polygonAreaM2: terrainNumber(
+        terrain,
+        "polygonAreaM2",
+        "polygon_area_m2",
+        "areaSquareMeters",
+        "area_sqm"
       ),
       flatPercent: terrainNumber(slope, "flatPercent", "flat_percent") ?? terrainNumber(terrain, "flatPercent", "flat_percent"),
       gentlePercent: terrainNumber(slope, "gentlePercent", "gentle_percent") ?? terrainNumber(terrain, "gentlePercent", "gentle_percent"),
@@ -3790,7 +3793,7 @@
           <span class="terrainRouteBadge" data-kind="ok">${cachedLabel}</span>
         </div>
         <div class="terrainStatsGrid">
-          ${terrainAreaStatHtml(pack)}
+          ${terrainAreaStatHtml(pack, metrics.polygonAreaM2)}
           <div class="terrainStat">
             <div class="terrainStatLabel">최저 표고</div>
             <div class="terrainStatValue">${formatTerrainNumber(metrics.minElevation, "m")}</div>

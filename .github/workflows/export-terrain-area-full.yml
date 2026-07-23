@@ -7,7 +7,7 @@ on:
       - "public/export-terrain-area-trigger.txt"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export:
@@ -24,26 +24,25 @@ jobs:
           from pathlib import Path
           import re
 
-          out_dir = Path("artifact")
+          out_dir = Path("exports")
           out_dir.mkdir(exist_ok=True)
 
           path = Path("public/zipcode_search")
           text = path.read_text(encoding="utf-8")
-
-          pattern = re.compile(r'^      function formatTerrainArea\(value\) \{.*?^      \}', re.M | re.S)
-          replacement = '''      function formatTerrainArea(value) {
+          text = re.sub(
+            r'^      function formatTerrainArea\(value\) \{.*?^      \}',
+            '''      function formatTerrainArea(value) {
         const sqm = terrainNumber(value);
         if (sqm == null || sqm < 0) return "-";
-
         return `${(sqm / 1000000).toLocaleString("ko-KR", {
           minimumFractionDigits: 0,
           maximumFractionDigits: 2
         })}㎢`;
-      }'''
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise RuntimeError(f"zipcode_search formatTerrainArea matches: {count}")
-
+      }''',
+            text,
+            count=1,
+            flags=re.M | re.S
+          )
           old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
           const areaSquareMeters = savedTerrainArea != null
             ? savedTerrainArea
@@ -58,10 +57,7 @@ jobs:
             ? savedTerrainArea
             : zipAreaSquareMeters(zip);'''
           if old in text:
-              text = text.replace(old, new, 1)
-          elif "terrain?.polygon_area_m2" not in text:
-              raise RuntimeError("zipcode_search savedTerrainArea block not found")
-
+            text = text.replace(old, new, 1)
           old_set = '''          state.terrainByZip.set(zip, {
             ...data.terrain,
             cached: data.cached === true,
@@ -81,53 +77,45 @@ jobs:
               areaSquareMeters
           });'''
           if old_set in text:
-              text = text.replace(old_set, new_set, 1)
-
+            text = text.replace(old_set, new_set, 1)
           text = text.replace("우편번호 면적", "면적")
-
-          if "terrain?.polygon_area_m2" not in text:
-              raise RuntimeError("zipcode_search polygon_area_m2 mapping missing")
-          if "우편번호 면적" in text:
-              raise RuntimeError("zipcode_search old label remains")
-
+          if "polygon_area_m2" not in text:
+            raise RuntimeError("zipcode_search area mapping missing")
           (out_dir / "zipcode_search_terrain_area_full.txt").write_text(text, encoding="utf-8")
 
           path = Path("public/coupangRouteMap.html")
           text = path.read_text(encoding="utf-8")
-
-          area_pattern = re.compile(r'^  function formatTerrainArea\(value\)\{.*?^  \}', re.M | re.S)
-          area_replacement = '''  function formatTerrainArea(value){
+          text = re.sub(
+            r'^  function formatTerrainArea\(value\)\{.*?^  \}',
+            '''  function formatTerrainArea(value){
     const squareMeters = Number(value);
     if (!Number.isFinite(squareMeters) || squareMeters < 0) return "-";
-
     return `${(squareMeters / 1000000).toLocaleString("ko-KR", {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2
     })}㎢`;
-  }'''
-          text, count = area_pattern.subn(area_replacement, text, count=1)
-          if count != 1:
-              raise RuntimeError(f"coupangRouteMap formatTerrainArea matches: {count}")
-
-          stat_pattern = re.compile(r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}', re.M | re.S)
-          stat_replacement = '''  function terrainAreaStatHtml(pack, backendAreaM2=null){
+  }''',
+            text,
+            count=1,
+            flags=re.M | re.S
+          )
+          text = re.sub(
+            r'^  function terrainAreaStatHtml\(pack(?:, backendAreaM2=null)?\)\{.*?^  \}',
+            '''  function terrainAreaStatHtml(pack, backendAreaM2=null){
     const localAreaM2 = terrainPackAreaSquareMeters(pack);
-    const areaM2 = Number.isFinite(Number(backendAreaM2))
-      ? Number(backendAreaM2)
-      : localAreaM2;
-
+    const areaM2 = Number.isFinite(Number(backendAreaM2)) ? Number(backendAreaM2) : localAreaM2;
     return `
       <div class="terrainStat is-area">
         <div class="terrainStatLabel">면적</div>
         <div class="terrainStatValue">${escapeHtml(formatTerrainArea(areaM2))}</div>
       </div>`;
-  }'''
-          text, count = stat_pattern.subn(stat_replacement, text, count=1)
-          if count != 1:
-              raise RuntimeError(f"coupangRouteMap terrainAreaStatHtml matches: {count}")
-
+  }''',
+            text,
+            count=1,
+            flags=re.M | re.S
+          )
           if "polygonAreaM2: terrainNumber(" not in text:
-              anchor = '''      elevationRange: terrainNumber(
+            anchor = '''      elevationRange: terrainNumber(
         terrain,
         "effectiveRange",
         "effective_range",
@@ -135,7 +123,7 @@ jobs:
         "elevation_range"
       ),
       flatPercent:'''
-              insert = '''      elevationRange: terrainNumber(
+            insert = '''      elevationRange: terrainNumber(
         terrain,
         "effectiveRange",
         "effective_range",
@@ -150,33 +138,29 @@ jobs:
         "area_sqm"
       ),
       flatPercent:'''
-              if anchor not in text:
-                  raise RuntimeError("coupangRouteMap metrics anchor not found")
-              text = text.replace(anchor, insert, 1)
-
+            if anchor not in text:
+              raise RuntimeError("route metrics anchor missing")
+            text = text.replace(anchor, insert, 1)
           success_anchor = "const metrics = terrainMetricsFromResponse(response);"
-          success_index = text.find(success_anchor)
-          if success_index < 0:
-              raise RuntimeError("coupangRouteMap success metrics anchor not found")
-
-          call_old = "${terrainAreaStatHtml(pack)}"
-          call_new = "${terrainAreaStatHtml(pack, metrics.polygonAreaM2)}"
-          call_index = text.find(call_old, success_index)
-          if call_index >= 0:
-              text = text[:call_index] + call_new + text[call_index + len(call_old):]
-          elif call_new not in text[success_index:]:
-              raise RuntimeError("coupangRouteMap success area call not found")
-
+          idx = text.find(success_anchor)
+          if idx < 0:
+            raise RuntimeError("route success anchor missing")
+          old_call = "${terrainAreaStatHtml(pack)}"
+          new_call = "${terrainAreaStatHtml(pack, metrics.polygonAreaM2)}"
+          call_idx = text.find(old_call, idx)
+          if call_idx >= 0:
+            text = text[:call_idx] + new_call + text[call_idx+len(old_call):]
           if "metrics.polygonAreaM2" not in text:
-              raise RuntimeError("coupangRouteMap polygon area output missing")
-
+            raise RuntimeError("route area output missing")
           (out_dir / "coupangRouteMap_terrain_area_full.txt").write_text(text, encoding="utf-8")
           PY
 
-      - name: Upload full replacement files
-        uses: actions/upload-artifact@v4
-        with:
-          name: terrain-area-full-files
-          path: artifact/*.txt
-          if-no-files-found: error
-          retention-days: 1
+      - name: Commit exports
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/zipcode_search_terrain_area_full.txt exports/coupangRouteMap_terrain_area_full.txt
+          git diff --cached --check
+          git commit -m "Generate terrain area full replacement files"
+          git push origin HEAD:main

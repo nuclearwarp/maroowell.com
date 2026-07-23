@@ -1,0 +1,116 @@
+name: Export zipcode sqm full
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "public/export-zipcode-sqm-main.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Build zipcode_search full replacement TXT
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          src = Path("public/zipcode_search")
+          text = src.read_text(encoding="utf-8")
+
+          pattern = re.compile(
+              r'^      function formatTerrainArea\(value\) \{.*?^      \}',
+              re.M | re.S,
+          )
+          replacement = '''      function formatTerrainArea(value) {
+            const sqm = terrainNumber(value);
+            if (sqm == null || sqm < 0) return "-";
+
+            return `${Math.round(sqm).toLocaleString("ko-KR")}㎡`;
+          }'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise RuntimeError(f"formatTerrainArea matches: {count}")
+
+          old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          new = '''          const savedTerrainArea = terrainNumber(
+            terrain?.polygonAreaM2 ??
+            terrain?.polygon_area_m2 ??
+            terrain?.areaSquareMeters ??
+            terrain?.area_sqm
+          );
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "terrain?.polygon_area_m2" not in text:
+              raise RuntimeError("savedTerrainArea block not found")
+
+          old_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
+          });'''
+          new_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters:
+              terrainNumber(
+                data?.terrain?.polygonAreaM2 ??
+                data?.terrain?.polygon_area_m2 ??
+                data?.terrain?.areaSquareMeters ??
+                data?.terrain?.area_sqm
+              ) ??
+              terrainNumber(state.areaByZip.get(zip)) ??
+              areaSquareMeters
+          });'''
+          if old_set in text:
+              text = text.replace(old_set, new_set, 1)
+          elif "data?.terrain?.polygon_area_m2" not in text:
+              raise RuntimeError("terrain state block not found")
+
+          text = text.replace("우편번호 면적", "면적")
+
+          formatter_start = text.find("function formatTerrainArea")
+          formatter_end = text.find("function terrainErrorMessage", formatter_start)
+          formatter = text[formatter_start:formatter_end]
+          if "㎢" in formatter:
+              raise RuntimeError("km2 remains in formatter")
+          if "㎡" not in formatter:
+              raise RuntimeError("sqm unit missing")
+          if "polygon_area_m2" not in text:
+              raise RuntimeError("polygon area mapping missing")
+
+          out = Path("exports")
+          out.mkdir(exist_ok=True)
+          target = out / "zipcode_search_terrain_area_sqm_full.txt"
+          target.write_text(text, encoding="utf-8")
+          print(f"generated {target} ({len(text)} chars)")
+          PY
+
+      - name: Commit generated TXT
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add exports/zipcode_search_terrain_area_sqm_full.txt
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+            exit 0
+          fi
+          git diff --cached --check
+          git commit -m "Generate zipcode sqm full replacement file"
+          git push origin HEAD:main

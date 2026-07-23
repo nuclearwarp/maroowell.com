@@ -1471,6 +1471,7 @@
       ).replace(/\/+$/, "");
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
+      const ZIPCODE_AREA_UI_VERSION = "2026-07-23-area-terrain-combined-v2";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
@@ -1528,6 +1529,7 @@
         polygons: new Map(),
         labels: new Map(),
         geoByZip: new Map(),
+        areaByZip: new Map(),
         terrainByZip: new Map(),
         terrainStatusByZip: new Map(),
         selectedZips: new Set(),
@@ -1803,7 +1805,14 @@
       }
 
       function zipAreaSquareMeters(zip) {
-        return featureAreaSquareMeters(state.geoByZip.get(zip));
+        const saved = terrainNumber(state.areaByZip.get(zip));
+        if (saved != null && saved >= 0) return saved;
+
+        const calculated = featureAreaSquareMeters(state.geoByZip.get(zip));
+        if (calculated != null && calculated >= 0) {
+          state.areaByZip.set(zip, calculated);
+        }
+        return calculated;
       }
 
       function formatTerrainArea(value) {
@@ -1843,7 +1852,11 @@
           const terrain = state.terrainByZip.get(zip) || null;
           const status = state.terrainStatusByZip.get(zip) || null;
           const safeZip = escapeTerrainHtml(zip);
-          const areaText = escapeTerrainHtml(formatTerrainArea(zipAreaSquareMeters(zip)));
+          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);
+          const areaText = escapeTerrainHtml(formatTerrainArea(areaSquareMeters));
 
           if (status?.state === "loading") {
             return `
@@ -1852,7 +1865,12 @@
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus fresh">조회 중</span>
                 </div>
-                <div class="terrainAreaSummary"><span>우편번호 면적</span><strong>${areaText}</strong></div>
+                <div class="terrainGrid">
+                  <div class="terrainMetric areaMetric">
+                    <span class="terrainMetricLabel">우편번호 면적</span>
+                    <strong class="terrainMetricValue">${areaText}</strong>
+                  </div>
+                </div>
                 <div class="terrainMessage">Copernicus GLO-30 지형정보를 계산하고 있습니다.</div>
               </article>`;
           }
@@ -1864,7 +1882,12 @@
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus">조회 실패</span>
                 </div>
-                <div class="terrainAreaSummary"><span>우편번호 면적</span><strong>${areaText}</strong></div>
+                <div class="terrainGrid">
+                  <div class="terrainMetric areaMetric">
+                    <span class="terrainMetricLabel">우편번호 면적</span>
+                    <strong class="terrainMetricValue">${areaText}</strong>
+                  </div>
+                </div>
                 <div class="terrainMessage">${escapeTerrainHtml(terrainErrorMessage(status.message))}</div>
                 <button class="terrainRetry" type="button" data-terrain-retry="${safeZip}">다시 조회</button>
               </article>`;
@@ -1880,7 +1903,12 @@
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus">대기</span>
                 </div>
-                <div class="terrainAreaSummary"><span>우편번호 면적</span><strong>${areaText}</strong></div>
+                <div class="terrainGrid">
+                  <div class="terrainMetric areaMetric">
+                    <span class="terrainMetricLabel">우편번호 면적</span>
+                    <strong class="terrainMetricValue">${areaText}</strong>
+                  </div>
+                </div>
                 <div class="terrainMessage">${waitingText}</div>
               </article>`;
           }
@@ -1949,6 +1977,11 @@
       async function fetchTerrainForZip(zip, feature, force = false) {
         if (!/^\d{5}$/.test(String(zip || "")) || !feature?.geometry) return;
 
+        const areaSquareMeters = featureAreaSquareMeters(feature);
+        if (areaSquareMeters != null && areaSquareMeters >= 0) {
+          state.areaByZip.set(zip, areaSquareMeters);
+        }
+
         const currentStatus = state.terrainStatusByZip.get(zip);
         if (!force && (state.terrainByZip.has(zip) || currentStatus?.state === "loading")) return;
 
@@ -1989,7 +2022,8 @@
 
           state.terrainByZip.set(zip, {
             ...data.terrain,
-            cached: data.cached === true
+            cached: data.cached === true,
+            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
           });
           state.terrainStatusByZip.set(zip, { state: "ready" });
         } catch (e) {
@@ -2018,6 +2052,7 @@
         }
 
         state.geoByZip.delete(zip);
+        state.areaByZip.delete(zip);
         state.terrainByZip.delete(zip);
         state.terrainStatusByZip.delete(zip);
         renderTerrainList();
@@ -2248,8 +2283,11 @@
                 geometry: { type: "MultiPolygon", coordinates: wgs }
               };
 
-              featureAreaSquareMeters(feature);
+              const areaSquareMeters = featureAreaSquareMeters(feature);
               state.geoByZip.set(zip, feature);
+              if (areaSquareMeters != null && areaSquareMeters >= 0) {
+                state.areaByZip.set(zip, areaSquareMeters);
+              }
               drawZipMultiPolygon(zip, wgs);
               void fetchTerrainForZip(zip, feature);
             } catch (err) {
@@ -2984,6 +3022,7 @@
         state.polygons.clear();
         state.labels.clear();
         state.geoByZip.clear();
+        state.areaByZip.clear();
         state.terrainByZip.clear();
         state.terrainStatusByZip.clear();
 

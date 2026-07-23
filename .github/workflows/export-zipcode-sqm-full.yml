@@ -1,0 +1,98 @@
+name: Export zipcode sqm full file
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "public/export-zipcode-sqm-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full replacement TXT
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path("public/zipcode_search").read_text(encoding="utf-8")
+
+          pattern = re.compile(
+              r'^      function formatTerrainArea\(value\) \{.*?^      \}',
+              re.M | re.S,
+          )
+          replacement = '''      function formatTerrainArea(value) {
+        const sqm = terrainNumber(value);
+        if (sqm == null || sqm < 0) return "-";
+
+        return `${Math.round(sqm).toLocaleString("ko-KR")}㎡`;
+      }'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise RuntimeError(f"formatTerrainArea matches: {count}")
+
+          old = '''          const savedTerrainArea = terrainNumber(terrain?.areaSquareMeters ?? terrain?.area_sqm);
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          new = '''          const savedTerrainArea = terrainNumber(
+            terrain?.polygonAreaM2 ??
+            terrain?.polygon_area_m2 ??
+            terrain?.areaSquareMeters ??
+            terrain?.area_sqm
+          );
+          const areaSquareMeters = savedTerrainArea != null
+            ? savedTerrainArea
+            : zipAreaSquareMeters(zip);'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "terrain?.polygon_area_m2" not in text:
+              raise RuntimeError("savedTerrainArea block not found")
+
+          old_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters: terrainNumber(state.areaByZip.get(zip)) ?? areaSquareMeters
+          });'''
+          new_set = '''          state.terrainByZip.set(zip, {
+            ...data.terrain,
+            cached: data.cached === true,
+            areaSquareMeters:
+              terrainNumber(
+                data?.terrain?.polygonAreaM2 ??
+                data?.terrain?.polygon_area_m2 ??
+                data?.terrain?.areaSquareMeters ??
+                data?.terrain?.area_sqm
+              ) ??
+              terrainNumber(state.areaByZip.get(zip)) ??
+              areaSquareMeters
+          });'''
+          if old_set in text:
+              text = text.replace(old_set, new_set, 1)
+
+          text = text.replace("우편번호 면적", "면적")
+
+          if "polygon_area_m2" not in text:
+              raise RuntimeError("polygon area mapping missing")
+          if "㎢" in text[text.find("function formatTerrainArea"):text.find("function formatTerrainArea")+500]:
+              raise RuntimeError("km2 remains in area formatter")
+
+          out = Path("artifact")
+          out.mkdir(exist_ok=True)
+          (out / "zipcode_search_terrain_area_sqm_full.txt").write_text(text, encoding="utf-8")
+          PY
+
+      - name: Upload full replacement file
+        uses: actions/upload-artifact@v4
+        with:
+          name: zipcode-search-sqm-full
+          path: artifact/zipcode_search_terrain_area_sqm_full.txt
+          if-no-files-found: error
+          retention-days: 1

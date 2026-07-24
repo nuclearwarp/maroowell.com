@@ -21,4 +21,47 @@ window.MARUWELL_CONFIG = {
   }
 };
 
+// 마루웰 회수율 운영 캠프 변경: 용인3(602) → 용인1(312)
+if (/^\/maroowell_freshbag_ratio(?:\.html)?\/?$/i.test(location.pathname || "")) {
+  const nativeFetch = window.fetch.bind(window);
+
+  window.fetch = async (input, init = {}) => {
+    const url = String(input instanceof Request ? input.url : input || "");
+
+    if (/\/ratio\/query(?:[/?#]|$)/i.test(url) && typeof init.body === "string") {
+      try {
+        const body = JSON.parse(init.body);
+
+        if (String(body.camp || "").trim() === "용인1") {
+          body.wave = "W2";
+          init = { ...init, body: JSON.stringify(body) };
+        }
+      } catch {}
+    }
+
+    return nativeFetch(input, init);
+  };
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const campFilter = document.getElementById("campFilter");
+    const waveFilter = document.getElementById("waveFilter");
+
+    if (!campFilter) return;
+
+    const yonginOption = Array.from(campFilter.options)
+      .find(option => option.value === "용인3");
+
+    if (yonginOption) {
+      yonginOption.value = "용인1";
+      yonginOption.textContent = "용인1 - 주간";
+    }
+
+    campFilter.addEventListener("change", () => {
+      if (campFilter.value === "용인1" && waveFilter) {
+        waveFilter.value = "W2";
+      }
+    });
+  });
+}
+
 // deploy kick: freshbag restore

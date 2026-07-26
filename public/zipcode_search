@@ -797,7 +797,6 @@
 
       header h1{
         font-size:18px;
-      }
 
       .headerActions{
         gap:6px;
@@ -1397,7 +1396,6 @@
           broadcastAuthState
         };
       }
-
       const authStorage = (() => {
         try { return window.sessionStorage; } catch {}
         return null;
@@ -2647,8 +2645,13 @@
             if (rr) outlineRings.push(rr);
           }
 
-          const rings = _deholeToFillRings(pf);
-          for (const r of rings) fillRings.push(r);
+          // DB 저장용 병합 결과는 각 Polygon의 외곽 링만 유지한다.
+          // 기존 _deholeToFillRings()는 내부 홀을 외곽선에 절개선으로 연결해
+          // 서로 떨어진 영역이 이상하게 이어지거나 자기 교차 폴리곤이 생길 수 있었다.
+          // 외곽 링을 독립된 구역으로 저장하면 기존 Array<ring> 포맷을 유지하면서
+          // Kakao 지도와 Copernicus 모두 유효한 MultiPolygon처럼 처리할 수 있다.
+          const outerRing = _closeRingCopy(coords[0]);
+          if (outerRing && outerRing.length >= 4) fillRings.push(outerRing);
         }
 
         return fillRings.length ? { fillRings, outlineRings } : null;
@@ -2797,7 +2800,6 @@
           alert("저장 실패: " + msg);
           return;
         }
-
         localStorage.setItem("mw_save_camp", camp);
         localStorage.setItem("mw_save_code", code);
 

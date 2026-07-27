@@ -1004,6 +1004,58 @@
       color:#047857;
     }
 
+    /* coupangRouteMap과 동일한 구역 고저차 강조 및 경사도 분포 */
+    .terrainMetric.rangeMetric{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+    }
+
+    .terrainMetric.rangeMetric .terrainMetricValue{
+      color:#1d4ed8;
+      font-size:16px;
+    }
+
+    .terrainSlopeTitle{
+      margin:10px 0 6px;
+      color:#475569;
+      font-size:10px;
+      font-weight:900;
+    }
+
+    .terrainSlopeRow{
+      display:grid;
+      grid-template-columns:42px minmax(0,1fr) 44px;
+      gap:7px;
+      align-items:center;
+      margin:6px 0;
+      color:#475569;
+      font-size:10px;
+      font-weight:900;
+    }
+
+    .terrainSlopeTrack{
+      height:7px;
+      overflow:hidden;
+      border-radius:999px;
+      background:#e2e8f0;
+    }
+
+    .terrainSlopeFill{
+      display:block;
+      height:100%;
+      width:0;
+      border-radius:999px;
+    }
+
+    .terrainSlopeFill.flat{background:#22c55e;}
+    .terrainSlopeFill.gentle{background:#f59e0b;}
+    .terrainSlopeFill.steep{background:#ef4444;}
+
+    .terrainSlopePercent{
+      text-align:right;
+      color:#0f172a;
+    }
+
     .terrainAreaSummary{
       display:flex;
       align-items:center;
@@ -1131,7 +1183,7 @@
           <div class="terrainHead">
             <div>
               <b>지형 정보</b>
-              <span class="terrainSub">우편번호별 면적·고도·고저차</span>
+              <span class="terrainSub">우편번호별 면적·표고·고저차·경사도</span>
             </div>
             <span class="terrainSourceBadge">Copernicus GLO-30</span>
           </div>
@@ -1826,6 +1878,67 @@
         return text.length > 220 ? `${text.slice(0, 220)}...` : text;
       }
 
+      function terrainValue(source, ...keys) {
+        for (const key of keys) {
+          const value = source?.[key];
+          if (value === null || value === undefined || value === "") continue;
+          const number = Number(value);
+          if (Number.isFinite(number)) return number;
+        }
+        return null;
+      }
+
+      function terrainMetricsFromResponse(response) {
+        const terrain = response?.terrain || response?.data || response || {};
+        const slope = terrain?.slope || terrain?.slopeStats || terrain?.slope_stats || {};
+
+        return {
+          minElevation: terrainValue(terrain, "minElevation", "min_elevation"),
+          maxElevation: terrainValue(terrain, "maxElevation", "max_elevation"),
+          meanElevation: terrainValue(terrain, "meanElevation", "mean_elevation"),
+          elevationRange: terrainValue(
+            terrain,
+            "effectiveRange",
+            "effective_range",
+            "elevationRange",
+            "elevation_range"
+          ),
+          polygonAreaM2: terrainValue(
+            terrain,
+            "polygonAreaM2",
+            "polygon_area_m2",
+            "areaSquareMeters",
+            "area_sqm"
+          ),
+          flatPercent:
+            terrainValue(slope, "flatPercent", "flat_percent") ??
+            terrainValue(terrain, "flatPercent", "flat_percent"),
+          gentlePercent:
+            terrainValue(slope, "gentlePercent", "gentle_percent") ??
+            terrainValue(terrain, "gentlePercent", "gentle_percent"),
+          steepPercent:
+            terrainValue(slope, "steepPercent", "steep_percent") ??
+            terrainValue(terrain, "steepPercent", "steep_percent")
+        };
+      }
+
+      function terrainSlopeHtml(label, value, kind) {
+        const percent = Number.isFinite(Number(value))
+          ? Math.max(0, Math.min(100, Number(value)))
+          : null;
+        const width = percent == null ? 0 : percent;
+        const display = percent == null
+          ? "-"
+          : `${percent.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
+
+        return `
+          <div class="terrainSlopeRow">
+            <span>${escapeTerrainHtml(label)}</span>
+            <span class="terrainSlopeTrack"><i class="terrainSlopeFill ${kind}" style="width:${width}%"></i></span>
+            <strong class="terrainSlopePercent">${display}</strong>
+          </div>`;
+      }
+
       function renderTerrainList() {
         const list = $("#terrainList");
         if (!list) return;
@@ -1906,51 +2019,63 @@
               </article>`;
           }
 
+          const metrics = terrainMetricsFromResponse(terrain);
           const cached = terrain.cached === true;
           const source = escapeTerrainHtml(terrain.source || "COPERNICUS_30");
-          const resolution = formatTerrainInteger(terrain.resolutionMeters);
-          const sampleCount = formatTerrainInteger(terrain.sampleCount);
-          const calculatedAt = terrain.calculatedAt
-            ? new Date(terrain.calculatedAt).toLocaleString("ko-KR")
+          const resolution = formatTerrainInteger(
+            terrain.resolutionMeters ?? terrain.resolution_m
+          );
+          const sampleCount = formatTerrainInteger(
+            terrain.slope?.sampleCount ??
+            terrain.slope?.sample_count ??
+            terrain.sampleCount ??
+            terrain.sample_count
+          );
+          const calculatedAt =
+            terrain.slope?.calculatedAt ??
+            terrain.slope?.calculated_at ??
+            terrain.calculatedAt ??
+            terrain.calculated_at;
+          const calculatedText = calculatedAt
+            ? new Date(calculatedAt).toLocaleString("ko-KR")
             : "-";
+          const metricsAreaText = escapeTerrainHtml(
+            formatTerrainArea(metrics.polygonAreaM2 ?? areaSquareMeters)
+          );
 
           return `
             <article class="terrainCard" data-terrain-zip="${safeZip}">
               <div class="terrainCardTop">
                 <span class="terrainZip">${safeZip}</span>
-                <span class="terrainStatus ${cached ? "cache" : "fresh"}">${cached ? "캐시" : "신규 계산"}</span>
+                <span class="terrainStatus ${cached ? "cache" : "fresh"}">${cached ? "캐시" : "완료"}</span>
               </div>
               <div class="terrainGrid">
                 <div class="terrainMetric areaMetric">
                   <span class="terrainMetricLabel">면적</span>
-                  <strong class="terrainMetricValue">${areaText}</strong>
-                </div>
-                <div class="terrainMetric emphasis">
-                  <span class="terrainMetricLabel">유효 고저차 (P90-P10)</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(terrain.effectiveRange)}</strong>
-                </div>
-                <div class="terrainMetric">
-                  <span class="terrainMetricLabel">전체 고저차</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(terrain.elevationRange)}</strong>
+                  <strong class="terrainMetricValue">${metricsAreaText}</strong>
                 </div>
                 <div class="terrainMetric">
                   <span class="terrainMetricLabel">최저 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(terrain.minElevation)}</strong>
+                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.minElevation)}</strong>
                 </div>
                 <div class="terrainMetric">
                   <span class="terrainMetricLabel">최고 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(terrain.maxElevation)}</strong>
+                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.maxElevation)}</strong>
                 </div>
                 <div class="terrainMetric">
                   <span class="terrainMetricLabel">평균 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(terrain.meanElevation)}</strong>
+                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.meanElevation)}</strong>
                 </div>
-                <div class="terrainMetric">
-                  <span class="terrainMetricLabel">P10 ~ P90 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainRange(terrain.p10Elevation, terrain.p90Elevation)}</strong>
+                <div class="terrainMetric rangeMetric">
+                  <span class="terrainMetricLabel">구역 고저차</span>
+                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.elevationRange)}</strong>
                 </div>
               </div>
-              <div class="terrainMeta">출처 ${source} · 해상도 약 ${resolution}m · 표본 ${sampleCount}개 · 계산 ${escapeTerrainHtml(calculatedAt)}</div>
+              <div class="terrainSlopeTitle">경사도 분포</div>
+              ${terrainSlopeHtml("평지", metrics.flatPercent, "flat")}
+              ${terrainSlopeHtml("완경사", metrics.gentlePercent, "gentle")}
+              ${terrainSlopeHtml("급경사", metrics.steepPercent, "steep")}
+              <div class="terrainMeta">출처 ${source} · 해상도 약 ${resolution}m · 표본 ${sampleCount}개 · 계산 ${escapeTerrainHtml(calculatedText)}</div>
             </article>`;
         }).join("");
 

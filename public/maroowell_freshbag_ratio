@@ -90,7 +90,7 @@
       justify-content:space-between;
       gap:14px;
       margin-bottom:16px;
-      padding:14px 16px;
+     padding:14px 16px;
       border:1px solid var(--line);
       border-radius:22px;
       background:rgba(255,255,255,.94);
@@ -231,7 +231,8 @@
       box-shadow:0 1px 0 rgba(255,255,255,.85),0 4px 12px rgba(15,23,42,.04);
     }
 
-    button:hover{background:#f8fbff;border-color:#93c5fd}
+    button:hover
+{background:#f8fbff;border-color:#93c5fd}
     button.primary{background:linear-gradient(180deg,#3b82f6,#2563eb);border-color:#2563eb;color:#fff;box-shadow:0 8px 18px rgba(37,99,235,.18)}
     button.primary:hover{background:linear-gradient(180deg,#2563eb,#1d4ed8)}
     button.secondary{background:#f8fafc;color:#334155}
@@ -344,8 +345,7 @@
 
     table{
       border-collapse:separate;
-      border-spacing:0;
-      width:max-content;
+      border-spacing:0;      width:max-content;
       min-width:100%;
       table-layout:fixed;
       font-size:13px;
@@ -389,7 +389,8 @@
 
     .routeCell{color:#1d4ed8}
 
-    .ratioBox{
+    .ratioBox
+{
       display:grid;
       grid-template-rows:1fr 1fr;
       height:100%;
@@ -1115,7 +1116,7 @@
       }
     };
 
-    totalRows.forEach(add);
+   totalRows.forEach(add);
     dailyRows.forEach(add);
 
     return Array.from(map.values()).sort((a, b) => {
@@ -1138,7 +1139,7 @@
       return;
     }
 
-    setStatus("백엔드로 회수율 조회 중...", "warn");
+    setStatus("백엔드로 회수율 조환 중...", "warn");
 
     const result = await fetchRatioRows();
 
@@ -1162,7 +1163,8 @@
 
   function renderSummary() {
     $("totalCount").textContent = totalRows.length.toLocaleString();
-    $("dailyCount").textContent = dailyRows.length.toLocaleString();
+    $("dailyCount").textContent = dailyRows.
+length.toLocaleString();
     $("routeCount").textContent = routeRows.length.toLocaleString();
     $("campCount").textContent = unique(routeRows.map(row => row.camp)).length.toLocaleString();
     $("dateCount").textContent = unique(dailyRows.map(row => row.date)).length.toLocaleString();
@@ -1373,67 +1375,120 @@
       return;
     }
 
-    setStatus(`${label} 이미지 생성 중...`, "warn");
+    setStatus(`${label} 전체 이미지 생성 중...`, "warn");
 
-    let captureElement = element;
     let tempWrap = null;
 
-    if (options.trimEmptyWeekColumns) {
+    try {
+      if (document.fonts?.ready) {
+        try {
+          await document.fonts.ready;
+        } catch {}
+      }
+
+      /*
+        화면에 보이는 스크롤 영역이 아니라 전체 표를 복제해서 캡처한다.
+        월 누적 표가 화면 높이보다 길어도 모든 라우트가 한 장에 포함된다.
+      */
       tempWrap = document.createElement("div");
       tempWrap.style.position = "fixed";
       tempWrap.style.left = "-100000px";
       tempWrap.style.top = "0";
       tempWrap.style.background = "#ffffff";
       tempWrap.style.padding = "0";
+      tempWrap.style.margin = "0";
+      tempWrap.style.overflow = "visible";
       tempWrap.style.zIndex = "-1";
 
       const clone = element.cloneNode(true);
       clone.id = "";
+      clone.style.display = "block";
+      clone.style.width = "max-content";
+      clone.style.minWidth = "0";
+      clone.style.height = "auto";
       clone.style.maxHeight = "none";
       clone.style.overflow = "visible";
-      clone.style.width = "max-content";
       clone.style.borderRadius = "16px";
+      clone.style.background = "#ffffff";
 
       const cloneTable = clone.querySelector("table");
       if (cloneTable) {
         cloneTable.style.width = "max-content";
         cloneTable.style.minWidth = "0";
+        cloneTable.style.height = "auto";
       }
+
+      clone.querySelectorAll("th").forEach(th => {
+        th.style.position = "static";
+        th.style.top = "auto";
+      });
 
       tempWrap.appendChild(clone);
       document.body.appendChild(tempWrap);
 
-      trimEmptyWeekColumnsForCopy(clone);
+      if (options.trimEmptyWeekColumns) {
+        trimEmptyWeekColumnsForCopy(clone);
 
-      const trimmedTable = clone.querySelector("table");
-      if (trimmedTable) {
-        trimmedTable.style.width = "max-content";
-        trimmedTable.style.minWidth = "0";
+        const trimmedTable = clone.querySelector("table");
+        if (trimmedTable) {
+          trimmedTable.style.width = "max-content";
+          trimmedTable.style.minWidth = "0";
+          trimmedTable.style.height = "auto";
+        }
       }
 
-      captureElement = clone;
-    }
+      const rect = clone.getBoundingClientRect();
+      const captureWidth = Math.ceil(
+        Math.max(clone.scrollWidth, clone.offsetWidth, rect.width)
+      );
+      const captureHeight = Math.ceil(
+        Math.max(clone.scrollHeight, clone.offsetHeight, rect.height)
+      );
+      const scale = Math.max(2, Math.min(4, window.devicePixelRatio || 2));
 
-    try {
-      const canvas = await html2canvas(captureElement, {
+      const canvas = await html2canvas(clone, {
         backgroundColor:"#ffffff",
-        scale:Math.max(2, Math.min(4, window.devicePixelRatio || 2)),
-        useCORS:true
+        scale,
+        useCORS:true,
+        width:captureWidth,
+        height:captureHeight,
+        windowWidth:captureWidth,
+        windowHeight:captureHeight,
+        scrollX:0,
+        scrollY:0,
+        onclone: clonedDocument => {
+          clonedDocument.querySelectorAll(".captureTarget").forEach(target => {
+            target.style.maxHeight = "none";
+            target.style.height = "auto";
+            target.style.overflow = "visible";
+          });
+
+          clonedDocument.querySelectorAll("th").forEach(th => {
+            th.style.position = "static";
+            th.style.top = "auto";
+          });
+        }
       });
 
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/png", 1));
+      const blob = await new Promise(resolve => {
+        canvas.toBlob(resolve, "image/png", 1);
+      });
 
       if (!blob) {
-        setStatus("이미지 생성에 실패했습니다.", "bad");
-        return;
+        throw new Error("이미지 생성에 실패했습니다.");
       }
 
-      if (navigator.clipboard?.write && window.ClipboardItem && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")) {
+      const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(
+        navigator.userAgent || ""
+      );
+
+      if (!isMobile && navigator.clipboard?.write && window.ClipboardItem) {
         try {
           await navigator.clipboard.write([
             new ClipboardItem({ "image/png": blob })
           ]);
-          setStatus(`${label} 이미지 클립보드 복사 완료`, "ok");
+
+          setStatus(`${label} 전체 이미지 클립보드 복사 완료`, "ok");
           return;
         } catch (e) {
           console.warn("clipboard image copy failed", e);
@@ -1448,7 +1503,19 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setStatus(`${label} 이미지 PNG 저장 완료`, "ok");
+
+      setStatus(
+        isMobile
+          ? `${label} 전체 이미지 원본 PNG 저장 완료`
+          : `${label} 전체 이미지 PNG 저장 완료`,
+        "ok"
+      );
+    } catch (e) {
+      console.error("ratio image copy failed", e);
+      setStatus(
+        e?.message || `${label} 이미지 생성에 실패했습니다.`,
+        "bad"
+      );
     } finally {
       if (tempWrap) tempWrap.remove();
     }
@@ -1526,7 +1593,7 @@
     actions.appendChild(btn);
     actions.appendChild(userPill);
 
-    const titleEl = top.querySelector(".title");
+    consttitleEl = top.querySelector(".title");
     const subEl = top.querySelector(".sub");
     const viewTitle = titleEl?.textContent || "마루웰 회수율";
     const viewSub = subEl?.textContent || "";
@@ -1543,7 +1610,7 @@
       btn.setAttribute("aria-pressed", uploadMode ? "true" : "false");
 
       if (titleEl) {
-        titleEl.textContent = uploadMode ? "마루웰 회수율 업로드" : viewTitle;
+        titleEl.textContent = uploadMode ? "마루웰 회수율 업셀 업로드" : viewTitle;
       }
 
       if (subEl) {
@@ -1671,7 +1738,7 @@
       renderWeeklyTables();
       renderSummary();
 
-      setStatus("백엔드 분리 모드 준비 완료. 조회는 maroowellfreshbag Worker를 통해 실행됩니다.", "ok");
+      setStatus("백엔드 분리 모드 준비 완료. 조회는 maroowellfreshbag Worker를 텵해간듈니다.", "ok");
     });
   } catch (e) {
     document.documentElement.style.visibility = "visible";

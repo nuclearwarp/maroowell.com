@@ -21,4 +21,12 @@ window.MARUWELL_CONFIG = {
   }
 };
 
+// 마루웰 회수율 월 누적 표는 화면 스크롤 높이와 무관하게 전체 라우트를 캡처한다.
+if (/^\/maroowell_freshbag_ratio(?:\.html)?\/?$/.test(location.pathname)) {
+  const script = document.createElement("script");
+  script.src = "/maroowell_freshbag_ratio_copy_patch.js?v=20260730-1";
+  script.defer = true;
+  document.head.appendChild(script);
+}
+
 // deploy kick: freshbag restore

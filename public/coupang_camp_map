@@ -10,7 +10,7 @@
   <link rel="icon" href="/favicon.ico?v=2">
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=clusterer"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=clusterer,services"></script>
 
   <style>
     @font-face{
@@ -375,7 +375,7 @@
             <div class="stats">
               <div class="stat"><strong id="visible">0</strong><span>표시 캠프</span></div>
               <div class="stat"><strong id="total">0</strong><span>전체 캠프</span></div>
-              <div class="stat"><strong id="missing">0</strong><span>좌표 누락</span></div>
+              <div class="stat"><strong id="missing">0</strong><span>위치 확인 실패</span></div>
             </div>
           </section>
 
@@ -415,7 +415,7 @@
           <button id="current" class="btn" type="button">내 위치</button>
         </div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
-        <div id="loading" class="loading"><div>캠프 지도를 불러오는 중...</div></div>
+        <div id="loading" class="loading"><div id="loadingText">캠프 지도를 불러오는 중...</div></div>
       </section>
     </main>
   </div>
@@ -467,12 +467,15 @@
         mapType: $("#mapType"),
         current: $("#current"),
         toast: $("#toast"),
-        loading: $("#loading")
+        loading: $("#loading"),
+        loadingText: $("#loadingText")
       };
 
       const state = {
         map: null,
         clusterer: null,
+        geocoder: null,
+        geocodeCache: new Map(),
         rows: [],
         filteredRows: [],
         markers: [],
@@ -564,8 +567,101 @@
           latitude,
           longitude,
           description: text(row?.description),
-          hasValidCoordinates
+          hasValidCoordinates,
+          coordinateSource: hasValidCoordinates ? "database" : "",
+          locationError: ""
         };
+      }
+
+      function addressCandidates(address) {
+        const original = text(address);
+        if (!original) return [];
+
+        const values = [
+          original,
+          original.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim(),
+          original.replace(/[，,]/g, " ").replace(/\s+/g, " ").trim()
+        ].filter(Boolean);
+
+        return [...new Set(values)];
+      }
+
+      function geocodeAddress(address) {
+        const cacheKey = lower(address);
+        if (!cacheKey) return Promise.resolve(null);
+        if (state.geocodeCache.has(cacheKey)) {
+          return Promise.resolve(state.geocodeCache.get(cacheKey));
+        }
+
+        const candidates = addressCandidates(address);
+
+        return new Promise(resolve => {
+          const searchNext = index => {
+            if (index >= candidates.length) {
+              state.geocodeCache.set(cacheKey, null);
+              resolve(null);
+              return;
+            }
+
+            state.geocoder.addressSearch(candidates[index], (result, status) => {
+              if (status === kakao.maps.services.Status.OK && result?.[0]) {
+                const latitude = Number(result[0].y);
+                const longitude = Number(result[0].x);
+                const found = Number.isFinite(latitude) && Number.isFinite(longitude)
+                  ? { latitude, longitude }
+                  : null;
+
+                if (found) {
+                  state.geocodeCache.set(cacheKey, found);
+                  resolve(found);
+                } else {
+                  searchNext(index + 1);
+                }
+                return;
+              }
+
+              searchNext(index + 1);
+            });
+          };
+
+          searchNext(0);
+        });
+      }
+
+      async function resolveMissingLocations(rows) {
+        const targets = rows.filter(row => !row.hasValidCoordinates);
+        if (!targets.length) return { resolved: 0, failed: 0 };
+
+        let resolved = 0;
+        let failed = 0;
+
+        for (let index = 0; index < targets.length; index++) {
+          const row = targets[index];
+          dom.loadingText.textContent = `주소로 위치 찾는 중... ${index + 1}/${targets.length}`;
+
+          if (!row.address) {
+            row.locationError = "주소 없음";
+            failed++;
+            continue;
+          }
+
+          const found = await geocodeAddress(row.address);
+          if (found) {
+            row.latitude = found.latitude;
+            row.longitude = found.longitude;
+            row.hasValidCoordinates = true;
+            row.coordinateSource = "address";
+            row.locationError = "";
+            resolved++;
+          } else {
+            row.locationError = "주소 검색 실패";
+            failed++;
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 40));
+        }
+
+        return { resolved, failed };
       }
 
       function sortedTypes() {
@@ -693,7 +789,7 @@
         if (!state.filteredRows.length) {
           const empty = document.createElement("div");
           empty.className = "empty";
-          empty.textContent = "조건에 맞는 좌표 등록 캠프가 없습니다.";
+          empty.textContent = "조건에 맞는 위치 확인 캠프가 없습니다.";
           dom.list.appendChild(empty);
           return;
         }
@@ -768,7 +864,7 @@
         dom.detailRegion.textContent = row.region || "-";
         dom.detailCode.textContent = row.code || "-";
         dom.detailDescription.textContent = row.description || "-";
-        dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}`;
+        dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}${row.coordinateSource === "address" ? " (주소 변환)" : ""}`;
 
         const position = new kakao.maps.LatLng(row.latitude, row.longitude);
         makeInfoOverlay(row, position);
@@ -797,18 +893,24 @@
           }
 
           const rows = Array.isArray(data) ? data : (data?.rows || []);
-          state.rows = rows
-            .map(normalizeRow)
-            .sort((a, b) => campName(a).localeCompare(campName(b), "ko", { numeric: true }));
+          state.rows = rows.map(normalizeRow);
+
+          const geocodeResult = await resolveMissingLocations(state.rows);
+          state.rows.sort((a, b) => campName(a).localeCompare(campName(b), "ko", { numeric: true }));
 
           clearSelection();
           updateFilterOptions();
           applyFilters(true);
-          showToast(`캠프 ${state.rows.length.toLocaleString()}건을 불러왔습니다.`);
+
+          const message = geocodeResult.resolved
+            ? `캠프 ${state.rows.length.toLocaleString()}건 · 주소로 ${geocodeResult.resolved.toLocaleString()}건 위치 확인`
+            : `캠프 ${state.rows.length.toLocaleString()}건을 불러왔습니다.`;
+          showToast(message);
         } catch (error) {
           console.error(error);
           showToast(error?.message || String(error), true);
         } finally {
+          dom.loadingText.textContent = "캠프 지도를 불러오는 중...";
           dom.loading.classList.add("hide");
         }
       }
@@ -908,6 +1010,8 @@
           center: new kakao.maps.LatLng(36.45, 127.85),
           level: 13
         });
+
+        state.geocoder = new kakao.maps.services.Geocoder();
 
         state.clusterer = new kakao.maps.MarkerClusterer({
           map: state.map,

@@ -128,6 +128,11 @@
       const esc = (value) => String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
       const text = (value) => String(value ?? "").trim();
       const normType = (value) => text(value).toUpperCase().replaceAll("-","_").replaceAll(" ","_");
+      const LEGACY_ROCKET_TYPES = new Set(["MOBILE_CAMP", "MINI_CAMP"]);
+      const normalizeCampType = (value) => {
+        const original = text(value);
+        return LEGACY_ROCKET_TYPES.has(normType(original)) ? "로켓" : original;
+      };
       const nullableId = (value) => { const n = Number(value); return value === "" || value == null || !Number.isSafeInteger(n) || n <= 0 ? null : n; };
 
       const dom = {
@@ -206,10 +211,24 @@
       }
 
       function typeSelectHtml(row) {
-        const types = [...new Set(state.rows.map((item) => text(item.camp_type)).filter(Boolean))];
-        for (const required of ["CAMP","MOBILE_CAMP","MINI_CAMP","SUB_HUB"]) if (!types.includes(required)) types.push(required);
-        types.sort((a,b) => a.localeCompare(b,"ko",{numeric:true}));
-        return `<select class="cellSelect center" data-field="camp_type" ${!state.canEdit||row._deleted?"disabled":""}>${types.map((v)=>`<option value="${esc(v)}" ${text(row.camp_type)===v?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
+        const currentType = normalizeCampType(row.camp_type);
+        const types = [...new Set(
+          state.rows
+            .map((item) => normalizeCampType(item.camp_type))
+            .filter(Boolean)
+        )];
+
+        // 모바일캠프와 미니캠프는 MB캠프 열에서 이미 구분되므로
+        // 구분 항목에서는 모두 '로켓'으로 통합한다.
+        for (const required of ["로켓","CAMP","SUB_HUB"]) {
+          if (!types.includes(required)) types.push(required);
+        }
+
+        const visibleTypes = types
+          .filter((value) => !LEGACY_ROCKET_TYPES.has(normType(value)))
+          .sort((a,b) => a.localeCompare(b,"ko",{numeric:true}));
+
+        return `<select class="cellSelect center" data-field="camp_type" ${!state.canEdit||row._deleted?"disabled":""}>${visibleTypes.map((v)=>`<option value="${esc(v)}" ${currentType===v?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
       }
 
       function parentSelectHtml(row) {
@@ -294,12 +313,20 @@
       }
 
       function updateFilterOptions() {
-        const types = [...new Set(state.rows.map((row)=>text(row.camp_type)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
+        const types = [...new Set(
+          state.rows
+            .map((row) => normalizeCampType(row.camp_type))
+            .filter(Boolean)
+        )]
+          .filter((value) => !LEGACY_ROCKET_TYPES.has(normType(value)))
+          .sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
+
         const regions = [...new Set(state.rows.map((row)=>text(row.region)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
-        const oldType = dom.fType.value, oldRegion = dom.fRegion.value;
+        const oldType = normalizeCampType(dom.fType.value), oldRegion = dom.fRegion.value;
         dom.fType.innerHTML = `<option value="">전체</option>${types.map((v)=>`<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
         dom.fRegion.innerHTML = `<option value="">전체</option>${regions.map((v)=>`<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
-        dom.fType.value = oldType; dom.fRegion.value = oldRegion;
+        dom.fType.value = types.includes(oldType) ? oldType : "";
+        dom.fRegion.value = oldRegion;
       }
 
       async function sessionToken() {
@@ -326,7 +353,17 @@
 
       function normalizeIncoming(row,index) {
         const out = { id:nullableId(row.id), _key:row.id != null ? `id_${row.id}` : `new_${index}_${Date.now()}`, _new:false, _deleted:false };
-        for (const field of FIELDS) out[field] = field.endsWith("_id") ? nullableId(row[field]) : text(row[field]);
+
+        for (const field of FIELDS) {
+          if (field.endsWith("_id")) {
+            out[field] = nullableId(row[field]);
+          } else if (field === "camp_type") {
+            out[field] = normalizeCampType(row[field]);
+          } else {
+            out[field] = text(row[field]);
+          }
+        }
+
         out._original = Object.fromEntries(FIELDS.map((field)=>[field,out[field]]));
         return out;
       }

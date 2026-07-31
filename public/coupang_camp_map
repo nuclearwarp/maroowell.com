@@ -805,39 +805,55 @@
       }
 
       async function resolveMissingLocations(rows) {
-        const targets = rows.filter(row => !row.hasValidCoordinates);
-        if (!targets.length) return { resolved: 0, failed: 0 };
+        // 주소가 있으면 DB 좌표가 정상이어도 주소 검색 결과를 최우선으로 사용한다.
+        // 주소 검색에 실패한 경우에만 기존 DB 좌표를 예비값으로 유지한다.
+        const targets = rows.filter(row => row.address || !row.hasValidCoordinates);
+        if (!targets.length) return { resolved: 0, failed: 0, fallback: 0 };
 
         let resolved = 0;
         let failed = 0;
+        let fallback = 0;
 
         for (let index = 0; index < targets.length; index++) {
           const row = targets[index];
-          dom.loadingText.textContent = `주소로 위치 찾는 중... ${index + 1}/${targets.length}`;
+          dom.loadingText.textContent = `주소 우선으로 위치 확인 중... ${index + 1}/${targets.length}`;
 
-          if (!row.address) {
-            row.locationError = "주소 없음";
-            failed++;
-            continue;
-          }
+          const hadDatabaseCoordinates = row.hasValidCoordinates;
 
-          const found = await geocodeAddress(row.address);
-          if (found) {
-            row.latitude = found.latitude;
-            row.longitude = found.longitude;
-            row.hasValidCoordinates = true;
-            row.coordinateSource = "address";
+          if (row.address) {
+            const found = await geocodeAddress(row.address);
+
+            if (found) {
+              row.latitude = found.latitude;
+              row.longitude = found.longitude;
+              row.hasValidCoordinates = true;
+              row.coordinateSource = "address";
+              row.locationError = "";
+              resolved++;
+            } else if (hadDatabaseCoordinates) {
+              row.coordinateSource = "database-fallback";
+              row.locationError = "주소 검색 실패 · DB 좌표 사용";
+              fallback++;
+            } else {
+              row.hasValidCoordinates = false;
+              row.coordinateSource = "";
+              row.locationError = "주소 검색 실패";
+              failed++;
+            }
+          } else if (hadDatabaseCoordinates) {
+            row.coordinateSource = "database";
             row.locationError = "";
-            resolved++;
           } else {
-            row.locationError = "주소 검색 실패";
+            row.hasValidCoordinates = false;
+            row.coordinateSource = "";
+            row.locationError = "주소 및 좌표 없음";
             failed++;
           }
 
           await new Promise(resolve => setTimeout(resolve, 40));
         }
 
-        return { resolved, failed };
+        return { resolved, failed, fallback };
       }
 
       function sortedTypes() {
@@ -1298,7 +1314,13 @@
           ? `${row.receiving_sh}${row.sh_assignment_type === "INHERITED" ? " (본캠프 상속)" : " (직접 지정)"}`
           : "미지정";
         dom.detailDescription.textContent = row.description || "-";
-        dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}${row.coordinateSource === "address" ? " (주소 변환)" : ""}`;
+        const coordinateLabel =
+          row.coordinateSource === "address"
+            ? " (주소 우선 변환)"
+            : row.coordinateSource === "database-fallback"
+              ? " (주소 검색 실패 · DB 좌표)"
+              : "";
+        dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}${coordinateLabel}`;
 
         const position = new kakao.maps.LatLng(row.latitude, row.longitude);
         makeInfoOverlay(row, position);

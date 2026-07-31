@@ -3,6 +3,7 @@
 <head>
   <style>html{visibility:hidden}</style>
   <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="referrer" content="origin">
@@ -326,10 +327,26 @@
       .mapPane{position:absolute;inset:0}
       .list{max-height:34vh}
     }
+
+    .denied{
+      position:fixed;inset:0;z-index:30000;display:none;align-items:center;justify-content:center;
+      padding:24px;background:rgba(15,23,42,.72);backdrop-filter:blur(8px)
+    }
+    .denied.show{display:flex}
+    .deniedCard{width:min(460px,100%);padding:26px;border-radius:24px;background:#fff;border:1px solid #e2e8f0;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.35)}
+    .deniedCard h2{margin:0 0 10px;font-size:22px}.deniedCard p{margin:0 0 18px;color:#64748b;line-height:1.6}.deniedCard .actions{display:flex;justify-content:center;gap:10px}
   </style>
 </head>
 
 <body>
+
+  <div id="denied" class="denied" aria-hidden="true">
+    <div class="deniedCard">
+      <h2>지도 조회 권한이 없습니다</h2>
+      <p>클렌징 히스토리를 조회할 수 있는 계정만 캠프 지도를 열 수 있습니다.</p>
+      <div class="actions"><a class="btn primary" href="/coupang_camp">캠프 목록으로</a><a class="btn" href="/login.html?next=%2Fcoupang_camp_map">로그인</a></div>
+    </div>
+  </div>
   <div class="app">
     <header class="top">
       <a id="mwBoardMenuToggle" class="logo" href="/index.html" title="마루웰 메뉴">
@@ -392,6 +409,8 @@
               <div class="row"><b>주소</b><span id="dAddress"></span></div>
               <div class="row"><b>지역</b><span id="dRegion"></span></div>
               <div class="row"><b>코드</b><span id="dCode"></span></div>
+              <div class="row"><b>본캠프</b><span id="dParent"></span></div>
+              <div class="row"><b>받는 SH</b><span id="dSh"></span></div>
               <div class="row"><b>설명</b><span id="dDesc"></span></div>
               <div class="row"><b>좌표</b><span id="dCoord"></span></div>
             </div>
@@ -429,6 +448,8 @@
         CONFIG.BACKENDS?.coupangCamp ||
         CONFIG.COUPANG_CAMP_API ||
         "https://coupangcamp.brain-0f6.workers.dev";
+      const SUPABASE_URL = CONFIG.SUPABASE_URL || "";
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY || CONFIG.SUPABASE_PUBLISHABLE_KEY || "";
 
       const MARKER_COLORS = [
         "#2563eb", "#16a34a", "#f97316", "#7c3aed", "#db2777",
@@ -460,7 +481,10 @@
         detailAddress: $("#dAddress"),
         detailRegion: $("#dRegion"),
         detailCode: $("#dCode"),
+        detailParent: $("#dParent"),
+        detailSh: $("#dSh"),
         detailDescription: $("#dDesc"),
+        denied: $("#denied"),
         detailCoord: $("#dCoord"),
         copy: $("#copy"),
         openKakao: $("#openKakao"),
@@ -564,6 +588,14 @@
           address: text(row?.address),
           region: text(row?.region || row?.area),
           code: text(row?.code),
+          parent_camp_id: text(row?.parent_camp_id),
+          receiving_sh_id: text(row?.receiving_sh_id),
+          parent_camp: text(row?.parent_camp),
+          parent_camp_code: text(row?.parent_camp_code),
+          effective_receiving_sh_id: text(row?.effective_receiving_sh_id || row?.resolved_receiving_sh_id),
+          receiving_sh: text(row?.receiving_sh),
+          receiving_sh_code: text(row?.receiving_sh_code),
+          sh_assignment_type: text(row?.sh_assignment_type),
           latitude,
           longitude,
           description: text(row?.description),
@@ -731,6 +763,9 @@
               row.address,
               row.region,
               row.code,
+              row.parent_camp,
+              row.receiving_sh,
+              row.receiving_sh_code,
               row.description
             ].map(lower).join("\n");
 
@@ -807,7 +842,7 @@
           title.append(dot, document.createTextNode(campName(row)));
 
           const subtitle = document.createElement("span");
-          subtitle.textContent = [row.camp_type, row.region, row.address].filter(Boolean).join(" · ");
+          subtitle.textContent = [row.camp_type, row.region, row.receiving_sh ? `SH ${row.receiving_sh}` : "", row.address].filter(Boolean).join(" · ");
 
           button.append(title, subtitle);
           dom.list.appendChild(button);
@@ -863,6 +898,10 @@
         dom.detailAddress.textContent = row.address || "-";
         dom.detailRegion.textContent = row.region || "-";
         dom.detailCode.textContent = row.code || "-";
+        dom.detailParent.textContent = row.parent_camp || "-";
+        dom.detailSh.textContent = row.receiving_sh
+          ? `${row.receiving_sh}${row.sh_assignment_type === "INHERITED" ? " (본캠프 상속)" : " (직접 지정)"}`
+          : "미지정";
         dom.detailDescription.textContent = row.description || "-";
         dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}${row.coordinateSource === "address" ? " (주소 변환)" : ""}`;
 
@@ -1005,7 +1044,42 @@
         window.addEventListener("resize", () => state.map?.relayout());
       }
 
-      function init() {
+
+      async function loadMapAccess() {
+        if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) return false;
+        try {
+          const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: { persistSession:true, storage:sessionStorage, autoRefreshToken:true, detectSessionInUrl:true }
+          });
+          const { data } = await sb.auth.getSession();
+          const token = data?.session?.access_token || "";
+          if (!token) return false;
+          const response = await fetch(`${API_BASE}/access`, {
+            headers: { Authorization:`Bearer ${token}` },
+            cache: "no-store"
+          });
+          const access = await response.json().catch(() => null);
+          return response.ok && (access?.canClhi === true || access?.access?.can_clhi === true);
+        } catch (error) {
+          console.error(error);
+          return false;
+        }
+      }
+
+      function showDenied() {
+        dom.loading.classList.add("hide");
+        dom.denied.classList.add("show");
+        dom.denied.setAttribute("aria-hidden", "false");
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function init() {
+        const allowed = await loadMapAccess();
+        if (!allowed) {
+          showDenied();
+          return;
+        }
+
         state.map = new kakao.maps.Map($("#map"), {
           center: new kakao.maps.LatLng(36.45, 127.85),
           level: 13

@@ -522,6 +522,9 @@
         filteredRows: [],
         markers: [],
         markerImages: new Map(),
+        labelOverlays: [],
+        labelLeaderLines: [],
+        labelLayoutTimer: null,
         colors: new Map(),
         selected: null,
         overlay: null,
@@ -643,70 +646,11 @@
         );
       }
 
-      const OVERLAP_STACK_GAP = 52;
+      const LABEL_MAX_LEVEL = 6;
+      const LABEL_STACK_GAP = 2;
+      const LABEL_COLLISION_PADDING = 6;
 
-      function overlapMarkerKey(row) {
-        const latitude = Number(row?.latitude);
-        const longitude = Number(row?.longitude);
-
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-          return `invalid:${rowId(row)}`;
-        }
-
-        // 동일 주소를 변환한 좌표나 사실상 같은 핀 위치를 하나의 그룹으로 묶는다.
-        // 소수점 5자리 기준은 대략 1m 안팎이라 다른 건물까지 과도하게 묶지 않는다.
-        return `${latitude.toFixed(5)}|${longitude.toFixed(5)}`;
-      }
-
-      function overlapSortLabel(row) {
-        return markerLabelLines(row).join(" ");
-      }
-
-      function buildOverlapMarkerLayout(rows) {
-        const groups = new Map();
-        const layout = new Map();
-
-        for (const row of rows) {
-          const key = overlapMarkerKey(row);
-          if (!groups.has(key)) groups.set(key, []);
-          groups.get(key).push(row);
-        }
-
-        for (const groupRows of groups.values()) {
-          groupRows.sort((a, b) => {
-            const aIsSubHub = text(a?.camp_type).toUpperCase() === "SUB_HUB";
-            const bIsSubHub = text(b?.camp_type).toUpperCase() === "SUB_HUB";
-
-            // 위쪽: 서브허브 / 아래쪽: 일반·모바일 캠프
-            if (aIsSubHub !== bIsSubHub) return aIsSubHub ? -1 : 1;
-
-            // 같은 종류끼리는 가나다순
-            return overlapSortLabel(a).localeCompare(
-              overlapSortLabel(b),
-              "ko",
-              { numeric: true, sensitivity: "base" }
-            );
-          });
-
-          groupRows.forEach((row, index) => {
-            // 배열 첫 번째가 가장 위에 보이도록 아래쪽 투명 여백을 더 준다.
-            const verticalOffset =
-              groupRows.length > 1
-                ? (groupRows.length - 1 - index) * OVERLAP_STACK_GAP
-                : 0;
-
-            layout.set(rowId(row), {
-              verticalOffset,
-              order: index,
-              count: groupRows.length
-            });
-          });
-        }
-
-        return layout;
-      }
-
-      function makeMarkerImage(row, verticalOffset = 0) {
+      function markerVisualMetrics(row) {
         const type = text(row?.camp_type) || "미분류";
         const isSubHub = type.toUpperCase() === "SUB_HUB";
         const isMobile = isMobileRocketCamp(row);
@@ -718,76 +662,490 @@
             ? [12.5, 11.5]
             : [12.5];
 
-        const safeVerticalOffset = Math.max(0, Number(verticalOffset) || 0);
+        const width = markerLabelWidth(lines, fontSizes, isSubHub, isMobile);
+        const bubbleHeight = lines.length > 1 ? 40 : isSubHub ? 25 : 24;
 
-        const key = [
+        return {
           type,
-          isMobile ? "mobile" : "base",
-          ...lines,
-          ...fontSizes,
-          `offset:${safeVerticalOffset}`
-        ].join("|");
+          isSubHub,
+          isMobile,
+          lines,
+          fontSizes,
+          width,
+          bubbleHeight,
+          pointerHeight: 6
+        };
+      }
+
+      function overlapMarkerKey(row) {
+        const latitude = Number(row?.latitude);
+        const longitude = Number(row?.longitude);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return `invalid:${rowId(row)}`;
+        }
+
+        // 약 1m 안팎의 동일 위치는 하나의 붙임 그룹으로 묶는다.
+        return `${latitude.toFixed(5)}|${longitude.toFixed(5)}`;
+      }
+
+      function overlapSortLabel(row) {
+        return markerLabelLines(row).join(" ");
+      }
+
+      function compareOverlapRows(a, b) {
+        const aIsSubHub = text(a?.camp_type).toUpperCase() === "SUB_HUB";
+        const bIsSubHub = text(b?.camp_type).toUpperCase() === "SUB_HUB";
+
+        // 같은 위치에서는 SUB_HUB를 맨 위에 둔다.
+        if (aIsSubHub !== bIsSubHub) return aIsSubHub ? -1 : 1;
+
+        // 나머지는 가나다순 정렬
+        return overlapSortLabel(a).localeCompare(
+          overlapSortLabel(b),
+          "ko",
+          { numeric: true, sensitivity: "base" }
+        );
+      }
+
+      function buildMarkerGroups(rows) {
+        const grouped = new Map();
+
+        for (const row of rows) {
+          const key = overlapMarkerKey(row);
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(row);
+        }
+
+        return [...grouped.entries()].map(([key, groupRows]) => {
+          groupRows.sort(compareOverlapRows);
+
+          const items = groupRows.map(row => ({
+            row,
+            metrics: markerVisualMetrics(row)
+          }));
+
+          const width = Math.max(...items.map(item => item.metrics.width));
+          const height =
+            items.reduce((sum, item) => sum + item.metrics.bubbleHeight, 0) +
+            Math.max(0, items.length - 1) * LABEL_STACK_GAP +
+            items[items.length - 1].metrics.pointerHeight;
+
+          return {
+            key,
+            items,
+            width,
+            height,
+            latitude: Number(groupRows[0]?.latitude),
+            longitude: Number(groupRows[0]?.longitude),
+            hasSubHub: groupRows.some(
+              row => text(row?.camp_type).toUpperCase() === "SUB_HUB"
+            ),
+            sortLabel: groupRows.map(overlapSortLabel).join(" ")
+          };
+        });
+      }
+
+      function rectanglesOverlap(a, b, padding = LABEL_COLLISION_PADDING) {
+        return !(
+          a.right + padding <= b.left ||
+          a.left >= b.right + padding ||
+          a.bottom + padding <= b.top ||
+          a.top >= b.bottom + padding
+        );
+      }
+
+      function rectangleOverlapArea(a, b) {
+        const width = Math.max(
+          0,
+          Math.min(a.right, b.right) - Math.max(a.left, b.left)
+        );
+        const height = Math.max(
+          0,
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+        );
+        return width * height;
+      }
+
+      function groupRectangle(group, anchor, offset) {
+        const left = anchor.x + offset.x - group.width / 2;
+        const bottom = anchor.y + offset.y;
+
+        return {
+          left,
+          top: bottom - group.height,
+          right: left + group.width,
+          bottom
+        };
+      }
+
+      function markerLayoutCandidates(group) {
+        const xStep = Math.max(54, Math.min(112, Math.round(group.width * 0.72)));
+        const yStep = Math.max(30, Math.min(68, Math.round(group.height * 0.48)));
+        const candidates = [{ x: 0, y: 0 }];
+
+        for (let level = 1; level <= 5; level++) {
+          const x = xStep * level;
+          const y = yStep * level;
+
+          candidates.push(
+            { x: 0, y: -y },
+            { x, y: 0 },
+            { x: -x, y: 0 },
+            { x: Math.round(x * 0.72), y: -Math.round(y * 0.65) },
+            { x: -Math.round(x * 0.72), y: -Math.round(y * 0.65) },
+            { x: Math.round(x * 0.72), y: Math.round(y * 0.62) },
+            { x: -Math.round(x * 0.72), y: Math.round(y * 0.62) },
+            { x: 0, y }
+          );
+        }
+
+        return candidates;
+      }
+
+      function viewportPenalty(rect, width, height) {
+        let penalty = 0;
+
+        if (rect.left < 4) penalty += (4 - rect.left) * 300;
+        if (rect.right > width - 4) penalty += (rect.right - width + 4) * 300;
+        if (rect.top < 4) penalty += (4 - rect.top) * 300;
+        if (rect.bottom > height - 4) penalty += (rect.bottom - height + 4) * 300;
+
+        return penalty;
+      }
+
+      function buildCollisionAwareGroupLayout(groups) {
+        const projection = state.map.getProjection();
+        const mapElement = document.getElementById("map");
+        const viewportWidth = mapElement?.clientWidth || window.innerWidth;
+        const viewportHeight = mapElement?.clientHeight || window.innerHeight;
+        const placed = [];
+        const layouts = new Map();
+
+        const prepared = groups
+          .map(group => {
+            const position = new kakao.maps.LatLng(
+              group.latitude,
+              group.longitude
+            );
+            const anchor = projection.containerPointFromCoords(position);
+
+            return { group, position, anchor };
+          })
+          .sort((a, b) => {
+            // SUB_HUB가 포함된 그룹은 원래 위치를 우선 확보한다.
+            if (a.group.hasSubHub !== b.group.hasSubHub) {
+              return a.group.hasSubHub ? -1 : 1;
+            }
+
+            return (
+              a.anchor.y - b.anchor.y ||
+              a.anchor.x - b.anchor.x ||
+              a.group.sortLabel.localeCompare(
+                b.group.sortLabel,
+                "ko",
+                { numeric: true, sensitivity: "base" }
+              )
+            );
+          });
+
+        for (const preparedGroup of prepared) {
+          const { group, anchor } = preparedGroup;
+          const candidates = markerLayoutCandidates(group);
+
+          let best = null;
+
+          for (const offset of candidates) {
+            const rect = groupRectangle(group, anchor, offset);
+            const collisions = placed.filter(item =>
+              rectanglesOverlap(rect, item.rect)
+            );
+
+            const overlapArea = collisions.reduce(
+              (sum, item) => sum + rectangleOverlapArea(rect, item.rect),
+              0
+            );
+
+            const score =
+              overlapArea * 10000 +
+              collisions.length * 1000000 +
+              viewportPenalty(
+                rect,
+                viewportWidth,
+                viewportHeight
+              ) +
+              Math.hypot(offset.x, offset.y);
+
+            if (!best || score < best.score) {
+              best = { offset, rect, score, collisions: collisions.length };
+            }
+
+            // 화면 안쪽이고 다른 마커와 겹치지 않는 가장 가까운 후보를 즉시 사용
+            if (
+              collisions.length === 0 &&
+              viewportPenalty(rect, viewportWidth, viewportHeight) === 0
+            ) {
+              best = { offset, rect, score, collisions: 0 };
+              break;
+            }
+          }
+
+          layouts.set(group.key, {
+            x: best?.offset?.x || 0,
+            y: best?.offset?.y || 0,
+            anchor,
+            rect: best?.rect || groupRectangle(group, anchor, { x: 0, y: 0 })
+          });
+
+          placed.push({
+            key: group.key,
+            rect: layouts.get(group.key).rect
+          });
+        }
+
+        return layouts;
+      }
+
+      function makeClusterDotImage(row) {
+        const type = text(row?.camp_type) || "미분류";
+        const isMobile = isMobileRocketCamp(row);
+        const key = `dot:${type}:${isMobile ? "mobile" : "base"}`;
 
         if (state.markerImages.has(key)) {
           return state.markerImages.get(key);
         }
 
-        // 본캠프는 기존 구분 색상, 모바일캠프는 연한 파란색으로 구분한다.
         const color = isMobile ? "#7dd3fc" : getColor(type);
-        const textColor = isMobile ? "#0c4a6e" : "#ffffff";
-        const borderColor = isMobile ? "#e0f2fe" : "#ffffff";
-
-        const width = markerLabelWidth(lines, fontSizes, isSubHub, isMobile);
-        const bubbleHeight = lines.length > 1 ? 40 : isSubHub ? 25 : 24;
-        const pointerTipY = bubbleHeight + 5;
-        const height = pointerTipY + safeVerticalOffset + 2;
-        const center = width / 2;
-        const anchorY = height - 2;
-
-        const textElements = lines.length > 1
-          ? [
-              `<text x="${center}" y="12.5" text-anchor="middle" dominant-baseline="middle"`,
-              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[0]}" font-weight="900"`,
-              ` fill="${textColor}">${escapeSvgText(lines[0])}</text>`,
-              `<text x="${center}" y="29.2" text-anchor="middle" dominant-baseline="middle"`,
-              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[1]}" font-weight="800"`,
-              ` fill="${textColor}">${escapeSvgText(lines[1])}</text>`
-            ].join("")
-          : [
-              `<text x="${center}" y="${1 + bubbleHeight / 2}" text-anchor="middle" dominant-baseline="middle"`,
-              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[0]}" font-weight="850"`,
-              ` fill="${textColor}">${escapeSvgText(lines[0])}</text>`
-            ].join("");
-
         const svg = [
-          `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" overflow="visible">`,
-          '<defs>',
-          '<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">',
-          '<feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#0f172a" flood-opacity=".24"/>',
-          '</filter>',
-          '</defs>',
-          '<g filter="url(#shadow)">',
-          `<rect x="1" y="1" width="${width - 2}" height="${bubbleHeight}" rx="7" fill="${color}" stroke="${borderColor}" stroke-width="1.2"/>`,
-          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${pointerTipY} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="${borderColor}" stroke-width="1.1" stroke-linejoin="round"/>`,
-          safeVerticalOffset > 0
-            ? `<line x1="${center}" y1="${pointerTipY}" x2="${center}" y2="${anchorY - 2}" stroke="${color}" stroke-width="1.6" stroke-opacity=".72"/>`
-            : "",
-          safeVerticalOffset > 0
-            ? `<circle cx="${center}" cy="${anchorY - 1}" r="2.2" fill="${color}" stroke="${borderColor}" stroke-width="1"/>`
-            : "",
-          '</g>',
-          textElements,
+          '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">',
+          `<circle cx="5" cy="5" r="4" fill="${color}" stroke="#ffffff" stroke-width="1.4"/>`,
           '</svg>'
         ].join("");
 
         const image = new kakao.maps.MarkerImage(
           "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-          new kakao.maps.Size(width, height),
-          { offset: new kakao.maps.Point(center, anchorY) }
+          new kakao.maps.Size(10, 10),
+          { offset: new kakao.maps.Point(5, 5) }
         );
 
         state.markerImages.set(key, image);
         return image;
+      }
+
+      function clearLabelOverlays() {
+        if (state.labelLayoutTimer) {
+          clearTimeout(state.labelLayoutTimer);
+          state.labelLayoutTimer = null;
+        }
+
+        for (const overlay of state.labelOverlays) {
+          overlay.setMap(null);
+        }
+
+        for (const line of state.labelLeaderLines) {
+          line.setMap(null);
+        }
+
+        state.labelOverlays = [];
+        state.labelLeaderLines = [];
+      }
+
+      function markerLabelColor(metrics) {
+        return metrics.isMobile ? "#0c4a6e" : "#ffffff";
+      }
+
+      function markerLabelBackground(metrics) {
+        return metrics.isMobile ? "#7dd3fc" : getColor(metrics.type);
+      }
+
+      function createMarkerLabelElement(row, metrics, showPointer, offset) {
+        const root = document.createElement("button");
+        root.type = "button";
+        root.title = campName(row);
+        root.setAttribute("aria-label", campName(row));
+
+        Object.assign(root.style, {
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          width: `${metrics.width}px`,
+          height: `${metrics.bubbleHeight + (showPointer ? metrics.pointerHeight : 0)}px`,
+          margin: "0",
+          padding: "0",
+          border: "0",
+          background: "transparent",
+          cursor: "pointer",
+          fontFamily: "Arial, Noto Sans KR, sans-serif",
+          transform: `translate(${offset.x}px, ${offset.y}px)`,
+          transformOrigin: "50% 100%",
+          filter: "drop-shadow(0 1px 2px rgba(15,23,42,.28))",
+          zIndex: "1"
+        });
+
+        const bubble = document.createElement("span");
+        Object.assign(bubble.style, {
+          display: "flex",
+          flexDirection: metrics.lines.length > 1 ? "column" : "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "0",
+          width: `${metrics.width}px`,
+          height: `${metrics.bubbleHeight}px`,
+          padding: metrics.lines.length > 1 ? "3px 8px" : "0 10px",
+          border: `1.2px solid ${metrics.isMobile ? "#e0f2fe" : "#ffffff"}`,
+          borderRadius: "7px",
+          background: markerLabelBackground(metrics),
+          color: markerLabelColor(metrics),
+          boxSizing: "border-box",
+          whiteSpace: "nowrap",
+          overflow: "hidden"
+        });
+
+        metrics.lines.forEach((line, index) => {
+          const span = document.createElement("span");
+          span.textContent = line;
+          Object.assign(span.style, {
+            display: "block",
+            width: "100%",
+            overflow: "hidden",
+            textOverflow: "clip",
+            whiteSpace: "nowrap",
+            textAlign: "center",
+            lineHeight: metrics.lines.length > 1 ? "1.08" : "1",
+            fontSize: `${metrics.fontSizes[index] || metrics.fontSizes[0]}px`,
+            fontWeight: index === 0 ? "900" : "800"
+          });
+          bubble.appendChild(span);
+        });
+
+        root.appendChild(bubble);
+
+        if (showPointer) {
+          const pointer = document.createElement("span");
+          Object.assign(pointer.style, {
+            display: "block",
+            width: "0",
+            height: "0",
+            borderLeft: "5px solid transparent",
+            borderRight: "5px solid transparent",
+            borderTop: `6px solid ${markerLabelBackground(metrics)}`,
+            marginTop: "-1px"
+          });
+          root.appendChild(pointer);
+        }
+
+        root.addEventListener("pointerdown", event => {
+          event.stopPropagation();
+        });
+
+        root.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          state.ignoreMapClickUntil = Date.now() + 250;
+          selectCamp(row, true);
+        });
+
+        return root;
+      }
+
+      function renderLabelOverlays() {
+        clearLabelOverlays();
+
+        if (
+          !state.map ||
+          !state.filteredRows.length ||
+          state.map.getLevel() > LABEL_MAX_LEVEL
+        ) {
+          return;
+        }
+
+        const groups = buildMarkerGroups(state.filteredRows);
+        const layouts = buildCollisionAwareGroupLayout(groups);
+        const projection = state.map.getProjection();
+
+        for (const group of groups) {
+          const layout = layouts.get(group.key) || {
+            x: 0,
+            y: 0,
+            anchor: projection.containerPointFromCoords(
+              new kakao.maps.LatLng(group.latitude, group.longitude)
+            )
+          };
+
+          const position = new kakao.maps.LatLng(
+            group.latitude,
+            group.longitude
+          );
+
+          let heightBelow = 0;
+
+          for (let index = group.items.length - 1; index >= 0; index--) {
+            const item = group.items[index];
+            const showPointer = index === group.items.length - 1;
+
+            const overlay = new kakao.maps.CustomOverlay({
+              map: state.map,
+              position,
+              content: createMarkerLabelElement(
+                item.row,
+                item.metrics,
+                showPointer,
+                {
+                  x: layout.x,
+                  y: layout.y - heightBelow
+                }
+              ),
+              xAnchor: 0.5,
+              yAnchor: 1,
+              zIndex:
+                item.metrics.isSubHub
+                  ? 5000 - index
+                  : 4000 - index
+            });
+
+            state.labelOverlays.push(overlay);
+
+            heightBelow +=
+              item.metrics.bubbleHeight +
+              (showPointer ? item.metrics.pointerHeight : 0) +
+              LABEL_STACK_GAP;
+          }
+
+          // 다른 좌표의 라벨을 피하느라 그룹 전체가 이동한 경우에만
+          // 실제 좌표와 이동된 그룹 끝점을 짧은 보조선으로 연결한다.
+          if (Math.abs(layout.x) > 2 || Math.abs(layout.y) > 2) {
+            const shiftedPoint = new kakao.maps.Point(
+              layout.anchor.x + layout.x,
+              layout.anchor.y + layout.y
+            );
+            const shiftedPosition =
+              projection.coordsFromContainerPoint(shiftedPoint);
+
+            const leader = new kakao.maps.Polyline({
+              map: state.map,
+              path: [position, shiftedPosition],
+              strokeWeight: 2,
+              strokeColor: group.hasSubHub ? "#7c3aed" : "#64748b",
+              strokeOpacity: 0.62,
+              strokeStyle: "solid",
+              zIndex: 1800
+            });
+
+            state.labelLeaderLines.push(leader);
+          }
+        }
+      }
+
+      function scheduleLabelLayout() {
+        if (state.labelLayoutTimer) {
+          clearTimeout(state.labelLayoutTimer);
+        }
+
+        state.labelLayoutTimer = setTimeout(() => {
+          state.labelLayoutTimer = null;
+          renderLabelOverlays();
+        }, 70);
       }
 
 
@@ -1283,29 +1641,23 @@
         state.clusterer.clear();
         for (const marker of state.markers) marker.setMap(null);
         state.markers = [];
+        clearLabelOverlays();
         clearRelationLines();
 
         if (state.overlay) state.overlay.setMap(null);
 
         const bounds = new kakao.maps.LatLngBounds();
-        const overlapLayout = buildOverlapMarkerLayout(state.filteredRows);
 
         for (const row of state.filteredRows) {
           const position = new kakao.maps.LatLng(row.latitude, row.longitude);
-          const markerLayout = overlapLayout.get(rowId(row)) || {
-            verticalOffset: 0,
-            order: 0,
-            count: 1
-          };
-
           const marker = new kakao.maps.Marker({
             position,
-            image: makeMarkerImage(row, markerLayout.verticalOffset),
+            image: makeClusterDotImage(row),
             title: campName(row),
             zIndex:
               text(row.camp_type).toUpperCase() === "SUB_HUB"
-                ? 4000 - markerLayout.order
-                : 3000 - markerLayout.order
+                ? 3200
+                : 3000
           });
 
           kakao.maps.event.addListener(marker, "click", () => selectCamp(row, true));
@@ -1315,7 +1667,12 @@
 
         renderRelationLines();
         state.clusterer.addMarkers(state.markers);
-        if (fitBounds && state.markers.length) state.map.setBounds(bounds);
+
+        if (fitBounds && state.markers.length) {
+          state.map.setBounds(bounds);
+        }
+
+        scheduleLabelLayout();
       }
 
       function renderList() {
@@ -1665,6 +2022,10 @@
               boxShadow:"0 3px 10px rgba(15,23,42,.22)"
             }
           ]
+        });
+
+        kakao.maps.event.addListener(state.map, "idle", () => {
+          scheduleLabelLayout();
         });
 
         kakao.maps.event.addListener(state.map, "click", () => {

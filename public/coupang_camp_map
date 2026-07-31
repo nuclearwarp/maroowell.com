@@ -430,7 +430,7 @@
       <section class="mapPane">
         <div id="map"></div>
         <div class="tools">
-          <button id="mapType" class="btn" type="button">스카이뷰</button>
+          <button id="mapType" class="btn" type="button">위성</button>
           <button id="current" class="btn" type="button">내 위치</button>
         </div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -507,7 +507,8 @@
         colors: new Map(),
         selected: null,
         overlay: null,
-        isRoadmap: true
+        isRoadmap: true,
+        selectedTypes: new Set()
       };
 
       const text = value => String(value ?? "").trim();
@@ -553,17 +554,17 @@
 
         const color = getColor(key);
         const svg = [
-          '<svg xmlns="http://www.w3.org/2000/svg" width="36" height="46" viewBox="0 0 36 46">',
-          `<path d="M18 1C8.6 1 1 8.6 1 18c0 12.7 17 27 17 27s17-14.3 17-27C35 8.6 27.4 1 18 1z" fill="${color}" stroke="white" stroke-width="2"/>`,
-          '<circle cx="18" cy="18" r="7" fill="white"/>',
-          `<circle cx="18" cy="18" r="3.2" fill="${color}"/>`,
+          '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="31" viewBox="0 0 24 31">',
+          `<path d="M12 1C5.9 1 1 5.9 1 12c0 8.4 11 18 11 18s11-9.6 11-18C23 5.9 18.1 1 12 1z" fill="${color}" stroke="white" stroke-width="1.5"/>`,
+          '<circle cx="12" cy="12" r="4.5" fill="white"/>',
+          `<circle cx="12" cy="12" r="2.1" fill="${color}"/>`,
           "</svg>"
         ].join("");
 
         const image = new kakao.maps.MarkerImage(
           "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-          new kakao.maps.Size(36, 46),
-          { offset: new kakao.maps.Point(18, 45) }
+          new kakao.maps.Size(24, 31),
+          { offset: new kakao.maps.Point(12, 30) }
         );
 
         state.markerImages.set(key, image);
@@ -712,13 +713,26 @@
         if (values.includes(currentValue)) select.value = currentValue;
       }
 
+      function syncTypeSelect() {
+        if (state.selectedTypes.size === 1) {
+          dom.type.value = [...state.selectedTypes][0];
+        } else {
+          dom.type.value = "";
+        }
+      }
+
       function updateFilterOptions() {
         const types = sortedTypes();
         const regions = [...new Set(state.rows.map(row => row.region).filter(Boolean))]
           .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
 
+        state.selectedTypes = new Set(
+          [...state.selectedTypes].filter(type => types.includes(type))
+        );
+
         updateSelectOptions(dom.type, types);
         updateSelectOptions(dom.region, regions);
+        syncTypeSelect();
         renderTypeChips(types);
       }
 
@@ -733,7 +747,7 @@
         for (const type of types) {
           const button = document.createElement("button");
           button.type = "button";
-          button.className = `chip${dom.type.value === type ? " active" : ""}`;
+          button.className = `chip${state.selectedTypes.has(type) ? " active" : ""}`;
           button.dataset.type = type;
 
           const dot = document.createElement("span");
@@ -747,12 +761,11 @@
 
       function applyFilters(fitBounds = true) {
         const query = lower(dom.query.value);
-        const selectedType = dom.type.value;
         const selectedRegion = dom.region.value;
 
         state.filteredRows = state.rows.filter(row => {
           if (!row.hasValidCoordinates) return false;
-          if (selectedType && row.camp_type !== selectedType) return false;
+          if (state.selectedTypes.size && !state.selectedTypes.has(row.camp_type)) return false;
           if (selectedRegion && row.region !== selectedRegion) return false;
 
           if (query) {
@@ -962,13 +975,25 @@
           searchTimer = setTimeout(() => applyFilters(true), 180);
         });
 
-        dom.type.addEventListener("change", () => applyFilters(true));
+        dom.type.addEventListener("change", () => {
+          state.selectedTypes.clear();
+          if (dom.type.value) state.selectedTypes.add(dom.type.value);
+          applyFilters(true);
+        });
         dom.region.addEventListener("change", () => applyFilters(true));
 
         dom.chips.addEventListener("click", event => {
           const button = event.target.closest("[data-type]");
           if (!button) return;
-          dom.type.value = dom.type.value === button.dataset.type ? "" : button.dataset.type;
+
+          const type = button.dataset.type;
+          if (state.selectedTypes.has(type)) {
+            state.selectedTypes.delete(type);
+          } else {
+            state.selectedTypes.add(type);
+          }
+
+          syncTypeSelect();
           applyFilters(true);
         });
 
@@ -981,6 +1006,7 @@
 
         dom.reset.addEventListener("click", () => {
           dom.query.value = "";
+          state.selectedTypes.clear();
           dom.type.value = "";
           dom.region.value = "";
           applyFilters(true);
@@ -995,9 +1021,9 @@
           state.map.setMapTypeId(
             state.isRoadmap
               ? kakao.maps.MapTypeId.ROADMAP
-              : kakao.maps.MapTypeId.HYBRID
+              : kakao.maps.MapTypeId.SKYVIEW
           );
-          dom.mapType.textContent = state.isRoadmap ? "스카이뷰" : "일반지도";
+          dom.mapType.textContent = state.isRoadmap ? "위성" : "일반지도";
         });
 
         dom.current.addEventListener("click", () => {
@@ -1090,7 +1116,59 @@
         state.clusterer = new kakao.maps.MarkerClusterer({
           map: state.map,
           averageCenter: true,
-          minLevel: 7
+          minLevel: 7,
+          gridSize: 48,
+          calculator: [10, 30, 70],
+          styles: [
+            {
+              width:"30px", height:"30px",
+              background:"rgba(56,189,248,.82)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#082f49",
+              textAlign:"center",
+              fontSize:"11px",
+              fontWeight:"900",
+              lineHeight:"26px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"33px", height:"33px",
+              background:"rgba(34,197,94,.82)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#052e16",
+              textAlign:"center",
+              fontSize:"11px",
+              fontWeight:"900",
+              lineHeight:"29px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"36px", height:"36px",
+              background:"rgba(132,204,22,.84)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#1a2e05",
+              textAlign:"center",
+              fontSize:"12px",
+              fontWeight:"900",
+              lineHeight:"32px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"39px", height:"39px",
+              background:"rgba(245,158,11,.86)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#451a03",
+              textAlign:"center",
+              fontSize:"12px",
+              fontWeight:"900",
+              lineHeight:"35px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            }
+          ]
         });
 
         kakao.maps.event.addListener(state.map, "click", () => {

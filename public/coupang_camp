@@ -255,11 +255,32 @@
           type:text(dom.fType.value),camp:text(dom.fCamp.value).toLowerCase(),mb:text(dom.fMb.value).toLowerCase(),parent:text(dom.fParent.value).toLowerCase(),sh:text(dom.fSh.value).toLowerCase(),address:text(dom.fAddress.value).toLowerCase(),region:text(dom.fRegion.value),code:text(dom.fCode.value).toLowerCase(),lat:text(dom.fLat.value).toLowerCase(),lng:text(dom.fLng.value).toLowerCase(),desc:text(dom.fDesc.value).toLowerCase()
         };
         const index = byId(); const bases = baseByCamp();
-        return state.rows.filter((row) => {
+
+        // 새로 추가한 입력 행은 모든 필터와 '변경 행만 보기' 조건을 무시하고
+        // 항상 표 최상단에 표시한다.
+        const newRows = state.rows.filter((row) => row._new);
+
+        const filteredRows = state.rows.filter((row) => {
+          if (row._new) return false;
           if (dom.onlyChanged.checked && !isDirty(row)) return false;
-          const parent = currentParent(row,index,bases); const sh = resolveSh(row,index,bases).row;
-          return (!f.type || text(row.camp_type)===f.type) && (!f.camp || text(row.camp).toLowerCase().includes(f.camp)) && (!f.mb || text(row.mb_camp).toLowerCase().includes(f.mb)) && (!f.parent || text(parent?.camp).toLowerCase().includes(f.parent)) && (!f.sh || text(sh?.camp).toLowerCase().includes(f.sh)) && (!f.address || text(row.address).toLowerCase().includes(f.address)) && (!f.region || text(row.region)===f.region) && (!f.code || text(row.code).toLowerCase().includes(f.code)) && (!f.lat || text(row.latitude).toLowerCase().includes(f.lat)) && (!f.lng || text(row.longitude).toLowerCase().includes(f.lng)) && (!f.desc || text(row.description).toLowerCase().includes(f.desc));
+
+          const parent = currentParent(row,index,bases);
+          const sh = resolveSh(row,index,bases).row;
+
+          return (!f.type || text(row.camp_type)===f.type) &&
+            (!f.camp || text(row.camp).toLowerCase().includes(f.camp)) &&
+            (!f.mb || text(row.mb_camp).toLowerCase().includes(f.mb)) &&
+            (!f.parent || text(parent?.camp).toLowerCase().includes(f.parent)) &&
+            (!f.sh || text(sh?.camp).toLowerCase().includes(f.sh)) &&
+            (!f.address || text(row.address).toLowerCase().includes(f.address)) &&
+            (!f.region || text(row.region)===f.region) &&
+            (!f.code || text(row.code).toLowerCase().includes(f.code)) &&
+            (!f.lat || text(row.latitude).toLowerCase().includes(f.lat)) &&
+            (!f.lng || text(row.longitude).toLowerCase().includes(f.lng)) &&
+            (!f.desc || text(row.description).toLowerCase().includes(f.desc));
         });
+
+        return [...newRows, ...filteredRows];
       }
 
       function render() {
@@ -327,7 +348,21 @@
       function addRow() {
         if (!state.canEdit) return;
         const row = { id:null,_key:`new_${Date.now()}_${Math.random().toString(36).slice(2)}`,_new:true,_deleted:false,camp_type:"CAMP",camp:"",mb_camp:"",parent_camp_id:null,receiving_sh_id:null,address:"",region:"",code:"",latitude:"",longitude:"",description:"" };
-        row._original = Object.fromEntries(FIELDS.map((field)=>[field,""])); state.rows.unshift(row); render(); setStatus("새 행을 추가했습니다.","ok");
+        row._original = Object.fromEntries(FIELDS.map((field)=>[field,""]));
+        state.rows.unshift(row);
+        render();
+
+        // 필터 적용 중이거나 아래쪽을 보고 있어도 새 행이 바로 보이도록 최상단 이동
+        const sheetWrap = dom.body.closest(".sheetWrap");
+        if (sheetWrap) sheetWrap.scrollTop = 0;
+
+        requestAnimationFrame(() => {
+          dom.body
+            .querySelector(`tr[data-key="${CSS.escape(rowKey(row))}"] [data-field="camp"]`)
+            ?.focus();
+        });
+
+        setStatus("새 행을 최상단에 추가했습니다.","ok");
       }
 
       function payload(row) {

@@ -643,7 +643,70 @@
         );
       }
 
-      function makeMarkerImage(row) {
+      const OVERLAP_STACK_GAP = 52;
+
+      function overlapMarkerKey(row) {
+        const latitude = Number(row?.latitude);
+        const longitude = Number(row?.longitude);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return `invalid:${rowId(row)}`;
+        }
+
+        // 동일 주소를 변환한 좌표나 사실상 같은 핀 위치를 하나의 그룹으로 묶는다.
+        // 소수점 5자리 기준은 대략 1m 안팎이라 다른 건물까지 과도하게 묶지 않는다.
+        return `${latitude.toFixed(5)}|${longitude.toFixed(5)}`;
+      }
+
+      function overlapSortLabel(row) {
+        return markerLabelLines(row).join(" ");
+      }
+
+      function buildOverlapMarkerLayout(rows) {
+        const groups = new Map();
+        const layout = new Map();
+
+        for (const row of rows) {
+          const key = overlapMarkerKey(row);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(row);
+        }
+
+        for (const groupRows of groups.values()) {
+          groupRows.sort((a, b) => {
+            const aIsSubHub = text(a?.camp_type).toUpperCase() === "SUB_HUB";
+            const bIsSubHub = text(b?.camp_type).toUpperCase() === "SUB_HUB";
+
+            // 위쪽: 서브허브 / 아래쪽: 일반·모바일 캠프
+            if (aIsSubHub !== bIsSubHub) return aIsSubHub ? -1 : 1;
+
+            // 같은 종류끼리는 가나다순
+            return overlapSortLabel(a).localeCompare(
+              overlapSortLabel(b),
+              "ko",
+              { numeric: true, sensitivity: "base" }
+            );
+          });
+
+          groupRows.forEach((row, index) => {
+            // 배열 첫 번째가 가장 위에 보이도록 아래쪽 투명 여백을 더 준다.
+            const verticalOffset =
+              groupRows.length > 1
+                ? (groupRows.length - 1 - index) * OVERLAP_STACK_GAP
+                : 0;
+
+            layout.set(rowId(row), {
+              verticalOffset,
+              order: index,
+              count: groupRows.length
+            });
+          });
+        }
+
+        return layout;
+      }
+
+      function makeMarkerImage(row, verticalOffset = 0) {
         const type = text(row?.camp_type) || "미분류";
         const isSubHub = type.toUpperCase() === "SUB_HUB";
         const isMobile = isMobileRocketCamp(row);
@@ -655,11 +718,14 @@
             ? [12.5, 11.5]
             : [12.5];
 
+        const safeVerticalOffset = Math.max(0, Number(verticalOffset) || 0);
+
         const key = [
           type,
           isMobile ? "mobile" : "base",
           ...lines,
-          ...fontSizes
+          ...fontSizes,
+          `offset:${safeVerticalOffset}`
         ].join("|");
 
         if (state.markerImages.has(key)) {
@@ -673,9 +739,10 @@
 
         const width = markerLabelWidth(lines, fontSizes, isSubHub, isMobile);
         const bubbleHeight = lines.length > 1 ? 40 : isSubHub ? 25 : 24;
-        const height = bubbleHeight + 7;
+        const pointerTipY = bubbleHeight + 5;
+        const height = pointerTipY + safeVerticalOffset + 2;
         const center = width / 2;
-        const tipBottom = height - 2;
+        const anchorY = height - 2;
 
         const textElements = lines.length > 1
           ? [
@@ -701,7 +768,13 @@
           '</defs>',
           '<g filter="url(#shadow)">',
           `<rect x="1" y="1" width="${width - 2}" height="${bubbleHeight}" rx="7" fill="${color}" stroke="${borderColor}" stroke-width="1.2"/>`,
-          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${tipBottom} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="${borderColor}" stroke-width="1.1" stroke-linejoin="round"/>`,
+          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${pointerTipY} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="${borderColor}" stroke-width="1.1" stroke-linejoin="round"/>`,
+          safeVerticalOffset > 0
+            ? `<line x1="${center}" y1="${pointerTipY}" x2="${center}" y2="${anchorY - 2}" stroke="${color}" stroke-width="1.6" stroke-opacity=".72"/>`
+            : "",
+          safeVerticalOffset > 0
+            ? `<circle cx="${center}" cy="${anchorY - 1}" r="2.2" fill="${color}" stroke="${borderColor}" stroke-width="1"/>`
+            : "",
           '</g>',
           textElements,
           '</svg>'
@@ -710,7 +783,7 @@
         const image = new kakao.maps.MarkerImage(
           "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
           new kakao.maps.Size(width, height),
-          { offset: new kakao.maps.Point(center, tipBottom) }
+          { offset: new kakao.maps.Point(center, anchorY) }
         );
 
         state.markerImages.set(key, image);
@@ -1215,13 +1288,24 @@
         if (state.overlay) state.overlay.setMap(null);
 
         const bounds = new kakao.maps.LatLngBounds();
+        const overlapLayout = buildOverlapMarkerLayout(state.filteredRows);
 
         for (const row of state.filteredRows) {
           const position = new kakao.maps.LatLng(row.latitude, row.longitude);
+          const markerLayout = overlapLayout.get(rowId(row)) || {
+            verticalOffset: 0,
+            order: 0,
+            count: 1
+          };
+
           const marker = new kakao.maps.Marker({
             position,
-            image: makeMarkerImage(row),
-            title: campName(row)
+            image: makeMarkerImage(row, markerLayout.verticalOffset),
+            title: campName(row),
+            zIndex:
+              text(row.camp_type).toUpperCase() === "SUB_HUB"
+                ? 4000 - markerLayout.order
+                : 3000 - markerLayout.order
           });
 
           kakao.maps.event.addListener(marker, "click", () => selectCamp(row, true));

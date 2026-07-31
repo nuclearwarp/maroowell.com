@@ -306,6 +306,24 @@
     .info strong{display:block;font-size:13px}
     .info span{display:block;margin-top:4px;color:var(--muted);font-size:11px}
 
+    .routeInfo{
+      min-width:238px;
+      max-width:310px;
+      padding:12px 13px;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(15,23,42,.22);
+      transform:translateY(-7px);
+    }
+    .routeInfo strong{display:block;font-size:13px;line-height:1.35}
+    .routeInfo .routeArrow{margin:4px 0 8px;color:#64748b;font-size:11px;font-weight:800}
+    .routeInfo .routeRow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:6px}
+    .routeInfo .routeKey{color:#64748b;font-size:11px;font-weight:800}
+    .routeInfo .routeVal{color:#0f172a;font-size:12px;font-weight:950;text-align:right}
+    .routeInfo .routeTime{margin-top:8px;padding-top:7px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px}
+    .routeInfo.loadingRoute .routeVal{color:#2563eb}
+
     @media(max-width:900px){
       .app{grid-template-rows:54px 1fr}
       .top{padding:0 10px}
@@ -507,6 +525,12 @@
         colors: new Map(),
         selected: null,
         overlay: null,
+        routeOverlay: null,
+        relationLines: [],
+        routeCache: new Map(),
+        accessToken: "",
+        supabaseClient: null,
+        ignoreMapClickUntil: 0,
         isRoadmap: true,
         selectedTypes: new Set()
       };
@@ -568,28 +592,34 @@
           .replaceAll("'", "&#39;");
       }
 
-      function markerLabelWidth(label) {
+      function markerLabelWidth(label, fontSize, isSubHub) {
+        const scale = fontSize / 9.5;
         const weighted = Array.from(label).reduce((sum, ch) => {
-          // 한글은 영문보다 넓게 계산
-          return sum + (/^[\x20-\x7E]$/.test(ch) ? 5.6 : 9.2);
+          return sum + (/^[\x20-\x7E]$/.test(ch) ? 5.6 : 9.2) * scale;
         }, 0);
 
-        return Math.max(32, Math.min(86, Math.ceil(weighted + 14)));
+        const minimum = isSubHub ? 42 : 36;
+        const maximum = isSubHub ? 108 : 98;
+        return Math.max(minimum, Math.min(maximum, Math.ceil(weighted + 16)));
       }
 
       function makeMarkerImage(row) {
         const type = text(row?.camp_type) || "미분류";
         const label = markerLabel(row);
-        const key = `${type}|${label}`;
+        const isSubHub = type.toUpperCase() === "SUB_HUB";
+        const fontSize = isSubHub ? 11.5 : 10.5;
+        const key = `${type}|${label}|${fontSize}`;
 
         if (state.markerImages.has(key)) {
           return state.markerImages.get(key);
         }
 
         const color = getColor(type);
-        const width = markerLabelWidth(label);
-        const height = 25;
+        const width = markerLabelWidth(label, fontSize, isSubHub);
+        const bubbleHeight = isSubHub ? 21 : 20;
+        const height = bubbleHeight + 7;
         const center = width / 2;
+        const tipBottom = height - 2;
         const safeLabel = escapeSvgText(label);
 
         const svg = [
@@ -600,11 +630,11 @@
           '</filter>',
           '</defs>',
           '<g filter="url(#shadow)">',
-          `<rect x="1" y="1" width="${width - 2}" height="18" rx="7" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>`,
-          `<path d="M${center - 3.5} 18 L${center} 23 L${center + 3.5} 18 Z" fill="${color}" stroke="#ffffff" stroke-width="1.1" stroke-linejoin="round"/>`,
+          `<rect x="1" y="1" width="${width - 2}" height="${bubbleHeight}" rx="7" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>`,
+          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${tipBottom} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="#ffffff" stroke-width="1.1" stroke-linejoin="round"/>`,
           '</g>',
-          `<text x="${center}" y="10.7" text-anchor="middle" dominant-baseline="middle"`,
-          ' font-family="Arial, Noto Sans KR, sans-serif" font-size="9.5" font-weight="800"',
+          `<text x="${center}" y="${1 + bubbleHeight / 2}" text-anchor="middle" dominant-baseline="middle"`,
+          ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSize}" font-weight="850"`,
           ` fill="#ffffff">${safeLabel}</text>`,
           '</svg>'
         ].join("");
@@ -612,7 +642,7 @@
         const image = new kakao.maps.MarkerImage(
           "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
           new kakao.maps.Size(width, height),
-          { offset: new kakao.maps.Point(center, 23) }
+          { offset: new kakao.maps.Point(center, tipBottom) }
         );
 
         state.markerImages.set(key, image);
@@ -644,6 +674,8 @@
           effective_receiving_sh_id: text(row?.effective_receiving_sh_id || row?.resolved_receiving_sh_id),
           receiving_sh: text(row?.receiving_sh),
           receiving_sh_code: text(row?.receiving_sh_code),
+          receiving_sh_latitude: Number(row?.receiving_sh_latitude),
+          receiving_sh_longitude: Number(row?.receiving_sh_longitude),
           sh_assignment_type: text(row?.sh_assignment_type),
           latitude,
           longitude,
@@ -852,10 +884,248 @@
         if (state.overlay) state.overlay.setMap(null);
       }
 
+
+      function isValidLatLng(latitude, longitude) {
+        return Number.isFinite(latitude) &&
+          Number.isFinite(longitude) &&
+          latitude >= -90 && latitude <= 90 &&
+          longitude >= -180 && longitude <= 180 &&
+          !(latitude === 0 && longitude === 0);
+      }
+
+      function receivingShPosition(row) {
+        if (isValidLatLng(row.receiving_sh_latitude, row.receiving_sh_longitude)) {
+          return {
+            latitude: row.receiving_sh_latitude,
+            longitude: row.receiving_sh_longitude
+          };
+        }
+
+        const shId = text(row.effective_receiving_sh_id);
+        if (!shId) return null;
+
+        const shRow = state.rows.find(item => text(item.id) === shId);
+        if (!shRow?.hasValidCoordinates) return null;
+
+        return {
+          latitude: shRow.latitude,
+          longitude: shRow.longitude
+        };
+      }
+
+      function clearRelationLines() {
+        for (const item of state.relationLines) {
+          item.visible?.setMap(null);
+          item.hit?.setMap(null);
+        }
+        state.relationLines = [];
+
+        if (state.routeOverlay) {
+          state.routeOverlay.setMap(null);
+          state.routeOverlay = null;
+        }
+      }
+
+      function formatDistance(meters) {
+        const value = Number(meters || 0);
+        if (value < 1000) return `${Math.round(value)}m`;
+        return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}km`;
+      }
+
+      function formatDuration(seconds) {
+        const totalMinutes = Math.max(1, Math.round(Number(seconds || 0) / 60));
+        if (totalMinutes < 60) return `${totalMinutes}분`;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+      }
+
+      function makeRouteOverlay(position, row, data = null, error = "") {
+        if (state.routeOverlay) state.routeOverlay.setMap(null);
+
+        const box = document.createElement("div");
+        box.className = `routeInfo${!data && !error ? " loadingRoute" : ""}`;
+
+        const title = document.createElement("strong");
+        title.textContent = `${row.receiving_sh_code || row.receiving_sh || "서브허브"} → ${campName(row)}`;
+
+        const arrow = document.createElement("div");
+        arrow.className = "routeArrow";
+        arrow.textContent = "서브허브 출발 · 캠프 도착";
+
+        box.append(title, arrow);
+
+        const addRow = (key, value) => {
+          const line = document.createElement("div");
+          line.className = "routeRow";
+          const keyNode = document.createElement("span");
+          keyNode.className = "routeKey";
+          keyNode.textContent = key;
+          const valueNode = document.createElement("span");
+          valueNode.className = "routeVal";
+          valueNode.textContent = value;
+          line.append(keyNode, valueNode);
+          box.appendChild(line);
+        };
+
+        if (error) {
+          addRow("길찾기", error);
+        } else if (!data) {
+          addRow("카카오내비", "현재 교통정보 조회 중...");
+        } else {
+          addRow(
+            "최단거리",
+            `${formatDistance(data.shortestDistance?.distance)} · ${formatDuration(data.shortestDistance?.duration)}`
+          );
+          addRow(
+            "현재 최단시간",
+            `${formatDuration(data.fastestTime?.duration)} · ${formatDistance(data.fastestTime?.distance)}`
+          );
+
+          const checked = document.createElement("div");
+          checked.className = "routeTime";
+          const queriedAt = data.queriedAt ? new Date(data.queriedAt) : new Date();
+          checked.textContent = `${queriedAt.toLocaleString("ko-KR")} 기준 · 카카오내비 길찾기`;
+          box.appendChild(checked);
+        }
+
+        state.routeOverlay = new kakao.maps.CustomOverlay({
+          position,
+          content: box,
+          yAnchor: 1.1,
+          zIndex: 40,
+          clickable: true
+        });
+        state.routeOverlay.setMap(state.map);
+      }
+
+      async function showRelationshipRoute(row, source, position) {
+        makeRouteOverlay(position, row);
+
+        const key = [
+          source.longitude,
+          source.latitude,
+          row.longitude,
+          row.latitude
+        ].join("|");
+
+        const cached = state.routeCache.get(key);
+        if (cached && Date.now() - cached.savedAt < 60000) {
+          makeRouteOverlay(position, row, cached.data);
+          return;
+        }
+
+        try {
+          if (state.supabaseClient) {
+            const { data: sessionData } = await state.supabaseClient.auth.getSession();
+            state.accessToken = sessionData?.session?.access_token || state.accessToken;
+          }
+          if (!state.accessToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
+
+          const params = new URLSearchParams({
+            origin_lng: String(source.longitude),
+            origin_lat: String(source.latitude),
+            destination_lng: String(row.longitude),
+            destination_lat: String(row.latitude)
+          });
+
+          const response = await fetch(`${API_BASE}/directions?${params}`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${state.accessToken}`
+            },
+            cache: "no-store"
+          });
+
+          const data = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(data?.error || data?.message || `길찾기 HTTP ${response.status}`);
+          }
+
+          state.routeCache.set(key, { savedAt: Date.now(), data });
+          makeRouteOverlay(position, row, data);
+        } catch (error) {
+          console.error(error);
+          makeRouteOverlay(position, row, null, error?.message || String(error));
+        }
+      }
+
+      function renderRelationLines() {
+        const unique = new Set();
+
+        for (const row of state.filteredRows) {
+          if (text(row.camp_type).toUpperCase() === "SUB_HUB") continue;
+          if (!row.effective_receiving_sh_id || !row.hasValidCoordinates) continue;
+
+          const source = receivingShPosition(row);
+          if (!source) continue;
+
+          const relationKey = [
+            row.effective_receiving_sh_id,
+            rowId(row),
+            source.latitude,
+            source.longitude,
+            row.latitude,
+            row.longitude
+          ].join("|");
+          if (unique.has(relationKey)) continue;
+          unique.add(relationKey);
+
+          const path = [
+            new kakao.maps.LatLng(source.latitude, source.longitude),
+            new kakao.maps.LatLng(row.latitude, row.longitude)
+          ];
+
+          const color = "#64748b";
+          const visible = new kakao.maps.Polyline({
+            map: state.map,
+            path,
+            strokeWeight: 2,
+            strokeColor: color,
+            strokeOpacity: 0.42,
+            strokeStyle: "solid",
+            zIndex: 2
+          });
+
+          // 보이는 선은 얇게 유지하고, 클릭 영역만 넓혀 조작성을 확보한다.
+          const hit = new kakao.maps.Polyline({
+            map: state.map,
+            path,
+            strokeWeight: 12,
+            strokeColor: "#ffffff",
+            strokeOpacity: 0.01,
+            strokeStyle: "solid",
+            zIndex: 3
+          });
+
+          const highlight = () => visible.setOptions({
+            strokeWeight: 4,
+            strokeOpacity: 0.88,
+            strokeColor: "#2563eb"
+          });
+          const restore = () => visible.setOptions({
+            strokeWeight: 2,
+            strokeOpacity: 0.42,
+            strokeColor: color
+          });
+
+          kakao.maps.event.addListener(hit, "mouseover", highlight);
+          kakao.maps.event.addListener(hit, "mouseout", restore);
+          kakao.maps.event.addListener(hit, "click", event => {
+            state.ignoreMapClickUntil = Date.now() + 250;
+            highlight();
+            showRelationshipRoute(row, source, event.latLng);
+          });
+
+          state.relationLines.push({ visible, hit, row, source });
+        }
+      }
+
       function renderMarkers(fitBounds) {
         state.clusterer.clear();
         for (const marker of state.markers) marker.setMap(null);
         state.markers = [];
+        clearRelationLines();
 
         if (state.overlay) state.overlay.setMap(null);
 
@@ -874,6 +1144,7 @@
           bounds.extend(position);
         }
 
+        renderRelationLines();
         state.clusterer.addMarkers(state.markers);
         if (fitBounds && state.markers.length) state.map.setBounds(bounds);
       }
@@ -1125,9 +1396,11 @@
           const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: { persistSession:true, storage:sessionStorage, autoRefreshToken:true, detectSessionInUrl:true }
           });
+          state.supabaseClient = sb;
           const { data } = await sb.auth.getSession();
           const token = data?.session?.access_token || "";
           if (!token) return false;
+          state.accessToken = token;
           const response = await fetch(`${API_BASE}/access`, {
             headers: { Authorization:`Bearer ${token}` },
             cache: "no-store"
@@ -1220,7 +1493,9 @@
         });
 
         kakao.maps.event.addListener(state.map, "click", () => {
+          if (Date.now() < state.ignoreMapClickUntil) return;
           if (state.overlay) state.overlay.setMap(null);
+          if (state.routeOverlay) state.routeOverlay.setMap(null);
         });
 
         bindEvents();

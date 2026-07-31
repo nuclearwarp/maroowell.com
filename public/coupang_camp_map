@@ -572,15 +572,38 @@
         }, 2400);
       }
 
-      function markerLabel(row) {
+      function isMobileRocketCamp(row) {
+        const type = text(row?.camp_type).toUpperCase();
+        const mbCamp = text(row?.mb_camp);
+
+        return (
+          type === "로켓" &&
+          mbCamp &&
+          mbCamp !== "본캠프" &&
+          mbCamp !== text(row?.camp)
+        );
+      }
+
+      function markerLabelLines(row) {
         const type = text(row?.camp_type).toUpperCase();
 
-        // 서브허브는 코드로, 나머지 캠프는 캠프명으로 표시한다.
+        // 서브허브는 코드 한 줄로 표시한다.
         if (type === "SUB_HUB") {
-          return text(row?.code) || text(row?.camp) || "SH";
+          return [text(row?.code) || text(row?.camp) || "SH"];
         }
 
-        return text(row?.camp) || text(row?.mb_camp) || text(row?.code) || "캠프";
+        // 로켓캠프 중 MB캠프가 본캠프가 아니면
+        // 1행: 본 캠프명 / 2행: MB캠프명
+        if (isMobileRocketCamp(row)) {
+          return [
+            text(row?.camp) || "캠프",
+            text(row?.mb_camp) || "모바일캠프"
+          ];
+        }
+
+        return [
+          text(row?.camp) || text(row?.mb_camp) || text(row?.code) || "캠프"
+        ];
       }
 
       function escapeSvgText(value) {
@@ -592,50 +615,89 @@
           .replaceAll("'", "&#39;");
       }
 
-      function markerLabelWidth(label, fontSize, isSubHub) {
+      function markerTextWidth(label, fontSize) {
         const scale = fontSize / 9.5;
-        const weighted = Array.from(label).reduce((sum, ch) => {
+
+        return Array.from(label).reduce((sum, ch) => {
           return sum + (/^[\x20-\x7E]$/.test(ch) ? 5.6 : 9.2) * scale;
         }, 0);
+      }
 
-        const minimum = isSubHub ? 42 : 36;
-        const maximum = isSubHub ? 108 : 98;
-        return Math.max(minimum, Math.min(maximum, Math.ceil(weighted + 16)));
+      function markerLabelWidth(lines, fontSizes, isSubHub, isMobile) {
+        const widest = Math.max(
+          ...lines.map((line, index) => {
+            const fontSize = fontSizes[index] || fontSizes[0] || 10.5;
+            return markerTextWidth(line, fontSize);
+          })
+        );
+
+        const minimum = isSubHub ? 46 : isMobile ? 48 : 38;
+        const maximum = isSubHub ? 116 : isMobile ? 118 : 102;
+
+        return Math.max(minimum, Math.min(maximum, Math.ceil(widest + 16)));
       }
 
       function makeMarkerImage(row) {
         const type = text(row?.camp_type) || "미분류";
-        const label = markerLabel(row);
         const isSubHub = type.toUpperCase() === "SUB_HUB";
-        const fontSize = isSubHub ? 11.5 : 10.5;
-        const key = `${type}|${label}|${fontSize}`;
+        const isMobile = isMobileRocketCamp(row);
+        const lines = markerLabelLines(row);
+
+        const fontSizes = isSubHub
+          ? [11.5]
+          : isMobile
+            ? [10.5, 9.5]
+            : [10.5];
+
+        const key = [
+          type,
+          isMobile ? "mobile" : "base",
+          ...lines,
+          ...fontSizes
+        ].join("|");
 
         if (state.markerImages.has(key)) {
           return state.markerImages.get(key);
         }
 
-        const color = getColor(type);
-        const width = markerLabelWidth(label, fontSize, isSubHub);
-        const bubbleHeight = isSubHub ? 21 : 20;
+        // 본캠프는 기존 구분 색상, 모바일캠프는 연한 파란색으로 구분한다.
+        const color = isMobile ? "#7dd3fc" : getColor(type);
+        const textColor = isMobile ? "#0c4a6e" : "#ffffff";
+        const borderColor = isMobile ? "#e0f2fe" : "#ffffff";
+
+        const width = markerLabelWidth(lines, fontSizes, isSubHub, isMobile);
+        const bubbleHeight = lines.length > 1 ? 34 : isSubHub ? 21 : 20;
         const height = bubbleHeight + 7;
         const center = width / 2;
         const tipBottom = height - 2;
-        const safeLabel = escapeSvgText(label);
+
+        const textElements = lines.length > 1
+          ? [
+              `<text x="${center}" y="10.5" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[0]}" font-weight="900"`,
+              ` fill="${textColor}">${escapeSvgText(lines[0])}</text>`,
+              `<text x="${center}" y="24.2" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[1]}" font-weight="800"`,
+              ` fill="${textColor}">${escapeSvgText(lines[1])}</text>`
+            ].join("")
+          : [
+              `<text x="${center}" y="${1 + bubbleHeight / 2}" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSizes[0]}" font-weight="850"`,
+              ` fill="${textColor}">${escapeSvgText(lines[0])}</text>`
+            ].join("");
 
         const svg = [
           `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
           '<defs>',
           '<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">',
-          '<feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#0f172a" flood-opacity=".26"/>',
+          '<feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#0f172a" flood-opacity=".24"/>',
           '</filter>',
           '</defs>',
           '<g filter="url(#shadow)">',
-          `<rect x="1" y="1" width="${width - 2}" height="${bubbleHeight}" rx="7" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>`,
-          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${tipBottom} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="#ffffff" stroke-width="1.1" stroke-linejoin="round"/>`,
+          `<rect x="1" y="1" width="${width - 2}" height="${bubbleHeight}" rx="7" fill="${color}" stroke="${borderColor}" stroke-width="1.2"/>`,
+          `<path d="M${center - 3.8} ${bubbleHeight} L${center} ${tipBottom} L${center + 3.8} ${bubbleHeight} Z" fill="${color}" stroke="${borderColor}" stroke-width="1.1" stroke-linejoin="round"/>`,
           '</g>',
-          `<text x="${center}" y="${1 + bubbleHeight / 2}" text-anchor="middle" dominant-baseline="middle"`,
-          ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${fontSize}" font-weight="850"`,
-          ` fill="#ffffff">${safeLabel}</text>`,
+          textElements,
           '</svg>'
         ].join("");
 
@@ -648,6 +710,7 @@
         state.markerImages.set(key, image);
         return image;
       }
+
 
       function normalizeRow(row, index) {
         const latitude = Number(row?.latitude);

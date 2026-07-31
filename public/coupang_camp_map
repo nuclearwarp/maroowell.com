@@ -548,23 +548,71 @@
         }, 2400);
       }
 
-      function makeMarkerImage(type) {
-        const key = type || "미분류";
-        if (state.markerImages.has(key)) return state.markerImages.get(key);
+      function markerLabel(row) {
+        const type = text(row?.camp_type).toUpperCase();
 
-        const color = getColor(key);
+        // 서브허브는 코드로, 나머지 캠프는 캠프명으로 표시한다.
+        if (type === "SUB_HUB") {
+          return text(row?.code) || text(row?.camp) || "SH";
+        }
+
+        return text(row?.camp) || text(row?.mb_camp) || text(row?.code) || "캠프";
+      }
+
+      function escapeSvgText(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function markerLabelWidth(label) {
+        const weighted = Array.from(label).reduce((sum, ch) => {
+          // 한글은 영문보다 넓게 계산
+          return sum + (/^[\x20-\x7E]$/.test(ch) ? 5.6 : 9.2);
+        }, 0);
+
+        return Math.max(32, Math.min(86, Math.ceil(weighted + 14)));
+      }
+
+      function makeMarkerImage(row) {
+        const type = text(row?.camp_type) || "미분류";
+        const label = markerLabel(row);
+        const key = `${type}|${label}`;
+
+        if (state.markerImages.has(key)) {
+          return state.markerImages.get(key);
+        }
+
+        const color = getColor(type);
+        const width = markerLabelWidth(label);
+        const height = 25;
+        const center = width / 2;
+        const safeLabel = escapeSvgText(label);
+
         const svg = [
-          '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="31" viewBox="0 0 24 31">',
-          `<path d="M12 1C5.9 1 1 5.9 1 12c0 8.4 11 18 11 18s11-9.6 11-18C23 5.9 18.1 1 12 1z" fill="${color}" stroke="white" stroke-width="1.5"/>`,
-          '<circle cx="12" cy="12" r="4.5" fill="white"/>',
-          `<circle cx="12" cy="12" r="2.1" fill="${color}"/>`,
-          "</svg>"
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+          '<defs>',
+          '<filter id="shadow" x="-20%" y="-30%" width="140%" height="170%">',
+          '<feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#0f172a" flood-opacity=".26"/>',
+          '</filter>',
+          '</defs>',
+          '<g filter="url(#shadow)">',
+          `<rect x="1" y="1" width="${width - 2}" height="18" rx="7" fill="${color}" stroke="#ffffff" stroke-width="1.2"/>`,
+          `<path d="M${center - 3.5} 18 L${center} 23 L${center + 3.5} 18 Z" fill="${color}" stroke="#ffffff" stroke-width="1.1" stroke-linejoin="round"/>`,
+          '</g>',
+          `<text x="${center}" y="10.7" text-anchor="middle" dominant-baseline="middle"`,
+          ' font-family="Arial, Noto Sans KR, sans-serif" font-size="9.5" font-weight="800"',
+          ` fill="#ffffff">${safeLabel}</text>`,
+          '</svg>'
         ].join("");
 
         const image = new kakao.maps.MarkerImage(
           "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-          new kakao.maps.Size(24, 31),
-          { offset: new kakao.maps.Point(12, 30) }
+          new kakao.maps.Size(width, height),
+          { offset: new kakao.maps.Point(center, 23) }
         );
 
         state.markerImages.set(key, image);
@@ -817,7 +865,7 @@
           const position = new kakao.maps.LatLng(row.latitude, row.longitude);
           const marker = new kakao.maps.Marker({
             position,
-            image: makeMarkerImage(row.camp_type),
+            image: makeMarkerImage(row),
             title: campName(row)
           });
 

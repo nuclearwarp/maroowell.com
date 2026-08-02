@@ -1731,11 +1731,16 @@
       }
 
       function clearSelection() {
+        const hadSelection = !!state.selected;
+
         state.selected = null;
         dom.detail.classList.remove("show");
 
         if (state.overlay) state.overlay.setMap(null);
         state.overlay = null;
+
+        if (state.routeOverlay) state.routeOverlay.setMap(null);
+        state.routeOverlay = null;
 
         clearSelectedRelationMarkers();
 
@@ -1743,6 +1748,10 @@
           clearRelationLines();
           renderRelationLines();
           scheduleLabelLayout();
+        }
+
+        if (hadSelection) {
+          renderList();
         }
       }
 
@@ -2304,6 +2313,36 @@
           window.open(url, "_blank", "noopener,noreferrer");
         });
 
+        // ESC를 누르면 현재 캠프/서브허브 선택과 길찾기 팝업을 모두 해제한다.
+        window.addEventListener("keydown", event => {
+          if (event.key !== "Escape") return;
+          if (!state.selected && !state.routeOverlay) return;
+
+          event.preventDefault();
+          clearSelection();
+        });
+
+        // 지도 외부의 필터/상단 버튼 등 다른 영역을 클릭해도 선택을 해제한다.
+        // 캠프 목록과 상세 패널 내부 조작은 유지하고, 지도 내부는 Kakao map click에서 처리한다.
+        document.addEventListener("pointerdown", event => {
+          if (!state.selected) return;
+
+          const target = event.target;
+          if (!(target instanceof Node)) return;
+
+          const mapElement = document.getElementById("map");
+
+          if (
+            mapElement?.contains(target) ||
+            dom.list?.contains(target) ||
+            dom.detail?.contains(target)
+          ) {
+            return;
+          }
+
+          clearSelection();
+        });
+
         window.addEventListener("resize", () => state.map?.relayout());
       }
 
@@ -2418,8 +2457,7 @@
 
         kakao.maps.event.addListener(state.map, "click", () => {
           if (Date.now() < state.ignoreMapClickUntil) return;
-          if (state.overlay) state.overlay.setMap(null);
-          if (state.routeOverlay) state.routeOverlay.setMap(null);
+          clearSelection();
         });
 
         bindEvents();

@@ -104,15 +104,43 @@
       position:relative;
       min-height:0;
       display:grid;
-      grid-template-columns:390px 1fr;
+      grid-template-columns:390px minmax(0,1fr);
+      transition:grid-template-columns .2s ease;
+    }
+
+    .work.side-collapsed{
+      grid-template-columns:0 minmax(0,1fr);
     }
 
     .side{
+      min-width:0;
       min-height:0;
       background:#fff;
       border-right:1px solid var(--line);
       overflow:auto;
       z-index:20;
+      transition:opacity .16s ease;
+    }
+
+    .work.side-collapsed .side{
+      width:0;
+      opacity:0;
+      overflow:hidden;
+      pointer-events:none;
+      border-right:0;
+    }
+
+    .sideToggle{
+      position:absolute;
+      top:12px;
+      left:12px;
+      z-index:18;
+      width:38px;
+      min-width:38px;
+      padding:0;
+      font-size:18px;
+      line-height:1;
+      box-shadow:0 10px 28px rgba(15,23,42,.18);
     }
     .inner{padding:14px}
 
@@ -330,18 +358,33 @@
       .title b{font-size:16px}
       .title small,.listLink{display:none}
       .menuBtn{display:inline-flex}
-      .work{display:block}
-      .side{
+      .work,
+      .work.side-collapsed{
+        display:block;
+      }
+      .side,
+      .work.side-collapsed .side{
         position:absolute;
         left:0;
         top:0;
         bottom:0;
         width:min(88vw,390px);
+        opacity:1;
+        overflow:auto;
+        pointer-events:auto;
+        border-right:1px solid var(--line);
         transform:translateX(-105%);
-        transition:.2s;
+        transition:transform .2s ease;
         box-shadow:0 14px 38px rgba(15,23,42,.18);
       }
-      .work.open .side{transform:translateX(0)}
+      .work.open .side,
+      .work.side-collapsed.open .side{
+        transform:translateX(0);
+      }
+      .sideToggle{
+        top:10px;
+        left:10px;
+      }
       .mapPane{position:absolute;inset:0}
       .list{max-height:34vh}
     }
@@ -447,6 +490,13 @@
 
       <section class="mapPane">
         <div id="map"></div>
+        <button
+          id="sideToggle"
+          class="btn sideToggle"
+          type="button"
+          aria-label="좌측 메뉴 접기"
+          title="좌측 메뉴 접기"
+        >◀</button>
         <div class="tools">
           <button id="mapType" class="btn" type="button">위성</button>
           <button id="current" class="btn" type="button">내 위치</button>
@@ -479,6 +529,7 @@
       const dom = {
         work: $("#work"),
         menu: $("#menu"),
+        sideToggle: $("#sideToggle"),
         reload: $("#reload"),
         query: $("#q"),
         type: $("#type"),
@@ -1856,7 +1907,7 @@
           const checked = document.createElement("div");
           checked.className = "routeTime";
           const queriedAt = data.queriedAt ? new Date(data.queriedAt) : new Date();
-          checked.textContent = `${queriedAt.toLocaleString("ko-KR")} 기준·카카오지도 길찾기`;
+          checked.textContent = `${queriedAt.toLocaleString("ko-KR")} 기준 · 카카오지도 자동차 길찾기`;
           box.appendChild(checked);
         }
 
@@ -2260,7 +2311,32 @@
 
         dom.fit.addEventListener("click", () => applyFilters(true));
         dom.reload.addEventListener("click", loadRows);
-        dom.menu.addEventListener("click", () => dom.work.classList.toggle("open"));
+
+        dom.menu.addEventListener("click", () => {
+          if (isMobileSidebarLayout()) {
+            dom.work.classList.toggle("open");
+            updateSidebarToggleButton();
+          } else {
+            setSidebarCollapsed(
+              !dom.work.classList.contains("side-collapsed")
+            );
+          }
+        });
+
+        dom.sideToggle.addEventListener("pointerdown", event => {
+          event.stopPropagation();
+        });
+
+        dom.sideToggle.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          const collapsed = isMobileSidebarLayout()
+            ? !dom.work.classList.contains("open")
+            : dom.work.classList.contains("side-collapsed");
+
+          setSidebarCollapsed(!collapsed);
+        });
 
         dom.mapType.addEventListener("click", () => {
           state.isRoadmap = !state.isRoadmap;
@@ -2334,6 +2410,7 @@
 
           if (
             mapElement?.contains(target) ||
+            dom.sideToggle?.contains(target) ||
             dom.list?.contains(target) ||
             dom.detail?.contains(target)
           ) {
@@ -2343,7 +2420,19 @@
           clearSelection();
         });
 
-        window.addEventListener("resize", () => state.map?.relayout());
+        window.addEventListener("resize", () => {
+          if (!state.map) return;
+
+          if (isMobileSidebarLayout()) {
+            dom.work.classList.remove("side-collapsed");
+          } else {
+            dom.work.classList.remove("open");
+          }
+
+          updateSidebarToggleButton();
+          state.map.relayout();
+          scheduleLabelLayout();
+        });
       }
 
 
@@ -2369,6 +2458,77 @@
           return false;
         }
       }
+
+      const SIDEBAR_STATE_KEY = "mw_coupang_camp_map_sidebar_collapsed";
+
+      function isMobileSidebarLayout() {
+        return window.matchMedia("(max-width:900px)").matches;
+      }
+
+      function updateSidebarToggleButton() {
+        const collapsed = isMobileSidebarLayout()
+          ? !dom.work.classList.contains("open")
+          : dom.work.classList.contains("side-collapsed");
+
+        dom.sideToggle.textContent = collapsed ? "▶" : "◀";
+        dom.sideToggle.setAttribute(
+          "aria-label",
+          collapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"
+        );
+        dom.sideToggle.title = collapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기";
+      }
+
+      function relayoutMapAfterSidebarChange() {
+        const center = state.map?.getCenter?.();
+
+        window.setTimeout(() => {
+          if (!state.map) return;
+
+          state.map.relayout();
+          if (center) state.map.setCenter(center);
+          scheduleLabelLayout();
+        }, 220);
+      }
+
+      function setSidebarCollapsed(collapsed, persist = true) {
+        if (isMobileSidebarLayout()) {
+          dom.work.classList.toggle("open", !collapsed);
+        } else {
+          dom.work.classList.toggle("side-collapsed", collapsed);
+          dom.work.classList.remove("open");
+
+          if (persist) {
+            try {
+              localStorage.setItem(
+                SIDEBAR_STATE_KEY,
+                collapsed ? "1" : "0"
+              );
+            } catch {}
+          }
+        }
+
+        updateSidebarToggleButton();
+        relayoutMapAfterSidebarChange();
+      }
+
+      function restoreSidebarState() {
+        if (isMobileSidebarLayout()) {
+          dom.work.classList.remove("open");
+          dom.work.classList.remove("side-collapsed");
+        } else {
+          let collapsed = false;
+
+          try {
+            collapsed =
+              localStorage.getItem(SIDEBAR_STATE_KEY) === "1";
+          } catch {}
+
+          dom.work.classList.toggle("side-collapsed", collapsed);
+        }
+
+        updateSidebarToggleButton();
+      }
+
 
       function showDenied() {
         dom.loading.classList.add("hide");
@@ -2461,6 +2621,7 @@
         });
 
         bindEvents();
+        restoreSidebarState();
         loadRows();
         document.documentElement.style.visibility = "visible";
       }

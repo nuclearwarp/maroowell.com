@@ -572,6 +572,7 @@
         rows: [],
         filteredRows: [],
         markers: [],
+        markerEntries: [],
         markerImages: new Map(),
         labelOverlays: [],
         labelLeaderLines: [],
@@ -1123,6 +1124,46 @@
       }
 
 
+      function forcedLabelRowIds() {
+        return new Set(
+          selectedSubHubRelatedRows().map(row => rowId(row))
+        );
+      }
+
+      function syncBaseMarkersForCurrentView() {
+        if (!state.clusterer) return;
+
+        state.clusterer.clear();
+
+        for (const entry of state.markerEntries) {
+          entry.marker.setMap(null);
+        }
+
+        const closeZoomShowsAllLabels =
+          state.map && state.map.getLevel() <= LABEL_MAX_LEVEL;
+
+        const forcedIds = forcedLabelRowIds();
+
+        const visibleMarkers = state.markerEntries
+          .filter(entry => {
+            // 가까이 확대된 상태에서는 모든 캠프가 텍스트 라벨로 표시되므로
+            // 뒤에 있는 숫자 1 마커를 전부 숨긴다.
+            if (closeZoomShowsAllLabels) return false;
+
+            // SUB_HUB 선택 중에는 선택한 SH와 연결 캠프가
+            // 강제 텍스트 라벨로 표시되므로 해당 숫자 마커만 숨긴다.
+            if (forcedIds.has(rowId(entry.row))) return false;
+
+            return true;
+          })
+          .map(entry => entry.marker);
+
+        if (visibleMarkers.length) {
+          state.clusterer.addMarkers(visibleMarkers);
+        }
+      }
+
+
       function clearSelectedRelationMarkers() {
         for (const marker of state.selectedRelationMarkers) {
           marker.setMap(null);
@@ -1473,6 +1514,7 @@
 
         state.labelLayoutTimer = setTimeout(() => {
           state.labelLayoutTimer = null;
+          syncBaseMarkersForCurrentView();
           renderLabelOverlays();
           renderSelectedSubHubMarkers();
         }, 70);
@@ -2047,6 +2089,7 @@
         state.clusterer.clear();
         for (const marker of state.markers) marker.setMap(null);
         state.markers = [];
+        state.markerEntries = [];
         clearLabelOverlays();
         clearRelationLines();
 
@@ -2068,11 +2111,12 @@
 
           kakao.maps.event.addListener(marker, "click", () => selectCamp(row, true));
           state.markers.push(marker);
+          state.markerEntries.push({ marker, row });
           bounds.extend(position);
         }
 
         renderRelationLines();
-        state.clusterer.addMarkers(state.markers);
+        syncBaseMarkersForCurrentView();
 
         if (fitBounds && state.markers.length) {
           state.map.setBounds(bounds);

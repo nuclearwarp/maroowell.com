@@ -1106,6 +1106,42 @@
       overflow-wrap:anywhere;
     }
 
+    .terrainCompactRange{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-top:9px;
+      padding:8px 10px;
+      border:1px solid #bfdbfe;
+      border-radius:12px;
+      background:#eff6ff;
+    }
+
+    .terrainCompactRange span{
+      color:#475569;
+      font-size:10px;
+      font-weight:950;
+      line-height:1.25;
+    }
+
+    .terrainCompactRange strong{
+      color:#1d4ed8;
+      font-size:15px;
+      font-weight:1000;
+      line-height:1.15;
+      white-space:nowrap;
+    }
+
+    .terrainCompactMeta{
+      margin-top:7px;
+      color:#94a3b8;
+      font-size:9px;
+      font-weight:850;
+      line-height:1.4;
+      overflow-wrap:anywhere;
+    }
+
     .terrainRetry{
       min-height:28px;
       margin-top:8px;
@@ -1174,16 +1210,11 @@
 
         <div class="list" id="zipList"></div>
 
-        <div class="hintBox">
-          • 잘못된 우편번호나 데이터가 없는 경우 미탑재로 안내됩니다.<br/>
-          • 모바일에서는 상단의 “검색 패널 접기”로 지도를 넓게 볼 수 있습니다.
-        </div>
-
         <section id="terrainSection" class="terrainSection" aria-live="polite">
           <div class="terrainHead">
             <div>
               <b>지형 정보</b>
-              <span class="terrainSub">우편번호별 면적·표고·고저차·경사도</span>
+              <span class="terrainSub">우편번호별 구역 고저차·경사도</span>
             </div>
           </div>
           <div id="terrainList" class="terrainList">
@@ -1952,16 +1983,6 @@
           const terrain = state.terrainByZip.get(zip) || null;
           const status = state.terrainStatusByZip.get(zip) || null;
           const safeZip = escapeTerrainHtml(zip);
-          const savedTerrainArea = terrainNumber(
-            terrain?.polygonAreaM2 ??
-            terrain?.polygon_area_m2 ??
-            terrain?.areaSquareMeters ??
-            terrain?.area_sqm
-          );
-          const areaSquareMeters = savedTerrainArea != null
-            ? savedTerrainArea
-            : zipAreaSquareMeters(zip);
-          const areaText = escapeTerrainHtml(formatTerrainArea(areaSquareMeters));
 
           if (status?.state === "loading") {
             return `
@@ -1970,13 +1991,7 @@
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus fresh">조회 중</span>
                 </div>
-                <div class="terrainGrid">
-                  <div class="terrainMetric areaMetric">
-                    <span class="terrainMetricLabel">면적</span>
-                    <strong class="terrainMetricValue">${areaText}</strong>
-                  </div>
-                </div>
-                <div class="terrainMessage">지형정보를 계산하고 있습니다.</div>
+                <div class="terrainMessage">구역 고저차와 경사도를 계산하고 있습니다.</div>
               </article>`;
           }
 
@@ -1986,12 +2001,6 @@
                 <div class="terrainCardTop">
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus">조회 실패</span>
-                </div>
-                <div class="terrainGrid">
-                  <div class="terrainMetric areaMetric">
-                    <span class="terrainMetricLabel">면적</span>
-                    <strong class="terrainMetricValue">${areaText}</strong>
-                  </div>
                 </div>
                 <div class="terrainMessage">${escapeTerrainHtml(terrainErrorMessage(status.message))}</div>
                 <button class="terrainRetry" type="button" data-terrain-retry="${safeZip}">다시 조회</button>
@@ -2008,27 +2017,12 @@
                   <span class="terrainZip">${safeZip}</span>
                   <span class="terrainStatus">대기</span>
                 </div>
-                <div class="terrainGrid">
-                  <div class="terrainMetric areaMetric">
-                    <span class="terrainMetricLabel">면적</span>
-                    <strong class="terrainMetricValue">${areaText}</strong>
-                  </div>
-                </div>
                 <div class="terrainMessage">${waitingText}</div>
               </article>`;
           }
 
           const metrics = terrainMetricsFromResponse(terrain);
           const cached = terrain.cached === true;
-          const resolution = formatTerrainInteger(
-            terrain.resolutionMeters ?? terrain.resolution_m
-          );
-          const sampleCount = formatTerrainInteger(
-            terrain.slope?.sampleCount ??
-            terrain.slope?.sample_count ??
-            terrain.sampleCount ??
-            terrain.sample_count
-          );
           const calculatedAt =
             terrain.slope?.calculatedAt ??
             terrain.slope?.calculated_at ??
@@ -2037,9 +2031,6 @@
           const calculatedText = calculatedAt
             ? new Date(calculatedAt).toLocaleString("ko-KR")
             : "-";
-          const metricsAreaText = escapeTerrainHtml(
-            formatTerrainArea(metrics.polygonAreaM2 ?? areaSquareMeters)
-          );
 
           return `
             <article class="terrainCard" data-terrain-zip="${safeZip}">
@@ -2047,33 +2038,11 @@
                 <span class="terrainZip">${safeZip}</span>
                 <span class="terrainStatus ${cached ? "cache" : "fresh"}">${cached ? "캐시" : "완료"}</span>
               </div>
-              <div class="terrainGrid">
-                <div class="terrainMetric areaMetric">
-                  <span class="terrainMetricLabel">면적</span>
-                  <strong class="terrainMetricValue">${metricsAreaText}</strong>
-                </div>
-                <div class="terrainMetric">
-                  <span class="terrainMetricLabel">최저 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.minElevation)}</strong>
-                </div>
-                <div class="terrainMetric">
-                  <span class="terrainMetricLabel">최고 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.maxElevation)}</strong>
-                </div>
-                <div class="terrainMetric">
-                  <span class="terrainMetricLabel">평균 표고</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.meanElevation)}</strong>
-                </div>
-                <div class="terrainMetric rangeMetric">
-                  <span class="terrainMetricLabel">구역 고저차</span>
-                  <strong class="terrainMetricValue">${formatTerrainMeters(metrics.elevationRange)}</strong>
-                </div>
+              <div class="terrainCompactRange">
+                <span>구역 고저차</span>
+                <strong>${formatTerrainMeters(metrics.elevationRange)}</strong>
               </div>
-              <div class="terrainSlopeTitle">경사도 분포</div>
-              ${terrainSlopeHtml("평지", metrics.flatPercent, "flat")}
-              ${terrainSlopeHtml("완경사", metrics.gentlePercent, "gentle")}
-              ${terrainSlopeHtml("급경사", metrics.steepPercent, "steep")}
-              <div class="terrainMeta">해상도 약 ${resolution}m · 표본 ${sampleCount}개 · 계산 ${escapeTerrainHtml(calculatedText)}</div>
+              <div class="terrainCompactMeta">경사도 분포 계산 ${escapeTerrainHtml(calculatedText)}</div>
             </article>`;
         }).join("");
 

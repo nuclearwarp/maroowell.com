@@ -641,7 +641,8 @@
       border:2px solid rgba(15,23,42,.24);
       box-shadow:0 4px 12px rgba(15,23,42,.22);
       user-select:none;
-      pointer-events:none;
+      pointer-events:auto;
+      cursor:pointer;
       transform:translateY(-2px);
       white-space:nowrap;
     }
@@ -1242,6 +1243,32 @@
       color:#c2410c;
     }
 
+    .terrainCard{
+      cursor:pointer;
+      transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+    }
+
+    .terrainCard:hover{
+      border-color:#93c5fd;
+    }
+
+    .terrainCard.is-active{
+      border-color:#2563eb;
+      box-shadow:0 0 0 3px rgba(37,99,235,.14), 0 12px 28px rgba(15,23,42,.10);
+      transform:translateY(-1px);
+    }
+
+    .terrainCard.is-active .terrainZip{
+      color:#1d4ed8;
+    }
+
+    .zip-label.is-active{
+      color:#1d4ed8;
+      border-color:#2563eb !important;
+      box-shadow:0 0 0 3px rgba(37,99,235,.18), 0 6px 16px rgba(15,23,42,.24);
+      transform:translateY(-2px) scale(1.06);
+    }
+
     .buildingStatsMessage{
       margin-top:6px;
       padding:7px 8px;
@@ -1672,12 +1699,13 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-04-terrain-building-stats-v1";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-04-terrain-building-stats-v2";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
-      const BUILDING_STATS_FETCH_TIMEOUT_MS = 180000;
-      const BUILDING_GEOCODE_CONCURRENCY = 4;
-      const BUILDING_GEOCODE_DELAY_MS = 80;
-      const BUILDING_GEOCODE_MAX_ROUNDS = 2;
+      const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
+      // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
+      const BUILDING_GEOCODE_CONCURRENCY = 2;
+      const BUILDING_GEOCODE_DELAY_MS = 140;
+      const BUILDING_GEOCODE_MAX_ROUNDS = 5;
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
       const ZIP_FETCH_TIMEOUT_MS = 15000;
@@ -1741,8 +1769,11 @@
         buildingStatsByZip: new Map(),
         buildingStatusByZip: new Map(),
         buildingLocationCache: new Map(),
+        buildingQueue: Promise.resolve(),
+        buildingQueuedZips: new Set(),
         kakaoGeocoder: null,
         selectedZips: new Set(),
+        activeZip: "",
         mergeMode: false,
         mergedPolygons: [],
         mergedOutlinePolylines: [],
@@ -1949,6 +1980,7 @@
 
           div.querySelector("button").onclick = async () => {
             state.selectedZips.delete(z);
+            if (state.activeZip === z) state.activeZip = "";
             removeZipData(z);
             renderZipChips();
             if (state.mergeMode) await mergeOn(true);
@@ -2166,32 +2198,50 @@
           points.push({ lng: x, lat: y });
         };
 
-        try {
-          const center = turf.centerOfMass(feature)?.geometry?.coordinates;
-          if (Array.isArray(center)) push(center[0], center[1]);
-        } catch {}
+        const pushFeaturePoint = (pointFeature) => {
+          const coordinates = pointFeature?.geometry?.coordinates;
+          if (Array.isArray(coordinates)) push(coordinates[0], coordinates[1]);
+        };
+
+        // 폴리곤 전체 대표점. centerOfMass가 폴리곤 밖으로 나가는 오목한 구역은
+        // pointOnFeature를 함께 사용해 실제 내부의 법정동 코드를 얻는다.
+        try { pushFeaturePoint(turf.pointOnFeature(feature)); } catch {}
+        try { pushFeaturePoint(turf.centerOfMass(feature)); } catch {}
 
         const polygons = geometry.type === "Polygon"
           ? [geometry.coordinates]
           : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
 
         for (const polygon of polygons) {
-          const ring = Array.isArray(polygon?.[0]) ? polygon[0] : [];
-          if (!ring.length) continue;
+          if (!Array.isArray(polygon) || !polygon.length) continue;
 
           try {
             const component = turf.polygon(polygon);
-            const center = turf.centerOfMass(component)?.geometry?.coordinates;
-            if (Array.isArray(center)) push(center[0], center[1]);
+            pushFeaturePoint(turf.pointOnFeature(component));
+            pushFeaturePoint(turf.centerOfMass(component));
           } catch {}
-
-          const step = Math.max(1, Math.ceil(ring.length / 6));
-          for (let i = 0; i < ring.length && points.length < 18; i += step) {
-            push(ring[i]?.[0], ring[i]?.[1]);
-          }
         }
 
-        return points.slice(0, 18);
+        // 우편번호 폴리곤이 법정동 경계를 가로지를 수 있으므로 bbox 내부를 격자로
+        // 표본화한다. 경계 꼭짓점만 조회하면 도로·하천·인접동 코드가 잡히는 문제가 있다.
+        try {
+          const bbox = turf.bbox(feature);
+          const [minLng, minLat, maxLng, maxLat] = bbox.map(Number);
+          const gridSteps = 5;
+
+          if ([minLng, minLat, maxLng, maxLat].every(Number.isFinite)) {
+            for (let iy = 0; iy < gridSteps; iy++) {
+              for (let ix = 0; ix < gridSteps; ix++) {
+                const lng = minLng + (maxLng - minLng) * ((ix + 0.5) / gridSteps);
+                const lat = minLat + (maxLat - minLat) * ((iy + 0.5) / gridSteps);
+                const point = turf.point([lng, lat]);
+                if (turf.booleanPointInPolygon(point, feature)) push(lng, lat);
+              }
+            }
+          }
+        } catch {}
+
+        return points.slice(0, 30);
       }
 
       function coordToLegalDongCode(point) {
@@ -2282,33 +2332,72 @@
       }
 
       async function geocodeBuildingTargets(targets) {
-        const unique = [];
-        const seen = new Set();
+        const uniqueTargets = [];
+        const seenKeys = new Set();
 
         for (const target of Array.isArray(targets) ? targets : []) {
           const key = String(target?.key || target?.managementKey || target?.address || "").trim();
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          unique.push(target);
+          if (!key || seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          uniqueTargets.push(target);
         }
 
-        const results = new Array(unique.length);
+        // 같은 단지·건물 주소가 여러 표제부 행으로 반복되는 경우 주소검색은 한 번만 한다.
+        const groups = new Map();
+        for (const target of uniqueTargets) {
+          const addresses = [
+            target?.roadAddress,
+            target?.parcelAddress,
+            target?.address
+          ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+
+          const groupKey = addresses[0]?.toLowerCase() || `key:${String(target?.key || target?.managementKey || "")}`;
+          if (!groups.has(groupKey)) groups.set(groupKey, []);
+          groups.get(groupKey).push(target);
+        }
+
+        const grouped = [...groups.values()];
+        const results = [];
         let cursor = 0;
 
         async function worker() {
           while (true) {
             const index = cursor++;
-            if (index >= unique.length) return;
-            results[index] = await geocodeBuildingTarget(unique[index]);
+            if (index >= grouped.length) return;
+
+            const group = grouped[index];
+            const representative = group[0];
+            const resolved = await geocodeBuildingTarget(representative);
+
+            if (resolved) {
+              for (const target of group) {
+                const key = String(target?.key || target?.managementKey || "").trim();
+                if (!key) continue;
+
+                const location = {
+                  ...resolved,
+                  key,
+                  managementKey: target?.managementKey || null,
+                  address: resolved.address || target?.address || target?.roadAddress || target?.parcelAddress || null
+                };
+
+                state.buildingLocationCache.set(key, location);
+                results.push(location);
+              }
+            }
+
             if (BUILDING_GEOCODE_DELAY_MS > 0) {
               await new Promise((resolve) => setTimeout(resolve, BUILDING_GEOCODE_DELAY_MS));
             }
           }
         }
 
-        const workerCount = Math.min(BUILDING_GEOCODE_CONCURRENCY, Math.max(1, unique.length));
+        const workerCount = Math.min(
+          BUILDING_GEOCODE_CONCURRENCY,
+          Math.max(1, grouped.length)
+        );
         await Promise.all(Array.from({ length: workerCount }, worker));
-        return results.filter(Boolean);
+        return results;
       }
 
       async function postBuildingStats(session, payload) {
@@ -2337,8 +2426,32 @@
         return data || {};
       }
 
+      function queueBuildingStatsForZip(zip, feature, force = false) {
+        if (!/^\d{5}$/.test(String(zip || "")) || !feature?.geometry) return Promise.resolve();
+        if (!force && state.buildingStatsByZip.has(zip)) return Promise.resolve();
+        if (state.buildingQueuedZips.has(zip)) return state.buildingQueue;
+
+        state.buildingQueuedZips.add(zip);
+        state.buildingStatusByZip.set(zip, {
+          state: "queued",
+          message: "세대수 분석 대기 중입니다."
+        });
+        renderTerrainList();
+
+        state.buildingQueue = state.buildingQueue
+          .catch(() => {})
+          .then(async () => {
+            state.buildingQueuedZips.delete(zip);
+            if (!state.selectedZips.has(zip)) return;
+            await fetchBuildingStatsForZip(zip, feature, force);
+          });
+
+        return state.buildingQueue;
+      }
+
       async function fetchBuildingStatsForZip(zip, feature, force = false) {
         if (!/^\d{5}$/.test(String(zip || "")) || !feature?.geometry) return;
+        if (!state.selectedZips.has(zip)) return;
 
         const currentStatus = state.buildingStatusByZip.get(zip);
         if (!force && (state.buildingStatsByZip.has(zip) || currentStatus?.state === "loading")) return;
@@ -2375,33 +2488,47 @@
           let data = await postBuildingStats(session, basePayload);
           const locationsByKey = new Map();
 
-          for (let round = 0; data?.requiresGeocoding === true && round < BUILDING_GEOCODE_MAX_ROUNDS; round++) {
+          for (
+            let round = 0;
+            data?.requiresGeocoding === true && round < BUILDING_GEOCODE_MAX_ROUNDS;
+            round++
+          ) {
             const targets = Array.isArray(data.geocodingTargets) ? data.geocodingTargets : [];
             if (!targets.length) break;
 
             state.buildingStatusByZip.set(zip, {
               state: "loading",
-              message: `건축물 위치를 확인하고 있습니다. (${targets.length.toLocaleString("ko-KR")}건)`
+              message: `건축물 위치 확인 중 ${round + 1}/${BUILDING_GEOCODE_MAX_ROUNDS} · ${targets.length.toLocaleString("ko-KR")}건`
             });
             renderTerrainList();
 
             const locations = await geocodeBuildingTargets(targets);
+            const beforeCount = locationsByKey.size;
             locations.forEach((location) => {
               if (location?.key) locationsByKey.set(location.key, location);
             });
+
+            if (locationsByKey.size === beforeCount && targets.length > 0) {
+              break;
+            }
 
             data = await postBuildingStats(session, {
               ...basePayload,
               forceRefresh: false,
               force_refresh: false,
               buildingLocations: [...locationsByKey.values()],
-              locationSource: "KAKAO_JS_GEOCODER",
-              allowPartial: round === BUILDING_GEOCODE_MAX_ROUNDS - 1
+              locationSource: "KAKAO_JS_GEOCODER"
             });
           }
 
+          if (!state.selectedZips.has(zip)) return;
+
           if (data?.requiresGeocoding === true) {
-            throw new Error("일부 건축물의 위치를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.");
+            const coverage = Number(data?.coveragePercent);
+            const coverageText = Number.isFinite(coverage)
+              ? ` 현재 위치확보율 ${coverage.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%.`
+              : "";
+            throw new Error(`건축물 위치확보가 부족해 부정확한 결과는 저장하지 않았습니다.${coverageText}`);
           }
 
           if (!data?.buildingStats) {
@@ -2484,7 +2611,7 @@
           }
 
           let buildingHtml = "";
-          if (buildingStatus?.state === "loading") {
+          if (buildingStatus?.state === "loading" || buildingStatus?.state === "queued") {
             buildingHtml = `
               <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "세대수·엘리베이터 정보를 분석하고 있습니다.")}</div>`;
           } else if (buildingStatus?.state === "error") {
@@ -2527,7 +2654,7 @@
           }
 
           return `
-            <article class="terrainCard${terrainStatus?.state === "error" ? " error" : ""}" data-terrain-zip="${safeZip}">
+            <article class="terrainCard${terrainStatus?.state === "error" ? " error" : ""}${state.activeZip === zip ? " is-active" : ""}" data-terrain-zip="${safeZip}">
               <div class="terrainCardTop">
                 <span class="terrainZip">${safeZip}</span>
                 <div class="terrainCardTopRight">
@@ -2559,16 +2686,31 @@
         });
 
         list.querySelectorAll("[data-building-refresh]").forEach((button) => {
-          button.addEventListener("click", () => {
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
             const zip = button.getAttribute("data-building-refresh") || "";
             const feature = state.geoByZip.get(zip);
             if (!feature) {
               alert("우편번호 경계를 먼저 지도에 표시해주세요.");
               return;
             }
-            void fetchBuildingStatsForZip(zip, feature, true);
+            void queueBuildingStatsForZip(zip, feature, true);
           });
         });
+
+        list.querySelectorAll("[data-terrain-retry]").forEach((button) => {
+          button.addEventListener("click", (event) => event.stopPropagation());
+        });
+
+        list.querySelectorAll("[data-terrain-zip]").forEach((card) => {
+          card.addEventListener("click", (event) => {
+            if (event.target.closest("button")) return;
+            const zip = card.getAttribute("data-terrain-zip") || "";
+            focusZip(zip, { focusMap: true, scrollCard: false });
+          });
+        });
+
+        updateZipSelectionVisuals();
       }
 
       async function fetchTerrainForZip(zip, feature, force = false) {
@@ -2708,7 +2850,13 @@
         const el = document.createElement("div");
         el.className = "zip-label";
         el.textContent = zip;
+        el.dataset.zip = zip;
         el.style.borderColor = color;
+        el.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          focusZip(zip, { focusMap: false, scrollCard: true });
+        });
 
         return new kakao.maps.CustomOverlay({
           position: pos,
@@ -2809,6 +2957,10 @@
             fillOpacity: 0.24
           });
 
+          kakao.maps.event.addListener(poly, "click", () => {
+            focusZip(zip, { focusMap: false, scrollCard: true });
+          });
+
           polys.push(poly);
 
           const outerRing = polyRings[0];
@@ -2902,7 +3054,7 @@
               }
               drawZipMultiPolygon(zip, wgs);
               void fetchTerrainForZip(zip, feature);
-              void fetchBuildingStatsForZip(zip, feature);
+              void queueBuildingStatsForZip(zip, feature);
             } catch (err) {
               const msg = String(err || "");
               console.warn("[ZIP_API] fetch failed", zip, msg);
@@ -2986,6 +3138,95 @@
         if (has) {
           state.map.setBounds(b);
           enableMobileMapInteractions();
+        }
+      }
+
+      function fitBoundsToFeature(feature) {
+        if (!state.map || !feature?.geometry) return;
+
+        const geometry = feature.geometry;
+        const polygons = geometry.type === "Polygon"
+          ? [geometry.coordinates]
+          : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
+
+        const bounds = new kakao.maps.LatLngBounds();
+        let hasPoint = false;
+
+        for (const polygon of polygons) {
+          for (const ring of polygon || []) {
+            for (const point of ring || []) {
+              const lng = Number(point?.[0]);
+              const lat = Number(point?.[1]);
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+              bounds.extend(new kakao.maps.LatLng(lat, lng));
+              hasPoint = true;
+            }
+          }
+        }
+
+        if (hasPoint) {
+          state.map.setBounds(bounds, 48, 48, 48, 48);
+          enableMobileMapInteractions();
+        }
+      }
+
+      function updateZipSelectionVisuals() {
+        const activeZip = String(state.activeZip || "");
+
+        document.querySelectorAll("[data-terrain-zip]").forEach((card) => {
+          card.classList.toggle(
+            "is-active",
+            card.getAttribute("data-terrain-zip") === activeZip
+          );
+        });
+
+        document.querySelectorAll(".zip-label[data-zip]").forEach((label) => {
+          label.classList.toggle(
+            "is-active",
+            label.getAttribute("data-zip") === activeZip
+          );
+        });
+
+        for (const [zip, polygons] of state.polygons.entries()) {
+          const active = zip === activeZip;
+          for (const polygon of polygons) {
+            try {
+              polygon.setOptions({
+                strokeWeight: active ? 5 : 3,
+                strokeOpacity: 1,
+                fillOpacity: active ? 0.38 : 0.24,
+                zIndex: active ? 10 : 1
+              });
+            } catch {}
+          }
+        }
+      }
+
+      function focusZip(zip, options = {}) {
+        const normalizedZip = String(zip || "").trim();
+        if (!normalizedZip || !state.selectedZips.has(normalizedZip)) return;
+
+        const focusMap = options.focusMap !== false;
+        const scrollCard = options.scrollCard !== false;
+
+        if (state.mergeMode) {
+          clearMerged();
+          setOriginalVisible(true);
+          setMergeUI(false);
+        }
+
+        state.activeZip = normalizedZip;
+        updateZipSelectionVisuals();
+
+        if (focusMap) {
+          fitBoundsToFeature(state.geoByZip.get(normalizedZip));
+        }
+
+        if (scrollCard) {
+          const card = document.querySelector(
+            `[data-terrain-zip="${CSS.escape(normalizedZip)}"]`
+          );
+          card?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
         }
       }
 
@@ -3650,6 +3891,7 @@
         setMergeUI(false);
 
         state.selectedZips.clear();
+        state.activeZip = "";
         renderZipChips();
 
         setRoadviewOn(false);

@@ -1142,6 +1142,125 @@
       overflow-wrap:anywhere;
     }
 
+    .terrainCardTopRight{
+      display:flex;
+      align-items:center;
+      gap:6px;
+    }
+
+    .analysisRefresh{
+      min-height:23px;
+      padding:0 8px;
+      border-color:#cbd5e1;
+      background:#fff;
+      color:#475569;
+      font-size:9px !important;
+      box-shadow:none;
+    }
+
+    .terrainCompactSlope{
+      margin-top:8px;
+      padding-top:1px;
+    }
+
+    .buildingStatsBlock{
+      margin-top:10px;
+      padding-top:10px;
+      border-top:1px solid #e2e8f0;
+    }
+
+    .buildingStatsHead{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      margin-bottom:7px;
+    }
+
+    .buildingStatsHead b{
+      color:#334155;
+      font-size:10px;
+      font-weight:1000;
+    }
+
+    .buildingStatsState{
+      color:#94a3b8;
+      font-size:9px;
+      font-weight:900;
+      white-space:nowrap;
+    }
+
+    .buildingStatsGrid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:6px;
+    }
+
+    .buildingStatsMetric{
+      min-width:0;
+      padding:7px 8px;
+      border:1px solid #e2e8f0;
+      border-radius:11px;
+      background:#fff;
+    }
+
+    .buildingStatsMetric.total{
+      grid-column:1 / -1;
+      border-color:#a7f3d0;
+      background:#ecfdf5;
+    }
+
+    .buildingStatsMetric.walkup{
+      border-color:#fed7aa;
+      background:#fff7ed;
+    }
+
+    .buildingStatsMetric span{
+      display:block;
+      color:#64748b;
+      font-size:9px;
+      font-weight:950;
+      line-height:1.25;
+    }
+
+    .buildingStatsMetric strong{
+      display:block;
+      margin-top:2px;
+      color:#0f172a;
+      font-size:12px;
+      font-weight:1000;
+      line-height:1.15;
+      overflow-wrap:anywhere;
+    }
+
+    .buildingStatsMetric.total strong{
+      color:#047857;
+      font-size:14px;
+    }
+
+    .buildingStatsMetric.walkup strong{
+      color:#c2410c;
+    }
+
+    .buildingStatsMessage{
+      margin-top:6px;
+      padding:7px 8px;
+      border:1px dashed #cbd5e1;
+      border-radius:10px;
+      background:#f8fafc;
+      color:#64748b;
+      font-size:9px;
+      font-weight:900;
+      line-height:1.4;
+      overflow-wrap:anywhere;
+    }
+
+    .buildingStatsMessage.error{
+      border-color:#fecaca;
+      background:#fffafa;
+      color:#b91c1c;
+    }
+
     .terrainRetry{
       min-height:28px;
       margin-top:8px;
@@ -1164,7 +1283,7 @@
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.1/proj4.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
 </head>
 
 <body>
@@ -1214,7 +1333,7 @@
           <div class="terrainHead">
             <div>
               <b>지형 정보</b>
-              <span class="terrainSub">우편번호별 구역 고저차·경사도</span>
+              <span class="terrainSub">우편번호별 고저차·경사도·세대수</span>
             </div>
           </div>
           <div id="terrainList" class="terrainList">
@@ -1552,8 +1671,13 @@
       ).replace(/\/+$/, "");
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-07-24-area-terrain-sqm-v3";
+      const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-04-terrain-building-stats-v1";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
+      const BUILDING_STATS_FETCH_TIMEOUT_MS = 180000;
+      const BUILDING_GEOCODE_CONCURRENCY = 4;
+      const BUILDING_GEOCODE_DELAY_MS = 80;
+      const BUILDING_GEOCODE_MAX_ROUNDS = 2;
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
       const ZIP_FETCH_TIMEOUT_MS = 15000;
@@ -1613,6 +1737,11 @@
         areaByZip: new Map(),
         terrainByZip: new Map(),
         terrainStatusByZip: new Map(),
+        metadataByZip: new Map(),
+        buildingStatsByZip: new Map(),
+        buildingStatusByZip: new Map(),
+        buildingLocationCache: new Map(),
+        kakaoGeocoder: null,
         selectedZips: new Set(),
         mergeMode: false,
         mergedPolygons: [],
@@ -1694,6 +1823,10 @@
           center: new kakao.maps.LatLng(37.5665, 126.978),
           level: 8
         });
+
+        if (kakao.maps.services?.Geocoder) {
+          state.kakaoGeocoder = new kakao.maps.services.Geocoder();
+        }
 
         enableMobileMapInteractions();
 
@@ -1969,80 +2102,447 @@
           </div>`;
       }
 
+      function formatHouseholdCount(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 0) return "-";
+        return `${Math.trunc(n).toLocaleString("ko-KR")}세대`;
+      }
+
+      function formatBuildingCount(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n < 0) return "-";
+        return `${Math.trunc(n).toLocaleString("ko-KR")}동`;
+      }
+
+      function buildingStatsFromResponse(response) {
+        const source = response?.buildingStats || response?.building_stats || response?.data || response || {};
+        const number = (...keys) => {
+          for (const key of keys) {
+            const value = source?.[key];
+            if (value === null || value === undefined || value === "") continue;
+            const n = Number(value);
+            if (Number.isFinite(n)) return n;
+          }
+          return null;
+        };
+
+        return {
+          householdCount: number("householdCount", "household_count"),
+          apartmentHouseholdCount: number("apartmentHouseholdCount", "apartment_household_count"),
+          nonApartmentHouseholdCount: number("nonApartmentHouseholdCount", "non_apartment_household_count"),
+          elevatorHouseholdCount: number("elevatorHouseholdCount", "elevator_household_count"),
+          noElevatorHouseholdCount: number("noElevatorHouseholdCount", "no_elevator_household_count"),
+          walkupHouseholdCount: number("walkupHouseholdCount", "walkup_household_count"),
+          residentialBuildingCount: number("residentialBuildingCount", "residential_building_count"),
+          matchedBuildingCount: number("matchedBuildingCount", "matched_building_count"),
+          coveragePercent: number("coveragePercent", "coverage_percent"),
+          calculatedAt: source?.calculatedAt ?? source?.calculated_at ?? null,
+          expiresAt: source?.expiresAt ?? source?.expires_at ?? null,
+          cached: response?.cached === true,
+          stale: response?.stale === true
+        };
+      }
+
+      function normalizeLegalDongCode(value) {
+        const digits = String(value ?? "").replace(/\D/g, "");
+        if (digits.length === 10) return digits;
+        if (digits.length > 10) return digits.slice(0, 10);
+        return "";
+      }
+
+      function geometrySamplePoints(feature) {
+        const geometry = feature?.geometry;
+        if (!geometry) return [];
+
+        const points = [];
+        const seen = new Set();
+        const push = (lng, lat) => {
+          const x = Number(lng);
+          const y = Number(lat);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+          const key = `${x.toFixed(6)},${y.toFixed(6)}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          points.push({ lng: x, lat: y });
+        };
+
+        try {
+          const center = turf.centerOfMass(feature)?.geometry?.coordinates;
+          if (Array.isArray(center)) push(center[0], center[1]);
+        } catch {}
+
+        const polygons = geometry.type === "Polygon"
+          ? [geometry.coordinates]
+          : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
+
+        for (const polygon of polygons) {
+          const ring = Array.isArray(polygon?.[0]) ? polygon[0] : [];
+          if (!ring.length) continue;
+
+          try {
+            const component = turf.polygon(polygon);
+            const center = turf.centerOfMass(component)?.geometry?.coordinates;
+            if (Array.isArray(center)) push(center[0], center[1]);
+          } catch {}
+
+          const step = Math.max(1, Math.ceil(ring.length / 6));
+          for (let i = 0; i < ring.length && points.length < 18; i += step) {
+            push(ring[i]?.[0], ring[i]?.[1]);
+          }
+        }
+
+        return points.slice(0, 18);
+      }
+
+      function coordToLegalDongCode(point) {
+        return new Promise((resolve) => {
+          if (!state.kakaoGeocoder || !point) return resolve("");
+
+          state.kakaoGeocoder.coord2RegionCode(point.lng, point.lat, (result, status) => {
+            if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) {
+              resolve("");
+              return;
+            }
+
+            const legal = result.find((row) => row?.region_type === "B") || result[0];
+            resolve(normalizeLegalDongCode(legal?.code));
+          });
+        });
+      }
+
+      async function resolveLegalDongCodes(zip, feature) {
+        const codes = new Set();
+        const metadata = state.metadataByZip.get(zip) || {};
+        const metadataCode = normalizeLegalDongCode(
+          metadata.lgvReplcCd ?? metadata.lgv_replc_cd ?? metadata.legalDongCode
+        );
+        if (metadataCode) codes.add(metadataCode);
+
+        if (!state.kakaoGeocoder) return [...codes];
+
+        const points = geometrySamplePoints(feature);
+        for (let i = 0; i < points.length; i += BUILDING_GEOCODE_CONCURRENCY) {
+          const chunk = points.slice(i, i + BUILDING_GEOCODE_CONCURRENCY);
+          const found = await Promise.all(chunk.map(coordToLegalDongCode));
+          found.filter(Boolean).forEach((code) => codes.add(code));
+          if (codes.size >= 20) break;
+        }
+
+        return [...codes].slice(0, 20);
+      }
+
+      function geocodeAddress(query) {
+        return new Promise((resolve) => {
+          if (!state.kakaoGeocoder || !query) return resolve(null);
+
+          state.kakaoGeocoder.addressSearch(query, (result, status) => {
+            if (status !== kakao.maps.services.Status.OK || !result?.[0]) {
+              resolve(null);
+              return;
+            }
+
+            const lng = Number(result[0].x);
+            const lat = Number(result[0].y);
+            resolve(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null);
+          });
+        });
+      }
+
+      async function geocodeBuildingTarget(target) {
+        const key = String(target?.key || target?.managementKey || "").trim();
+        const addresses = [
+          target?.roadAddress,
+          target?.parcelAddress,
+          target?.address
+        ].map((value) => String(value || "").trim()).filter(Boolean);
+
+        const cacheKeys = [key, ...addresses.map((address) => `addr:${address}`)].filter(Boolean);
+        for (const cacheKey of cacheKeys) {
+          const cached = state.buildingLocationCache.get(cacheKey);
+          if (cached) return { ...cached, key: key || cached.key };
+        }
+
+        for (const address of [...new Set(addresses)]) {
+          const point = await geocodeAddress(address);
+          if (!point) continue;
+
+          const location = {
+            key,
+            managementKey: target?.managementKey || null,
+            address,
+            lat: point.lat,
+            lng: point.lng
+          };
+
+          cacheKeys.forEach((cacheKey) => state.buildingLocationCache.set(cacheKey, location));
+          return location;
+        }
+
+        return null;
+      }
+
+      async function geocodeBuildingTargets(targets) {
+        const unique = [];
+        const seen = new Set();
+
+        for (const target of Array.isArray(targets) ? targets : []) {
+          const key = String(target?.key || target?.managementKey || target?.address || "").trim();
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          unique.push(target);
+        }
+
+        const results = new Array(unique.length);
+        let cursor = 0;
+
+        async function worker() {
+          while (true) {
+            const index = cursor++;
+            if (index >= unique.length) return;
+            results[index] = await geocodeBuildingTarget(unique[index]);
+            if (BUILDING_GEOCODE_DELAY_MS > 0) {
+              await new Promise((resolve) => setTimeout(resolve, BUILDING_GEOCODE_DELAY_MS));
+            }
+          }
+        }
+
+        const workerCount = Math.min(BUILDING_GEOCODE_CONCURRENCY, Math.max(1, unique.length));
+        await Promise.all(Array.from({ length: workerCount }, worker));
+        return results.filter(Boolean);
+      }
+
+      async function postBuildingStats(session, payload) {
+        const res = await fetchWithTimeout(
+          BUILDING_STATS_API_URL,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify(payload),
+            cache: "no-store"
+          },
+          BUILDING_STATS_FETCH_TIMEOUT_MS
+        );
+
+        const text = await res.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch {}
+
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
+        }
+
+        return data || {};
+      }
+
+      async function fetchBuildingStatsForZip(zip, feature, force = false) {
+        if (!/^\d{5}$/.test(String(zip || "")) || !feature?.geometry) return;
+
+        const currentStatus = state.buildingStatusByZip.get(zip);
+        if (!force && (state.buildingStatsByZip.has(zip) || currentStatus?.state === "loading")) return;
+
+        if (force) state.buildingStatsByZip.delete(zip);
+        state.buildingStatusByZip.set(zip, { state: "loading", message: "세대수 자료를 확인하고 있습니다." });
+        renderTerrainList();
+
+        try {
+          if (!state.kakaoGeocoder) {
+            throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
+          }
+
+          const session = await getCurrentSession();
+          if (!session?.access_token) {
+            throw new Error("로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.");
+          }
+
+          const legalDongCodes = await resolveLegalDongCodes(zip, feature);
+          if (!legalDongCodes.length) {
+            throw new Error("건축물 조회에 필요한 법정동 코드를 확인하지 못했습니다.");
+          }
+
+          const basePayload = {
+            zipcode: zip,
+            geometry: feature.geometry,
+            legalDongCodes,
+            forceRefresh: force === true,
+            force_refresh: force === true,
+            walkupMinGroundFloors: 3,
+            minCoveragePercent: 95
+          };
+
+          let data = await postBuildingStats(session, basePayload);
+          const locationsByKey = new Map();
+
+          for (let round = 0; data?.requiresGeocoding === true && round < BUILDING_GEOCODE_MAX_ROUNDS; round++) {
+            const targets = Array.isArray(data.geocodingTargets) ? data.geocodingTargets : [];
+            if (!targets.length) break;
+
+            state.buildingStatusByZip.set(zip, {
+              state: "loading",
+              message: `건축물 위치를 확인하고 있습니다. (${targets.length.toLocaleString("ko-KR")}건)`
+            });
+            renderTerrainList();
+
+            const locations = await geocodeBuildingTargets(targets);
+            locations.forEach((location) => {
+              if (location?.key) locationsByKey.set(location.key, location);
+            });
+
+            data = await postBuildingStats(session, {
+              ...basePayload,
+              forceRefresh: false,
+              force_refresh: false,
+              buildingLocations: [...locationsByKey.values()],
+              locationSource: "KAKAO_JS_GEOCODER",
+              allowPartial: round === BUILDING_GEOCODE_MAX_ROUNDS - 1
+            });
+          }
+
+          if (data?.requiresGeocoding === true) {
+            throw new Error("일부 건축물의 위치를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.");
+          }
+
+          if (!data?.buildingStats) {
+            throw new Error("세대수 분석 결과가 비어 있습니다.");
+          }
+
+          state.buildingStatsByZip.set(zip, {
+            ...data.buildingStats,
+            cached: data.cached === true,
+            stale: data.stale === true
+          });
+          state.buildingStatusByZip.set(zip, { state: "ready" });
+        } catch (e) {
+          console.warn("[BUILDING_STATS_API] fetch failed", zip, e);
+          state.buildingStatusByZip.set(zip, {
+            state: "error",
+            message: e?.name === "AbortError"
+              ? `요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS / 1000)}초)`
+              : String(e?.message || e || "세대수 분석 실패")
+          });
+        } finally {
+          renderTerrainList();
+        }
+      }
+
       function renderTerrainList() {
         const list = $("#terrainList");
         if (!list) return;
 
         const zips = [...state.selectedZips].sort();
         if (!zips.length) {
-          list.innerHTML = '<div class="terrainEmpty">지도표시 후 우편번호별 지형정보가 표시됩니다.</div>';
+          list.innerHTML = '<div class="terrainEmpty">지도표시 후 우편번호별 분석정보가 표시됩니다.</div>';
           return;
         }
 
         list.innerHTML = zips.map((zip) => {
           const terrain = state.terrainByZip.get(zip) || null;
-          const status = state.terrainStatusByZip.get(zip) || null;
+          const terrainStatus = state.terrainStatusByZip.get(zip) || null;
+          const buildingRaw = state.buildingStatsByZip.get(zip) || null;
+          const buildingStatus = state.buildingStatusByZip.get(zip) || null;
+          const building = buildingRaw ? buildingStatsFromResponse(buildingRaw) : null;
           const safeZip = escapeTerrainHtml(zip);
 
-          if (status?.state === "loading") {
-            return `
-              <article class="terrainCard loading" data-terrain-zip="${safeZip}">
-                <div class="terrainCardTop">
-                  <span class="terrainZip">${safeZip}</span>
-                  <span class="terrainStatus fresh">조회 중</span>
-                </div>
-                <div class="terrainMessage">구역 고저차와 경사도를 계산하고 있습니다.</div>
-              </article>`;
-          }
+          const terrainCached = terrain?.cached === true;
+          const terrainBadge = terrainCached ? "캐시" : (terrain ? "완료" : "대기");
+          const terrainBadgeClass = terrainCached ? "cache" : (terrain ? "fresh" : "");
 
-          if (status?.state === "error") {
-            return `
-              <article class="terrainCard error" data-terrain-zip="${safeZip}">
-                <div class="terrainCardTop">
-                  <span class="terrainZip">${safeZip}</span>
-                  <span class="terrainStatus">조회 실패</span>
-                </div>
-                <div class="terrainMessage">${escapeTerrainHtml(terrainErrorMessage(status.message))}</div>
-                <button class="terrainRetry" type="button" data-terrain-retry="${safeZip}">다시 조회</button>
-              </article>`;
-          }
+          let terrainHtml = "";
+          if (terrainStatus?.state === "loading") {
+            terrainHtml = '<div class="terrainMessage">구역 고저차와 경사도를 계산하고 있습니다.</div>';
+          } else if (terrainStatus?.state === "error") {
+            terrainHtml = `
+              <div class="terrainMessage">${escapeTerrainHtml(terrainErrorMessage(terrainStatus.message))}</div>
+              <button class="terrainRetry" type="button" data-terrain-retry="${safeZip}">지형 다시 조회</button>`;
+          } else if (terrain) {
+            const metrics = terrainMetricsFromResponse(terrain);
+            const calculatedAt =
+              terrain.slope?.calculatedAt ??
+              terrain.slope?.calculated_at ??
+              terrain.calculatedAt ??
+              terrain.calculated_at;
+            const calculatedText = calculatedAt
+              ? new Date(calculatedAt).toLocaleString("ko-KR")
+              : "-";
 
-          if (!terrain) {
-            const waitingText = state.geoByZip.has(zip)
-              ? "지형정보 조회를 준비하고 있습니다."
-              : "지도표시를 누르면 지형정보를 함께 조회합니다.";
-            return `
-              <article class="terrainCard" data-terrain-zip="${safeZip}">
-                <div class="terrainCardTop">
-                  <span class="terrainZip">${safeZip}</span>
-                  <span class="terrainStatus">대기</span>
-                </div>
-                <div class="terrainMessage">${waitingText}</div>
-              </article>`;
-          }
-
-          const metrics = terrainMetricsFromResponse(terrain);
-          const cached = terrain.cached === true;
-          const calculatedAt =
-            terrain.slope?.calculatedAt ??
-            terrain.slope?.calculated_at ??
-            terrain.calculatedAt ??
-            terrain.calculated_at;
-          const calculatedText = calculatedAt
-            ? new Date(calculatedAt).toLocaleString("ko-KR")
-            : "-";
-
-          return `
-            <article class="terrainCard" data-terrain-zip="${safeZip}">
-              <div class="terrainCardTop">
-                <span class="terrainZip">${safeZip}</span>
-                <span class="terrainStatus ${cached ? "cache" : "fresh"}">${cached ? "캐시" : "완료"}</span>
-              </div>
+            terrainHtml = `
               <div class="terrainCompactRange">
                 <span>구역 고저차</span>
                 <strong>${formatTerrainMeters(metrics.elevationRange)}</strong>
               </div>
-              <div class="terrainCompactMeta">경사도 분포 계산 ${escapeTerrainHtml(calculatedText)}</div>
+              <div class="terrainCompactSlope">
+                <div class="terrainSlopeTitle">경사도 분포</div>
+                ${terrainSlopeHtml("평지", metrics.flatPercent, "flat")}
+                ${terrainSlopeHtml("완경사", metrics.gentlePercent, "gentle")}
+                ${terrainSlopeHtml("급경사", metrics.steepPercent, "steep")}
+              </div>
+              <div class="terrainCompactMeta">계산 ${escapeTerrainHtml(calculatedText)}</div>`;
+          } else {
+            terrainHtml = `<div class="terrainMessage">${state.geoByZip.has(zip) ? "지형정보 조회를 준비하고 있습니다." : "지도표시를 누르면 지형정보를 조회합니다."}</div>`;
+          }
+
+          let buildingHtml = "";
+          if (buildingStatus?.state === "loading") {
+            buildingHtml = `
+              <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "세대수·엘리베이터 정보를 분석하고 있습니다.")}</div>`;
+          } else if (buildingStatus?.state === "error") {
+            buildingHtml = `
+              <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "세대수 분석 실패")}</div>`;
+          } else if (building) {
+            const calculatedText = building.calculatedAt
+              ? new Date(building.calculatedAt).toLocaleString("ko-KR")
+              : "-";
+            const coverageText = Number.isFinite(Number(building.coveragePercent))
+              ? ` · 위치확보 ${Number(building.coveragePercent).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
+              : "";
+
+            buildingHtml = `
+              <div class="buildingStatsGrid">
+                <div class="buildingStatsMetric total">
+                  <span>총 세대수</span>
+                  <strong>${formatHouseholdCount(building.householdCount)}</strong>
+                </div>
+                <div class="buildingStatsMetric">
+                  <span>엘리베이터 있음</span>
+                  <strong>${formatHouseholdCount(building.elevatorHouseholdCount)}</strong>
+                </div>
+                <div class="buildingStatsMetric">
+                  <span>엘리베이터 없음</span>
+                  <strong>${formatHouseholdCount(building.noElevatorHouseholdCount)}</strong>
+                </div>
+                <div class="buildingStatsMetric walkup">
+                  <span>3층 이상 계단</span>
+                  <strong>${formatHouseholdCount(building.walkupHouseholdCount)}</strong>
+                </div>
+                <div class="buildingStatsMetric">
+                  <span>주거 건물</span>
+                  <strong>${formatBuildingCount(building.residentialBuildingCount)}</strong>
+                </div>
+              </div>
+              <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}${escapeTerrainHtml(coverageText)}</div>`;
+          } else {
+            buildingHtml = '<div class="buildingStatsMessage">지도표시 후 세대수·엘리베이터 정보를 분석합니다.</div>';
+          }
+
+          return `
+            <article class="terrainCard${terrainStatus?.state === "error" ? " error" : ""}" data-terrain-zip="${safeZip}">
+              <div class="terrainCardTop">
+                <span class="terrainZip">${safeZip}</span>
+                <div class="terrainCardTopRight">
+                  <span class="terrainStatus ${terrainBadgeClass}">${terrainBadge}</span>
+                  <button class="analysisRefresh" type="button" data-building-refresh="${safeZip}">세대수 갱신</button>
+                </div>
+              </div>
+              ${terrainHtml}
+              <div class="buildingStatsBlock">
+                <div class="buildingStatsHead">
+                  <b>세대수·엘리베이터</b>
+                  <span class="buildingStatsState">${building?.cached ? "캐시" : (building ? "완료" : "")}</span>
+                </div>
+                ${buildingHtml}
+              </div>
             </article>`;
         }).join("");
 
@@ -2055,6 +2555,18 @@
               return;
             }
             void fetchTerrainForZip(zip, feature, true);
+          });
+        });
+
+        list.querySelectorAll("[data-building-refresh]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const zip = button.getAttribute("data-building-refresh") || "";
+            const feature = state.geoByZip.get(zip);
+            if (!feature) {
+              alert("우편번호 경계를 먼저 지도에 표시해주세요.");
+              return;
+            }
+            void fetchBuildingStatsForZip(zip, feature, true);
           });
         });
       }
@@ -2148,6 +2660,9 @@
         state.areaByZip.delete(zip);
         state.terrainByZip.delete(zip);
         state.terrainStatusByZip.delete(zip);
+        state.metadataByZip.delete(zip);
+        state.buildingStatsByZip.delete(zip);
+        state.buildingStatusByZip.delete(zip);
         renderTerrainList();
       }
 
@@ -2370,19 +2885,24 @@
                 continue;
               }
 
+              const metadata = data?.metadata && typeof data.metadata === "object"
+                ? data.metadata
+                : {};
               const feature = {
                 type: "Feature",
-                properties: { zip },
+                properties: { zip, ...metadata },
                 geometry: { type: "MultiPolygon", coordinates: wgs }
               };
 
               const areaSquareMeters = featureAreaSquareMeters(feature);
               state.geoByZip.set(zip, feature);
+              state.metadataByZip.set(zip, metadata);
               if (areaSquareMeters != null && areaSquareMeters >= 0) {
                 state.areaByZip.set(zip, areaSquareMeters);
               }
               drawZipMultiPolygon(zip, wgs);
               void fetchTerrainForZip(zip, feature);
+              void fetchBuildingStatsForZip(zip, feature);
             } catch (err) {
               const msg = String(err || "");
               console.warn("[ZIP_API] fetch failed", zip, msg);
@@ -3122,6 +3642,9 @@
         state.areaByZip.clear();
         state.terrainByZip.clear();
         state.terrainStatusByZip.clear();
+        state.metadataByZip.clear();
+        state.buildingStatsByZip.clear();
+        state.buildingStatusByZip.clear();
 
         clearMerged();
         setMergeUI(false);

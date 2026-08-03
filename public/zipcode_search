@@ -1216,6 +1216,35 @@
       background:#fff7ed;
     }
 
+    .buildingStatsMetric.residential{
+      border-color:#bfdbfe;
+      background:#eff6ff;
+    }
+
+    .buildingStatsMetric.commercial{
+      border-color:#ddd6fe;
+      background:#f5f3ff;
+    }
+
+    .buildingStatsMetric.inferred{
+      border-color:#fde68a;
+      background:#fffbeb;
+    }
+
+    .buildingStatsMetric.unknown{
+      border-color:#e2e8f0;
+      background:#f8fafc;
+    }
+
+    .buildingStatsMetric small{
+      display:block;
+      margin-top:2px;
+      color:#64748b;
+      font-size:8px;
+      font-weight:900;
+      line-height:1.2;
+    }
+
     .buildingStatsMetric span{
       display:block;
       color:#64748b;
@@ -1360,7 +1389,7 @@
           <div class="terrainHead">
             <div>
               <b>지형 정보</b>
-              <span class="terrainSub">우편번호별 고저차·경사도·세대수</span>
+              <span class="terrainSub">우편번호별 고저차·경사도·배송호수</span>
             </div>
           </div>
           <div id="terrainList" class="terrainList">
@@ -2143,16 +2172,27 @@
           </div>`;
       }
 
-      function formatHouseholdCount(value) {
+      function formatDeliveryUnitCount(value) {
         const n = Number(value);
         if (!Number.isFinite(n) || n < 0) return "-";
-        return `${Math.trunc(n).toLocaleString("ko-KR")}세대`;
+        return `${Math.trunc(n).toLocaleString("ko-KR")}호`;
+      }
+
+      function formatHouseholdCount(value) {
+        return formatDeliveryUnitCount(value);
       }
 
       function formatBuildingCount(value) {
         const n = Number(value);
         if (!Number.isFinite(n) || n < 0) return "-";
         return `${Math.trunc(n).toLocaleString("ko-KR")}동`;
+      }
+
+      function formatUnitPercent(value, total) {
+        const n = Number(value);
+        const t = Number(total);
+        if (!Number.isFinite(n) || !Number.isFinite(t) || t <= 0) return "-";
+        return `${(n / t * 100).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
       }
 
       function buildingStatsFromResponse(response) {
@@ -2167,16 +2207,87 @@
           return null;
         };
 
+        const legacyHouseholds = number("householdCount", "household_count");
+        const legacyElevator = number("elevatorHouseholdCount", "elevator_household_count");
+        const legacyNoElevator = number("noElevatorHouseholdCount", "no_elevator_household_count");
+        const legacyUnknownElevator = number("unknownElevatorHouseholdCount", "unknown_elevator_household_count");
+
+        const residentialUnitCount = number(
+          "residentialUnitCount",
+          "residential_unit_count",
+          "householdCount",
+          "household_count"
+        );
+        const commercialUnitCount = number("commercialUnitCount", "commercial_unit_count") ?? 0;
+        const unclassifiedUnitCount = number("unclassifiedUnitCount", "unclassified_unit_count") ?? 0;
+        const deliveryUnitCount = number("deliveryUnitCount", "delivery_unit_count") ??
+          Math.max(0, Number(residentialUnitCount || 0) + Number(commercialUnitCount || 0) + Number(unclassifiedUnitCount || 0));
+
+        const confirmedElevatorUnitCount = number(
+          "confirmedElevatorUnitCount",
+          "confirmed_elevator_unit_count"
+        );
+        const inferredElevatorUnitCount = number(
+          "inferredElevatorUnitCount",
+          "inferred_elevator_unit_count"
+        );
+        const noElevatorUnitCount = number(
+          "noElevatorUnitCount",
+          "no_elevator_unit_count"
+        );
+        const unknownElevatorUnitCount = number(
+          "unknownElevatorUnitCount",
+          "unknown_elevator_unit_count"
+        );
+
         return {
-          householdCount: number("householdCount", "household_count"),
-          apartmentHouseholdCount: number("apartmentHouseholdCount", "apartment_household_count"),
-          nonApartmentHouseholdCount: number("nonApartmentHouseholdCount", "non_apartment_household_count"),
-          elevatorHouseholdCount: number("elevatorHouseholdCount", "elevator_household_count"),
-          noElevatorHouseholdCount: number("noElevatorHouseholdCount", "no_elevator_household_count"),
+          householdCount: legacyHouseholds,
+          residentialUnitCount,
+          commercialUnitCount,
+          unclassifiedUnitCount,
+          deliveryUnitCount,
+
+          confirmedElevatorUnitCount:
+            confirmedElevatorUnitCount ?? legacyElevator ?? 0,
+          inferredElevatorUnitCount:
+            inferredElevatorUnitCount ?? 0,
+          noElevatorUnitCount:
+            noElevatorUnitCount ?? legacyNoElevator ?? 0,
+          unknownElevatorUnitCount:
+            unknownElevatorUnitCount ?? legacyUnknownElevator ?? 0,
+
+          residentialElevatorUnitCount: number(
+            "residentialElevatorUnitCount",
+            "residential_elevator_unit_count"
+          ),
+          residentialNoElevatorUnitCount: number(
+            "residentialNoElevatorUnitCount",
+            "residential_no_elevator_unit_count"
+          ),
+          commercialElevatorUnitCount: number(
+            "commercialElevatorUnitCount",
+            "commercial_elevator_unit_count"
+          ),
+          commercialNoElevatorUnitCount: number(
+            "commercialNoElevatorUnitCount",
+            "commercial_no_elevator_unit_count"
+          ),
+
           walkupHouseholdCount: number("walkupHouseholdCount", "walkup_household_count"),
-          residentialBuildingCount: number("residentialBuildingCount", "residential_building_count"),
+          residentialBuildingCount: number(
+            "residentialBuildingUnitCount",
+            "residential_building_unit_count",
+            "residentialBuildingCount",
+            "residential_building_count"
+          ),
+          commercialBuildingCount: number(
+            "commercialBuildingUnitCount",
+            "commercial_building_unit_count"
+          ),
           matchedBuildingCount: number("matchedBuildingCount", "matched_building_count"),
+          exclusiveUnitRecordCount: number("exclusiveUnitRecordCount", "exclusive_unit_record_count"),
           coveragePercent: number("coveragePercent", "coverage_percent"),
+          unitAnalysisVersion: source?.unitAnalysisVersion ?? source?.unit_analysis_version ?? null,
           calculatedAt: source?.calculatedAt ?? source?.calculated_at ?? null,
           expiresAt: source?.expiresAt ?? source?.expires_at ?? null,
           cached: response?.cached === true,
@@ -2443,7 +2554,7 @@
         state.buildingQueuedZips.add(zip);
         state.buildingStatusByZip.set(zip, {
           state: "queued",
-          message: "세대수 분석 대기 중입니다."
+          message: "배송 호수 분석 대기 중입니다."
         });
         renderTerrainList();
 
@@ -2466,7 +2577,7 @@
         if (!force && (state.buildingStatsByZip.has(zip) || currentStatus?.state === "loading")) return;
 
         if (force) state.buildingStatsByZip.delete(zip);
-        state.buildingStatusByZip.set(zip, { state: "loading", message: "세대수 자료를 확인하고 있습니다." });
+        state.buildingStatusByZip.set(zip, { state: "loading", message: "주거·상업 배송 호수를 확인하고 있습니다." });
         renderTerrainList();
 
         try {
@@ -2491,7 +2602,7 @@
             forceRefresh: force === true,
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
-            minCoveragePercent: 95
+            minCoveragePercent: 80
           };
 
           let data = await postBuildingStats(session, basePayload);
@@ -2537,11 +2648,11 @@
             const coverageText = Number.isFinite(coverage)
               ? ` 현재 위치확보율 ${coverage.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%.`
               : "";
-            throw new Error(`건축물 위치확보가 부족해 부정확한 결과는 저장하지 않았습니다.${coverageText}`);
+            throw new Error(`건축물 위치확보가 부족해 결과를 저장하지 않았습니다.${coverageText}`);
           }
 
           if (!data?.buildingStats) {
-            throw new Error("세대수 분석 결과가 비어 있습니다.");
+            throw new Error("배송 호수 분석 결과가 비어 있습니다.");
           }
 
           state.buildingStatsByZip.set(zip, {
@@ -2556,7 +2667,7 @@
             state: "error",
             message: e?.name === "AbortError"
               ? `요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS / 1000)}초)`
-              : String(e?.message || e || "세대수 분석 실패")
+              : String(e?.message || e || "배송 호수 분석 실패")
           });
         } finally {
           renderTerrainList();
@@ -2622,10 +2733,10 @@
           let buildingHtml = "";
           if (buildingStatus?.state === "loading" || buildingStatus?.state === "queued") {
             buildingHtml = `
-              <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "세대수·엘리베이터 정보를 분석하고 있습니다.")}</div>`;
+              <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "주거·상업 배송 호수와 엘리베이터를 분석하고 있습니다.")}</div>`;
           } else if (buildingStatus?.state === "error") {
             buildingHtml = `
-              <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "세대수 분석 실패")}</div>`;
+              <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "배송 호수 분석 실패")}</div>`;
           } else if (building) {
             const calculatedText = building.calculatedAt
               ? new Date(building.calculatedAt).toLocaleString("ko-KR")
@@ -2634,32 +2745,61 @@
               ? ` · 위치확보 ${Number(building.coveragePercent).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
               : "";
 
+            const totalUnits = Number(building.deliveryUnitCount || 0);
+            const residentialUnits = Number(building.residentialUnitCount || 0);
+            const commercialUnits = Number(building.commercialUnitCount || 0);
+            const unclassifiedUnits = Number(building.unclassifiedUnitCount || 0);
+            const confirmedElevatorUnits = Number(building.confirmedElevatorUnitCount || 0);
+            const inferredElevatorUnits = Number(building.inferredElevatorUnitCount || 0);
+            const noElevatorUnits = Number(building.noElevatorUnitCount || 0);
+            const unknownElevatorUnits = Number(building.unknownElevatorUnitCount || 0);
+
             buildingHtml = `
               <div class="buildingStatsGrid">
                 <div class="buildingStatsMetric total">
-                  <span>총 세대수</span>
-                  <strong>${formatHouseholdCount(building.householdCount)}</strong>
+                  <span>총 배송호수</span>
+                  <strong>${formatDeliveryUnitCount(totalUnits)}</strong>
                 </div>
-                <div class="buildingStatsMetric">
-                  <span>엘리베이터 있음</span>
-                  <strong>${formatHouseholdCount(building.elevatorHouseholdCount)}</strong>
+                <div class="buildingStatsMetric residential">
+                  <span>주거</span>
+                  <strong>${formatDeliveryUnitCount(residentialUnits)}</strong>
+                  <small>${formatUnitPercent(residentialUnits, totalUnits)}</small>
                 </div>
+                <div class="buildingStatsMetric commercial">
+                  <span>상업·업무</span>
+                  <strong>${formatDeliveryUnitCount(commercialUnits)}</strong>
+                  <small>${formatUnitPercent(commercialUnits, totalUnits)}</small>
+                </div>
+                ${unclassifiedUnits > 0 ? `
+                <div class="buildingStatsMetric unknown">
+                  <span>용도 미분류</span>
+                  <strong>${formatDeliveryUnitCount(unclassifiedUnits)}</strong>
+                  <small>${formatUnitPercent(unclassifiedUnits, totalUnits)}</small>
+                </div>` : ""}
                 <div class="buildingStatsMetric">
-                  <span>엘리베이터 없음</span>
-                  <strong>${formatHouseholdCount(building.noElevatorHouseholdCount)}</strong>
+                  <span>엘베 확인</span>
+                  <strong>${formatDeliveryUnitCount(confirmedElevatorUnits)}</strong>
+                  <small>${formatUnitPercent(confirmedElevatorUnits, totalUnits)}</small>
+                </div>
+                <div class="buildingStatsMetric inferred">
+                  <span>엘베 추정</span>
+                  <strong>${formatDeliveryUnitCount(inferredElevatorUnits)}</strong>
+                  <small>${formatUnitPercent(inferredElevatorUnits, totalUnits)}</small>
                 </div>
                 <div class="buildingStatsMetric walkup">
-                  <span>3층 이상 계단</span>
-                  <strong>${formatHouseholdCount(building.walkupHouseholdCount)}</strong>
+                  <span>엘베 없음</span>
+                  <strong>${formatDeliveryUnitCount(noElevatorUnits)}</strong>
+                  <small>${formatUnitPercent(noElevatorUnits, totalUnits)}</small>
                 </div>
-                <div class="buildingStatsMetric">
-                  <span>주거 건물</span>
-                  <strong>${formatBuildingCount(building.residentialBuildingCount)}</strong>
+                <div class="buildingStatsMetric unknown">
+                  <span>엘베 미확인</span>
+                  <strong>${formatDeliveryUnitCount(unknownElevatorUnits)}</strong>
+                  <small>${formatUnitPercent(unknownElevatorUnits, totalUnits)}</small>
                 </div>
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}${escapeTerrainHtml(coverageText)}</div>`;
           } else {
-            buildingHtml = '<div class="buildingStatsMessage">지도표시 후 세대수·엘리베이터 정보를 분석합니다.</div>';
+            buildingHtml = '<div class="buildingStatsMessage">지도표시 후 주거·상업 배송 호수와 엘리베이터를 분석합니다.</div>';
           }
 
           return `
@@ -2668,13 +2808,13 @@
                 <span class="terrainZip">${safeZip}</span>
                 <div class="terrainCardTopRight">
                   <span class="terrainStatus ${terrainBadgeClass}">${terrainBadge}</span>
-                  <button class="analysisRefresh" type="button" data-building-refresh="${safeZip}">세대수 갱신</button>
+                  <button class="analysisRefresh" type="button" data-building-refresh="${safeZip}">배송호수 갱신</button>
                 </div>
               </div>
               ${terrainHtml}
               <div class="buildingStatsBlock">
                 <div class="buildingStatsHead">
-                  <b>세대수·엘리베이터</b>
+                  <b>배송호수·엘리베이터</b>
                   <span class="buildingStatsState">${building?.cached ? "캐시" : (building ? "완료" : "")}</span>
                 </div>
                 ${buildingHtml}

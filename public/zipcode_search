@@ -1774,6 +1774,7 @@
         kakaoGeocoder: null,
         selectedZips: new Set(),
         activeZip: "",
+        selectionClickGuardUntil: 0,
         mergeMode: false,
         mergedPolygons: [],
         mergedOutlinePolylines: [],
@@ -1858,6 +1859,14 @@
         if (kakao.maps.services?.Geocoder) {
           state.kakaoGeocoder = new kakao.maps.services.Geocoder();
         }
+
+        // 지도 빈 공간을 누르면 현재 선택된 우편번호를 해제한다.
+        // Polygon 클릭도 Kakao Map click으로 이어질 수 있어 짧은 guard를 둔다.
+        kakao.maps.event.addListener(state.map, "click", () => {
+          if (state.roadviewOn) return;
+          if (Date.now() < Number(state.selectionClickGuardUntil || 0)) return;
+          clearZipSelection();
+        });
 
         enableMobileMapInteractions();
 
@@ -2855,6 +2864,7 @@
         el.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
+          state.selectionClickGuardUntil = Date.now() + 180;
           focusZip(zip, { focusMap: false, scrollCard: true });
         });
 
@@ -2954,10 +2964,12 @@
             strokeOpacity: 1,
             strokeStyle: "solid",
             fillColor: color,
-            fillOpacity: 0.24
+            fillOpacity: 0.24,
+            clickable: true
           });
 
           kakao.maps.event.addListener(poly, "click", () => {
+            state.selectionClickGuardUntil = Date.now() + 180;
             focusZip(zip, { focusMap: false, scrollCard: true });
           });
 
@@ -3200,6 +3212,12 @@
             } catch {}
           }
         }
+      }
+
+      function clearZipSelection() {
+        if (!state.activeZip) return;
+        state.activeZip = "";
+        updateZipSelectionVisuals();
       }
 
       function focusZip(zip, options = {}) {
@@ -3974,6 +3992,11 @@
           if (e.key !== "Enter" || e.shiftKey) return;
           e.preventDefault();
           $("#searchBtn").click();
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.key !== "Escape") return;
+          clearZipSelection();
         });
 
         const preset = parseZips(new URLSearchParams(location.search).get("zips"));

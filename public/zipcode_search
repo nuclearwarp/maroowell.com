@@ -2291,7 +2291,10 @@
           calculatedAt: source?.calculatedAt ?? source?.calculated_at ?? null,
           expiresAt: source?.expiresAt ?? source?.expires_at ?? null,
           cached: response?.cached === true,
-          stale: response?.stale === true
+          stale: response?.stale === true,
+          partial: response?.partial === true,
+          provisional: response?.provisional === true,
+          warning: response?.warning || null
         };
       }
 
@@ -2423,8 +2426,10 @@
         const addresses = [
           target?.roadAddress,
           target?.parcelAddress,
-          target?.address
-        ].map((value) => String(value || "").trim()).filter(Boolean);
+          target?.address,
+          ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
+          ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
+        ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
 
         const cacheKeys = [key, ...addresses.map((address) => `addr:${address}`)].filter(Boolean);
         for (const cacheKey of cacheKeys) {
@@ -2440,6 +2445,9 @@
             key,
             managementKey: target?.managementKey || null,
             address,
+            roadAddress: target?.roadAddress || null,
+            parcelAddress: target?.parcelAddress || null,
+            addressAliases: [...new Set(addresses)],
             lat: point.lat,
             lng: point.lng
           };
@@ -2468,7 +2476,9 @@
           const addresses = [
             target?.roadAddress,
             target?.parcelAddress,
-            target?.address
+            target?.address,
+            ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
+            ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
           ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
 
           const groupKey = addresses[0]?.toLowerCase() || `key:${String(target?.key || target?.managementKey || "")}`;
@@ -2494,10 +2504,24 @@
                 const key = String(target?.key || target?.managementKey || "").trim();
                 if (!key) continue;
 
+                const targetAliases = [
+                  target?.roadAddress,
+                  target?.parcelAddress,
+                  target?.address,
+                  ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
+                  ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
+                ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+
                 const location = {
                   ...resolved,
                   key,
                   managementKey: target?.managementKey || null,
+                  roadAddress: target?.roadAddress || resolved.roadAddress || null,
+                  parcelAddress: target?.parcelAddress || resolved.parcelAddress || null,
+                  addressAliases: [...new Set([
+                    ...(Array.isArray(resolved.addressAliases) ? resolved.addressAliases : []),
+                    ...targetAliases
+                  ])],
                   address: resolved.address || target?.address || target?.roadAddress || target?.parcelAddress || null
                 };
 
@@ -2643,12 +2667,27 @@
 
           if (!state.selectedZips.has(zip)) return;
 
+          // 공터·하천·도로가 넓은 우편번호라도 건물 데이터 자체는 분석한다.
+          // 주소검색이 끝까지 되지 않은 고유 건물만 남은 경우에는 1년 캐시에 저장하지 않고
+          // 현재 확인된 건물 기준 잠정 결과를 받아 화면에 표시한다.
+          if (data?.requiresGeocoding === true) {
+            data = await postBuildingStats(session, {
+              ...basePayload,
+              forceRefresh: false,
+              force_refresh: false,
+              allowPartial: true,
+              allow_partial: true,
+              buildingLocations: [...locationsByKey.values()],
+              locationSource: "KAKAO_JS_GEOCODER"
+            });
+          }
+
           if (data?.requiresGeocoding === true) {
             const coverage = Number(data?.coveragePercent);
             const coverageText = Number.isFinite(coverage)
-              ? ` 현재 위치확보율 ${coverage.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%.`
+              ? ` 현재 건물주소 확인율 ${coverage.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%.`
               : "";
-            throw new Error(`건축물 위치확보가 부족해 결과를 저장하지 않았습니다.${coverageText}`);
+            throw new Error(`건물주소 확인을 완료하지 못했습니다.${coverageText}`);
           }
 
           if (!data?.buildingStats) {
@@ -2658,7 +2697,10 @@
           state.buildingStatsByZip.set(zip, {
             ...data.buildingStats,
             cached: data.cached === true,
-            stale: data.stale === true
+            stale: data.stale === true,
+            partial: data.partial === true,
+            provisional: data.provisional === true,
+            warning: data.warning || null
           });
           state.buildingStatusByZip.set(zip, { state: "ready" });
         } catch (e) {
@@ -2742,7 +2784,7 @@
               ? new Date(building.calculatedAt).toLocaleString("ko-KR")
               : "-";
             const coverageText = Number.isFinite(Number(building.coveragePercent))
-              ? ` · 위치확보 ${Number(building.coveragePercent).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
+              ? ` · 건물주소 확인 ${Number(building.coveragePercent).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`
               : "";
 
             const totalUnits = Number(building.deliveryUnitCount || 0);
@@ -2815,7 +2857,11 @@
               <div class="buildingStatsBlock">
                 <div class="buildingStatsHead">
                   <b>배송호수·엘리베이터</b>
-                  <span class="buildingStatsState">${building?.cached ? "캐시" : (building ? "완료" : "")}</span>
+                  <span class="buildingStatsState">${building?.cached
+                    ? "캐시"
+                    : (building?.partial || building?.provisional
+                      ? "잠정"
+                      : (building ? "완료" : ""))}</span>
                 </div>
                 ${buildingHtml}
               </div>

@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design");
+      console.log("[mw] zipcode_search loaded white design · building V8 zipcode match");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2414,9 +2414,27 @@
               return;
             }
 
-            const lng = Number(result[0].x);
-            const lat = Number(result[0].y);
-            resolve(Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null);
+            const first = result[0];
+            const lng = Number(first.x);
+            const lat = Number(first.y);
+            const rawZonecode = String(
+              first?.road_address?.zone_no ??
+              first?.road_address?.zonecode ??
+              first?.address?.zone_no ??
+              first?.address?.zip_code ??
+              first?.zone_no ??
+              ""
+            ).replace(/\D/g, "");
+
+            resolve(
+              Number.isFinite(lat) && Number.isFinite(lng)
+                ? {
+                    lat,
+                    lng,
+                    zonecode: rawZonecode.length === 5 ? rawZonecode : null
+                  }
+                : null
+            );
           });
         });
       }
@@ -2449,7 +2467,8 @@
             parcelAddress: target?.parcelAddress || null,
             addressAliases: [...new Set(addresses)],
             lat: point.lat,
-            lng: point.lng
+            lng: point.lng,
+            zonecode: point.zonecode || null
           };
 
           cacheKeys.forEach((cacheKey) => state.buildingLocationCache.set(cacheKey, location));

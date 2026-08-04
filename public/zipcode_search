@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V10 strict polygon scope");
+      console.log("[mw] zipcode_search loaded white design · building V11 parcel postcode scope");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2465,11 +2465,39 @@
         });
       }
 
+      function reverseZonecodeFromPoint(lng, lat) {
+        return new Promise((resolve) => {
+          if (!state.kakaoGeocoder) return resolve(null);
+
+          state.kakaoGeocoder.coord2Address(lng, lat, (result, status) => {
+            if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) {
+              resolve(null);
+              return;
+            }
+
+            for (const row of result) {
+              const raw = String(
+                row?.road_address?.zone_no ??
+                row?.address?.zone_no ??
+                ""
+              ).replace(/\D/g, "");
+
+              if (raw.length === 5) {
+                resolve(raw);
+                return;
+              }
+            }
+
+            resolve(null);
+          });
+        });
+      }
+
       function geocodeAddress(query) {
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder || !query) return resolve(null);
 
-          state.kakaoGeocoder.addressSearch(query, (result, status) => {
+          state.kakaoGeocoder.addressSearch(query, async (result, status) => {
             if (status !== kakao.maps.services.Status.OK || !result?.[0]) {
               resolve(null);
               return;
@@ -2479,7 +2507,7 @@
               geocodeResultMatchesQuery(query, row)
             );
 
-            // 카카오가 유사한 다른 주소를 반환한 경우 해당 건물의 좌표로 사용하지 않는다.
+            // 서로 다른 지번을 카카오의 유사주소 결과로 잘못 연결하지 않는다.
             if (!first) {
               resolve(null);
               return;
@@ -2487,7 +2515,12 @@
 
             const lng = Number(first.x);
             const lat = Number(first.y);
-            const rawZonecode = String(
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+              resolve(null);
+              return;
+            }
+
+            let rawZonecode = String(
               first?.road_address?.zone_no ??
               first?.road_address?.zonecode ??
               first?.address?.zone_no ??
@@ -2496,35 +2529,57 @@
               ""
             ).replace(/\D/g, "");
 
-            resolve(
-              Number.isFinite(lat) && Number.isFinite(lng)
-                ? {
-                    lat,
-                    lng,
-                    zonecode: rawZonecode.length === 5 ? rawZonecode : null,
-                    matchedAddress:
-                      first?.road_address?.address_name ??
-                      first?.address?.address_name ??
-                      first?.address_name ??
-                      null
-                  }
-                : null
-            );
+            // 지번·구축 빌라는 addressSearch 결과에 zone_no가 비는 경우가 있다.
+            // 이때 동일 좌표를 역지오코딩해 우편번호를 보완한다.
+            if (rawZonecode.length !== 5) {
+              rawZonecode = String(
+                await reverseZonecodeFromPoint(lng, lat) || ""
+              ).replace(/\D/g, "");
+            }
+
+            resolve({
+              lat,
+              lng,
+              zonecode: rawZonecode.length === 5 ? rawZonecode : null,
+              matchedAddress:
+                first?.road_address?.address_name ??
+                first?.address?.address_name ??
+                first?.address_name ??
+                null
+            });
           });
         });
       }
 
       async function geocodeBuildingTarget(target) {
-        const key = String(target?.key || target?.managementKey || "").trim();
+        const key = String(
+          target?.key ||
+          target?.parcelKey ||
+          target?.managementKey ||
+          ""
+        ).trim();
+
+        const parcelKey = String(
+          target?.parcelKey ||
+          target?.parcel_key ||
+          ""
+        ).trim();
+
         const addresses = [
-          target?.roadAddress,
+          // 구축 빌라·다세대는 도로명보다 지번 주소가 더 안정적인 경우가 많다.
           target?.parcelAddress,
+          target?.roadAddress,
           target?.address,
           ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
           ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
-        ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+        ].map((value) => String(value || "").replace(/\s+/g, " ").trim())
+          .filter(Boolean);
 
-        const cacheKeys = [key, ...addresses.map((address) => `addr:${address}`)].filter(Boolean);
+        const cacheKeys = [
+          key,
+          parcelKey ? `parcel:${parcelKey}` : ""
+        ].filter(Boolean);
+
         for (const cacheKey of cacheKeys) {
           const cached = state.buildingLocationCache.get(cacheKey);
           if (cached) return { ...cached, key: key || cached.key };
@@ -2536,7 +2591,9 @@
 
           const location = {
             key,
+            parcelKey: parcelKey || null,
             managementKey: target?.managementKey || null,
+            sourceType: target?.sourceType || null,
             address,
             roadAddress: target?.roadAddress || null,
             parcelAddress: target?.parcelAddress || null,
@@ -2547,7 +2604,9 @@
             matchedAddress: point.matchedAddress || null
           };
 
-          cacheKeys.forEach((cacheKey) => state.buildingLocationCache.set(cacheKey, location));
+          cacheKeys.forEach((cacheKey) => {
+            state.buildingLocationCache.set(cacheKey, location);
+          });
           return location;
         }
 
@@ -2559,71 +2618,30 @@
         const seenKeys = new Set();
 
         for (const target of Array.isArray(targets) ? targets : []) {
-          const key = String(target?.key || target?.managementKey || target?.address || "").trim();
+          const key = String(
+            target?.key ||
+            target?.parcelKey ||
+            target?.managementKey ||
+            target?.address ||
+            ""
+          ).trim();
+
           if (!key || seenKeys.has(key)) continue;
           seenKeys.add(key);
           uniqueTargets.push(target);
         }
 
-        // 같은 단지·건물 주소가 여러 표제부 행으로 반복되는 경우 주소검색은 한 번만 한다.
-        const groups = new Map();
-        for (const target of uniqueTargets) {
-          const addresses = [
-            target?.roadAddress,
-            target?.parcelAddress,
-            target?.address,
-            ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
-            ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
-          ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
-
-          const groupKey = addresses[0]?.toLowerCase() || `key:${String(target?.key || target?.managementKey || "")}`;
-          if (!groups.has(groupKey)) groups.set(groupKey, []);
-          groups.get(groupKey).push(target);
-        }
-
-        const grouped = [...groups.values()];
         const results = [];
         let cursor = 0;
 
         async function worker() {
           while (true) {
             const index = cursor++;
-            if (index >= grouped.length) return;
+            if (index >= uniqueTargets.length) return;
 
-            const group = grouped[index];
-            const representative = group[0];
-            const resolved = await geocodeBuildingTarget(representative);
-
-            if (resolved) {
-              for (const target of group) {
-                const key = String(target?.key || target?.managementKey || "").trim();
-                if (!key) continue;
-
-                const targetAliases = [
-                  target?.roadAddress,
-                  target?.parcelAddress,
-                  target?.address,
-                  ...(Array.isArray(target?.addressAliases) ? target.addressAliases : []),
-                  ...(Array.isArray(target?.address_aliases) ? target.address_aliases : [])
-                ].map((value) => String(value || "").replace(/\s+/g, " ").trim()).filter(Boolean);
-
-                const location = {
-                  ...resolved,
-                  key,
-                  managementKey: target?.managementKey || null,
-                  roadAddress: target?.roadAddress || resolved.roadAddress || null,
-                  parcelAddress: target?.parcelAddress || resolved.parcelAddress || null,
-                  addressAliases: [...new Set([
-                    ...(Array.isArray(resolved.addressAliases) ? resolved.addressAliases : []),
-                    ...targetAliases
-                  ])],
-                  address: resolved.address || target?.address || target?.roadAddress || target?.parcelAddress || null
-                };
-
-                state.buildingLocationCache.set(key, location);
-                results.push(location);
-              }
-            }
+            const target = uniqueTargets[index];
+            const resolved = await geocodeBuildingTarget(target);
+            if (resolved) results.push(resolved);
 
             if (BUILDING_GEOCODE_DELAY_MS > 0) {
               await new Promise((resolve) => setTimeout(resolve, BUILDING_GEOCODE_DELAY_MS));
@@ -2633,8 +2651,9 @@
 
         const workerCount = Math.min(
           BUILDING_GEOCODE_CONCURRENCY,
-          Math.max(1, grouped.length)
+          Math.max(1, uniqueTargets.length)
         );
+
         await Promise.all(Array.from({ length: workerCount }, worker));
         return results;
       }
@@ -2721,7 +2740,8 @@
             forceRefresh: force === true,
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
-            minCoveragePercent: 80
+            minCoveragePercent: 85,
+            scopeMatchMode: "PARCEL_POSTCODE"
           };
 
           let data = await postBuildingStats(session, basePayload);
@@ -2745,6 +2765,7 @@
             const beforeCount = locationsByKey.size;
             locations.forEach((location) => {
               if (location?.key) locationsByKey.set(location.key, location);
+              if (location?.parcelKey) locationsByKey.set(`parcel:${location.parcelKey}`, location);
             });
 
             if (locationsByKey.size === beforeCount && targets.length > 0) {

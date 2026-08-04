@@ -2404,6 +2404,67 @@
         return [...codes].slice(0, 20);
       }
 
+      function normalizeGeocodeAddressText(value) {
+        return String(value || "")
+          .toLowerCase()
+          .replace(/\([^)]*\)/g, " ")
+          .replace(/[,_·]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+
+      function geocodeAddressNumbers(value) {
+        return [...new Set(
+          normalizeGeocodeAddressText(value)
+            .match(/\d+(?:-\d+)?/g) || []
+        )];
+      }
+
+      function geocodeAddressTokens(value) {
+        const ignored = new Set([
+          "서울특별시", "서울시", "부산광역시", "대구광역시", "인천광역시",
+          "광주광역시", "대전광역시", "울산광역시", "세종특별자치시",
+          "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도",
+          "전라남도", "경상북도", "경상남도", "제주특별자치도",
+          "대한민국"
+        ]);
+
+        return normalizeGeocodeAddressText(value)
+          .split(" ")
+          .map((token) => token.trim())
+          .filter((token) => token.length >= 2 && !ignored.has(token));
+      }
+
+      function geocodeResultMatchesQuery(query, result) {
+        const returnedAddresses = [
+          result?.road_address?.address_name,
+          result?.address?.address_name,
+          result?.address_name
+        ].filter(Boolean);
+
+        if (!returnedAddresses.length) return false;
+
+        const queryNumbers = geocodeAddressNumbers(query);
+        const queryTokens = geocodeAddressTokens(query);
+
+        return returnedAddresses.some((returnedAddress) => {
+          const returnedNumbers = geocodeAddressNumbers(returnedAddress);
+          const returnedTokens = geocodeAddressTokens(returnedAddress);
+
+          const numberMatched = !queryNumbers.length || queryNumbers.some(
+            (number) => returnedNumbers.includes(number)
+          );
+
+          if (!numberMatched) return false;
+
+          const tokenMatched = !queryTokens.length || queryTokens.some(
+            (token) => returnedTokens.includes(token)
+          );
+
+          return tokenMatched;
+        });
+      }
+
       function geocodeAddress(query) {
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder || !query) return resolve(null);
@@ -2414,7 +2475,16 @@
               return;
             }
 
-            const first = result[0];
+            const first = result.find((row) =>
+              geocodeResultMatchesQuery(query, row)
+            );
+
+            // 카카오가 유사한 다른 주소를 반환한 경우 해당 건물의 좌표로 사용하지 않는다.
+            if (!first) {
+              resolve(null);
+              return;
+            }
+
             const lng = Number(first.x);
             const lat = Number(first.y);
             const rawZonecode = String(
@@ -2431,7 +2501,12 @@
                 ? {
                     lat,
                     lng,
-                    zonecode: rawZonecode.length === 5 ? rawZonecode : null
+                    zonecode: rawZonecode.length === 5 ? rawZonecode : null,
+                    matchedAddress:
+                      first?.road_address?.address_name ??
+                      first?.address?.address_name ??
+                      first?.address_name ??
+                      null
                   }
                 : null
             );
@@ -2468,7 +2543,8 @@
             addressAliases: [...new Set(addresses)],
             lat: point.lat,
             lng: point.lng,
-            zonecode: point.zonecode || null
+            zonecode: point.zonecode || null,
+            matchedAddress: point.matchedAddress || null
           };
 
           cacheKeys.forEach((cacheKey) => state.buildingLocationCache.set(cacheKey, location));

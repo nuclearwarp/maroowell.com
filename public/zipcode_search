@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V12 PK+recap+exact postcode");
+      console.log("[mw] zipcode_search loaded white design · building V13 verified parcel");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2350,7 +2350,7 @@
         try {
           const bbox = turf.bbox(feature);
           const [minLng, minLat, maxLng, maxLat] = bbox.map(Number);
-          const gridSteps = 5;
+          const gridSteps = 7;
 
           if ([minLng, minLat, maxLng, maxLat].every(Number.isFinite)) {
             for (let iy = 0; iy < gridSteps; iy++) {
@@ -2364,7 +2364,7 @@
           }
         } catch {}
 
-        return points.slice(0, 30);
+        return points.slice(0, 60);
       }
 
       function coordToLegalDongCode(point) {
@@ -2413,10 +2413,19 @@
           .trim();
       }
 
+      function normalizeParcelNo(value) {
+        const digits = String(value ?? "").replace(/\D/g, "");
+        return digits ? String(Number(digits)) : "0";
+      }
+
+      function normalizeTargetLegalDongCode(value) {
+        const digits = String(value ?? "").replace(/\D/g, "");
+        return digits.length >= 10 ? digits.slice(0, 10) : "";
+      }
+
       function geocodeAddressNumbers(value) {
         return [...new Set(
-          normalizeGeocodeAddressText(value)
-            .match(/\d+(?:-\d+)?/g) || []
+          normalizeGeocodeAddressText(value).match(/\d+(?:-\d+)?/g) || []
         )];
       }
 
@@ -2425,8 +2434,7 @@
           "서울특별시", "서울시", "부산광역시", "대구광역시", "인천광역시",
           "광주광역시", "대전광역시", "울산광역시", "세종특별자치시",
           "경기도", "강원특별자치도", "충청북도", "충청남도", "전북특별자치도",
-          "전라남도", "경상북도", "경상남도", "제주특별자치도",
-          "대한민국"
+          "전라남도", "경상북도", "경상남도", "제주특별자치도", "대한민국"
         ]);
 
         return normalizeGeocodeAddressText(value)
@@ -2435,37 +2443,33 @@
           .filter((token) => token.length >= 2 && !ignored.has(token));
       }
 
-      function geocodeResultMatchesQuery(query, result) {
-        const returnedAddresses = [
+      function geocodeReturnedAddresses(result) {
+        return [
           result?.road_address?.address_name,
           result?.address?.address_name,
           result?.address_name
-        ].filter(Boolean);
-
-        if (!returnedAddresses.length) return false;
-
-        const queryNumbers = geocodeAddressNumbers(query);
-        const queryTokens = geocodeAddressTokens(query);
-
-        return returnedAddresses.some((returnedAddress) => {
-          const returnedNumbers = geocodeAddressNumbers(returnedAddress);
-          const returnedTokens = geocodeAddressTokens(returnedAddress);
-
-          const numberMatched = !queryNumbers.length || queryNumbers.some(
-            (number) => returnedNumbers.includes(number)
-          );
-
-          if (!numberMatched) return false;
-
-          const tokenMatched = !queryTokens.length || queryTokens.some(
-            (token) => returnedTokens.includes(token)
-          );
-
-          return tokenMatched;
-        });
+        ].map((value) => String(value || "").trim()).filter(Boolean);
       }
 
-      function reverseZonecodeFromPoint(lng, lat) {
+      function geocodeTextMatchScore(query, result) {
+        const queryNumbers = geocodeAddressNumbers(query);
+        const queryTokens = geocodeAddressTokens(query);
+        let best = 0;
+
+        for (const returnedAddress of geocodeReturnedAddresses(result)) {
+          const returnedNumbers = geocodeAddressNumbers(returnedAddress);
+          const returnedTokens = geocodeAddressTokens(returnedAddress);
+          const numberMatches = queryNumbers.filter((value) => returnedNumbers.includes(value)).length;
+          const tokenMatches = queryTokens.filter((value) => returnedTokens.includes(value)).length;
+          const exact = normalizeGeocodeAddressText(query) === normalizeGeocodeAddressText(returnedAddress);
+          const score = (exact ? 100 : 0) + numberMatches * 18 + tokenMatches * 4;
+          best = Math.max(best, score);
+        }
+
+        return best;
+      }
+
+      function reverseAddressMetaFromPoint(lng, lat) {
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder) return resolve(null);
 
@@ -2475,113 +2479,132 @@
               return;
             }
 
-            for (const row of result) {
-              const raw = String(
-                row?.road_address?.zone_no ??
-                row?.address?.zone_no ??
-                ""
-              ).replace(/\D/g, "");
-
-              if (raw.length === 5) {
-                resolve(raw);
-                return;
-              }
-            }
-
-            resolve(null);
-          });
-        });
-      }
-
-      function geocodeAddress(query) {
-        return new Promise((resolve) => {
-          if (!state.kakaoGeocoder || !query) return resolve(null);
-
-          const runSearch = (analyzeType) => new Promise((done) => {
-            const options = analyzeType
-              ? { analyze_type: analyzeType }
-              : undefined;
-
-            state.kakaoGeocoder.addressSearch(query, (result, status) => {
-              done({ result, status });
-            }, options);
-          });
-
-          (async () => {
-            const exactType = kakao?.maps?.services?.AnalyzeType?.EXACT || "EXACT";
-            const similarType = kakao?.maps?.services?.AnalyzeType?.SIMILAR || "SIMILAR";
-            let response = await runSearch(exactType);
-
-            if (
-              response.status !== kakao.maps.services.Status.OK ||
-              !Array.isArray(response.result) ||
-              !response.result.length
-            ) {
-              response = await runSearch(similarType);
-            }
-
-            const result = Array.isArray(response.result) ? response.result : [];
-            if (response.status !== kakao.maps.services.Status.OK || !result.length) {
-              resolve(null);
-              return;
-            }
-
-            const matched = result.find((row) => geocodeResultMatchesQuery(query, row));
-            const first = matched || result[0];
-            const lng = Number(first?.x);
-            const lat = Number(first?.y);
-
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-              resolve(null);
-              return;
-            }
-
-            let rawZonecode = String(
-              first?.road_address?.zone_no ??
-              first?.road_address?.zonecode ??
-              first?.address?.zone_no ??
-              first?.address?.zip_code ??
-              first?.zone_no ??
-              ""
-            ).replace(/\D/g, "");
-
-            if (rawZonecode.length !== 5) {
-              rawZonecode = String(
-                await reverseZonecodeFromPoint(lng, lat) || ""
-              ).replace(/\D/g, "");
-            }
-
+            const row = result[0] || null;
+            if (!row) return resolve(null);
+            const address = row.address || {};
+            const road = row.road_address || {};
+            const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
             resolve({
-              lat,
-              lng,
-              zonecode: rawZonecode.length === 5 ? rawZonecode : null,
-              matchedAddress:
-                first?.road_address?.address_name ??
-                first?.address?.address_name ??
-                first?.address_name ??
-                null,
-              geocodeAnalyzeType: matched ? "EXACT_OR_VERIFIED" : "SIMILAR_FALLBACK"
+              zonecode: zoneDigits.length === 5 ? zoneDigits : null,
+              legalDongCode: normalizeTargetLegalDongCode(address.b_code),
+              parcelMainNo: normalizeParcelNo(address.main_address_no),
+              parcelSubNo: normalizeParcelNo(address.sub_address_no),
+              matchedAddress: road.address_name || address.address_name || null,
             });
-          })().catch(() => resolve(null));
+          });
         });
       }
 
-      async function geocodeBuildingTarget(target) {
+      function runKakaoAddressSearch(query, analyzeType) {
+        return new Promise((resolve) => {
+          if (!state.kakaoGeocoder || !query) return resolve([]);
+          const options = analyzeType ? { analyze_type: analyzeType } : undefined;
+          state.kakaoGeocoder.addressSearch(query, (result, status) => {
+            resolve(
+              status === kakao.maps.services.Status.OK && Array.isArray(result)
+                ? result
+                : []
+            );
+          }, options);
+        });
+      }
+
+      function pointInsideZipFeature(feature, lng, lat) {
+        try {
+          return turf.booleanPointInPolygon(turf.point([lng, lat]), feature);
+        } catch {
+          return false;
+        }
+      }
+
+      async function geocodeResultCandidate(query, row, target, zip, feature, analyzeType) {
+        const lng = Number(row?.x);
+        const lat = Number(row?.y);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+        const address = row?.address || {};
+        const road = row?.road_address || {};
+        let zonecode = String(road.zone_no ?? address.zone_no ?? row?.zone_no ?? "").replace(/\D/g, "");
+        let legalDongCode = normalizeTargetLegalDongCode(address.b_code);
+        let parcelMainNo = normalizeParcelNo(address.main_address_no);
+        let parcelSubNo = normalizeParcelNo(address.sub_address_no);
+        let matchedAddress = road.address_name || address.address_name || row?.address_name || null;
+
+        if (zonecode.length !== 5 || !legalDongCode) {
+          const reverse = await reverseAddressMetaFromPoint(lng, lat);
+          if (reverse) {
+            if (zonecode.length !== 5 && reverse.zonecode) zonecode = reverse.zonecode;
+            if (!legalDongCode && reverse.legalDongCode) legalDongCode = reverse.legalDongCode;
+            if (!matchedAddress && reverse.matchedAddress) matchedAddress = reverse.matchedAddress;
+            if (parcelMainNo === "0" && reverse.parcelMainNo) parcelMainNo = reverse.parcelMainNo;
+            if (parcelSubNo === "0" && reverse.parcelSubNo) parcelSubNo = reverse.parcelSubNo;
+          }
+        }
+
+        const targetLegalDongCode = normalizeTargetLegalDongCode(
+          target?.legalDongCode ?? target?.legal_dong_code
+        );
+        const targetMainNo = normalizeParcelNo(
+          target?.parcelMainNo ?? target?.parcel_main_no ?? target?.bun
+        );
+        const targetSubNo = normalizeParcelNo(
+          target?.parcelSubNo ?? target?.parcel_sub_no ?? target?.ji
+        );
+        const parcelTarget = target?.sourceType === "BUILDING_PARCEL" || target?.identityRequired === true;
+        const legalMatch = !!targetLegalDongCode && legalDongCode === targetLegalDongCode;
+        const mainMatch = targetMainNo !== "0" && parcelMainNo === targetMainNo;
+        const subMatch = targetSubNo === "0" || parcelSubNo === targetSubNo;
+        const parcelIdentity = parcelTarget && legalMatch && mainMatch && subMatch;
+        const textScore = geocodeTextMatchScore(query, row);
+        const addressVerified = textScore >= 22;
+        const inside = pointInsideZipFeature(feature, lng, lat);
+        const exactZip = String(zonecode) === String(zip);
+
+        let score = 0;
+        if (parcelIdentity) score += 1000;
+        if (legalMatch) score += 250;
+        if (mainMatch) score += 160;
+        if (subMatch) score += 30;
+        if (inside) score += 220;
+        if (exactZip) score += 120;
+        if (addressVerified) score += Math.min(120, textScore);
+        if (analyzeType === "EXACT") score += 25;
+        if (parcelTarget && targetLegalDongCode && !legalMatch) score -= 800;
+        if (parcelTarget && targetMainNo !== "0" && !mainMatch) score -= 800;
+
+        const accepted = parcelTarget
+          ? (parcelIdentity || (inside && legalMatch && addressVerified))
+          : (addressVerified && (inside || exactZip));
+
+        if (!accepted) return null;
+
+        return {
+          lat,
+          lng,
+          zonecode: zonecode.length === 5 ? zonecode : null,
+          legalDongCode: legalDongCode || null,
+          parcelMainNo,
+          parcelSubNo,
+          matchedAddress,
+          identityVerified: parcelIdentity,
+          addressVerified,
+          insidePolygon: inside,
+          exactZip,
+          matchScore: score,
+          matchType: parcelIdentity
+            ? "PARCEL_IDENTITY"
+            : inside
+              ? "POLYGON_VERIFIED_ADDRESS"
+              : "POSTCODE_VERIFIED_ADDRESS",
+        };
+      }
+
+      async function geocodeBuildingTarget(target, zip, feature) {
         const key = String(
-          target?.key ||
-          target?.parcelKey ||
-          target?.managementKey ||
-          ""
+          target?.key || target?.parcelKey || target?.managementKey || ""
         ).trim();
-
-        const parcelKey = String(
-          target?.parcelKey ||
-          target?.parcel_key ||
-          ""
-        ).trim();
-
+        const parcelKey = String(target?.parcelKey || target?.parcel_key || "").trim();
         const addresses = [
-          // 구축 빌라·다세대는 도로명보다 지번 주소가 더 안정적인 경우가 많다.
           target?.parcelAddress,
           target?.roadAddress,
           target?.address,
@@ -2591,45 +2614,70 @@
           .filter(Boolean);
 
         const cacheKeys = [
-          key,
-          parcelKey ? `parcel:${parcelKey}` : ""
+          key ? `${zip}|${key}` : "",
+          parcelKey ? `${zip}|parcel:${parcelKey}` : ""
         ].filter(Boolean);
-
         for (const cacheKey of cacheKeys) {
           const cached = state.buildingLocationCache.get(cacheKey);
           if (cached) return { ...cached, key: key || cached.key };
         }
 
+        const exactType = kakao?.maps?.services?.AnalyzeType?.EXACT || "EXACT";
+        const similarType = kakao?.maps?.services?.AnalyzeType?.SIMILAR || "SIMILAR";
+        const candidates = [];
+        const seen = new Set();
+
         for (const address of [...new Set(addresses)]) {
-          const point = await geocodeAddress(address);
-          if (!point) continue;
-
-          const location = {
-            key,
-            parcelKey: parcelKey || null,
-            managementKey: target?.managementKey || null,
-            sourceType: target?.sourceType || null,
-            address,
-            roadAddress: target?.roadAddress || null,
-            parcelAddress: target?.parcelAddress || null,
-            addressAliases: [...new Set(addresses)],
-            lat: point.lat,
-            lng: point.lng,
-            zonecode: point.zonecode || null,
-            matchedAddress: point.matchedAddress || null,
-            geocodeAnalyzeType: point.geocodeAnalyzeType || null
-          };
-
-          cacheKeys.forEach((cacheKey) => {
-            state.buildingLocationCache.set(cacheKey, location);
-          });
-          return location;
+          for (const analyzeType of [exactType, similarType]) {
+            const rows = await runKakaoAddressSearch(address, analyzeType);
+            for (const row of rows.slice(0, 10)) {
+              const rawKey = `${row?.x}|${row?.y}|${row?.address?.b_code || ""}|${row?.address?.main_address_no || ""}|${row?.address?.sub_address_no || ""}`;
+              if (seen.has(rawKey)) continue;
+              seen.add(rawKey);
+              const candidate = await geocodeResultCandidate(
+                address,
+                row,
+                target,
+                zip,
+                feature,
+                analyzeType === exactType ? "EXACT" : "SIMILAR"
+              );
+              if (candidate) candidates.push({ ...candidate, queryAddress: address });
+            }
+          }
         }
 
-        return null;
+        candidates.sort((a, b) => b.matchScore - a.matchScore);
+        const point = candidates[0] || null;
+        if (!point) return null;
+
+        const location = {
+          key,
+          parcelKey: parcelKey || null,
+          managementKey: target?.managementKey || null,
+          sourceType: target?.sourceType || null,
+          address: point.queryAddress || target?.address || null,
+          roadAddress: target?.roadAddress || null,
+          parcelAddress: target?.parcelAddress || null,
+          addressAliases: [...new Set(addresses)],
+          lat: point.lat,
+          lng: point.lng,
+          zonecode: point.zonecode,
+          legalDongCode: point.legalDongCode,
+          parcelMainNo: point.parcelMainNo,
+          parcelSubNo: point.parcelSubNo,
+          matchedAddress: point.matchedAddress,
+          identityVerified: point.identityVerified === true,
+          addressVerified: point.addressVerified === true,
+          matchScore: point.matchScore,
+          matchType: point.matchType,
+        };
+
+        cacheKeys.forEach((cacheKey) => state.buildingLocationCache.set(cacheKey, location));
+        return location;
       }
 
-      async function geocodeBuildingTargets(targets) {
+      async function geocodeBuildingTargets(targets, zip, feature) {
         const uniqueTargets = [];
         const seenKeys = new Set();
 
@@ -2656,7 +2704,7 @@
             if (index >= uniqueTargets.length) return;
 
             const target = uniqueTargets[index];
-            const resolved = await geocodeBuildingTarget(target);
+            const resolved = await geocodeBuildingTarget(target, zip, feature);
             if (resolved) results.push(resolved);
 
             if (BUILDING_GEOCODE_DELAY_MS > 0) {
@@ -2756,8 +2804,8 @@
             forceRefresh: force === true,
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
-            minCoveragePercent: 85,
-            scopeMatchMode: "PARCEL_POSTCODE"
+            minCoveragePercent: 75,
+            scopeMatchMode: "VERIFIED_PARCEL_POLYGON_FIRST"
           };
 
           let data = await postBuildingStats(session, basePayload);
@@ -2777,7 +2825,7 @@
             });
             renderTerrainList();
 
-            const locations = await geocodeBuildingTargets(targets);
+            const locations = await geocodeBuildingTargets(targets, zip, feature);
             const beforeCount = locationsByKey.size;
             locations.forEach((location) => {
               if (location?.key) locationsByKey.set(location.key, location);
@@ -2824,6 +2872,13 @@
 
           if (!data?.buildingStats) {
             throw new Error("배송 호수 분석 결과가 비어 있습니다.");
+          }
+
+          const deliveryCount = Number(data?.buildingStats?.deliveryUnitCount || 0);
+          const diagnostics = data?.buildingStats?.breakdown || data?.diagnostics || null;
+          if (deliveryCount === 0) {
+            console.error("[BUILDING_STATS_ZERO_DIAGNOSTICS]", zip, diagnostics);
+            throw new Error("건물 주소는 확인됐지만 배송호수를 계산하지 못했습니다. 0호 결과는 표시하지 않습니다.");
           }
 
           console.info("[BUILDING_STATS_RESULT]", zip, {

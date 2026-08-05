@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V11 parcel postcode scope");
+      console.log("[mw] zipcode_search loaded white design · building V12 PK+recap+exact postcode");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2497,24 +2497,40 @@
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder || !query) return resolve(null);
 
-          state.kakaoGeocoder.addressSearch(query, async (result, status) => {
-            if (status !== kakao.maps.services.Status.OK || !result?.[0]) {
+          const runSearch = (analyzeType) => new Promise((done) => {
+            const options = analyzeType
+              ? { analyze_type: analyzeType }
+              : undefined;
+
+            state.kakaoGeocoder.addressSearch(query, (result, status) => {
+              done({ result, status });
+            }, options);
+          });
+
+          (async () => {
+            const exactType = kakao?.maps?.services?.AnalyzeType?.EXACT || "EXACT";
+            const similarType = kakao?.maps?.services?.AnalyzeType?.SIMILAR || "SIMILAR";
+            let response = await runSearch(exactType);
+
+            if (
+              response.status !== kakao.maps.services.Status.OK ||
+              !Array.isArray(response.result) ||
+              !response.result.length
+            ) {
+              response = await runSearch(similarType);
+            }
+
+            const result = Array.isArray(response.result) ? response.result : [];
+            if (response.status !== kakao.maps.services.Status.OK || !result.length) {
               resolve(null);
               return;
             }
 
-            const first = result.find((row) =>
-              geocodeResultMatchesQuery(query, row)
-            );
+            const matched = result.find((row) => geocodeResultMatchesQuery(query, row));
+            const first = matched || result[0];
+            const lng = Number(first?.x);
+            const lat = Number(first?.y);
 
-            // 서로 다른 지번을 카카오의 유사주소 결과로 잘못 연결하지 않는다.
-            if (!first) {
-              resolve(null);
-              return;
-            }
-
-            const lng = Number(first.x);
-            const lat = Number(first.y);
             if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
               resolve(null);
               return;
@@ -2529,8 +2545,6 @@
               ""
             ).replace(/\D/g, "");
 
-            // 지번·구축 빌라는 addressSearch 결과에 zone_no가 비는 경우가 있다.
-            // 이때 동일 좌표를 역지오코딩해 우편번호를 보완한다.
             if (rawZonecode.length !== 5) {
               rawZonecode = String(
                 await reverseZonecodeFromPoint(lng, lat) || ""
@@ -2545,9 +2559,10 @@
                 first?.road_address?.address_name ??
                 first?.address?.address_name ??
                 first?.address_name ??
-                null
+                null,
+              geocodeAnalyzeType: matched ? "EXACT_OR_VERIFIED" : "SIMILAR_FALLBACK"
             });
-          });
+          })().catch(() => resolve(null));
         });
       }
 
@@ -2601,7 +2616,8 @@
             lat: point.lat,
             lng: point.lng,
             zonecode: point.zonecode || null,
-            matchedAddress: point.matchedAddress || null
+            matchedAddress: point.matchedAddress || null,
+            geocodeAnalyzeType: point.geocodeAnalyzeType || null
           };
 
           cacheKeys.forEach((cacheKey) => {
@@ -2809,6 +2825,17 @@
           if (!data?.buildingStats) {
             throw new Error("배송 호수 분석 결과가 비어 있습니다.");
           }
+
+          console.info("[BUILDING_STATS_RESULT]", zip, {
+            sourceVersion: data?.buildingStats?.sourceVersion,
+            unitAnalysisVersion: data?.buildingStats?.unitAnalysisVersion,
+            deliveryUnitCount: data?.buildingStats?.deliveryUnitCount,
+            residentialUnitCount: data?.buildingStats?.residentialUnitCount,
+            commercialUnitCount: data?.buildingStats?.commercialUnitCount,
+            coveragePercent: data?.buildingStats?.coveragePercent,
+            breakdown: data?.buildingStats?.breakdown,
+            warning: data?.warning || null
+          });
 
           state.buildingStatsByZip.set(zip, {
             ...data.buildingStats,

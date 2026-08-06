@@ -2327,6 +2327,16 @@
             source?.breakdown?.data_quality?.estimated_unit_count ??
             0
           ),
+          averageUnitsPerMatchedBuilding: Number(
+            source?.breakdown?.dataQuality?.averageUnitsPerMatchedBuilding ??
+            source?.breakdown?.data_quality?.average_units_per_matched_building ??
+            0
+          ),
+          onePerBuildingSuspicion: Boolean(
+            source?.breakdown?.dataQuality?.onePerBuildingSuspicion ??
+            source?.breakdown?.data_quality?.one_per_building_suspicion ??
+            false
+          ),
           dataQuality: source?.breakdown?.dataQuality ?? source?.breakdown?.data_quality ?? null,
           breakdown: source?.breakdown ?? null,
           unitAnalysisVersion: source?.unitAnalysisVersion ?? source?.unit_analysis_version ?? null,
@@ -3505,7 +3515,13 @@
             const elevatorBuildings = Number(building.elevatorBuildingCount || 0);
             const noElevatorBuildings = Number(building.noElevatorBuildingCount || 0);
             const unknownElevatorBuildings = Number(building.unknownElevatorBuildingCount || 0);
-            const qualityClass = estimatedUnits > 0 ? " warn" : "";
+            const matchedBuildings = Number(building.matchedBuildingCount || 0);
+            const averageUnitsPerBuilding = Number(
+              building.averageUnitsPerMatchedBuilding ||
+              (matchedBuildings > 0 ? totalUnits / matchedBuildings : 0)
+            );
+            const onePerBuildingSuspicion = building.onePerBuildingSuspicion === true;
+            const qualityClass = estimatedUnits > 0 || onePerBuildingSuspicion ? " warn" : "";
 
             buildingHtml = `
               <div class="buildingStatsGrid">
@@ -3552,7 +3568,9 @@
               </div>
               <div class="buildingStatsQuality${qualityClass}">
                 호수 검증 · 확정 ${formatDeliveryUnitCount(authoritativeUnits)} · 추정 ${formatDeliveryUnitCount(estimatedUnits)}<br/>
+                건물 기준 · 매칭 ${formatBuildingCount(matchedBuildings)} · 평균 ${averageUnitsPerBuilding.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}호/동<br/>
                 엘베 건물 · 있음/추정 ${formatBuildingCount(elevatorBuildings)} · 없음 ${formatBuildingCount(noElevatorBuildings)} · 미확인 ${formatBuildingCount(unknownElevatorBuildings)}
+                ${onePerBuildingSuspicion ? '<br/><b>건물당 1호 수준으로 계산되어 재분석이 필요합니다.</b>' : ''}
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}${escapeTerrainHtml(coverageText)}</div>`;
           } else {
@@ -3575,10 +3593,14 @@
                   <span class="buildingStatsState">${building?.cached
                     ? (building?.stale
                       ? "기존값"
-                      : (building?.legacyCache ? "기존 캐시" : "캐시"))
-                    : (building?.partial || building?.provisional
-                      ? "잠정"
-                      : (building ? "완료" : ""))}</span>
+                      : (building?.estimatedUnitCount > 0
+                        ? "추정 캐시"
+                        : (building?.legacyCache ? "기존 캐시" : "캐시")))
+                    : (building?.estimatedUnitCount > 0
+                      ? "추정"
+                      : (building?.partial || building?.provisional
+                        ? "잠정"
+                        : (building ? "완료" : "")))}</span>
                 </div>
                 ${buildingHtml}
               </div>

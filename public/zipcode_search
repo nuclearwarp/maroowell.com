@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V22 direct scope parcel match");
+      console.log("[mw] zipcode_search loaded white design · building V23 elevator reconcile");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2317,6 +2317,16 @@
           elevatorBuildingCount: number("elevatorBuildingCount", "elevator_building_count"),
           noElevatorBuildingCount: number("noElevatorBuildingCount", "no_elevator_building_count"),
           unknownElevatorBuildingCount: number("unknownElevatorBuildingCount", "unknown_elevator_building_count"),
+          confirmedElevatorBuildingCount: Number(
+            source?.breakdown?.elevator?.buildingCounts?.confirmed ??
+            source?.breakdown?.elevator?.building_counts?.confirmed ??
+            0
+          ),
+          inferredElevatorBuildingCount: Number(
+            source?.breakdown?.elevator?.buildingCounts?.inferred ??
+            source?.breakdown?.elevator?.building_counts?.inferred ??
+            0
+          ),
           authoritativeUnitCount: Number(
             source?.breakdown?.dataQuality?.authoritativeUnitCount ??
             source?.breakdown?.data_quality?.authoritative_unit_count ??
@@ -3354,6 +3364,10 @@
             );
           }
 
+          console.info("[BUILDING_ELEVATOR_RESULT]", zip,
+            data?.buildingStats?.breakdown?.elevator || null
+          );
+
           console.info("[BUILDING_STATS_RESULT]", zip, {
             sourceVersion: data?.buildingStats?.sourceVersion,
             unitAnalysisVersion: data?.buildingStats?.unitAnalysisVersion,
@@ -3513,6 +3527,8 @@
             const authoritativeUnits = Number(building.authoritativeUnitCount ?? totalUnits);
             const estimatedUnits = Number(building.estimatedUnitCount || 0);
             const elevatorBuildings = Number(building.elevatorBuildingCount || 0);
+            const confirmedElevatorBuildings = Number(building.confirmedElevatorBuildingCount || 0);
+            const inferredElevatorBuildings = Number(building.inferredElevatorBuildingCount || 0);
             const noElevatorBuildings = Number(building.noElevatorBuildingCount || 0);
             const unknownElevatorBuildings = Number(building.unknownElevatorBuildingCount || 0);
             const matchedBuildings = Number(building.matchedBuildingCount || 0);
@@ -3521,7 +3537,13 @@
               (matchedBuildings > 0 ? totalUnits / matchedBuildings : 0)
             );
             const onePerBuildingSuspicion = building.onePerBuildingSuspicion === true;
-            const qualityClass = estimatedUnits > 0 || onePerBuildingSuspicion ? " warn" : "";
+            const elevatorSuspicion = (
+              totalUnits > 0 &&
+              confirmedElevatorUnits + inferredElevatorUnits === 0 &&
+              noElevatorUnits >= totalUnits * 0.8 &&
+              matchedBuildings >= 4
+            );
+            const qualityClass = estimatedUnits > 0 || onePerBuildingSuspicion || elevatorSuspicion ? " warn" : "";
 
             buildingHtml = `
               <div class="buildingStatsGrid">
@@ -3569,8 +3591,9 @@
               <div class="buildingStatsQuality${qualityClass}">
                 호수 검증 · 확정 ${formatDeliveryUnitCount(authoritativeUnits)} · 추정 ${formatDeliveryUnitCount(estimatedUnits)}<br/>
                 건물 기준 · 매칭 ${formatBuildingCount(matchedBuildings)} · 평균 ${averageUnitsPerBuilding.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}호/동<br/>
-                엘베 건물 · 있음/추정 ${formatBuildingCount(elevatorBuildings)} · 없음 ${formatBuildingCount(noElevatorBuildings)} · 미확인 ${formatBuildingCount(unknownElevatorBuildings)}
+                엘베 건물 · 확인 ${formatBuildingCount(confirmedElevatorBuildings)} · 추정 ${formatBuildingCount(inferredElevatorBuildings)} · 없음 ${formatBuildingCount(noElevatorBuildings)} · 미확인 ${formatBuildingCount(unknownElevatorBuildings)}
                 ${onePerBuildingSuspicion ? '<br/><b>건물당 1호 수준으로 계산되어 재분석이 필요합니다.</b>' : ''}
+                ${elevatorSuspicion ? '<br/><b>승강기 정보가 전부 없음으로 판정되어 새 로직 재분석이 필요합니다.</b>' : ''}
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}${escapeTerrainHtml(coverageText)}</div>`;
           } else {

@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V15 response + unit-register fallback");
+      console.log("[mw] zipcode_search loaded white design · building V16 cache preserve + subrequest budget");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1728,13 +1728,16 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-04-terrain-building-stats-v2";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-06-terrain-building-stats-v16";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
       const BUILDING_GEOCODE_CONCURRENCY = 2;
       const BUILDING_GEOCODE_DELAY_MS = 140;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
+      // 한 우편번호에서 실제 면적 비중이 큰 법정동만 백엔드에 전달한다.
+      // 경계의 작은 조각까지 20개를 넘기면 Worker subrequest 한도를 쉽게 초과한다.
+      const BUILDING_MAX_LEGAL_DONG_CODES = 3;
       const MERGE_SNAP_METERS = 35;
       const MIN_COMPONENT_AREA_SQM = 800;
       const ZIP_FETCH_TIMEOUT_MS = 15000;
@@ -2384,24 +2387,33 @@
       }
 
       async function resolveLegalDongCodes(zip, feature) {
-        const codes = new Set();
+        const scores = new Map();
+        const addScore = (code, score = 1) => {
+          const normalized = normalizeLegalDongCode(code);
+          if (!normalized) return;
+          scores.set(normalized, (scores.get(normalized) || 0) + score);
+        };
+
         const metadata = state.metadataByZip.get(zip) || {};
         const metadataCode = normalizeLegalDongCode(
           metadata.lgvReplcCd ?? metadata.lgv_replc_cd ?? metadata.legalDongCode
         );
-        if (metadataCode) codes.add(metadataCode);
+        // 우편번호 경계 API가 내려준 법정동은 우선순위를 높이되 독점하지 않는다.
+        if (metadataCode) addScore(metadataCode, 20);
 
-        if (!state.kakaoGeocoder) return [...codes];
-
-        const points = geometrySamplePoints(feature);
-        for (let i = 0; i < points.length; i += BUILDING_GEOCODE_CONCURRENCY) {
-          const chunk = points.slice(i, i + BUILDING_GEOCODE_CONCURRENCY);
-          const found = await Promise.all(chunk.map(coordToLegalDongCode));
-          found.filter(Boolean).forEach((code) => codes.add(code));
-          if (codes.size >= 20) break;
+        if (state.kakaoGeocoder) {
+          const points = geometrySamplePoints(feature);
+          for (let i = 0; i < points.length; i += BUILDING_GEOCODE_CONCURRENCY) {
+            const chunk = points.slice(i, i + BUILDING_GEOCODE_CONCURRENCY);
+            const found = await Promise.all(chunk.map(coordToLegalDongCode));
+            found.filter(Boolean).forEach((code) => addScore(code, 1));
+          }
         }
 
-        return [...codes].slice(0, 20);
+        return [...scores.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, BUILDING_MAX_LEGAL_DONG_CODES)
+          .map(([code]) => code);
       }
 
       function normalizeGeocodeAddressText(value) {
@@ -2778,8 +2790,14 @@
         const currentStatus = state.buildingStatusByZip.get(zip);
         if (!force && (state.buildingStatsByZip.has(zip) || currentStatus?.state === "loading")) return;
 
-        if (force) state.buildingStatsByZip.delete(zip);
-        state.buildingStatusByZip.set(zip, { state: "loading", message: "주거·상업 배송 호수를 확인하고 있습니다." });
+        // 수동 갱신이 실패해도 기존 정상 분석 카드를 지우지 않는다.
+        const previousStats = state.buildingStatsByZip.get(zip) || null;
+        state.buildingStatusByZip.set(zip, {
+          state: "loading",
+          message: previousStats
+            ? "기존 분석값을 유지한 채 새 데이터로 갱신하고 있습니다."
+            : "주거·상업 배송 호수를 확인하고 있습니다."
+        });
         renderTerrainList();
 
         try {
@@ -2805,7 +2823,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 75,
-            scopeMatchMode: "V15_RESPONSE_UNIT_REGISTER_FALLBACK"
+            scopeMatchMode: "V16_CACHE_PRESERVE_SUBREQUEST_BUDGET"
           };
 
           let data = await postBuildingStats(session, basePayload);
@@ -2925,19 +2943,36 @@
             ...data.buildingStats,
             cached: data.cached === true,
             stale: data.stale === true,
+            legacyCache: data.legacyCache === true,
+            needsRefresh: data.needsRefresh === true,
             partial: data.partial === true,
             provisional: data.provisional === true,
-            warning: data.warning || null
+            warning: data.warning || (
+              data.legacyCache === true
+                ? "기존 정상 캐시를 표시합니다. 필요할 때 배송호수 갱신을 눌러주세요."
+                : null
+            )
           });
           state.buildingStatusByZip.set(zip, { state: "ready" });
         } catch (e) {
           console.warn("[BUILDING_STATS_API] fetch failed", zip, e);
-          state.buildingStatusByZip.set(zip, {
-            state: "error",
-            message: e?.name === "AbortError"
-              ? `요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS / 1000)}초)`
-              : String(e?.message || e || "배송 호수 분석 실패")
-          });
+
+          if (previousStats) {
+            state.buildingStatsByZip.set(zip, {
+              ...previousStats,
+              stale: true,
+              needsRefresh: true,
+              warning: `갱신 실패 · 기존 분석값 유지: ${String(e?.message || e || "배송 호수 분석 실패")}`
+            });
+            state.buildingStatusByZip.set(zip, { state: "ready" });
+          } else {
+            state.buildingStatusByZip.set(zip, {
+              state: "error",
+              message: e?.name === "AbortError"
+                ? `요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS / 1000)}초)`
+                : String(e?.message || e || "배송 호수 분석 실패")
+            });
+          }
         } finally {
           renderTerrainList();
         }
@@ -3085,7 +3120,9 @@
                 <div class="buildingStatsHead">
                   <b>배송호수·엘리베이터</b>
                   <span class="buildingStatsState">${building?.cached
-                    ? "캐시"
+                    ? (building?.stale
+                      ? "기존값"
+                      : (building?.legacyCache ? "기존 캐시" : "캐시"))
                     : (building?.partial || building?.provisional
                       ? "잠정"
                       : (building ? "완료" : ""))}</span>

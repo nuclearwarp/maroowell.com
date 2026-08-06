@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V18 polygon scope parcel discovery");
+      console.log("[mw] zipcode_search loaded white design · building V19 region-code parcel discovery");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1728,7 +1728,7 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-06-terrain-building-stats-v18";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-06-terrain-building-stats-v19";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
@@ -2544,12 +2544,31 @@
 
             const row = result[0] || null;
             if (!row) return resolve(null);
+
             const address = row.address || {};
             const road = row.road_address || {};
-            const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
+            const zoneDigits = String(
+              road.zone_no ??
+              address.zone_no ??
+              ""
+            ).replace(/\D/g, "");
+
+            // coord2Address의 지번 주소에는 법정동 코드가 보장되지 않는다.
+            // discovery 단계에서는 아래 regionNameKey를 기준으로 coord2RegionCode를
+            // 한 번만 호출해 법정동 코드를 보충한다.
+            const regionNameKey = [
+              address.region_1depth_name,
+              address.region_2depth_name,
+              address.region_3depth_name
+            ]
+              .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+              .filter(Boolean)
+              .join("|");
+
             resolve({
               zonecode: zoneDigits.length === 5 ? zoneDigits : null,
               legalDongCode: normalizeTargetLegalDongCode(address.b_code),
+              regionNameKey,
               platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
               parcelMainNo: normalizeParcelNo(address.main_address_no),
               parcelSubNo: normalizeParcelNo(address.sub_address_no),
@@ -2662,15 +2681,50 @@
 
         const plan = buildScopeDiscoveryPoints(feature);
         const parcelMap = new Map();
+        const legalDongPromiseByRegion = new Map();
         let cursor = 0;
         let reverseSuccessCount = 0;
+        let legalDongLookupCount = 0;
+        let legalDongLookupSuccessCount = 0;
+        let legalDongPointCount = 0;
+        let invalidParcelKeyCount = 0;
+        let parcelKeyPointCount = 0;
         let exactZipHitCount = 0;
-        let noZipInteriorHitCount = 0;
+        let interiorHitCount = 0;
+        let postcodeMismatchInteriorHitCount = 0;
+        let scopeRejectedCount = 0;
+
+        async function resolvePointLegalDongCode(point, reverse) {
+          const direct = normalizeTargetLegalDongCode(reverse?.legalDongCode);
+          if (direct) return direct;
+
+          const regionKey = String(reverse?.regionNameKey || "").trim();
+          if (!regionKey) {
+            legalDongLookupCount += 1;
+            const code = await coordToLegalDongRegionCode(point).catch(() => "");
+            if (code) legalDongLookupSuccessCount += 1;
+            return code;
+          }
+
+          let pending = legalDongPromiseByRegion.get(regionKey);
+          if (!pending) {
+            legalDongLookupCount += 1;
+            pending = coordToLegalDongRegionCode(point)
+              .then((code) => {
+                if (code) legalDongLookupSuccessCount += 1;
+                return code || "";
+              })
+              .catch(() => "");
+            legalDongPromiseByRegion.set(regionKey, pending);
+          }
+          return await pending;
+        }
 
         async function worker() {
           while (true) {
             const index = cursor++;
             if (index >= plan.points.length) return;
+
             const point = plan.points[index];
             const reverse = await reverseAddressMetaFromPoint(point.lng, point.lat).catch(() => null);
             if (BUILDING_SCOPE_DISCOVERY_DELAY_MS > 0) {
@@ -2679,15 +2733,48 @@
             if (!reverse) continue;
             reverseSuccessCount += 1;
 
-            const key = scopeParcelKey(reverse);
-            if (!key) continue;
+            const legalDongCode = await resolvePointLegalDongCode(point, reverse);
+            if (!legalDongCode) {
+              invalidParcelKeyCount += 1;
+              continue;
+            }
+            legalDongPointCount += 1;
+
+            const normalizedReverse = {
+              ...reverse,
+              legalDongCode
+            };
+            const key = scopeParcelKey(normalizedReverse);
+            if (!key) {
+              invalidParcelKeyCount += 1;
+              continue;
+            }
+            parcelKeyPointCount += 1;
+
             const exactZip = String(reverse.zonecode || "") === String(zip);
             const boundaryDistance = featureBoundaryDistanceMeters(feature, point.lng, point.lat);
-            const interiorVerified = !reverse.zonecode && boundaryDistance >= Math.max(7, Number(plan.spacingMeters || 0) * 0.55);
-            if (!exactZip && !interiorVerified) continue;
+            const interiorThresholdMeters = Math.max(
+              6,
+              Number(plan.spacingMeters || 0) * 0.45
+            );
+            // 우편번호가 비어 있거나 인접 도로의 우편번호가 반환되더라도,
+            // 실제 표본 좌표가 폴리곤 경계에서 충분히 안쪽이면 해당 필지를 인정한다.
+            const interiorVerified = boundaryDistance >= interiorThresholdMeters;
+
+            if (!exactZip && !interiorVerified) {
+              scopeRejectedCount += 1;
+              continue;
+            }
 
             if (exactZip) exactZipHitCount += 1;
-            else noZipInteriorHitCount += 1;
+            if (interiorVerified) interiorHitCount += 1;
+            if (
+              reverse.zonecode &&
+              String(reverse.zonecode) !== String(zip) &&
+              interiorVerified
+            ) {
+              postcodeMismatchInteriorHitCount += 1;
+            }
 
             const previous = parcelMap.get(key);
             if (previous) {
@@ -2698,13 +2785,15 @@
                 previous.lat = point.lat;
                 previous.lng = point.lng;
                 previous.boundaryDistanceMeters = boundaryDistance;
+                previous.zonecode = reverse.zonecode || previous.zonecode || null;
+                previous.matchedAddress = reverse.matchedAddress || previous.matchedAddress || null;
               }
               continue;
             }
 
             parcelMap.set(key, {
               key,
-              legalDongCode: reverse.legalDongCode,
+              legalDongCode,
               platGbCd: reverse.platGbCd || "0",
               parcelMainNo: reverse.parcelMainNo,
               parcelSubNo: reverse.parcelSubNo,
@@ -2731,17 +2820,31 @@
           diagnostics: {
             sampleCount: plan.points.length,
             reverseSuccessCount,
+            legalDongLookupCount,
+            legalDongLookupSuccessCount,
+            legalDongPointCount,
+            invalidParcelKeyCount,
+            parcelKeyPointCount,
             exactZipHitCount,
-            noZipInteriorHitCount,
+            interiorHitCount,
+            postcodeMismatchInteriorHitCount,
+            scopeRejectedCount,
             parcelCount: parcelMap.size,
+            regionCacheCount: legalDongPromiseByRegion.size,
             spacingMeters: Number.isFinite(plan.spacingMeters)
               ? Math.round(plan.spacingMeters * 10) / 10
               : null,
             areaM2: Math.round(Number(plan.areaM2 || 0)),
           }
         };
+
         state.scopeParcelsByZip.set(zip, result);
-        console.info("[BUILDING_SCOPE_PARCELS]", zip, result.diagnostics, result.parcels.slice(0, 20));
+        console.info(
+          "[BUILDING_SCOPE_PARCELS]",
+          zip,
+          result.diagnostics,
+          result.parcels.slice(0, 20)
+        );
         return result;
       }
 
@@ -3064,7 +3167,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 75,
-            scopeMatchMode: "V18_POLYGON_SCOPE_PARCEL_DISCOVERY",
+            scopeMatchMode: "V19_REGION_CODE_PARCEL_DISCOVERY",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3081,7 +3184,7 @@
             scopeDiscovery = await discoverScopeParcels(zip, feature, force === true);
             if (!scopeDiscovery.parcels.length) {
               throw new Error(
-                `폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${scopeDiscovery.diagnostics.sampleCount.toLocaleString("ko-KR")}개 / 역지오코딩 ${scopeDiscovery.diagnostics.reverseSuccessCount.toLocaleString("ko-KR")}건`
+                `폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${scopeDiscovery.diagnostics.sampleCount.toLocaleString("ko-KR")}개 / 역지오코딩 ${scopeDiscovery.diagnostics.reverseSuccessCount.toLocaleString("ko-KR")}건 / 법정동확인 ${scopeDiscovery.diagnostics.legalDongPointCount.toLocaleString("ko-KR")}건 / 필지키 ${scopeDiscovery.diagnostics.parcelKeyPointCount.toLocaleString("ko-KR")}건`
               );
             }
 

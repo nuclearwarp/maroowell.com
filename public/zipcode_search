@@ -1317,6 +1317,24 @@
       color:#b91c1c;
     }
 
+    .buildingStatsQuality{
+      margin-top:7px;
+      padding:7px 9px;
+      border:1px solid #dbe3ef;
+      border-radius:10px;
+      background:#f8fafc;
+      color:#475569;
+      font-size:9px;
+      font-weight:950;
+      line-height:1.45;
+    }
+
+    .buildingStatsQuality.warn{
+      border-color:#fde68a;
+      background:#fffbeb;
+      color:#92400e;
+    }
+
     .terrainRetry{
       min-height:28px;
       margin-top:8px;
@@ -2296,6 +2314,21 @@
           matchedBuildingCount: number("matchedBuildingCount", "matched_building_count"),
           exclusiveUnitRecordCount: number("exclusiveUnitRecordCount", "exclusive_unit_record_count"),
           coveragePercent: number("coveragePercent", "coverage_percent"),
+          elevatorBuildingCount: number("elevatorBuildingCount", "elevator_building_count"),
+          noElevatorBuildingCount: number("noElevatorBuildingCount", "no_elevator_building_count"),
+          unknownElevatorBuildingCount: number("unknownElevatorBuildingCount", "unknown_elevator_building_count"),
+          authoritativeUnitCount: Number(
+            source?.breakdown?.dataQuality?.authoritativeUnitCount ??
+            source?.breakdown?.data_quality?.authoritative_unit_count ??
+            deliveryUnitCount ?? 0
+          ),
+          estimatedUnitCount: Number(
+            source?.breakdown?.dataQuality?.estimatedUnitCount ??
+            source?.breakdown?.data_quality?.estimated_unit_count ??
+            0
+          ),
+          dataQuality: source?.breakdown?.dataQuality ?? source?.breakdown?.data_quality ?? null,
+          breakdown: source?.breakdown ?? null,
           unitAnalysisVersion: source?.unitAnalysisVersion ?? source?.unit_analysis_version ?? null,
           calculatedAt: source?.calculatedAt ?? source?.calculated_at ?? null,
           expiresAt: source?.expiresAt ?? source?.expires_at ?? null,
@@ -3173,7 +3206,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 75,
-            scopeMatchMode: "V19_REGION_CODE_PARCEL_DISCOVERY",
+            scopeMatchMode: "V21_BULK_EXCLUSIVE_VALIDATION",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3321,6 +3354,8 @@
             breakdown: data?.buildingStats?.breakdown,
             kaptDiagnostics: data?.buildingStats?.breakdown?.kapt?.complexes || [],
             parcelDiagnostics: data?.buildingStats?.breakdown?.source?.parcelQueries || [],
+            dataQuality: data?.buildingStats?.breakdown?.dataQuality || null,
+            bulkExclusive: data?.buildingStats?.breakdown?.source?.bulkExclusive || null,
             warning: data?.warning || null
           });
 
@@ -3465,6 +3500,12 @@
             const inferredElevatorUnits = Number(building.inferredElevatorUnitCount || 0);
             const noElevatorUnits = Number(building.noElevatorUnitCount || 0);
             const unknownElevatorUnits = Number(building.unknownElevatorUnitCount || 0);
+            const authoritativeUnits = Number(building.authoritativeUnitCount ?? totalUnits);
+            const estimatedUnits = Number(building.estimatedUnitCount || 0);
+            const elevatorBuildings = Number(building.elevatorBuildingCount || 0);
+            const noElevatorBuildings = Number(building.noElevatorBuildingCount || 0);
+            const unknownElevatorBuildings = Number(building.unknownElevatorBuildingCount || 0);
+            const qualityClass = estimatedUnits > 0 ? " warn" : "";
 
             buildingHtml = `
               <div class="buildingStatsGrid">
@@ -3508,6 +3549,10 @@
                   <strong>${formatDeliveryUnitCount(unknownElevatorUnits)}</strong>
                   <small>${formatUnitPercent(unknownElevatorUnits, totalUnits)}</small>
                 </div>
+              </div>
+              <div class="buildingStatsQuality${qualityClass}">
+                호수 검증 · 확정 ${formatDeliveryUnitCount(authoritativeUnits)} · 추정 ${formatDeliveryUnitCount(estimatedUnits)}<br/>
+                엘베 건물 · 있음/추정 ${formatBuildingCount(elevatorBuildings)} · 없음 ${formatBuildingCount(noElevatorBuildings)} · 미확인 ${formatBuildingCount(unknownElevatorBuildings)}
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}${escapeTerrainHtml(coverageText)}</div>`;
           } else {

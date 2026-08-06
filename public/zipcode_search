@@ -1442,7 +1442,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V14 title baseline fallback");
+      console.log("[mw] zipcode_search loaded white design · building V15 response + unit-register fallback");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -2805,7 +2805,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 75,
-            scopeMatchMode: "VERIFIED_PARCEL_POLYGON_FIRST_TITLE_BASELINE"
+            scopeMatchMode: "V15_RESPONSE_UNIT_REGISTER_FALLBACK"
           };
 
           let data = await postBuildingStats(session, basePayload);
@@ -2877,13 +2877,34 @@
           const deliveryCount = Number(data?.buildingStats?.deliveryUnitCount || 0);
           const diagnostics = data?.buildingStats?.breakdown || data?.diagnostics || null;
           if (deliveryCount === 0) {
+            const breakdown = diagnostics?.breakdown || diagnostics || {};
+            const kapt = breakdown?.kapt || {};
+            const source = breakdown?.source || {};
+            const unitDiagnostics = source?.unitDiagnostics || {};
+            const matchedRows = Number(
+              diagnostics?.matchedBuildingRows ??
+              source?.matchedTitleRowCount ??
+              data?.diagnostics?.matchedBuildingRows ??
+              0
+            );
+            const detail = [
+              `표제부 ${matchedRows}건`,
+              `K-APT ${Number(kapt?.complexCount || 0)}단지/${Number(kapt?.householdCount || 0)}호`,
+              `전유부 ${Number(unitDiagnostics?.exposRows || 0)}건`,
+              `전유공용 ${Number(unitDiagnostics?.areaRows || 0)}건`,
+              `총괄표제 ${Number(unitDiagnostics?.recapRows || 0)}건`,
+              `주택가격 ${Number(unitDiagnostics?.housePriceRows || 0)}건`,
+            ].join(" · ");
+
             console.error("[BUILDING_STATS_ZERO_DIAGNOSTICS]", zip, {
               diagnostics,
+              kaptDiagnostics: kapt?.complexes || [],
+              parcelDiagnostics: source?.parcelQueries || [],
               response: data,
             });
             throw new Error(
               data?.error ||
-              "건물대장에 매칭된 행은 있지만 세대수·가구수·호수·전유호 정보가 모두 비어 있습니다. 콘솔의 BUILDING_STATS_ZERO_DIAGNOSTICS를 확인해주세요."
+              `배송호수 원천 연결 실패 (${detail}). 콘솔 BUILDING_STATS_ZERO_DIAGNOSTICS에서 K-APT와 필지별 API 응답을 확인해주세요.`
             );
           }
 
@@ -2895,6 +2916,8 @@
             commercialUnitCount: data?.buildingStats?.commercialUnitCount,
             coveragePercent: data?.buildingStats?.coveragePercent,
             breakdown: data?.buildingStats?.breakdown,
+            kaptDiagnostics: data?.buildingStats?.breakdown?.kapt?.complexes || [],
+            parcelDiagnostics: data?.buildingStats?.breakdown?.source?.parcelQueries || [],
             warning: data?.warning || null
           });
 

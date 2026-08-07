@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V28 mixed-use/detail continuation");
+      console.log("[mw] zipcode_search loaded white design · building V29 full scope/direct parcel detail");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1753,7 +1753,8 @@
       const BUILDING_GEOCODE_CONCURRENCY = 2;
       const BUILDING_GEOCODE_DELAY_MS = 140;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
-      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 12;
+      const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
+      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 48;
       const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
       const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 4;
       const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 35;
@@ -3275,7 +3276,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 95,
-            scopeMatchMode: "V28_MIXEDUSE_DETAIL_CONTINUATION",
+            scopeMatchMode: "V29_FULL_SCOPE_PARCEL_DETAIL",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3304,6 +3305,47 @@
               scopeParcelDiscovery: scopeDiscovery.diagnostics,
               locationSource: "KAKAO_POLYGON_REVERSE_PARCEL"
             });
+          }
+
+          // V29: 폴리곤에서 발견한 필지를 12개씩 직접 표제부 조회해 끝까지 확인한다.
+          // 이전 V28은 첫 12필지만 확인해 33필지 중 11동만 살아남는 경우가 있었다.
+          let scopeTitleEvidence = Array.isArray(data?.scopeTitleContinuation?.evidence)
+            ? data.scopeTitleContinuation.evidence
+            : [];
+          for (
+            let titleRound = 0;
+            data?.requiresScopeTitleContinuation === true &&
+              titleRound < BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS;
+            titleRound++
+          ) {
+            const progress = data?.progress || data?.scopeTitleContinuation || {};
+            const processed = Number(progress.processedParcelCount || scopeTitleEvidence.length || 0);
+            const remaining = Number(progress.remainingParcelCount || 0);
+            const total = Number(progress.totalDirectParcelCount || processed + remaining || 0);
+            state.buildingStatusByZip.set(zip, {
+              state: "loading",
+              message: `건축물대장 필지 확인 ${Math.min(processed, total || processed).toLocaleString("ko-KR")}/${(total || processed + remaining).toLocaleString("ko-KR")}필지 · 다음 배치 분석 중`
+            });
+            renderTerrainList();
+
+            data = await postBuildingStats(session, {
+              ...basePayload,
+              forceRefresh: false,
+              force_refresh: false,
+              scopeParcels: scopeDiscovery?.parcels || undefined,
+              scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              scopeTitleEvidence,
+              locationSource: "KAKAO_POLYGON_REVERSE_PARCEL"
+            });
+
+            if (Array.isArray(data?.scopeTitleContinuation?.evidence)) {
+              scopeTitleEvidence = data.scopeTitleContinuation.evidence;
+            }
+          }
+
+          if (data?.requiresScopeTitleContinuation === true) {
+            const remaining = Number(data?.scopeTitleContinuation?.remainingParcelCount || 0);
+            throw new Error(`폴리곤 필지 표제부 확인을 완료하지 못했습니다. 남은 필지 ${remaining.toLocaleString("ko-KR")}건`);
           }
 
           const locationsByKey = new Map();
@@ -3340,6 +3382,7 @@
               buildingLocations: [...locationsByKey.values()],
               scopeParcels: scopeDiscovery?.parcels || undefined,
               scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              scopeTitleEvidence,
               locationSource: scopeDiscovery?.parcels?.length
                 ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
                 : "KAKAO_JS_GEOCODER"
@@ -3361,6 +3404,7 @@
               buildingLocations: [...locationsByKey.values()],
               scopeParcels: scopeDiscovery?.parcels || undefined,
               scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              scopeTitleEvidence,
               locationSource: scopeDiscovery?.parcels?.length
                 ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
                 : "KAKAO_JS_GEOCODER"
@@ -3375,8 +3419,8 @@
             throw new Error(`건물주소 확인을 완료하지 못했습니다.${coverageText}`);
           }
 
-          // V28: 한 Worker invocation에서 상세 필지를 전부 조회하면 Cloudflare
-          // subrequest 한도를 넘을 수 있다. 백엔드가 4필지 단위 증거를 돌려주면
+          // V29: 폴리곤 매칭 필지를 모두 직접 상세조회하되 Cloudflare
+          // subrequest 한도를 넘지 않도록 백엔드가 6필지 단위 증거를 돌려주면
           // 프론트가 그 증거를 다시 보내 다음 배치를 자동으로 이어서 처리한다.
           let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)
             ? data.detailContinuation.evidence
@@ -3392,7 +3436,7 @@
             const total = Number(progress.totalDetailParcelCount || processed + remaining || 0);
             state.buildingStatusByZip.set(zip, {
               state: "loading",
-              message: `상가·오피스텔 상세조회 ${Math.min(processed, total || processed).toLocaleString("ko-KR")}/${(total || processed + remaining).toLocaleString("ko-KR")}필지 · 다음 배치 분석 중`
+              message: `건물·상가 전유부 상세조회 ${Math.min(processed, total || processed).toLocaleString("ko-KR")}/${(total || processed + remaining).toLocaleString("ko-KR")}필지 · 다음 배치 분석 중`
             });
             renderTerrainList();
 
@@ -3405,6 +3449,7 @@
               buildingLocations: [...locationsByKey.values()],
               scopeParcels: scopeDiscovery?.parcels || undefined,
               scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              scopeTitleEvidence,
               locationSource: scopeDiscovery?.parcels?.length
                 ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
                 : "KAKAO_JS_GEOCODER",

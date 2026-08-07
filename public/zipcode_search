@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V23 elevator reconcile");
+      console.log("[mw] zipcode_search loaded white design · building V25 full building scope validation");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1746,7 +1746,7 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-06-terrain-building-stats-v19";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-07-terrain-building-stats-v25";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
@@ -2984,11 +2984,23 @@
         if (parcelTarget && targetLegalDongCode && !legalMatch) score -= 800;
         if (parcelTarget && targetMainNo !== "0" && !mainMatch) score -= 800;
 
-        const accepted = parcelTarget
-          ? (parcelIdentity || (inside && legalMatch && addressVerified))
-          : (addressVerified && (inside || exactZip));
+        // V25: 지오코딩 단계와 폴리곤 포함 판정을 분리한다.
+        // 이전에는 폴리곤 밖 후보를 프론트에서 버려서 백엔드가
+        // "정상 지오코딩된 외부 건물"과 "주소검색 실패 건물"을 구분할 수 없었다.
+        // 이제 주소/필지 식별이 된 좌표는 외부라도 백엔드로 보내고,
+        // 최종 포함 여부는 백엔드의 point-in-polygon 판정이 결정한다.
+        const relaxedParcelIdentity = (
+          parcelTarget &&
+          legalMatch &&
+          mainMatch &&
+          addressVerified
+        );
+        const strongAddressMatch = addressVerified && textScore >= 40;
+        const geocodeResolved = parcelTarget
+          ? (parcelIdentity || relaxedParcelIdentity || strongAddressMatch)
+          : addressVerified;
 
-        if (!accepted) return null;
+        if (!geocodeResolved) return null;
 
         return {
           lat,
@@ -3003,11 +3015,18 @@
           insidePolygon: inside,
           exactZip,
           matchScore: score,
+          relaxedParcelIdentity,
+          insidePolygon: inside,
+          exactZip,
           matchType: parcelIdentity
             ? "PARCEL_IDENTITY"
-            : inside
-              ? "POLYGON_VERIFIED_ADDRESS"
-              : "POSTCODE_VERIFIED_ADDRESS",
+            : relaxedParcelIdentity
+              ? "PARCEL_IDENTITY_RELAXED"
+              : inside
+                ? "POLYGON_STRONG_ADDRESS"
+                : exactZip
+                  ? "POSTCODE_STRONG_ADDRESS"
+                  : "RESOLVED_OUTSIDE_SCOPE",
         };
       }
 
@@ -3081,6 +3100,9 @@
           matchedAddress: point.matchedAddress,
           identityVerified: point.identityVerified === true,
           addressVerified: point.addressVerified === true,
+          relaxedParcelIdentity: point.relaxedParcelIdentity === true,
+          insidePolygon: point.insidePolygon === true,
+          exactZip: point.exactZip === true,
           matchScore: point.matchScore,
           matchType: point.matchType,
         };
@@ -3131,6 +3153,17 @@
         );
 
         await Promise.all(Array.from({ length: workerCount }, worker));
+
+        const insideCount = results.filter((row) => row?.insidePolygon === true).length;
+        const outsideResolvedCount = Math.max(0, results.length - insideCount);
+        console.info("[BUILDING_GEOCODE_SUMMARY]", zip, {
+          requested: uniqueTargets.length,
+          resolved: results.length,
+          unresolved: Math.max(0, uniqueTargets.length - results.length),
+          insidePolygon: insideCount,
+          resolvedOutsidePolygon: outsideResolvedCount,
+        });
+
         return results;
       }
 
@@ -3225,8 +3258,8 @@
             forceRefresh: force === true,
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
-            minCoveragePercent: 75,
-            scopeMatchMode: "V21_BULK_EXCLUSIVE_VALIDATION",
+            minCoveragePercent: 95,
+            scopeMatchMode: "V25_FULL_BUILDING_GEOCODE_VALIDATION",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3364,6 +3397,9 @@
             );
           }
 
+          console.info("[BUILDING_SCOPE_RESULT]", zip,
+            data?.buildingStats?.breakdown?.algorithm?.scope || null
+          );
           console.info("[BUILDING_ELEVATOR_RESULT]", zip,
             data?.buildingStats?.breakdown?.elevator || null
           );

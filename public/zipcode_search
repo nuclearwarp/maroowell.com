@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V27 scope/unit/elevator reconcile");
+      console.log("[mw] zipcode_search loaded white design · building V28 mixed-use/detail continuation");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1746,13 +1746,14 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-08-terrain-building-stats-v26";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-08-terrain-building-stats-v28";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
       const BUILDING_GEOCODE_CONCURRENCY = 2;
       const BUILDING_GEOCODE_DELAY_MS = 140;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
+      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 12;
       const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
       const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 4;
       const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 35;
@@ -3274,7 +3275,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 95,
-            scopeMatchMode: "V27_SCOPE_UNIT_ELEVATOR_RECONCILE",
+            scopeMatchMode: "V28_MIXEDUSE_DETAIL_CONTINUATION",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3372,6 +3373,52 @@
               ? ` 현재 건물주소 확인율 ${coverage.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%.`
               : "";
             throw new Error(`건물주소 확인을 완료하지 못했습니다.${coverageText}`);
+          }
+
+          // V28: 한 Worker invocation에서 상세 필지를 전부 조회하면 Cloudflare
+          // subrequest 한도를 넘을 수 있다. 백엔드가 4필지 단위 증거를 돌려주면
+          // 프론트가 그 증거를 다시 보내 다음 배치를 자동으로 이어서 처리한다.
+          let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)
+            ? data.detailContinuation.evidence
+            : [];
+          for (
+            let detailRound = 0;
+            data?.requiresDetailContinuation === true && detailRound < BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS;
+            detailRound++
+          ) {
+            const progress = data?.progress || data?.detailContinuation || {};
+            const processed = Number(progress.processedParcelCount || detailEvidence.length || 0);
+            const remaining = Number(progress.remainingParcelCount || 0);
+            const total = Number(progress.totalDetailParcelCount || processed + remaining || 0);
+            state.buildingStatusByZip.set(zip, {
+              state: "loading",
+              message: `상가·오피스텔 상세조회 ${Math.min(processed, total || processed).toLocaleString("ko-KR")}/${(total || processed + remaining).toLocaleString("ko-KR")}필지 · 다음 배치 분석 중`
+            });
+            renderTerrainList();
+
+            data = await postBuildingStats(session, {
+              ...basePayload,
+              forceRefresh: false,
+              force_refresh: false,
+              allowPartial: true,
+              allow_partial: true,
+              buildingLocations: [...locationsByKey.values()],
+              scopeParcels: scopeDiscovery?.parcels || undefined,
+              scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              locationSource: scopeDiscovery?.parcels?.length
+                ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
+                : "KAKAO_JS_GEOCODER",
+              detailEvidence
+            });
+
+            if (Array.isArray(data?.detailContinuation?.evidence)) {
+              detailEvidence = data.detailContinuation.evidence;
+            }
+          }
+
+          if (data?.requiresDetailContinuation === true) {
+            const remaining = Number(data?.detailContinuation?.remainingParcelCount || 0);
+            throw new Error(`상세 필지 분석을 완료하지 못했습니다. 남은 필지 ${remaining.toLocaleString("ko-KR")}건`);
           }
 
           if (!data?.buildingStats) {

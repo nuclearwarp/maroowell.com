@@ -2,6 +2,22 @@
   if (!location.pathname.startsWith("/zipcode_search")) return;
 
   const STYLE_ID = "zipcode-search-elevator-runtime-style";
+  const BUILDING_LOG_PREFIX = /^\[BUILDING_/;
+
+  function suppressBuildingConsoleNoise() {
+    for (const method of ["info", "warn", "error"]) {
+      const original = console?.[method];
+      if (typeof original !== "function" || original.__mwBuildingFiltered) continue;
+
+      const wrapped = function (...args) {
+        const first = String(args?.[0] ?? "");
+        if (BUILDING_LOG_PREFIX.test(first)) return;
+        return original.apply(console, args);
+      };
+      wrapped.__mwBuildingFiltered = true;
+      console[method] = wrapped;
+    }
+  }
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -14,13 +30,6 @@
       }
     `;
     document.head.appendChild(style);
-  }
-
-  function numericMetricValue(metric) {
-    const strong = metric?.querySelector("strong");
-    const digits = String(strong?.textContent || "").replace(/[^0-9.-]/g, "");
-    const value = Number(digits);
-    return Number.isFinite(value) ? value : null;
   }
 
   function normalizeElevatorLabels(root = document) {
@@ -44,15 +53,15 @@
         return;
       }
 
-      // V36부터 추정값은 O 판정에 사용하지 않는다.
-      // 과거 캐시나 전환 중 응답에서 0호 추정 카드가 남는 경우만 숨긴다.
-      if (text === "엘베 추정" && numericMetricValue(metric) === 0) {
+      // V36부터 추정값은 실제 O 판정에 쓰지 않으므로 UI에서도 제거한다.
+      if (text === "엘베 추정") {
         metric.hidden = true;
       }
     });
   }
 
   function start() {
+    suppressBuildingConsoleNoise();
     normalizeElevatorLabels(document);
 
     const observer = new MutationObserver((mutations) => {
@@ -70,6 +79,8 @@
       subtree: true,
     });
   }
+
+  suppressBuildingConsoleNoise();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });

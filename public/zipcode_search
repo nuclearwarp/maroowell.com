@@ -1272,6 +1272,16 @@
       color:#c2410c;
     }
 
+    .buildingStatsMetric.elevatorYes{
+      border-color:#bfdbfe;
+      background:#eff6ff;
+    }
+
+    .buildingStatsMetric.elevatorYes span,
+    .buildingStatsMetric.elevatorYes strong{
+      color:#2563eb;
+    }
+
     .terrainCard{
       cursor:pointer;
       transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
@@ -1460,9 +1470,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V32 phased K-APT/detail budget");
-
-      const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
+            const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
       const LOGIN_PATH = (PATHS?.login || "/");
 
@@ -1746,7 +1754,7 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v32";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v36";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
@@ -2918,12 +2926,6 @@
         };
 
         state.scopeParcelsByZip.set(zip, result);
-        console.info(
-          "[BUILDING_SCOPE_PARCELS]",
-          zip,
-          result.diagnostics,
-          result.parcels.slice(0, 20)
-        );
         return result;
       }
 
@@ -3176,13 +3178,6 @@
 
         const insideCount = results.filter((row) => row?.insidePolygon === true).length;
         const outsideResolvedCount = Math.max(0, results.length - insideCount);
-        console.info("[BUILDING_GEOCODE_SUMMARY]", zip, {
-          requested: uniqueTargets.length,
-          resolved: results.length,
-          unresolved: Math.max(0, uniqueTargets.length - results.length),
-          insidePolygon: insideCount,
-          resolvedOutsidePolygon: outsideResolvedCount,
-        });
 
         return results;
       }
@@ -3231,12 +3226,6 @@
             );
 
             if (!transient || attempt >= BUILDING_STATS_FETCH_RETRY_COUNT) throw error;
-
-            console.warn("[BUILDING_STATS_RETRY]", {
-              attempt: attempt + 1,
-              maxRetry: BUILDING_STATS_FETCH_RETRY_COUNT,
-              message
-            });
             await new Promise((resolve) =>
               setTimeout(resolve, BUILDING_STATS_FETCH_RETRY_DELAY_MS * (attempt + 1))
             );
@@ -3572,40 +3561,11 @@
               `총괄표제 ${Number(unitDiagnostics?.recapRows || 0)}건`,
               `주택가격 ${Number(unitDiagnostics?.housePriceRows || 0)}건`,
             ].join(" · ");
-
-            console.error("[BUILDING_STATS_ZERO_DIAGNOSTICS]", zip, {
-              diagnostics,
-              kaptDiagnostics: kapt?.complexes || [],
-              parcelDiagnostics: source?.parcelQueries || [],
-              response: data,
-            });
             throw new Error(
               data?.error ||
-              `배송호수 원천 연결 실패 (${detail}). 콘솔 BUILDING_STATS_ZERO_DIAGNOSTICS에서 폴리곤 필지 직접조회와 K-APT 응답을 확인해주세요.`
+              `배송호수 원천 연결 실패 (${detail}). 원천 데이터 연결 상태를 확인해주세요.`
             );
           }
-
-          console.info("[BUILDING_SCOPE_RESULT]", zip,
-            data?.buildingStats?.breakdown?.algorithm?.scope || null
-          );
-          console.info("[BUILDING_ELEVATOR_RESULT]", zip,
-            data?.buildingStats?.breakdown?.elevator || null
-          );
-
-          console.info("[BUILDING_STATS_RESULT]", zip, {
-            sourceVersion: data?.buildingStats?.sourceVersion,
-            unitAnalysisVersion: data?.buildingStats?.unitAnalysisVersion,
-            deliveryUnitCount: data?.buildingStats?.deliveryUnitCount,
-            residentialUnitCount: data?.buildingStats?.residentialUnitCount,
-            commercialUnitCount: data?.buildingStats?.commercialUnitCount,
-            coveragePercent: data?.buildingStats?.coveragePercent,
-            breakdown: data?.buildingStats?.breakdown,
-            kaptDiagnostics: data?.buildingStats?.breakdown?.kapt?.complexes || [],
-            parcelDiagnostics: data?.buildingStats?.breakdown?.source?.parcelQueries || [],
-            dataQuality: data?.buildingStats?.breakdown?.dataQuality || null,
-            bulkExclusive: data?.buildingStats?.breakdown?.source?.bulkExclusive || null,
-            warning: data?.warning || null
-          });
 
           state.buildingStatsByZip.set(zip, {
             ...data.buildingStats,
@@ -3625,12 +3585,6 @@
         } catch (e) {
           const responseData = e?.responseData || null;
           const diagnostics = responseData?.diagnostics || null;
-          console.warn("[BUILDING_STATS_API] fetch failed", zip, {
-            error: e,
-            responseData,
-            legalDongCodes: diagnostics?.legalDongCodes || null,
-            buildingHubQueries: diagnostics?.buildingHubQueries || null,
-          });
 
           let displayMessage = String(e?.message || e || "배송 호수 분석 실패");
           if (diagnostics?.legalDongCodes?.length) {
@@ -3762,7 +3716,7 @@
             const onePerBuildingSuspicion = building.onePerBuildingSuspicion === true;
             const elevatorSuspicion = (
               totalUnits > 0 &&
-              confirmedElevatorUnits + inferredElevatorUnits === 0 &&
+              confirmedElevatorUnits === 0 &&
               noElevatorUnits >= totalUnits * 0.8 &&
               matchedBuildings >= 4
             );
@@ -3790,18 +3744,13 @@
                   <strong>${formatDeliveryUnitCount(unclassifiedUnits)}</strong>
                   <small>${formatUnitPercent(unclassifiedUnits, totalUnits)}</small>
                 </div>` : ""}
-                <div class="buildingStatsMetric">
-                  <span>엘베 있음</span>
+                <div class="buildingStatsMetric elevatorYes">
+                  <span>엘베 O</span>
                   <strong>${formatDeliveryUnitCount(confirmedElevatorUnits)}</strong>
                   <small>${formatUnitPercent(confirmedElevatorUnits, totalUnits)}</small>
                 </div>
-                <div class="buildingStatsMetric inferred">
-                  <span>엘베 추정</span>
-                  <strong>${formatDeliveryUnitCount(inferredElevatorUnits)}</strong>
-                  <small>${formatUnitPercent(inferredElevatorUnits, totalUnits)}</small>
-                </div>
                 <div class="buildingStatsMetric walkup">
-                  <span>엘베 없음</span>
+                  <span>엘베 X</span>
                   <strong>${formatDeliveryUnitCount(noElevatorUnits)}</strong>
                   <small>${formatUnitPercent(noElevatorUnits, totalUnits)}</small>
                 </div>

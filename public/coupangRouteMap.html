@@ -1958,7 +1958,57 @@
       overflow-wrap:anywhere;
     }
     .buildingStatsMessage.error{border-color:#fecaca;background:#fffafa;color:#b91c1c;}
-    .analysisCalculatedAt{margin-top:6px;color:#94a3b8;font-size:9px;font-weight:900;}
+    .analysisCalculatedAt{margin-top:7px;color:#94a3b8;font-size:9px;font-weight:850;line-height:1.4;}
+
+    /* zipcode_search V40과 동일한 분석 카드 표현 */
+    #terrainInfoGroup .globalAnalysisStatus{display:none !important;}
+    #terrainInfoGroup .terrainResultsList{margin-top:0;gap:10px;}
+    #terrainInfoGroup .terrainRouteCard{
+      padding:12px;
+      border:1px solid #dbe3ef;
+      border-radius:16px;
+      background:linear-gradient(180deg,#ffffff,#f8fafc);
+      box-shadow:0 4px 14px rgba(15,23,42,.05);
+    }
+    #terrainInfoGroup .terrainRouteCardHead{margin-bottom:0;}
+    #terrainInfoGroup .terrainRouteCode{
+      color:#0f172a;
+      font-size:13px;
+      font-weight:1000;
+      letter-spacing:.01em;
+    }
+    #terrainInfoGroup .routeAnalysisBadges{gap:6px;}
+    #terrainInfoGroup .analysisMiniBtn{
+      min-height:23px;
+      padding:0 8px;
+      border-color:#cbd5e1;
+      background:#fff;
+      color:#475569;
+      font-size:9px;
+      box-shadow:none;
+    }
+    #terrainInfoGroup .analysisMiniBtn[data-kind="ok"]{border-color:#86efac;background:#f0fdf4;color:#15803d;}
+    #terrainInfoGroup .analysisMiniBtn[data-kind="loading"]{border-color:#cbd5e1;background:#fff;color:#64748b;}
+    #terrainInfoGroup .analysisMiniBtn[data-kind="error"]{border-color:#cbd5e1;background:#fff;color:#475569;}
+    #terrainInfoGroup .terrainAnalysisBlock{margin-top:9px;}
+    #terrainInfoGroup .terrainCompactRange{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:8px 10px;
+      border:1px solid #bfdbfe;
+      border-radius:12px;
+      background:#eff6ff;
+    }
+    #terrainInfoGroup .terrainCompactRange span{color:#475569;font-size:10px;font-weight:950;line-height:1.25;}
+    #terrainInfoGroup .terrainCompactRange strong{color:#1d4ed8;font-size:15px;font-weight:1000;line-height:1.15;white-space:nowrap;}
+    #terrainInfoGroup .terrainCompactSlope{margin-top:8px;padding-top:1px;}
+    #terrainInfoGroup .buildingStatsBlock{margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;}
+    #terrainInfoGroup .buildingStatsHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;}
+    #terrainInfoGroup .buildingStatsHead b{color:#334155;font-size:10px;font-weight:1000;}
+    #terrainInfoGroup .analysisRefreshRow{display:none !important;}
+    #terrainInfoGroup .terrainTargetText{font-size:10px;line-height:1.35;}
 
   </style>
 
@@ -2079,14 +2129,14 @@
     <div class="group sectionGroup" id="terrainInfoGroup">
       <button id="terrainInfoToggleBtn" class="sectionHeaderBtn" type="button" aria-expanded="true">
         <span>
-          지형 · 배송호수 · 엘리베이터
-          <small id="terrainTargetText" class="terrainTargetText">캠프·라우트를 불러오면 세부 구역별 자동 조회</small>
+          지형 정보
+          <small id="terrainTargetText" class="terrainTargetText">세부 라우트별 고저차·경사도·배송호수</small>
         </span>
         <span class="sectionToggleText">접기</span>
       </button>
       <div id="terrainInfoBody" class="sectionBody">
-        <div id="terrainStatus" class="terrainStatus">분석할 폴리곤을 불러오세요.</div>
-        <div id="buildingStatus" class="terrainStatus analysisSecondaryStatus">배송호수·엘리베이터 분석을 준비합니다.</div>
+        <div id="terrainStatus" class="terrainStatus globalAnalysisStatus">분석할 폴리곤을 불러오세요.</div>
+        <div id="buildingStatus" class="terrainStatus analysisSecondaryStatus globalAnalysisStatus">배송호수·엘리베이터 분석을 준비합니다.</div>
         <div id="terrainResultsList" class="terrainResultsList"></div>
         <div class="terrainRefreshRow analysisRefreshRow">
           <button id="terrainRefreshBtn" class="btn" type="button">지형 다시 조회</button>
@@ -4587,30 +4637,44 @@
 
     const legalDongCodes=await resolveLegalDongCodesForFeature(feature);
     if(!legalDongCodes.length)throw new Error("건축물 조회에 필요한 법정동 코드를 확인하지 못했습니다.");
-    const basePayload={
-      ...scopePayload,legalDongCodes,legalDongCodeCandidates:legalDongCodes,
-      forceRefresh:force===true,force_refresh:force===true,walkupMinGroundFloors:3,minCoveragePercent:95,
-      scopeMatchMode:"V32_PHASED_KAPT_DETAIL_BUDGET"
-    };
-
-    let data=await postBuildingStats(accessToken,basePayload);
-    let scopeDiscovery=null;
     const updateMessage=message=>{
       const current=buildingResultByRouteKey.get(routeKey)||{};
       buildingResultByRouteKey.set(routeKey,{...current,status:"loading",message});
       renderTerrainCards();
     };
 
+    // zipcode_search V40과 동일하게 캐시 미스 뒤에는 폴리곤 내부 실제 필지를 먼저 확정한다.
+    // Worker의 requiresScopeDiscovery 응답은 zipcode scope에서만 자동 발생하므로,
+    // subsubroute는 프론트에서 선제 discovery 후 scopeParcels를 넘겨 directScopeMode로 진입시킨다.
+    updateMessage("폴리곤 내부 필지를 확인하고 있습니다.");
+    const scopeDiscovery=await discoverScopeParcelsForRoute(memoryKey,feature,force===true);
+    if(!scopeDiscovery.parcels.length){
+      const d=scopeDiscovery.diagnostics;
+      throw new Error(`폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${Number(d.sampleCount||0).toLocaleString("ko-KR")}개 / 역지오코딩 ${Number(d.reverseSuccessCount||0).toLocaleString("ko-KR")}건 / 법정동확인 ${Number(d.legalDongPointCount||0).toLocaleString("ko-KR")}건 / 필지키 ${Number(d.parcelKeyPointCount||0).toLocaleString("ko-KR")}건`);
+    }
+
+    const basePayload={
+      ...scopePayload,
+      legalDongCodes,
+      legalDongCodeCandidates:legalDongCodes,
+      forceRefresh:force===true,
+      force_refresh:force===true,
+      walkupMinGroundFloors:3,
+      minCoveragePercent:95,
+      scopeMatchMode:"V32_PHASED_KAPT_DETAIL_BUDGET",
+      scopeParcels:scopeDiscovery.parcels,
+      scopeParcelDiscovery:scopeDiscovery.diagnostics,
+      locationSource:"KAKAO_POLYGON_REVERSE_PARCEL"
+    };
+
+    let data=await postBuildingStats(accessToken,basePayload);
+
+    // 방어 코드: 백엔드가 discovery를 다시 요구하는 버전이어도 같은 필지 증거로 재요청한다.
     if(data?.requiresScopeDiscovery===true){
-      updateMessage("폴리곤 내부 필지를 확인하고 있습니다.");
-      scopeDiscovery=await discoverScopeParcelsForRoute(memoryKey,feature,force===true);
-      if(!scopeDiscovery.parcels.length){
-        const d=scopeDiscovery.diagnostics;
-        throw new Error(`폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${Number(d.sampleCount||0).toLocaleString("ko-KR")}개 / 역지오코딩 ${Number(d.reverseSuccessCount||0).toLocaleString("ko-KR")}건 / 필지 ${Number(d.parcelKeyPointCount||0).toLocaleString("ko-KR")}건`);
-      }
       data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,scopeParcels:scopeDiscovery.parcels,
-        scopeParcelDiscovery:scopeDiscovery.diagnostics,locationSource:"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL"
+        ...basePayload,
+        forceRefresh:false,
+        force_refresh:false
       });
     }
 
@@ -4694,7 +4758,7 @@
       const breakdown=data?.buildingStats?.breakdown||data?.diagnostics||{};
       const kapt=breakdown?.kapt||{}, source=breakdown?.source||{}, unitDiagnostics=source?.unitDiagnostics||{};
       const matchedRows=Number(breakdown?.matchedBuildingRows??source?.matchedTitleRowCount??data?.diagnostics?.matchedBuildingRows??0);
-      const detail=[`표제부 ${matchedRows}건`,`K-APT ${Number(kapt?.complexCount||0)}단지/${Number(kapt?.householdCount||0)}호`,`전유부 ${Number(unitDiagnostics?.exposRows||0)}건`,`전유공용 ${Number(unitDiagnostics?.areaRows||0)}건`].join(" · ");
+      const detail=[`필지 ${Number(scopeDiscovery?.parcels?.length||0)}건`,`표제부 ${matchedRows}건`,`K-APT ${Number(kapt?.complexCount||0)}단지/${Number(kapt?.householdCount||0)}호`,`전유부 ${Number(unitDiagnostics?.exposRows||0)}건`,`전유공용 ${Number(unitDiagnostics?.areaRows||0)}건`].join(" · ");
       throw new Error(data?.error||`배송호수 원천 연결 실패 (${detail}).`);
     }
     return {status:"ok",data,target,memoryKey};
@@ -4802,123 +4866,67 @@
   }
 
   function analysisMiniState(item, type){
+    const isTerrain = type === "terrain";
     if (!item){
-      return {
-        kind: "idle",
-        label: type === "terrain" ? "지형 준비" : "세대수 준비",
-        disabled: false
-      };
+      return { kind:"idle", label:isTerrain ? "지형정보 준비" : "세대수 준비", disabled:false };
     }
-
     if (item.status === "checking"){
-      return {
-        kind: "loading",
-        label: type === "terrain" ? "지형 확인중" : "세대수 확인중",
-        disabled: true
-      };
+      return { kind:"loading", label:isTerrain ? "지형정보 확인중.." : "세대수 확인중..", disabled:true };
     }
-
     if (item.status === "loading"){
-      return {
-        kind: "loading",
-        label: type === "terrain" ? "지형 계산중" : "세대수 계산중",
-        disabled: true
-      };
+      return { kind:"loading", label:isTerrain ? "지형정보 계산중.." : "세대수 계산중..", disabled:true };
     }
-
-    if (item.status === "error"){
-      return {
-        kind: "error",
-        label: type === "terrain" ? "지형 실패" : "세대수 실패",
-        disabled: false
-      };
-    }
-
     if (item.status === "ok"){
+      const cached = item.data?.cached === true || item.data?.cacheAvailable === true;
       return {
-        kind: "ok",
-        label: item.data?.cached
-          ? (type === "terrain" ? "지형 캐시" : "세대수 캐시")
-          : (type === "terrain" ? "지형 완료" : "세대수 완료"),
-        disabled: false
+        kind: cached ? "ok" : "idle",
+        label: cached
+          ? (isTerrain ? "지형정보 캐시" : "세대수 캐시")
+          : (isTerrain ? "지형정보 갱신" : "세대수 갱신"),
+        disabled:false
       };
     }
-
-    return {
-      kind: "idle",
-      label: type === "terrain" ? "지형 준비" : "세대수 준비",
-      disabled: false
-    };
+    return { kind:"idle", label:isTerrain ? "지형정보 준비" : "세대수 준비", disabled:false };
   }
 
   function terrainAnalysisHtml(pack, item, code){
     if (!item){
-      return `
-        <div class="terrainStatsGrid">
-          ${terrainAreaStatHtml(pack)}
-        </div>
-        <div class="terrainStatus" style="margin-top:9px;">지형 정보 조회를 준비하고 있습니다.</div>`;
+      return '<div class="terrainMessage">지형정보 조회를 준비하고 있습니다.</div>';
     }
-
     if (item.status === "loading" || item.status === "checking"){
-      return `
-        <div class="terrainStatsGrid">
-          ${terrainAreaStatHtml(pack)}
-        </div>
-        <div class="terrainStatus" data-kind="loading" style="margin-top:9px;">${escapeHtml(code)} 폴리곤을 분석하고 있습니다.</div>`;
+      return '<div class="terrainMessage">구역 고저차와 경사도를 계산하고 있습니다.</div>';
     }
-
     if (item.status === "error"){
-      return `
-        <div class="terrainStatsGrid">
-          ${terrainAreaStatHtml(pack)}
-        </div>
-        <div class="terrainCardError" style="margin-top:9px;">${escapeHtml(item.error || "지형 정보 조회 실패")}</div>`;
+      return `<div class="terrainMessage" style="color:#b91c1c;">${escapeHtml(item.error || "지형 정보 조회 실패")}</div>`;
     }
-
     if (item.status !== "ok"){
-      return `
-        <div class="terrainStatsGrid">
-          ${terrainAreaStatHtml(pack)}
-        </div>
-        <div class="terrainStatus" style="margin-top:9px;">지형 정보 조회를 준비하고 있습니다.</div>`;
+      return '<div class="terrainMessage">지형정보 조회를 준비하고 있습니다.</div>';
     }
 
     const metrics = terrainMetricsFromResponse(item.data);
+    const terrain = item.data?.terrain || item.data?.data || item.data || {};
+    const calculatedAt = terrain?.slope?.calculatedAt ?? terrain?.slope?.calculated_at ?? terrain?.calculatedAt ?? terrain?.calculated_at;
+    const calculatedText = calculatedAt ? new Date(calculatedAt).toLocaleString("ko-KR") : "-";
+
     return `
-      <div class="terrainStatsGrid">
-        ${terrainAreaStatHtml(pack, metrics.polygonAreaM2)}
-        <div class="terrainStat">
-          <div class="terrainStatLabel">최저 표고</div>
-          <div class="terrainStatValue">${formatTerrainNumber(metrics.minElevation, "m")}</div>
-        </div>
-        <div class="terrainStat">
-          <div class="terrainStatLabel">최고 표고</div>
-          <div class="terrainStatValue">${formatTerrainNumber(metrics.maxElevation, "m")}</div>
-        </div>
-        <div class="terrainStat">
-          <div class="terrainStatLabel">평균 표고</div>
-          <div class="terrainStatValue">${formatTerrainNumber(metrics.meanElevation, "m")}</div>
-        </div>
-        <div class="terrainStat is-range">
-          <div class="terrainStatLabel">구역 고저차</div>
-          <div class="terrainStatValue">${formatTerrainNumber(metrics.elevationRange, "m")}</div>
-        </div>
+      <div class="terrainCompactRange">
+        <span>구역 고저차</span>
+        <strong>${formatTerrainNumber(metrics.elevationRange, "m")}</strong>
       </div>
-      <div class="terrainSlopeTitle">경사도 분포</div>
-      ${terrainSlopeHtml("평지", metrics.flatPercent, "flat")}
-      ${terrainSlopeHtml("완경사", metrics.gentlePercent, "gentle")}
-      ${terrainSlopeHtml("급경사", metrics.steepPercent, "steep")}
-      <div class="analysisCalculatedAt">계산 ${escapeHtml((() => {
-        const terrain = item.data?.terrain || item.data?.data || item.data || {};
-        const calculatedAt = terrain?.slope?.calculatedAt ?? terrain?.slope?.calculated_at ?? terrain?.calculatedAt ?? terrain?.calculated_at;
-        return calculatedAt ? new Date(calculatedAt).toLocaleString("ko-KR") : "-";
-      })())}</div>`;
+      <div class="terrainCompactSlope">
+        <div class="terrainSlopeTitle">경사도 분포</div>
+        ${terrainSlopeHtml("평지", metrics.flatPercent, "flat")}
+        ${terrainSlopeHtml("완경사", metrics.gentlePercent, "gentle")}
+        ${terrainSlopeHtml("급경사", metrics.steepPercent, "steep")}
+      </div>
+      <div class="analysisCalculatedAt">계산 ${escapeHtml(calculatedText)}</div>`;
   }
 
   function terrainResultCardHtml(pack, index){
     const routeKey = terrainPackRouteKey(pack, index);
     const code = terrainPackCode(pack);
+    const camp = String(pack?.row?.camp || campInput.value || "").trim();
+    const routeLabel = camp ? `${camp} - ${code}` : code;
     const terrainItem = terrainResultByRouteKey.get(routeKey);
     const buildingItem = buildingResultByRouteKey.get(routeKey);
     const terrainMini = analysisMiniState(terrainItem, "terrain");
@@ -4929,7 +4937,7 @@
     return `
       <div class="terrainRouteCard${selectedClass}" data-terrain-route-id="${escapeHtml(routeKey)}">
         <div class="terrainRouteCardHead">
-          <div class="terrainRouteCode">${escapeHtml(code)}</div>
+          <div class="terrainRouteCode">${escapeHtml(routeLabel)}</div>
           <div class="routeAnalysisBadges">
             <button
               class="analysisMiniBtn"
@@ -4951,12 +4959,11 @@
         </div>
 
         <div class="terrainAnalysisBlock">
-          <div class="analysisSubTitle">지형 정보</div>
           ${terrainAnalysisHtml(pack, terrainItem, code)}
         </div>
 
         <div class="buildingStatsBlock">
-          <div class="analysisSubTitle">배송호수 · 엘리베이터</div>
+          <div class="buildingStatsHead"><b>배송호수·엘리베이터</b></div>
           ${buildingStatsHtml(buildingItem)}
         </div>
       </div>`;
@@ -5053,7 +5060,7 @@
   function clearTerrainDisplay(message="분석할 폴리곤을 불러오세요."){
     terrainRequestSeq += 1;
     terrainResultByRouteKey.clear();
-    if (terrainTargetText) terrainTargetText.textContent = "캠프·라우트를 불러오면 세부 구역별 자동 조회";
+    if (terrainTargetText) terrainTargetText.textContent = "세부 라우트별 고저차·경사도·배송호수";
     setTerrainStatus(message, "idle");
     if (terrainResultsList) terrainResultsList.innerHTML = "";
   }
@@ -5082,7 +5089,7 @@
         ? Number(row.subroute_id)
         : null,
       geometryHash,
-      displayName: [camp, code].filter(Boolean).join(" ") || code,
+      displayName: camp ? `${camp} - ${code}` : code,
       camp,
       code
     };
@@ -5151,7 +5158,7 @@
     const inputCodes = parseCodes(codeInput.value);
     const queryLabel = inputCodes.length ? inputCodes.join(" ") : "전체";
     if (terrainTargetText){
-      terrainTargetText.textContent = `${[camp, queryLabel].filter(Boolean).join(" ")} · ${packs.length}개 세부 구역`;
+      terrainTargetText.textContent = "세부 라우트별 고저차·경사도·배송호수";
     }
 
     for (const [index, pack] of packs.entries()){

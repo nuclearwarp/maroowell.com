@@ -1171,6 +1171,14 @@
       background:#dcfce7;
     }
 
+    .analysisRefresh:disabled{
+      opacity:1;
+      border-color:#cbd5e1;
+      background:#fff;
+      color:#64748b;
+      cursor:default;
+    }
+
     .terrainCompactSlope{
       margin-top:8px;
       padding-top:1px;
@@ -1236,6 +1244,10 @@
     .buildingStatsMetric.commercial{
       border-color:#ddd6fe;
       background:#f5f3ff;
+    }
+
+    .buildingStatsMetric.unclassified{
+      grid-column:1 / -1;
     }
 
     .buildingStatsMetric.inferred{
@@ -1856,7 +1868,7 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v37-cache-apartment-poi";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v38-cache-state-layout";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
@@ -3865,8 +3877,16 @@
           const safeZip = escapeTerrainHtml(zip);
 
           const terrainCached = terrain?.cached === true;
-          const terrainCacheReady = terrain?.cacheAvailable === true || terrainCached;
-          const buildingCacheReady = building?.cacheAvailable === true || building?.cached === true;
+          const terrainLoading = terrainStatus?.state === "loading";
+          const buildingLoading = buildingStatus?.state === "loading" || buildingStatus?.state === "queued";
+          const terrainCacheReady = !terrainLoading && (terrain?.cacheAvailable === true || terrainCached);
+          const buildingCacheReady = !buildingLoading && (building?.cacheAvailable === true || building?.cached === true);
+          const terrainButtonText = terrainLoading
+            ? "지형정보 계산중.."
+            : (terrainCacheReady ? "지형정보 캐시" : (terrain ? "지형정보 갱신" : "지형정보 준비"));
+          const buildingButtonText = buildingLoading
+            ? "세대수 계산중.."
+            : (buildingCacheReady ? "세대수 캐시" : (building ? "세대수 갱신" : "세대수 준비"));
 
           let terrainHtml = "";
           if (terrainStatus?.state === "loading") {
@@ -3961,12 +3981,6 @@
                   <strong>${formatDeliveryUnitCount(commercialUnits)}</strong>
                   <small>${formatUnitPercent(commercialUnits, totalUnits)}</small>
                 </div>
-                ${unclassifiedUnits > 0 ? `
-                <div class="buildingStatsMetric unknown">
-                  <span>용도 미분류</span>
-                  <strong>${formatDeliveryUnitCount(unclassifiedUnits)}</strong>
-                  <small>${formatUnitPercent(unclassifiedUnits, totalUnits)}</small>
-                </div>` : ""}
                 <div class="buildingStatsMetric elevatorYes">
                   <span>엘베 O</span>
                   <strong>${formatDeliveryUnitCount(confirmedElevatorUnits)}</strong>
@@ -3977,6 +3991,12 @@
                   <strong>${formatDeliveryUnitCount(noElevatorUnits)}</strong>
                   <small>${formatUnitPercent(noElevatorUnits, totalUnits)}</small>
                 </div>
+                ${unclassifiedUnits > 0 ? `
+                <div class="buildingStatsMetric unknown unclassified">
+                  <span>용도 미분류</span>
+                  <strong>${formatDeliveryUnitCount(unclassifiedUnits)}</strong>
+                  <small>${formatUnitPercent(unclassifiedUnits, totalUnits)}</small>
+                </div>` : ""}
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}</div>`;
           } else {
@@ -3988,8 +4008,8 @@
               <div class="terrainCardTop">
                 <span class="terrainZip">${safeZip}</span>
                 <div class="terrainCardTopRight">
-                  <button class="analysisRefresh${terrainCacheReady ? " cacheReady" : ""}" type="button" data-terrain-refresh="${safeZip}" ${terrainStatus?.state === "loading" ? "disabled" : ""}>지형정보 캐시</button>
-                  <button class="analysisRefresh${buildingCacheReady ? " cacheReady" : ""}" type="button" data-building-refresh="${safeZip}" ${buildingStatus?.state === "loading" || buildingStatus?.state === "queued" ? "disabled" : ""}>세대수 캐시</button>
+                  <button class="analysisRefresh${terrainCacheReady ? " cacheReady" : ""}" type="button" data-terrain-refresh="${safeZip}" ${terrainLoading ? "disabled" : ""}>${terrainButtonText}</button>
+                  <button class="analysisRefresh${buildingCacheReady ? " cacheReady" : ""}" type="button" data-building-refresh="${safeZip}" ${buildingLoading ? "disabled" : ""}>${buildingButtonText}</button>
                 </div>
               </div>
               ${terrainHtml}

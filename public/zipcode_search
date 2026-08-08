@@ -1157,6 +1157,18 @@
       color:#475569;
       font-size:9px !important;
       box-shadow:none;
+      white-space:nowrap;
+    }
+
+    .analysisRefresh.cacheReady{
+      border-color:#86efac;
+      background:#f0fdf4;
+      color:#15803d;
+    }
+
+    .analysisRefresh.cacheReady:hover{
+      border-color:#4ade80;
+      background:#dcfce7;
     }
 
     .terrainCompactSlope{
@@ -1266,6 +1278,96 @@
     .buildingStatsMetric.total strong{
       color:#047857;
       font-size:14px;
+    }
+
+    .buildingStatsMetric.total .elevatorRate{
+      display:inline;
+      margin-left:5px;
+      color:#2563eb;
+      font-size:10px;
+      font-style:normal;
+      font-weight:1000;
+      white-space:nowrap;
+      vertical-align:1px;
+    }
+
+    .apartmentPoi{
+      width:24px;
+      height:24px;
+      min-height:24px;
+      padding:0;
+      border:2px solid #fff;
+      border-radius:50%;
+      background:#3b82f6;
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow:0 2px 8px rgba(15,23,42,.28);
+      cursor:pointer;
+    }
+
+    .apartmentPoi:hover{
+      background:#2563eb;
+      transform:scale(1.08);
+    }
+
+    .apartmentPoi svg{
+      width:14px;
+      height:14px;
+      display:block;
+      fill:currentColor;
+    }
+
+    .apartmentPopup{
+      position:relative;
+      min-width:170px;
+      max-width:250px;
+      padding:11px 34px 10px 12px;
+      border:1px solid #cbd5e1;
+      border-radius:12px;
+      background:#fff;
+      color:#0f172a;
+      box-shadow:0 10px 28px rgba(15,23,42,.20);
+      font-family:var(--font-mw);
+    }
+
+    .apartmentPopup b{
+      display:block;
+      font-size:11px;
+      font-weight:1000;
+      line-height:1.3;
+    }
+
+    .apartmentPopup strong{
+      display:block;
+      margin-top:5px;
+      color:#2563eb;
+      font-size:14px;
+      font-weight:1000;
+    }
+
+    .apartmentPopup small{
+      display:block;
+      margin-top:4px;
+      color:#64748b;
+      font-size:9px;
+      line-height:1.35;
+    }
+
+    .apartmentPopupClose{
+      position:absolute;
+      top:6px;
+      right:6px;
+      width:24px;
+      height:24px;
+      min-height:24px;
+      padding:0;
+      border:0;
+      background:transparent;
+      color:#64748b;
+      box-shadow:none;
+      font-size:16px !important;
     }
 
     .buildingStatsMetric.walkup strong{
@@ -1754,7 +1856,7 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v36";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v37-cache-apartment-poi";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
       const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
@@ -1838,6 +1940,8 @@
         buildingStatusByZip: new Map(),
         buildingLocationCache: new Map(),
         scopeParcelsByZip: new Map(),
+        apartmentMarkersByZip: new Map(),
+        apartmentPopup: null,
         buildingQueue: Promise.resolve(),
         buildingQueuedZips: new Set(),
         kakaoGeocoder: null,
@@ -1932,6 +2036,7 @@
         // 지도 빈 공간을 누르면 현재 선택된 우편번호를 해제한다.
         // Polygon 클릭도 Kakao Map click으로 이어질 수 있어 짧은 guard를 둔다.
         kakao.maps.event.addListener(state.map, "click", () => {
+          closeApartmentPopup();
           if (state.roadviewOn) return;
           if (Date.now() < Number(state.selectionClickGuardUntil || 0)) return;
           clearZipSelection();
@@ -1951,6 +2056,129 @@
 
           enableMobileMapInteractions();
         });
+      }
+
+      function closeApartmentPopup() {
+        if (!state.apartmentPopup) return;
+        try { state.apartmentPopup.setMap(null); } catch {}
+        state.apartmentPopup = null;
+      }
+
+      function clearApartmentMarkersForZip(zip) {
+        const rows = state.apartmentMarkersByZip.get(zip) || [];
+        rows.forEach((overlay) => {
+          try { overlay.setMap(null); } catch {}
+        });
+        state.apartmentMarkersByZip.delete(zip);
+      }
+
+      function clearAllApartmentMarkers() {
+        for (const zip of [...state.apartmentMarkersByZip.keys()]) {
+          clearApartmentMarkersForZip(zip);
+        }
+        closeApartmentPopup();
+      }
+
+      function apartmentComplexesFromStats(raw) {
+        const stats = raw ? buildingStatsFromResponse(raw) : null;
+        const rows = stats?.breakdown?.kapt?.complexes;
+        if (!Array.isArray(rows)) return [];
+
+        return rows.filter((row) => {
+          const lat = Number(row?.lat);
+          const lng = Number(row?.lng);
+          const households = Number(row?.households);
+          return Number.isFinite(lat) && Number.isFinite(lng) && households > 0;
+        });
+      }
+
+      function showApartmentPopup(complex, position) {
+        closeApartmentPopup();
+        if (!state.map || !position) return;
+
+        const content = document.createElement("div");
+        content.className = "apartmentPopup";
+
+        const name = String(complex?.name || "아파트").trim() || "아파트";
+        const households = Math.max(0, Math.trunc(Number(complex?.households) || 0));
+        const address = String(complex?.address || "").trim();
+        const buildingCount = Math.max(0, Math.trunc(Number(complex?.buildingCount) || 0));
+
+        content.innerHTML = `
+          <button class="apartmentPopupClose" type="button" aria-label="닫기">×</button>
+          <b>${escapeTerrainHtml(name)}</b>
+          <strong>${households.toLocaleString("ko-KR")}세대</strong>
+          ${buildingCount > 0 ? `<small>${buildingCount.toLocaleString("ko-KR")}개동</small>` : ""}
+          ${address ? `<small>${escapeTerrainHtml(address)}</small>` : ""}`;
+
+        content.querySelector(".apartmentPopupClose")?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeApartmentPopup();
+        });
+
+        state.apartmentPopup = new kakao.maps.CustomOverlay({
+          map: state.map,
+          position,
+          content,
+          clickable: true,
+          xAnchor: 0.5,
+          yAnchor: 1.22,
+          zIndex: 10020,
+        });
+      }
+
+      function renderApartmentMarkersForZip(zip) {
+        clearApartmentMarkersForZip(zip);
+        if (!state.map || !state.selectedZips.has(zip)) return;
+
+        const complexes = apartmentComplexesFromStats(state.buildingStatsByZip.get(zip));
+        if (!complexes.length) return;
+
+        const overlays = [];
+        for (const complex of complexes) {
+          const lat = Number(complex.lat);
+          const lng = Number(complex.lng);
+          const position = new kakao.maps.LatLng(lat, lng);
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "apartmentPoi";
+          button.title = `${String(complex?.name || "아파트")} · ${Math.trunc(Number(complex?.households) || 0).toLocaleString("ko-KR")}세대`;
+          button.setAttribute("aria-label", button.title);
+          button.innerHTML = `
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 21V4.5C5 3.67 5.67 3 6.5 3h7C14.33 3 15 3.67 15 4.5V8h2.5c.83 0 1.5.67 1.5 1.5V21h-2v-2h-2v2H5Zm3-14h2V5H8v2Zm4 0h2V5h-2v2ZM8 11h2V9H8v2Zm4 0h2V9h-2v2Zm-4 4h2v-2H8v2Zm4 0h2v-2h-2v2Zm4 0h1v-2h-1v2Z"/>
+            </svg>`;
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            state.selectionClickGuardUntil = Date.now() + 220;
+            showApartmentPopup(complex, position);
+          });
+
+          const overlay = new kakao.maps.CustomOverlay({
+            map: state.map,
+            position,
+            content: button,
+            clickable: true,
+            xAnchor: 0.5,
+            yAnchor: 0.5,
+            zIndex: 9000,
+          });
+          overlays.push(overlay);
+        }
+
+        state.apartmentMarkersByZip.set(zip, overlays);
+      }
+
+      function syncApartmentMarkers() {
+        if (!state.map) return;
+        for (const zip of [...state.apartmentMarkersByZip.keys()]) {
+          if (!state.selectedZips.has(zip)) clearApartmentMarkersForZip(zip);
+        }
+        for (const zip of state.selectedZips) {
+          renderApartmentMarkersForZip(zip);
+        }
       }
 
       function relayoutMapSoon() {
@@ -2379,8 +2607,9 @@
           breakdown: source?.breakdown ?? null,
           unitAnalysisVersion: source?.unitAnalysisVersion ?? source?.unit_analysis_version ?? null,
           calculatedAt: source?.calculatedAt ?? source?.calculated_at ?? null,
-          expiresAt: source?.expiresAt ?? source?.expires_at ?? null,
+          expiresAt: source?.expiresAt ?? source?.expires_at ?? response?.cacheExpiresAt ?? null,
           cached: response?.cached === true,
+          cacheAvailable: response?.cacheAvailable === true || response?.cached === true,
           stale: response?.stale === true,
           partial: response?.partial === true,
           provisional: response?.provisional === true,
@@ -2536,14 +2765,6 @@
             return b[1].score - a[1].score || a[0].localeCompare(b[0]);
           })
           .slice(0, BUILDING_MAX_LEGAL_DONG_CODES);
-
-        console.info("[BUILDING_LEGAL_DONG_CODES]", zip, ordered.map(([code, info]) => ({
-          code,
-          bjdongCd: code.slice(5, 10),
-          score: Math.round(info.score * 10) / 10,
-          likelyLegalDong: info.likely,
-          sources: [...info.sources],
-        })));
 
         return ordered.map(([code]) => code);
       }
@@ -3570,6 +3791,8 @@
           state.buildingStatsByZip.set(zip, {
             ...data.buildingStats,
             cached: data.cached === true,
+            cacheAvailable: data.cacheAvailable === true || data.cached === true,
+            cacheExpiresAt: data.cacheExpiresAt || data?.buildingStats?.expiresAt || data?.buildingStats?.expires_at || null,
             stale: data.stale === true,
             legacyCache: data.legacyCache === true,
             needsRefresh: data.needsRefresh === true,
@@ -3577,7 +3800,7 @@
             provisional: data.provisional === true,
             warning: data.warning || (
               data.legacyCache === true
-                ? "기존 정상 캐시를 표시합니다. 필요할 때 배송호수 갱신을 눌러주세요."
+                ? "기존 정상 캐시를 표시합니다. 필요할 때 세대수 캐시 버튼을 눌러 갱신해주세요."
                 : null
             )
           });
@@ -3642,8 +3865,8 @@
           const safeZip = escapeTerrainHtml(zip);
 
           const terrainCached = terrain?.cached === true;
-          const terrainBadge = terrainCached ? "캐시" : (terrain ? "완료" : "대기");
-          const terrainBadgeClass = terrainCached ? "cache" : (terrain ? "fresh" : "");
+          const terrainCacheReady = terrain?.cacheAvailable === true || terrainCached;
+          const buildingCacheReady = building?.cacheAvailable === true || building?.cached === true;
 
           let terrainHtml = "";
           if (terrainStatus?.state === "loading") {
@@ -3726,7 +3949,7 @@
               <div class="buildingStatsGrid">
                 <div class="buildingStatsMetric total">
                   <span>총 배송호수</span>
-                  <strong>${formatDeliveryUnitCount(totalUnits)}</strong>
+                  <strong>${formatDeliveryUnitCount(totalUnits)} <em class="elevatorRate">(${formatUnitPercent(confirmedElevatorUnits, totalUnits)})</em></strong>
                 </div>
                 <div class="buildingStatsMetric residential">
                   <span>주거</span>
@@ -3754,11 +3977,6 @@
                   <strong>${formatDeliveryUnitCount(noElevatorUnits)}</strong>
                   <small>${formatUnitPercent(noElevatorUnits, totalUnits)}</small>
                 </div>
-                <div class="buildingStatsMetric unknown">
-                  <span>엘베 미확인</span>
-                  <strong>${formatDeliveryUnitCount(unknownElevatorUnits)}</strong>
-                  <small>${formatUnitPercent(unknownElevatorUnits, totalUnits)}</small>
-                </div>
               </div>
               <div class="terrainCompactMeta">분석 ${escapeTerrainHtml(calculatedText)}</div>`;
           } else {
@@ -3770,25 +3988,14 @@
               <div class="terrainCardTop">
                 <span class="terrainZip">${safeZip}</span>
                 <div class="terrainCardTopRight">
-                  <span class="terrainStatus ${terrainBadgeClass}">${terrainBadge}</span>
-                  <button class="analysisRefresh" type="button" data-building-refresh="${safeZip}">배송호수 갱신</button>
+                  <button class="analysisRefresh${terrainCacheReady ? " cacheReady" : ""}" type="button" data-terrain-refresh="${safeZip}" ${terrainStatus?.state === "loading" ? "disabled" : ""}>지형정보 캐시</button>
+                  <button class="analysisRefresh${buildingCacheReady ? " cacheReady" : ""}" type="button" data-building-refresh="${safeZip}" ${buildingStatus?.state === "loading" || buildingStatus?.state === "queued" ? "disabled" : ""}>세대수 캐시</button>
                 </div>
               </div>
               ${terrainHtml}
               <div class="buildingStatsBlock">
                 <div class="buildingStatsHead">
                   <b>배송호수·엘리베이터</b>
-                  <span class="buildingStatsState">${building?.cached
-                    ? (building?.stale
-                      ? "기존값"
-                      : (building?.estimatedUnitCount > 0
-                        ? "추정 캐시"
-                        : (building?.legacyCache ? "기존 캐시" : "캐시")))
-                    : (building?.estimatedUnitCount > 0
-                      ? "추정"
-                      : (building?.partial || building?.provisional
-                        ? "잠정"
-                        : (building ? "완료" : "")))}</span>
                 </div>
                 ${buildingHtml}
               </div>
@@ -3798,6 +4005,19 @@
         list.querySelectorAll("[data-terrain-retry]").forEach((button) => {
           button.addEventListener("click", () => {
             const zip = button.getAttribute("data-terrain-retry") || "";
+            const feature = state.geoByZip.get(zip);
+            if (!feature) {
+              alert("우편번호 경계를 먼저 지도에 표시해주세요.");
+              return;
+            }
+            void fetchTerrainForZip(zip, feature, true);
+          });
+        });
+
+        list.querySelectorAll("[data-terrain-refresh]").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const zip = button.getAttribute("data-terrain-refresh") || "";
             const feature = state.geoByZip.get(zip);
             if (!feature) {
               alert("우편번호 경계를 먼저 지도에 표시해주세요.");
@@ -3833,6 +4053,7 @@
         });
 
         updateZipSelectionVisuals();
+        syncApartmentMarkers();
       }
 
       async function fetchTerrainForZip(zip, feature, force = false) {
@@ -3846,7 +4067,7 @@
         const currentStatus = state.terrainStatusByZip.get(zip);
         if (!force && (state.terrainByZip.has(zip) || currentStatus?.state === "loading")) return;
 
-        if (force) state.terrainByZip.delete(zip);
+        const previousTerrain = state.terrainByZip.get(zip) || null;
         state.terrainStatusByZip.set(zip, { state: "loading" });
         renderTerrainList();
 
@@ -3866,7 +4087,9 @@
               },
               body: JSON.stringify({
                 zipcode: zip,
-                geometry: feature.geometry
+                geometry: feature.geometry,
+                forceRefresh: force === true,
+                force_refresh: force === true
               }),
               cache: "no-store"
             },
@@ -3884,6 +4107,9 @@
           state.terrainByZip.set(zip, {
             ...data.terrain,
             cached: data.cached === true,
+            cacheAvailable: data.cacheAvailable === true || data.cached === true,
+            cacheExpiresAt: data.cacheExpiresAt || null,
+            stale: data.stale === true,
             areaSquareMeters:
               terrainNumber(
                 data?.terrain?.polygonAreaM2 ??
@@ -3896,13 +4122,21 @@
           });
           state.terrainStatusByZip.set(zip, { state: "ready" });
         } catch (e) {
-          console.warn("[TERRAIN_API] fetch failed", zip, e);
-          state.terrainStatusByZip.set(zip, {
-            state: "error",
-            message: e?.name === "AbortError"
-              ? `요청 시간초과(${Math.round(TERRAIN_FETCH_TIMEOUT_MS / 1000)}초)`
-              : terrainErrorMessage(e?.message || e)
-          });
+          if (previousTerrain) {
+            state.terrainByZip.set(zip, {
+              ...previousTerrain,
+              stale: true,
+              cacheAvailable: previousTerrain.cacheAvailable === true || previousTerrain.cached === true,
+            });
+            state.terrainStatusByZip.set(zip, { state: "ready" });
+          } else {
+            state.terrainStatusByZip.set(zip, {
+              state: "error",
+              message: e?.name === "AbortError"
+                ? `요청 시간초과(${Math.round(TERRAIN_FETCH_TIMEOUT_MS / 1000)}초)`
+                : terrainErrorMessage(e?.message || e)
+            });
+          }
         } finally {
           renderTerrainList();
         }
@@ -3928,6 +4162,7 @@
         state.buildingStatsByZip.delete(zip);
         state.buildingStatusByZip.delete(zip);
         state.scopeParcelsByZip.delete(zip);
+        clearApartmentMarkersForZip(zip);
         renderTerrainList();
       }
 
@@ -5019,6 +5254,7 @@
         state.buildingStatsByZip.clear();
         state.buildingStatusByZip.clear();
         state.scopeParcelsByZip.clear();
+        clearAllApartmentMarkers();
 
         clearMerged();
         setMergeUI(false);

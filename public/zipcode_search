@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V29 full scope/direct parcel detail");
+      console.log("[mw] zipcode_search loaded white design · building V31 strict subrequest budget");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1749,6 +1749,8 @@
       const ZIPCODE_AREA_UI_VERSION = "2026-08-08-terrain-building-stats-v28";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
+      const BUILDING_STATS_FETCH_RETRY_COUNT = 2;
+      const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 1200;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
       const BUILDING_GEOCODE_CONCURRENCY = 2;
       const BUILDING_GEOCODE_DELAY_MS = 140;
@@ -3185,32 +3187,62 @@
       }
 
       async function postBuildingStats(session, payload) {
-        const res = await fetchWithTimeout(
-          BUILDING_STATS_API_URL,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${session.access_token}`
-            },
-            body: JSON.stringify(payload),
-            cache: "no-store"
-          },
-          BUILDING_STATS_FETCH_TIMEOUT_MS
-        );
+        let lastError = null;
 
-        const text = await res.text();
-        let data = null;
-        try { data = text ? JSON.parse(text) : null; } catch {}
+        for (let attempt = 0; attempt <= BUILDING_STATS_FETCH_RETRY_COUNT; attempt++) {
+          try {
+            const res = await fetchWithTimeout(
+              BUILDING_STATS_API_URL,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${session.access_token}`
+                },
+                body: JSON.stringify(payload),
+                cache: "no-store"
+              },
+              BUILDING_STATS_FETCH_TIMEOUT_MS
+            );
 
-        if (!res.ok || data?.ok === false) {
-          const error = new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
-          error.responseData = data && typeof data === "object" ? data : null;
-          error.httpStatus = res.status;
-          throw error;
+            const text = await res.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch {}
+
+            if (!res.ok || data?.ok === false) {
+              const error = new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
+              error.responseData = data && typeof data === "object" ? data : null;
+              error.httpStatus = res.status;
+              throw error;
+            }
+
+            return data || {};
+          } catch (error) {
+            lastError = error;
+            const status = Number(error?.httpStatus || 0);
+            const message = String(error?.message || error || "");
+            const transient = (
+              status === 0 ||
+              status === 408 ||
+              status === 429 ||
+              status >= 500 ||
+              /failed to fetch|network|timeout|cors|err_failed/i.test(message)
+            );
+
+            if (!transient || attempt >= BUILDING_STATS_FETCH_RETRY_COUNT) throw error;
+
+            console.warn("[BUILDING_STATS_RETRY]", {
+              attempt: attempt + 1,
+              maxRetry: BUILDING_STATS_FETCH_RETRY_COUNT,
+              message
+            });
+            await new Promise((resolve) =>
+              setTimeout(resolve, BUILDING_STATS_FETCH_RETRY_DELAY_MS * (attempt + 1))
+            );
+          }
         }
 
-        return data || {};
+        throw lastError || new Error("BUILDING_STATS request failed");
       }
 
       function queueBuildingStatsForZip(zip, feature, force = false) {
@@ -3276,7 +3308,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 95,
-            scopeMatchMode: "V29_FULL_SCOPE_PARCEL_DETAIL",
+            scopeMatchMode: "V31_STRICT_SUBREQUEST_BUDGET",
             legalDongCodeCandidates: legalDongCodes
           };
 

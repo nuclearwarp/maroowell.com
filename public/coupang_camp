@@ -9,7 +9,6 @@
   <title>쿠팡 캠프 조회</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
 
   <style>
     @font-face{
@@ -432,10 +431,53 @@
         const blob = new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url;a.download=`coupang_camps_${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url);
       }
 
+      let qrCodeLibPromise = null;
+
+      async function getQrCodeLib() {
+        if (window.QRCode?.toCanvas) return window.QRCode;
+
+        if (!qrCodeLibPromise) {
+          qrCodeLibPromise = import("https://esm.sh/qrcode@1.5.4")
+            .then((module) => module.default || module)
+            .then((library) => {
+              if (!library?.toCanvas) throw new Error("QR 코드 라이브러리를 불러오지 못했습니다.");
+              return library;
+            })
+            .catch((error) => {
+              qrCodeLibPromise = null;
+              throw error;
+            });
+        }
+
+        return qrCodeLibPromise;
+      }
+
       async function openQr(row) {
-        const code = text(row.code); if (!code) { setStatus("QR을 만들 캠프 코드가 없습니다.","err"); return; }
-        state.currentQr = {code,label:text(row.camp)||code}; dom.qrTitle.textContent = `${state.currentQr.label} QR`; dom.qrMeta.textContent = `${state.currentQr.label} · ${code}`;
-        await QRCode.toCanvas(dom.qrCanvas,code,{width:220,margin:2,errorCorrectionLevel:"M"}); dom.qrModal.classList.add("show");dom.qrModal.setAttribute("aria-hidden","false");
+        const code = text(row.code);
+        if (!code) {
+          setStatus("QR을 만들 캠프 코드가 없습니다.","err");
+          return;
+        }
+
+        try {
+          const qrCodeLib = await getQrCodeLib();
+          state.currentQr = {code,label:text(row.camp)||code};
+          dom.qrTitle.textContent = `${state.currentQr.label} QR`;
+          dom.qrMeta.textContent = `${state.currentQr.label} · ${code}`;
+
+          await qrCodeLib.toCanvas(dom.qrCanvas,code,{
+            width:220,
+            margin:2,
+            errorCorrectionLevel:"M"
+          });
+
+          dom.qrModal.classList.add("show");
+          dom.qrModal.setAttribute("aria-hidden","false");
+        } catch (error) {
+          console.error("QR 생성 실패", error);
+          setStatus("QR 코드 라이브러리 로드 또는 생성에 실패했습니다.","err");
+          alert("QR 코드를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        }
       }
       function closeQr(){dom.qrModal.classList.remove("show");dom.qrModal.setAttribute("aria-hidden","true");}
       function canvasBlob(){return new Promise((resolve)=>dom.qrCanvas.toBlob(resolve,"image/png"));}

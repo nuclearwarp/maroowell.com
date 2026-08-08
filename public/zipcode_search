@@ -3475,8 +3475,10 @@
 
         state.buildingQueuedZips.add(zip);
         state.buildingStatusByZip.set(zip, {
-          state: "queued",
-          message: "배송 호수 분석 대기 중입니다."
+          state: force ? "queued" : "checking",
+          message: force
+            ? "세대수 갱신을 준비하고 있습니다."
+            : "세대수 캐시를 확인하고 있습니다."
         });
         renderTerrainList();
 
@@ -3498,24 +3500,66 @@
         const currentStatus = state.buildingStatusByZip.get(zip);
         if (!force && (state.buildingStatsByZip.has(zip) || currentStatus?.state === "loading")) return;
 
-        // 수동 갱신이 실패해도 기존 정상 분석 카드를 지우지 않는다.
+        // 자동 조회는 먼저 서버 캐시만 확인한다.
+        // 캐시가 있으면 법정동/필지/지오코딩 계산을 전혀 시작하지 않고 즉시 표시한다.
         const previousStats = state.buildingStatsByZip.get(zip) || null;
         state.buildingStatusByZip.set(zip, {
-          state: "loading",
-          message: previousStats
-            ? "기존 분석값을 유지한 채 새 데이터로 갱신하고 있습니다."
-            : "주거·상업 배송 호수를 확인하고 있습니다."
+          state: force ? "loading" : "checking",
+          message: force
+            ? (previousStats
+              ? "기존 분석값을 유지한 채 새 데이터로 갱신하고 있습니다."
+              : "세대수를 새로 계산하고 있습니다.")
+            : "세대수 캐시를 확인하고 있습니다."
         });
         renderTerrainList();
 
         try {
-          if (!state.kakaoGeocoder) {
-            throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
-          }
-
           const session = await getCurrentSession();
           if (!session?.access_token) {
             throw new Error("로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.");
+          }
+
+          if (!force) {
+            const cacheProbe = await postBuildingStats(session, {
+              zipcode: zip,
+              geometry: feature.geometry,
+              forceRefresh: false,
+              force_refresh: false,
+              cacheOnly: true,
+              cache_only: true
+            });
+
+            if (cacheProbe?.cached === true && cacheProbe?.buildingStats) {
+              state.buildingStatsByZip.set(zip, {
+                ...cacheProbe.buildingStats,
+                cached: true,
+                cacheAvailable: true,
+                cacheExpiresAt:
+                  cacheProbe.cacheExpiresAt ||
+                  cacheProbe?.buildingStats?.expiresAt ||
+                  cacheProbe?.buildingStats?.expires_at ||
+                  null,
+                stale: cacheProbe.stale === true,
+                legacyCache: cacheProbe.legacyCache === true,
+                needsRefresh: cacheProbe.needsRefresh === true,
+                partial: cacheProbe.partial === true,
+                provisional: cacheProbe.provisional === true,
+                warning: cacheProbe.warning || null
+              });
+              state.buildingStatusByZip.set(zip, { state: "ready" });
+              renderTerrainList();
+              return;
+            }
+
+            state.buildingStatusByZip.set(zip, {
+              state: "loading",
+              message: "캐시가 없어 세대수를 계산하고 있습니다."
+            });
+            renderTerrainList();
+          }
+
+          if (!state.kakaoGeocoder) {
+            throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
           }
 
           const legalDongCodes = await resolveLegalDongCodes(zip, feature);
@@ -3878,15 +3922,19 @@
 
           const terrainCached = terrain?.cached === true;
           const terrainLoading = terrainStatus?.state === "loading";
+          const buildingChecking = buildingStatus?.state === "checking";
           const buildingLoading = buildingStatus?.state === "loading" || buildingStatus?.state === "queued";
+          const buildingBusy = buildingChecking || buildingLoading;
           const terrainCacheReady = !terrainLoading && (terrain?.cacheAvailable === true || terrainCached);
-          const buildingCacheReady = !buildingLoading && (building?.cacheAvailable === true || building?.cached === true);
+          const buildingCacheReady = !buildingBusy && (building?.cacheAvailable === true || building?.cached === true);
           const terrainButtonText = terrainLoading
             ? "지형정보 계산중.."
             : (terrainCacheReady ? "지형정보 캐시" : (terrain ? "지형정보 갱신" : "지형정보 준비"));
-          const buildingButtonText = buildingLoading
-            ? "세대수 계산중.."
-            : (buildingCacheReady ? "세대수 캐시" : (building ? "세대수 갱신" : "세대수 준비"));
+          const buildingButtonText = buildingChecking
+            ? "세대수 확인중.."
+            : (buildingLoading
+              ? "세대수 계산중.."
+              : (buildingCacheReady ? "세대수 캐시" : (building ? "세대수 갱신" : "세대수 준비")));
 
           let terrainHtml = "";
           if (terrainStatus?.state === "loading") {
@@ -3923,9 +3971,9 @@
           }
 
           let buildingHtml = "";
-          if (buildingStatus?.state === "loading" || buildingStatus?.state === "queued") {
+          if (buildingStatus?.state === "checking" || buildingStatus?.state === "loading" || buildingStatus?.state === "queued") {
             buildingHtml = `
-              <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "주거·상업 배송 호수와 엘리베이터를 분석하고 있습니다.")}</div>`;
+              <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "세대수 데이터를 확인하고 있습니다.")}</div>`;
           } else if (buildingStatus?.state === "error") {
             buildingHtml = `
               <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "배송 호수 분석 실패")}</div>`;
@@ -4009,7 +4057,7 @@
                 <span class="terrainZip">${safeZip}</span>
                 <div class="terrainCardTopRight">
                   <button class="analysisRefresh${terrainCacheReady ? " cacheReady" : ""}" type="button" data-terrain-refresh="${safeZip}" ${terrainLoading ? "disabled" : ""}>${terrainButtonText}</button>
-                  <button class="analysisRefresh${buildingCacheReady ? " cacheReady" : ""}" type="button" data-building-refresh="${safeZip}" ${buildingLoading ? "disabled" : ""}>${buildingButtonText}</button>
+                  <button class="analysisRefresh${buildingCacheReady ? " cacheReady" : ""}" type="button" data-building-refresh="${safeZip}" ${buildingBusy ? "disabled" : ""}>${buildingButtonText}</button>
                 </div>
               </div>
               ${terrainHtml}

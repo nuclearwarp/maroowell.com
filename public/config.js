@@ -21,4 +21,13 @@ window.MARUWELL_CONFIG = {
   }
 };
 
+// zipcode_search 전용 가벼운 런타임 패치.
+// 대형 단일 HTML을 건드리지 않고 표시/콘솔 정책만 분리한다.
+if (location.pathname.startsWith("/zipcode_search")) {
+  const script = document.createElement("script");
+  script.src = "/zipcode_search_runtime.js?v=36";
+  script.defer = true;
+  document.head.appendChild(script);
+}
+
 // deploy kick: freshbag restore

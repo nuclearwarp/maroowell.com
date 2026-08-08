@@ -1460,7 +1460,7 @@
     (async function(){
       "use strict";
 
-      console.log("[mw] zipcode_search loaded white design · building V31 strict subrequest budget");
+      console.log("[mw] zipcode_search loaded white design · building V32 phased K-APT/detail budget");
 
       const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
       const INDEX_PATH = (PATHS?.index || "/zipcode_search");
@@ -1746,17 +1746,18 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-08-terrain-building-stats-v28";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-09-terrain-building-stats-v32";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
-      const BUILDING_STATS_FETCH_RETRY_COUNT = 2;
+      const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
       const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 1200;
       // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
       const BUILDING_GEOCODE_CONCURRENCY = 2;
       const BUILDING_GEOCODE_DELAY_MS = 140;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
       const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
-      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 48;
+      const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
+      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;
       const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
       const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 4;
       const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 35;
@@ -3308,7 +3309,7 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 95,
-            scopeMatchMode: "V31_STRICT_SUBREQUEST_BUDGET",
+            scopeMatchMode: "V32_PHASED_KAPT_DETAIL_BUDGET",
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -3339,8 +3340,7 @@
             });
           }
 
-          // V29: 폴리곤에서 발견한 필지를 12개씩 직접 표제부 조회해 끝까지 확인한다.
-          // 이전 V28은 첫 12필지만 확인해 33필지 중 11동만 살아남는 경우가 있었다.
+          // V32: 폴리곤에서 발견한 필지는 소규모 배치 continuation으로 끝까지 표제부를 확인한다.
           let scopeTitleEvidence = Array.isArray(data?.scopeTitleContinuation?.evidence)
             ? data.scopeTitleContinuation.evidence
             : [];
@@ -3451,9 +3451,57 @@
             throw new Error(`건물주소 확인을 완료하지 못했습니다.${coverageText}`);
           }
 
-          // V29: 폴리곤 매칭 필지를 모두 직접 상세조회하되 Cloudflare
-          // subrequest 한도를 넘지 않도록 백엔드가 6필지 단위 증거를 돌려주면
-          // 프론트가 그 증거를 다시 보내 다음 배치를 자동으로 이어서 처리한다.
+          // V32: K-APT 상세정보를 건축HUB 전유부 조회와 분리한다.
+          // 백엔드는 단지 1개만 조회하고 증거를 반환하며, 프론트가 다음 요청으로 이어간다.
+          // 마지막 단지를 처리한 뒤에도 한 번 더 호출해 K-APT 외부호출이 없는 invocation에서
+          // 건축HUB 상세조회가 시작되도록 한다.
+          let kaptInfoEvidence = Array.isArray(data?.kaptInfoContinuation?.evidence)
+            ? data.kaptInfoContinuation.evidence
+            : [];
+          for (
+            let kaptRound = 0;
+            data?.requiresKaptInfoContinuation === true &&
+              kaptRound < BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS;
+            kaptRound++
+          ) {
+            const progress = data?.progress || data?.kaptInfoContinuation || {};
+            const processed = Number(progress.processedComplexCount || kaptInfoEvidence.length || 0);
+            const remaining = Number(progress.remainingComplexCount || 0);
+            const total = Number(progress.totalComplexCount || processed + remaining || 0);
+            state.buildingStatusByZip.set(zip, {
+              state: "loading",
+              message: `아파트 단지 정보 확인 ${Math.min(processed, total || processed).toLocaleString("ko-KR")}/${(total || processed + remaining).toLocaleString("ko-KR")}단지 · 다음 배치 분석 중`
+            });
+            renderTerrainList();
+
+            data = await postBuildingStats(session, {
+              ...basePayload,
+              forceRefresh: false,
+              force_refresh: false,
+              allowPartial: true,
+              allow_partial: true,
+              buildingLocations: [...locationsByKey.values()],
+              scopeParcels: scopeDiscovery?.parcels || undefined,
+              scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
+              scopeTitleEvidence,
+              kaptInfoEvidence,
+              locationSource: scopeDiscovery?.parcels?.length
+                ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
+                : "KAKAO_JS_GEOCODER"
+            });
+
+            if (Array.isArray(data?.kaptInfoContinuation?.evidence)) {
+              kaptInfoEvidence = data.kaptInfoContinuation.evidence;
+            }
+          }
+
+          if (data?.requiresKaptInfoContinuation === true) {
+            const remaining = Number(data?.kaptInfoContinuation?.remainingComplexCount || 0);
+            throw new Error(`K-APT 단지 상세조회를 완료하지 못했습니다. 남은 단지 ${remaining.toLocaleString("ko-KR")}건`);
+          }
+
+          // V32: 폴리곤 매칭 필지를 1필지씩 직접 상세조회한다.
+          // K-APT 단계가 완전히 끝난 뒤에만 전유부/층별개요 조회를 시작한다.
           let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)
             ? data.detailContinuation.evidence
             : [];
@@ -3482,6 +3530,7 @@
               scopeParcels: scopeDiscovery?.parcels || undefined,
               scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
               scopeTitleEvidence,
+              kaptInfoEvidence,
               locationSource: scopeDiscovery?.parcels?.length
                 ? "KAKAO_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH"
                 : "KAKAO_JS_GEOCODER",

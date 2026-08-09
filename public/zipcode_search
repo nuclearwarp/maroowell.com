@@ -2916,15 +2916,31 @@
 
       function featureBoundaryDistanceMeters(feature, lng, lat) {
         try {
-          const line = turf.polygonToLine(feature);
-          return turf.pointToLineDistance(
-            turf.point([lng, lat]),
-            line,
-            { units: "meters" }
-          );
-        } catch {
-          return 0;
-        }
+          const point = turf.point([Number(lng), Number(lat)]);
+          if (!feature?.geometry || !Number.isFinite(Number(lng)) || !Number.isFinite(Number(lat))) {
+            return 0;
+          }
+
+          if (feature.geometry.type === "Polygon") {
+            const line = turf.polygonToLine(feature);
+            return Number(turf.pointToLineDistance(point, line, { units: "meters" })) || 0;
+          }
+
+          if (feature.geometry.type === "MultiPolygon") {
+            let best = Infinity;
+            for (const coordinates of feature.geometry.coordinates || []) {
+              try {
+                const polygon = turf.polygon(coordinates);
+                if (!turf.booleanPointInPolygon(point, polygon, { ignoreBoundary: false })) continue;
+                const line = turf.polygonToLine(polygon);
+                const distance = Number(turf.pointToLineDistance(point, line, { units: "meters" }));
+                if (Number.isFinite(distance)) best = Math.min(best, distance);
+              } catch {}
+            }
+            return Number.isFinite(best) ? best : 0;
+          }
+        } catch {}
+        return 0;
       }
 
       function buildScopeDiscoveryPoints(feature) {
@@ -3087,11 +3103,9 @@
             // 실제 표본 좌표가 폴리곤 경계에서 충분히 안쪽이면 해당 필지를 인정한다.
             const interiorVerified = boundaryDistance >= interiorThresholdMeters;
 
-            if (!exactZip && !interiorVerified) {
-              scopeRejectedCount += 1;
-              continue;
-            }
-
+            // 우편번호 불일치/미확인 표본도 즉시 버리지 않는다.
+            // 같은 필지가 폴리곤 내부 여러 표본에서 반복 확인되면 최종 후보로 인정할 수 있도록
+            // 아래 parcelMap에 누적한 뒤 zoneVerified / interiorVerified / hitCount 기준으로 선별한다.
             if (exactZip) exactZipHitCount += 1;
             if (interiorVerified) interiorHitCount += 1;
             if (
@@ -3145,8 +3159,26 @@
         );
         await Promise.all(Array.from({ length: workerCount }, worker));
 
+        // 우편번호 일치, 폴리곤 깊은 내부 확인, 또는 서로 다른 내부 표본에서 2회 이상
+        // 반복 확인된 필지를 최종 후보로 사용한다. MultiPolygon/경계 인접 아파트에서
+        // 카카오 우편번호가 인접 구역으로 반환되는 경우의 누락을 줄인다.
+        let parcels = [...parcelMap.values()].filter((row) =>
+          row.zoneVerified === true ||
+          row.interiorVerified === true ||
+          Number(row.hitCount || 0) >= 2
+        );
+
+        // 매우 좁거나 복잡한 폴리곤은 모든 표본이 경계 가까이에 있을 수 있다.
+        // 이 경우 폴리곤 내부 표본에서 실제 확인된 필지를 버리지 않고
+        // 백엔드의 최종 point-in-polygon 검증에 맡긴다.
+        if (!parcels.length && parcelMap.size) {
+          parcels = [...parcelMap.values()];
+        }
+
+        scopeRejectedCount = Math.max(0, parcelMap.size - parcels.length);
+
         const result = {
-          parcels: [...parcelMap.values()],
+          parcels,
           diagnostics: {
             sampleCount: plan.points.length,
             reverseSuccessCount,
@@ -3159,7 +3191,8 @@
             interiorHitCount,
             postcodeMismatchInteriorHitCount,
             scopeRejectedCount,
-            parcelCount: parcelMap.size,
+            parcelCount: parcels.length,
+            rawParcelCount: parcelMap.size,
             regionCacheCount: legalDongPromiseByRegion.size,
             spacingMeters: Number.isFinite(plan.spacingMeters)
               ? Math.round(plan.spacingMeters * 10) / 10
@@ -3827,7 +3860,11 @@
             throw new Error("배송 호수 분석 결과가 비어 있습니다.");
           }
 
-          const deliveryCount = Number(data?.buildingStats?.deliveryUnitCount || 0);
+          const deliveryCount = Number(
+            data?.buildingStats?.deliveryUnitCount ??
+            data?.buildingStats?.delivery_unit_count ??
+            0
+          );
           const diagnostics = data?.buildingStats?.breakdown || data?.diagnostics || null;
           if (deliveryCount === 0) {
             const breakdown = diagnostics?.breakdown || diagnostics || {};

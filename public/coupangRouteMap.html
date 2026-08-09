@@ -3767,16 +3767,44 @@
 
   function terrainPackCode(pack){
     const row = pack?.row || {};
-    return String(row.full_code || row.code || "구역").trim() || "구역";
+    return String(row.full_code || row.code || row.route_code || row.route || "구역").trim() || "구역";
+  }
+
+  function terrainRouteSortParts(pack){
+    const raw = terrainPackCode(pack).toUpperCase().replace(/\s+/g, "");
+    // 405A, 405A01, 406B 같은 쿠팡 라우트 코드를 숫자 -> 알파벳 -> 세부번호 순으로 정렬한다.
+    const match = raw.match(/(?:^|[^0-9])([0-9]{1,4})([A-Z]+)([0-9]*)/);
+    if (match){
+      return {
+        matched:true,
+        number:Number(match[1]),
+        letter:match[2],
+        detail:match[3] === "" ? -1 : Number(match[3]),
+        raw
+      };
+    }
+    return { matched:false, number:Number.MAX_SAFE_INTEGER, letter:"", detail:Number.MAX_SAFE_INTEGER, raw };
+  }
+
+  function compareTerrainRoutePacks(a, b){
+    const aa = terrainRouteSortParts(a);
+    const bb = terrainRouteSortParts(b);
+    if (aa.matched !== bb.matched) return aa.matched ? -1 : 1;
+    if (aa.number !== bb.number) return aa.number - bb.number;
+    const letterCompare = aa.letter.localeCompare(bb.letter, "en", { sensitivity:"base" });
+    if (letterCompare) return letterCompare;
+    if (aa.detail !== bb.detail) return aa.detail - bb.detail;
+    return aa.raw.localeCompare(bb.raw, "en", { numeric:true, sensitivity:"base" });
+  }
+
+  function sortedTerrainPacks(packs){
+    return Array.from(packs || []).sort(compareTerrainRoutePacks);
   }
 
   function routePacksForTerrain(){
-    return Array.from(overlayById.values())
-      .filter(pack => pack?.polygons?.length)
-      .sort((a, b) => terrainPackCode(a).localeCompare(terrainPackCode(b), "en", {
-        numeric:true,
-        sensitivity:"base"
-      }));
+    return sortedTerrainPacks(
+      Array.from(overlayById.values()).filter(pack => pack?.polygons?.length)
+    );
   }
 
   function terrainGeometryFromPack(pack){
@@ -5057,7 +5085,9 @@
 
   function renderTerrainCards(packs=routePacksForTerrain()){
     if (!terrainResultsList) return;
-    terrainResultsList.innerHTML = (packs || [])
+    // 호출자가 어떤 순서의 배열을 넘기더라도 화면은 항상 라우트 순으로 고정한다.
+    const orderedPacks = sortedTerrainPacks(packs);
+    terrainResultsList.innerHTML = orderedPacks
       .map((pack, index) => terrainResultCardHtml(pack, index))
       .join("");
     bindTerrainCardEvents();

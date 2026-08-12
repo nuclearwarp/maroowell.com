@@ -2326,8 +2326,11 @@
   const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;
   const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
-  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 4;
-  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 35;
+  // Kakao Local API is browser-origin/rate sensitive. Keep discovery conservative;
+  // failed samples are retried inside reverseAddressMetaFromPoint and bad coverage is rejected.
+  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 2;
+  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 100;
+  const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.60;
   const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 8;
   const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 24;
   const BUILDING_MAX_LEGAL_DONG_CODES = 12;
@@ -4229,28 +4232,40 @@
   function reverseAddressMetaFromPoint(lng, lat){
     return new Promise(resolve => {
       if (!geocoder) return resolve(null);
-      geocoder.coord2Address(lng, lat, (result, status) => {
-        if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) return resolve(null);
-        const row = result[0] || null;
-        if (!row) return resolve(null);
-        const address = row.address || {};
-        const road = row.road_address || {};
-        const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
-        const regionNameKey = [address.region_1depth_name,address.region_2depth_name,address.region_3depth_name]
-          .map(value => String(value || "").replace(/\s+/g, " ").trim())
-          .filter(Boolean).join("|");
-        resolve({
-          zonecode: zoneDigits.length === 5 ? zoneDigits : null,
-          legalDongCode: normalizeLegalDongCode(address.b_code),
-          regionNameKey,
-          platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
-          parcelMainNo: normalizeParcelNo(address.main_address_no),
-          parcelSubNo: normalizeParcelNo(address.sub_address_no),
-          parcelAddress: address.address_name || null,
-          roadAddress: road.address_name || null,
-          matchedAddress: address.address_name || road.address_name || null
+      let attempt = 0;
+      const run = () => {
+        attempt += 1;
+        geocoder.coord2Address(lng, lat, (result, status) => {
+          if (status !== kakao.maps.services.Status.OK || !Array.isArray(result) || !result[0]) {
+            if (attempt < 3) {
+              const delay = attempt === 1 ? 240 : 650;
+              window.setTimeout(run, delay);
+              return;
+            }
+            resolve(null);
+            return;
+          }
+          const row = result[0];
+          const address = row.address || {};
+          const road = row.road_address || {};
+          const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
+          const regionNameKey = [address.region_1depth_name,address.region_2depth_name,address.region_3depth_name]
+            .map(value => String(value || "").replace(/\s+/g, " ").trim())
+            .filter(Boolean).join("|");
+          resolve({
+            zonecode: zoneDigits.length === 5 ? zoneDigits : null,
+            legalDongCode: normalizeLegalDongCode(address.b_code),
+            regionNameKey,
+            platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
+            parcelMainNo: normalizeParcelNo(address.main_address_no),
+            parcelSubNo: normalizeParcelNo(address.sub_address_no),
+            parcelAddress: address.address_name || null,
+            roadAddress: road.address_name || null,
+            matchedAddress: address.address_name || road.address_name || null
+          });
         });
-      });
+      };
+      run();
     });
   }
 
@@ -4448,6 +4463,14 @@
     const workerCount=Math.min(BUILDING_SCOPE_DISCOVERY_CONCURRENCY,Math.max(1,plan.points.length));
     await Promise.all(Array.from({length:workerCount},worker));
 
+    const reverseCoverage = plan.points.length > 0 ? reverseSuccessCount / plan.points.length : 0;
+    if (plan.points.length >= 20 && reverseCoverage < BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE) {
+      throw new Error(
+        `카카오 필지 역지오코딩 성공률이 너무 낮습니다 (${Math.round(reverseCoverage*100)}%). ` +
+        `부분 데이터로 세대수를 저장하지 않고 중단합니다.`
+      );
+    }
+
     // Route scopes have no postcode to use as an edge fallback. Keep parcels with a deep interior hit,
     // or repeated independent hits; the backend still performs the final polygon verification.
     let parcels=[...parcelMap.values()].filter(row=>row.interiorVerified===true || Number(row.hitCount||0)>=2);
@@ -4459,7 +4482,8 @@
     const result={
       parcels,
       diagnostics:{
-        sampleCount:plan.points.length,reverseSuccessCount,legalDongLookupCount,legalDongLookupSuccessCount,legalDongPointCount,
+        sampleCount:plan.points.length,reverseSuccessCount,reverseCoveragePercent:Math.round(reverseCoverage*1000)/10,
+        legalDongLookupCount,legalDongLookupSuccessCount,legalDongPointCount,
         invalidParcelKeyCount,parcelKeyPointCount,interiorHitCount,parcelCount:parcels.length,rawParcelCount:parcelMap.size,
         regionCacheCount:legalDongPromiseByRegion.size,
         spacingMeters:Number.isFinite(plan.spacingMeters)?Math.round(plan.spacingMeters*10)/10:null,

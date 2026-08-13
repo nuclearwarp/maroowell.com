@@ -2079,7 +2079,7 @@
       </div>
 
       <div class="label" style="margin-top:10px;">
-        Enter 규칙: 선택 라우트의 캠프·라우트 번호 변경 후 Enter → 저장 / 변경 없음 → 편집모드
+        Enter 규칙: 캠프·라우트 번호 변경 후 Enter → 조회 / 변경 없음 → 편집모드 · 번호 변경 저장은 저장 버튼만 사용
       </div>
     </div>
 
@@ -5765,13 +5765,22 @@
     return tag === "input" || tag === "textarea" || a?.isContentEditable;
   }
 
+  async function loadRoutesAsLookup(){
+    // 조회는 저장과 완전히 분리한다. 기존 라우트가 선택된 상태에서
+    // 캠프/라우트 입력을 바꿔 조회해도 기존 선택 id를 절대 저장 대상으로 남기지 않는다.
+    if (selectedRouteId){
+      clearSelection("조회 대상 변경 · 기존 선택 저장 해제");
+    }
+    await loadRoutes();
+  }
+
   function inputEnterHandler(e){
     if (e.key !== "Enter" || e.isComposing) return;
     e.preventDefault();
     e.stopPropagation();
 
     if (selectedRouteId && (campDirty || codeDirty)){
-      saveCurrent().catch(err=>setStatus(err.message,"ERR"));
+      loadRoutesAsLookup().catch(err=>setStatus(err.message,"ERR"));
       return;
     }
 
@@ -5781,7 +5790,7 @@
       else enterEditMode();
       return;
     }
-    loadRoutes().catch(err=>setStatus(err.message,"ERR"));
+    loadRoutesAsLookup().catch(err=>setStatus(err.message,"ERR"));
   }
   campInput.addEventListener("keydown", inputEnterHandler);
   codeInput.addEventListener("keydown", inputEnterHandler);
@@ -5816,7 +5825,7 @@
     else enterEditMode();
   });
 
-  loadBtn.addEventListener("click", ()=> loadRoutes().catch(err=>setStatus(err.message,"ERR")));
+  loadBtn.addEventListener("click", ()=> loadRoutesAsLookup().catch(err=>setStatus(err.message,"ERR")));
   drawNewBtn.addEventListener("click", async ()=>{
     const ok = await ensureSelectedRouteFromInputsForDraw();
     if (!ok) return;

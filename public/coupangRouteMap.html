@@ -4718,29 +4718,59 @@
     finally{clearTimeout(timer);}
   }
 
+  function isBuildingAuthRejected(status,message){
+    const code=Number(status||0);
+    const text=String(message||"");
+    return code===401||code===403||/invalid or expired login session|jwt[^a-z0-9]*(?:expired|invalid)|(?:access|auth|login)[^\n]{0,24}(?:token|session)[^\n]{0,24}(?:expired|invalid)|token[^\n]{0,24}expired/i.test(text);
+  }
+
   async function postBuildingStats(accessToken,payload,requestOptions={}){
     const timeoutMs=Number(requestOptions.timeoutMs||BUILDING_STATS_FETCH_TIMEOUT_MS);
     const retryCount=Number.isFinite(Number(requestOptions.retryCount))
       ? Math.max(0,Math.trunc(Number(requestOptions.retryCount)))
       : BUILDING_STATS_FETCH_RETRY_COUNT;
     let lastError=null;
+    let authRetried=false;
+
     for(let attempt=0;attempt<=retryCount;attempt++){
       try{
-        const response=await analysisFetchWithTimeout(BUILDING_STATS_ENDPOINT,{
-          method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${accessToken}`},body:JSON.stringify(payload),cache:"no-store"
-        },timeoutMs);
-        const text=await response.text(); let data=null; try{data=text?JSON.parse(text):null;}catch{}
-        if(!response.ok||data?.ok===false){
-          const error=new Error(data?.error||data?.message||text||`HTTP ${response.status}`);
-          error.responseData=data&&typeof data==="object"?data:null; error.httpStatus=response.status; throw error;
+        let token=await getTerrainAccessToken(false).catch(()=>accessToken||"");
+        if(!token)throw new Error("로그인이 만료되었습니다.");
+
+        const requestOnce=async currentToken=>{
+          const response=await analysisFetchWithTimeout(BUILDING_STATS_ENDPOINT,{
+            method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${currentToken}`},body:JSON.stringify(payload),cache:"no-store"
+          },timeoutMs);
+          const text=await response.text();
+          let data=null; try{data=text?JSON.parse(text):null;}catch{}
+          return {response,text,data};
+        };
+
+        let result=await requestOnce(token);
+        let failureMessage=String(result.data?.error||result.data?.message||result.text||"");
+
+        // 인증 거절은 Worker가 계산을 시작하기 전에 끝난 요청이라 동일 payload 1회 재전송이 안전하다.
+        // 네트워크/timeout/5xx에는 기존처럼 자동 재계산하지 않는다.
+        if((!result.response.ok||result.data?.ok===false)&&!authRetried&&isBuildingAuthRejected(result.response.status,failureMessage)){
+          authRetried=true;
+          token=await getTerrainAccessToken(true);
+          result=await requestOnce(token);
+          failureMessage=String(result.data?.error||result.data?.message||result.text||"");
         }
-        return data||{};
+
+        if(!result.response.ok||result.data?.ok===false){
+          const error=new Error(failureMessage||`HTTP ${result.response.status}`);
+          error.responseData=result.data&&typeof result.data==="object"?result.data:null;
+          error.httpStatus=result.response.status;
+          throw error;
+        }
+        return result.data||{};
       }catch(error){
         lastError=error;
         const status=Number(error?.httpStatus||0), message=String(error?.message||error||"");
         const transient=status===0||status===408||status===429||status>=500||/failed to fetch|network|timeout|cors|err_failed/i.test(message);
         if(!transient||attempt>=retryCount)throw error;
-        await new Promise(r=>setTimeout(r,BUILDING_STATS_FETCH_RETRY_DELAY_MS*(attempt+1)));
+        await new Promise(resolve=>setTimeout(resolve,BUILDING_STATS_FETCH_RETRY_DELAY_MS*(attempt+1)));
       }
     }
     throw lastError||new Error("BUILDING_STATS request failed");
@@ -5316,11 +5346,36 @@
     if (terrainResultsList) terrainResultsList.innerHTML = "";
   }
 
-  async function getTerrainAccessToken(){
+  let analysisAuthRefreshPromise=null;
+
+  function analysisSessionExpiresSoon(session,skewMs=120000){
+    const expiresAtMs=Number(session?.expires_at||0)*1000;
+    return Number.isFinite(expiresAtMs)&&expiresAtMs>0&&expiresAtMs<=Date.now()+Math.max(0,Number(skewMs)||0);
+  }
+
+  async function refreshAnalysisSession(){
+    if(!mwSupabase?.auth)throw new Error("로그인 정보를 확인할 수 없습니다.");
+    if(!analysisAuthRefreshPromise){
+      analysisAuthRefreshPromise=(async()=>{
+        const {data,error}=await mwSupabase.auth.refreshSession();
+        if(error)throw error;
+        const session=data?.session||null;
+        if(!session?.access_token)throw new Error("로그인이 만료되었습니다.");
+        return session;
+      })().finally(()=>{analysisAuthRefreshPromise=null;});
+    }
+    return await analysisAuthRefreshPromise;
+  }
+
+  async function getTerrainAccessToken(forceRefresh=false){
     if (!mwSupabase?.auth) throw new Error("로그인 정보를 확인할 수 없습니다.");
     const { data, error } = await mwSupabase.auth.getSession();
     if (error) throw error;
-    const accessToken = data?.session?.access_token;
+    let session=data?.session||null;
+    if(forceRefresh||analysisSessionExpiresSoon(session)){
+      session=await refreshAnalysisSession();
+    }
+    const accessToken = session?.access_token;
     if (!accessToken) throw new Error("로그인이 만료되었습니다.");
     return accessToken;
   }

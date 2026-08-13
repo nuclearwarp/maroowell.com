@@ -48,7 +48,6 @@
       line-height:1.45 !important;
       letter-spacing:-.03em !important;
     }
-
     label{
       font-size:11px !important;
       letter-spacing:-.03em !important;
@@ -447,8 +446,7 @@
       border-color:#fca5a5;
     }
 
-    #shareMapBtn{
-      display:none;
+    #shareMapBtn{      display:none;
     }
 
     #shareMapBtn.share-visible{
@@ -997,8 +995,7 @@
 
     .terrainMetric.areaMetric{
       grid-column:1 / -1;
-      border-color:#a7f3d0;
-      background:#ecfdf5;
+      border-color:#a7f3d0;      background:#ecfdf5;
     }
 
     .terrainMetric.areaMetric .terrainMetricValue{
@@ -1498,7 +1495,6 @@
     .apartmentPopupActions button.primary + button{
       border-left-color:#3b82f6;
     }
-
     .apartmentPopupActions button:disabled{
       cursor:not-allowed;
       background:#f8fafc;
@@ -1798,7 +1794,6 @@
             keys.forEach(key => target.removeItem(key));
           } catch {}
         }
-
         function resolvePending(requestId, entries) {
           const item = pending.get(requestId);
           if (!item) return;
@@ -2013,23 +2008,32 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-10-terrain-building-stats-v42-v45-direct-scope-kapt-recovery";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-14-building-v62-dense-parcel-900";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
-      const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
-      const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
-      const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 1200;
-      // Kakao 주소검색은 동시 호출을 높이면 일부 주소가 누락될 수 있으므로 보수적으로 처리한다.
-      const BUILDING_GEOCODE_CONCURRENCY = 2;
-      const BUILDING_GEOCODE_DELAY_MS = 140;
+      // coupangRouteMap V62와 동일한 건물 분석 프론트 설정.
+      // 180초는 목표 시간이 아니라 Worker continuation 요청의 safety timeout이다.
+      const BUILDING_STATS_FETCH_TIMEOUT_MS = 180000;
+      const BUILDING_STATS_FETCH_RETRY_COUNT = 0;
+      const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
+      const BUILDING_FRONT_DISCOVERY_VERSION = "V62_DENSE_PARCEL_900";
+
+      const BUILDING_GEOCODE_CONCURRENCY = 3;
+      const BUILDING_GEOCODE_DELAY_MS = 70;
+      const BUILDING_KAKAO_CALL_TIMEOUT_MS = 6000;
+      const BUILDING_REVERSE_RETRY_COUNT = 2;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
       const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
       const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
       const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;
-      const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
-      const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 4;
-      const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 35;
-      const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 8;
-      const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 24;
+
+      // V62 dense parcel discovery: 작은 일반 지번/다가구/빌라를 누락하지 않도록
+      // coupangRouteMap과 동일한 900-point / 7~16m 격자를 사용한다.
+      const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 900;
+      const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 5;
+      const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 30;
+      const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.58;
+      const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 7;
+      const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 16;
       // 한 우편번호에서 실제 면적 비중이 큰 법정동만 백엔드에 전달한다.
       // 경계의 작은 조각까지 20개를 넘기면 Worker subrequest 한도를 쉽게 초과한다.
       const BUILDING_MAX_LEGAL_DONG_CODES = 12;
@@ -2096,9 +2100,10 @@
         buildingStatsByZip: new Map(),
         buildingStatusByZip: new Map(),
         buildingLocationCache: new Map(),
+        buildingReverseAddressCache: new Map(),
+        buildingRegionCodeCache: new Map(),
         scopeParcelsByZip: new Map(),
-        apartmentMarkersByZip: new Map(),
-        apartmentPopup: null,
+        apartmentMarkersByZip: new Map(),        apartmentPopup: null,
         apartmentPopupRequestSeq: 0,
         buildingQueue: Promise.resolve(),
         buildingQueuedZips: new Set(),
@@ -2397,7 +2402,6 @@
               ${parcelAddress && parcelAddress !== primaryAddress ? `<span>(지번) ${escapeTerrainHtml(parcelAddress)}</span>` : ""}
             </div>
           </div>
-
           ${households > 0 || buildingCount > 0 || elevatorCount > 0 ? `
             <div class="apartmentPopupSection">
               <div class="apartmentPopupSectionTitle">단지 정보</div>
@@ -3053,14 +3057,40 @@
       function coordToLegalDongRegionCode(point) {
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder || !point) return resolve("");
-          state.kakaoGeocoder.coord2RegionCode(point.lng, point.lat, (result, status) => {
-            if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) {
-              resolve("");
-              return;
-            }
-            const legal = result.find((row) => row?.region_type === "B");
-            resolve(normalizeLegalDongCode(legal?.code));
-          });
+          const lng = Number(point.lng);
+          const lat = Number(point.lat);
+          if (!Number.isFinite(lng) || !Number.isFinite(lat)) return resolve("");
+
+          const cacheKey = `${lng.toFixed(6)},${lat.toFixed(6)}`;
+          if (state.buildingRegionCodeCache.has(cacheKey)) {
+            return resolve(state.buildingRegionCodeCache.get(cacheKey) || "");
+          }
+
+          let settled = false;
+          const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            const normalized = normalizeLegalDongCode(value);
+            state.buildingRegionCodeCache.set(cacheKey, normalized || "");
+            resolve(normalized || "");
+          };
+          const timer = window.setTimeout(
+            () => finish(""),
+            BUILDING_KAKAO_CALL_TIMEOUT_MS
+          );
+
+          try {
+            state.kakaoGeocoder.coord2RegionCode(lng, lat, (result, status) => {
+              if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) {
+                return finish("");
+              }
+              const legal = result.find((row) => row?.region_type === "B");
+              finish(legal?.code || "");
+            });
+          } catch {
+            finish("");
+          }
         });
       }
 
@@ -3184,51 +3214,93 @@
       }
 
       function reverseAddressMetaFromPoint(lng, lat) {
+        const x = Number(lng);
+        const y = Number(lat);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return Promise.resolve(null);
+
+        const cacheKey = `${x.toFixed(6)},${y.toFixed(6)}`;
+        if (state.buildingReverseAddressCache.has(cacheKey)) {
+          return Promise.resolve(state.buildingReverseAddressCache.get(cacheKey));
+        }
+
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder) return resolve(null);
+          let settled = false;
+          let attempt = 0;
+          let callTimer = null;
 
-          state.kakaoGeocoder.coord2Address(lng, lat, (result, status) => {
-            if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) {
-              resolve(null);
-              return;
+          const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            if (callTimer) window.clearTimeout(callTimer);
+            state.buildingReverseAddressCache.set(cacheKey, value || null);
+            resolve(value || null);
+          };
+
+          const run = () => {
+            if (settled) return;
+            attempt += 1;
+            if (callTimer) window.clearTimeout(callTimer);
+            callTimer = window.setTimeout(() => {
+              if (attempt < BUILDING_REVERSE_RETRY_COUNT) return run();
+              finish(null);
+            }, BUILDING_KAKAO_CALL_TIMEOUT_MS);
+
+            try {
+              state.kakaoGeocoder.coord2Address(x, y, (result, status) => {
+                if (settled) return;
+                if (callTimer) window.clearTimeout(callTimer);
+                if (
+                  status !== kakao.maps.services.Status.OK ||
+                  !Array.isArray(result) ||
+                  !result[0]
+                ) {
+                  if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
+                    window.setTimeout(run, attempt === 1 ? 160 : 360);
+                    return;
+                  }
+                  finish(null);
+                  return;
+                }
+
+                const row = result[0];
+                const address = row.address || {};
+                const road = row.road_address || {};
+                const zoneDigits = String(
+                  road.zone_no ?? address.zone_no ?? ""
+                ).replace(/\D/g, "");
+                const regionNameKey = [
+                  address.region_1depth_name,
+                  address.region_2depth_name,
+                  address.region_3depth_name
+                ]
+                  .map((value) => String(value || "").replace(/\s+/g, " ").trim())
+                  .filter(Boolean)
+                  .join("|");
+
+                finish({
+                  zonecode: zoneDigits.length === 5 ? zoneDigits : null,
+                  legalDongCode: normalizeTargetLegalDongCode(address.b_code),
+                  regionNameKey,
+                  platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
+                  parcelMainNo: normalizeParcelNo(address.main_address_no),
+                  parcelSubNo: normalizeParcelNo(address.sub_address_no),
+                  parcelAddress: address.address_name || null,
+                  roadAddress: road.address_name || null,
+                  buildingName: String(road.building_name || "").trim() || null,
+                  matchedAddress: address.address_name || road.address_name || null
+                });
+              });
+            } catch {
+              if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
+                window.setTimeout(run, attempt === 1 ? 160 : 360);
+              } else {
+                finish(null);
+              }
             }
+          };
 
-            const row = result[0] || null;
-            if (!row) return resolve(null);
-
-            const address = row.address || {};
-            const road = row.road_address || {};
-            const zoneDigits = String(
-              road.zone_no ??
-              address.zone_no ??
-              ""
-            ).replace(/\D/g, "");
-
-            // coord2Address의 지번 주소에는 법정동 코드가 보장되지 않는다.
-            // discovery 단계에서는 아래 regionNameKey를 기준으로 coord2RegionCode를
-            // 한 번만 호출해 법정동 코드를 보충한다.
-            const regionNameKey = [
-              address.region_1depth_name,
-              address.region_2depth_name,
-              address.region_3depth_name
-            ]
-              .map((value) => String(value || "").replace(/\s+/g, " ").trim())
-              .filter(Boolean)
-              .join("|");
-
-            resolve({
-              zonecode: zoneDigits.length === 5 ? zoneDigits : null,
-              legalDongCode: normalizeTargetLegalDongCode(address.b_code),
-              regionNameKey,
-              platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
-              parcelMainNo: normalizeParcelNo(address.main_address_no),
-              parcelSubNo: normalizeParcelNo(address.sub_address_no),
-              parcelAddress: address.address_name || null,
-              roadAddress: road.address_name || null,
-              buildingName: String(road.building_name || "").trim() || null,
-              matchedAddress: address.address_name || road.address_name || null,
-            });
-          });
+          run();
         });
       }
 
@@ -3297,7 +3369,6 @@
           const coordinates = turf.centerOfMass(feature)?.geometry?.coordinates;
           if (Array.isArray(coordinates)) push(coordinates[0], coordinates[1]);
         } catch {}
-
         let bbox = null;
         let areaM2 = 0;
         try {
@@ -3423,9 +3494,10 @@
 
             const exactZip = String(reverse.zonecode || "") === String(zip);
             const boundaryDistance = featureBoundaryDistanceMeters(feature, point.lng, point.lat);
+            // V62: 경계에서 수 m 안쪽에 있는 작은 일반 지번도 유효하게 보존한다.
             const interiorThresholdMeters = Math.max(
-              6,
-              Number(plan.spacingMeters || 0) * 0.45
+              3,
+              Number(plan.spacingMeters || 0) * 0.25
             );
             // 우편번호가 비어 있거나 인접 도로의 우편번호가 반환되더라도,
             // 실제 표본 좌표가 폴리곤 경계에서 충분히 안쪽이면 해당 필지를 인정한다.
@@ -3456,6 +3528,7 @@
                 previous.zonecode = reverse.zonecode || previous.zonecode || null;
                 previous.parcelAddress = reverse.parcelAddress || previous.parcelAddress || null;
                 previous.roadAddress = reverse.roadAddress || previous.roadAddress || null;
+                previous.buildingName = reverse.buildingName || previous.buildingName || null;
                 previous.matchedAddress = reverse.matchedAddress || previous.matchedAddress || null;
               }
               continue;
@@ -3472,6 +3545,7 @@
               interiorVerified,
               parcelAddress: reverse.parcelAddress || null,
               roadAddress: reverse.roadAddress || null,
+              buildingName: reverse.buildingName || null,
               matchedAddress: reverse.matchedAddress || reverse.parcelAddress || reverse.roadAddress || null,
               lat: point.lat,
               lng: point.lng,
@@ -3487,13 +3561,27 @@
         );
         await Promise.all(Array.from({ length: workerCount }, worker));
 
+        const reverseCoverage = plan.points.length > 0
+          ? reverseSuccessCount / plan.points.length
+          : 0;
+        if (
+          plan.points.length >= 20 &&
+          reverseCoverage < BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE
+        ) {
+          throw new Error(
+            `카카오 필지 역지오코딩 성공률이 너무 낮습니다 (${Math.round(reverseCoverage * 100)}%). ` +
+            `부분 데이터로 세대수를 저장하지 않고 중단합니다.`
+          );
+        }
+
         // 우편번호 일치, 폴리곤 깊은 내부 확인, 또는 서로 다른 내부 표본에서 2회 이상
         // 반복 확인된 필지를 최종 후보로 사용한다. MultiPolygon/경계 인접 아파트에서
         // 카카오 우편번호가 인접 구역으로 반환되는 경우의 누락을 줄인다.
         let parcels = [...parcelMap.values()].filter((row) =>
           row.zoneVerified === true ||
           row.interiorVerified === true ||
-          Number(row.hitCount || 0) >= 2
+          Number(row.hitCount || 0) >= 2 ||
+          Number(row.boundaryDistanceMeters || 0) >= 1.5
         );
 
         // 매우 좁거나 복잡한 폴리곤은 모든 표본이 경계 가까이에 있을 수 있다.
@@ -3510,6 +3598,8 @@
           diagnostics: {
             sampleCount: plan.points.length,
             reverseSuccessCount,
+            reverseCoveragePercent: Math.round(reverseCoverage * 1000) / 10,
+            frontDiscoveryVersion: BUILDING_FRONT_DISCOVERY_VERSION,
             legalDongLookupCount,
             legalDongLookupSuccessCount,
             legalDongPointCount,
@@ -3537,13 +3627,28 @@
         return new Promise((resolve) => {
           if (!state.kakaoGeocoder || !query) return resolve([]);
           const options = analyzeType ? { analyze_type: analyzeType } : undefined;
-          state.kakaoGeocoder.addressSearch(query, (result, status) => {
-            resolve(
-              status === kakao.maps.services.Status.OK && Array.isArray(result)
-                ? result
-                : []
-            );
-          }, options);
+          let settled = false;
+          const finish = (rows) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve(Array.isArray(rows) ? rows : []);
+          };
+          const timer = window.setTimeout(
+            () => finish([]),
+            BUILDING_KAKAO_CALL_TIMEOUT_MS
+          );
+          try {
+            state.kakaoGeocoder.addressSearch(query, (result, status) => {
+              finish(
+                status === kakao.maps.services.Status.OK && Array.isArray(result)
+                  ? result
+                  : []
+              );
+            }, options);
+          } catch {
+            finish([]);
+          }
         });
       }
 
@@ -3597,7 +3702,6 @@
         const addressVerified = textScore >= 22;
         const inside = pointInsideZipFeature(feature, lng, lat);
         const exactZip = String(zonecode) === String(zip);
-
         let score = 0;
         if (parcelIdentity) score += 1000;
         if (legalMatch) score += 250;
@@ -3716,6 +3820,7 @@
           address: point.queryAddress || target?.address || null,
           roadAddress: target?.roadAddress || null,
           parcelAddress: target?.parcelAddress || null,
+          buildingName: target?.buildingName || target?.building_name || null,
           addressAliases: [...new Set(addresses)],
           lat: point.lat,
           lng: point.lng,
@@ -3946,7 +4051,9 @@
             force_refresh: force === true,
             walkupMinGroundFloors: 3,
             minCoveragePercent: 95,
-            scopeMatchMode: "V32_PHASED_KAPT_DETAIL_BUDGET",
+            scopeMatchMode: "V62_DENSE_PARCEL_900",
+            frontDiscoveryVersion: BUILDING_FRONT_DISCOVERY_VERSION,
+            front_discovery_version: BUILDING_FRONT_DISCOVERY_VERSION,
             legalDongCodeCandidates: legalDongCodes
           };
 
@@ -5397,7 +5504,6 @@
               strokeOpacity: 1,
               strokeStyle: "solid"
             });
-
             state.mergedOutlinePolylines.push(line);
           }
 

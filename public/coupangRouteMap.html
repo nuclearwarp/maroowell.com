@@ -2325,6 +2325,7 @@
   const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
   const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
   const BUILDING_CALC_CONCURRENCY = 1;
+  const BUILDING_FRONT_DISCOVERY_VERSION = "V62_DENSE_PARCEL_900";
 
   const BUILDING_GEOCODE_CONCURRENCY = 3;
   const BUILDING_GEOCODE_DELAY_MS = 70;
@@ -2335,13 +2336,15 @@
   const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;
 
-  // 폴리곤 discovery는 Backend에서 최종 필지 검증을 다시 하므로 과도한 560포인트 탐색을 피한다.
-  const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 180;
-  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;
-  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 55;
-  const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.55;
-  const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 12;
-  const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 32;
+  // V62: 서울 도심의 5~15m 폭 소필지를 180포인트 격자로 찾으면 일반 다가구/빌라가 대거 누락된다.
+  // 큰 아파트 필지만 살아남아 배송호수는 작아지고 엘리베이터 비율이 과대해지는 문제가 확인되어
+  // discovery 밀도를 복원한다. Kakao 호출은 병렬화/짧은 pacing으로 처리해 예전 560포인트보다 빠르게 돈다.
+  const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 900;
+  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 5;
+  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 30;
+  const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.58;
+  const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 7;
+  const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 16;
   const BUILDING_MAX_LEGAL_DONG_CODES = 12;
 
   const GOLDEN_ANGLE = 137.50776405003785;
@@ -4496,7 +4499,9 @@
         if(!key){ invalidParcelKeyCount++; continue; }
         parcelKeyPointCount++;
         const boundaryDistance=featureBoundaryDistanceMeters(feature,point.lng,point.lat);
-        const interiorThreshold=Math.max(6,Number(plan.spacingMeters||0)*.45);
+        // V62: route 경계에서 수 m 안쪽에 있는 소필지도 유효하다.
+        // 예전 0.45*spacing(최대 14m 이상) 기준은 경계부 일반지번을 과도하게 버렸다.
+        const interiorThreshold=Math.max(3,Number(plan.spacingMeters||0)*.25);
         const interiorVerified=boundaryDistance>=interiorThreshold;
         if(interiorVerified) interiorHitCount++;
         const previous=parcelMap.get(key);
@@ -4533,9 +4538,12 @@
       );
     }
 
-    // Route scopes have no postcode to use as an edge fallback. Keep parcels with a deep interior hit,
-    // or repeated independent hits; the backend still performs the final polygon verification.
-    let parcels=[...parcelMap.values()].filter(row=>row.interiorVerified===true || Number(row.hitCount||0)>=2);
+    // V62: 모든 표본점 자체가 route polygon 내부에서 생성되고 Backend가 좌표를 다시 polygon 검증한다.
+    // 따라서 경계부 소필지는 1회 hit라도 boundary 1.5m 이상이면 보존한다.
+    // 이 완화가 없으면 도로변 소형 다가구/빌라 지번이 대거 빠져 아파트 비중만 과대해진다.
+    let parcels=[...parcelMap.values()].filter(row=>
+      row.interiorVerified===true || Number(row.hitCount||0)>=2 || Number(row.boundaryDistanceMeters||0)>=1.5
+    );
     // 매우 좁은 세부 라우트는 모든 표본이 경계 가까이에 있을 수 있다. 이 경우에는
     // 폴리곤 내부 표본에서 확인된 필지를 버리지 않고 백엔드의 최종 polygon 검증에 맡긴다.
     if (!parcels.length && parcelMap.size){

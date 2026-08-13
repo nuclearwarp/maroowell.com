@@ -2316,23 +2316,31 @@
   const TERRAIN_ENDPOINT = `${ANALYSIS_API_BASE}/terrain`;
   const BUILDING_STATS_ENDPOINT = `${ANALYSIS_API_BASE}/building/stats`;
 
-  const BUILDING_STATS_FETCH_TIMEOUT_MS = 240000;
-  const BUILDING_STATS_FETCH_RETRY_COUNT = 1;
-  const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 1200;
-  const BUILDING_GEOCODE_CONCURRENCY = 2;
-  const BUILDING_GEOCODE_DELAY_MS = 140;
+  // V52: 캐시 확인과 실제 계산을 분리한다.
+  // 한 라우트가 지연되어도 다른 라우트의 캐시 확인/계산이 막히지 않도록 제한 병렬 처리한다.
+  const BUILDING_STATS_FETCH_TIMEOUT_MS = 60000;
+  const BUILDING_CACHE_PROBE_TIMEOUT_MS = 8000;
+  const BUILDING_STATS_FETCH_RETRY_COUNT = 0;
+  const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
+  const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
+  const BUILDING_CALC_CONCURRENCY = 2;
+
+  const BUILDING_GEOCODE_CONCURRENCY = 3;
+  const BUILDING_GEOCODE_DELAY_MS = 70;
+  const BUILDING_KAKAO_CALL_TIMEOUT_MS = 6000;
+  const BUILDING_REVERSE_RETRY_COUNT = 2;
   const BUILDING_GEOCODE_MAX_ROUNDS = 5;
   const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;
-  const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 560;
-  // Kakao Local API is browser-origin/rate sensitive. Keep discovery conservative;
-  // failed samples are retried inside reverseAddressMetaFromPoint and bad coverage is rejected.
-  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 2;
-  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 100;
-  const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.60;
-  const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 8;
-  const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 24;
+
+  // 폴리곤 discovery는 Backend에서 최종 필지 검증을 다시 하므로 과도한 560포인트 탐색을 피한다.
+  const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 180;
+  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;
+  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 55;
+  const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.55;
+  const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 12;
+  const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 32;
   const BUILDING_MAX_LEGAL_DONG_CODES = 12;
 
   const GOLDEN_ANGLE = 137.50776405003785;
@@ -2671,6 +2679,8 @@
   const buildingResultByRouteKey = new Map();
   const buildingLocationCache = new Map();
   const buildingScopeParcelsByRouteKey = new Map();
+  const buildingReverseAddressCache = new Map();
+  const buildingRegionCodeCache = new Map();
 
   let campDirty=false, codeDirty=false;
   campInput.addEventListener("input", ()=>{ campDirty=true; });
@@ -4221,49 +4231,98 @@
   function coordToLegalDongRegionCode(point){
     return new Promise(resolve => {
       if (!geocoder || !point) return resolve("");
-      geocoder.coord2RegionCode(point.lng, point.lat, (result, status) => {
-        if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) return resolve("");
-        const legal = result.find(row => row?.region_type === "B");
-        resolve(normalizeLegalDongCode(legal?.code));
-      });
+      const lng = Number(point.lng), lat = Number(point.lat);
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return resolve("");
+      const cacheKey = `${lng.toFixed(6)},${lat.toFixed(6)}`;
+      if (buildingRegionCodeCache.has(cacheKey)) return resolve(buildingRegionCodeCache.get(cacheKey) || "");
+
+      let settled = false;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const normalized = normalizeLegalDongCode(value);
+        buildingRegionCodeCache.set(cacheKey, normalized || "");
+        resolve(normalized || "");
+      };
+      const timer = window.setTimeout(() => finish(""), BUILDING_KAKAO_CALL_TIMEOUT_MS);
+      try{
+        geocoder.coord2RegionCode(lng, lat, (result, status) => {
+          if (status !== kakao.maps.services.Status.OK || !Array.isArray(result)) return finish("");
+          const legal = result.find(row => row?.region_type === "B");
+          finish(legal?.code || "");
+        });
+      }catch{
+        finish("");
+      }
     });
   }
 
   function reverseAddressMetaFromPoint(lng, lat){
+    const x = Number(lng), y = Number(lat);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return Promise.resolve(null);
+    const cacheKey = `${x.toFixed(6)},${y.toFixed(6)}`;
+    if (buildingReverseAddressCache.has(cacheKey)) return Promise.resolve(buildingReverseAddressCache.get(cacheKey));
+
     return new Promise(resolve => {
       if (!geocoder) return resolve(null);
+      let settled = false;
       let attempt = 0;
+      let callTimer = null;
+
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        if (callTimer) clearTimeout(callTimer);
+        buildingReverseAddressCache.set(cacheKey, value || null);
+        resolve(value || null);
+      };
+
       const run = () => {
+        if (settled) return;
         attempt += 1;
-        geocoder.coord2Address(lng, lat, (result, status) => {
-          if (status !== kakao.maps.services.Status.OK || !Array.isArray(result) || !result[0]) {
-            if (attempt < 3) {
-              const delay = attempt === 1 ? 240 : 650;
-              window.setTimeout(run, delay);
+        if (callTimer) clearTimeout(callTimer);
+        callTimer = window.setTimeout(() => {
+          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return run();
+          finish(null);
+        }, BUILDING_KAKAO_CALL_TIMEOUT_MS);
+
+        try{
+          geocoder.coord2Address(x, y, (result, status) => {
+            if (settled) return;
+            if (callTimer) clearTimeout(callTimer);
+            if (status !== kakao.maps.services.Status.OK || !Array.isArray(result) || !result[0]) {
+              if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
+                window.setTimeout(run, attempt === 1 ? 160 : 360);
+                return;
+              }
+              finish(null);
               return;
             }
-            resolve(null);
-            return;
-          }
-          const row = result[0];
-          const address = row.address || {};
-          const road = row.road_address || {};
-          const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
-          const regionNameKey = [address.region_1depth_name,address.region_2depth_name,address.region_3depth_name]
-            .map(value => String(value || "").replace(/\s+/g, " ").trim())
-            .filter(Boolean).join("|");
-          resolve({
-            zonecode: zoneDigits.length === 5 ? zoneDigits : null,
-            legalDongCode: normalizeLegalDongCode(address.b_code),
-            regionNameKey,
-            platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
-            parcelMainNo: normalizeParcelNo(address.main_address_no),
-            parcelSubNo: normalizeParcelNo(address.sub_address_no),
-            parcelAddress: address.address_name || null,
-            roadAddress: road.address_name || null,
-            matchedAddress: address.address_name || road.address_name || null
+            const row = result[0];
+            const address = row.address || {};
+            const road = row.road_address || {};
+            const zoneDigits = String(road.zone_no ?? address.zone_no ?? "").replace(/\D/g, "");
+            const regionNameKey = [address.region_1depth_name,address.region_2depth_name,address.region_3depth_name]
+              .map(value => String(value || "").replace(/\s+/g, " ").trim())
+              .filter(Boolean).join("|");
+            finish({
+              zonecode: zoneDigits.length === 5 ? zoneDigits : null,
+              legalDongCode: normalizeLegalDongCode(address.b_code),
+              regionNameKey,
+              platGbCd: String(address.mountain_yn || "N").toUpperCase() === "Y" ? "1" : "0",
+              parcelMainNo: normalizeParcelNo(address.main_address_no),
+              parcelSubNo: normalizeParcelNo(address.sub_address_no),
+              parcelAddress: address.address_name || null,
+              roadAddress: road.address_name || null,
+              buildingName: road.building_name || null,
+              matchedAddress: address.address_name || road.address_name || null
+            });
           });
-        });
+        }catch{
+          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, 160);
+          finish(null);
+        }
       };
       run();
     });
@@ -4448,6 +4507,7 @@
             previous.zonecode=reverse.zonecode||previous.zonecode||null;
             previous.parcelAddress=reverse.parcelAddress||previous.parcelAddress||null;
             previous.roadAddress=reverse.roadAddress||previous.roadAddress||null;
+            previous.buildingName=reverse.buildingName||previous.buildingName||null;
             previous.matchedAddress=reverse.matchedAddress||previous.matchedAddress||null;
           }
           continue;
@@ -4455,6 +4515,7 @@
         parcelMap.set(key,{
           key,legalDongCode,platGbCd:reverse.platGbCd||"0",parcelMainNo:reverse.parcelMainNo,parcelSubNo:reverse.parcelSubNo,
           zonecode:reverse.zonecode||null,interiorVerified,parcelAddress:reverse.parcelAddress||null,roadAddress:reverse.roadAddress||null,
+          buildingName:reverse.buildingName||null,
           matchedAddress:reverse.matchedAddress||reverse.parcelAddress||reverse.roadAddress||null,lat:point.lat,lng:point.lng,hitCount:1,
           boundaryDistanceMeters:Math.round(boundaryDistance*10)/10
         });
@@ -4521,9 +4582,21 @@
     return new Promise(resolve=>{
       if(!geocoder||!query) return resolve([]);
       const options=analyzeType?{analyze_type:analyzeType}:undefined;
-      geocoder.addressSearch(query,(result,status)=>{
-        resolve(status===kakao.maps.services.Status.OK&&Array.isArray(result)?result:[]);
-      },options);
+      let settled=false;
+      const finish=rows=>{
+        if(settled)return;
+        settled=true;
+        clearTimeout(timer);
+        resolve(Array.isArray(rows)?rows:[]);
+      };
+      const timer=window.setTimeout(()=>finish([]),BUILDING_KAKAO_CALL_TIMEOUT_MS);
+      try{
+        geocoder.addressSearch(query,(result,status)=>{
+          finish(status===kakao.maps.services.Status.OK&&Array.isArray(result)?result:[]);
+        },options);
+      }catch{
+        finish([]);
+      }
     });
   }
 
@@ -4636,13 +4709,17 @@
     finally{clearTimeout(timer);}
   }
 
-  async function postBuildingStats(accessToken,payload){
+  async function postBuildingStats(accessToken,payload,requestOptions={}){
+    const timeoutMs=Number(requestOptions.timeoutMs||BUILDING_STATS_FETCH_TIMEOUT_MS);
+    const retryCount=Number.isFinite(Number(requestOptions.retryCount))
+      ? Math.max(0,Math.trunc(Number(requestOptions.retryCount)))
+      : BUILDING_STATS_FETCH_RETRY_COUNT;
     let lastError=null;
-    for(let attempt=0;attempt<=BUILDING_STATS_FETCH_RETRY_COUNT;attempt++){
+    for(let attempt=0;attempt<=retryCount;attempt++){
       try{
         const response=await analysisFetchWithTimeout(BUILDING_STATS_ENDPOINT,{
           method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${accessToken}`},body:JSON.stringify(payload),cache:"no-store"
-        },BUILDING_STATS_FETCH_TIMEOUT_MS);
+        },timeoutMs);
         const text=await response.text(); let data=null; try{data=text?JSON.parse(text):null;}catch{}
         if(!response.ok||data?.ok===false){
           const error=new Error(data?.error||data?.message||text||`HTTP ${response.status}`);
@@ -4653,7 +4730,7 @@
         lastError=error;
         const status=Number(error?.httpStatus||0), message=String(error?.message||error||"");
         const transient=status===0||status===408||status===429||status>=500||/failed to fetch|network|timeout|cors|err_failed/i.test(message);
-        if(!transient||attempt>=BUILDING_STATS_FETCH_RETRY_COUNT)throw error;
+        if(!transient||attempt>=retryCount)throw error;
         await new Promise(r=>setTimeout(r,BUILDING_STATS_FETCH_RETRY_DELAY_MS*(attempt+1)));
       }
     }
@@ -4683,7 +4760,23 @@
     setBuildingStatus(message,"idle");
   }
 
-  async function fetchBuildingStatsForPack(pack,accessToken,force=false){
+  async function probeBuildingCacheForPack(pack,accessToken){
+    const geometry=terrainGeometryFromPack(pack);
+    if(!geometry)throw new Error("분석할 폴리곤이 없습니다.");
+    const target=await buildTerrainTarget(pack,geometry);
+    const memoryKey=`${target.scopeType}:${target.scopeKey}:${target.geometryHash}`;
+    const scopePayload=analysisScopePayload(target,geometry);
+    const data=await postBuildingStats(accessToken,{
+      ...scopePayload,forceRefresh:false,force_refresh:false,cacheOnly:true,cache_only:true
+    },{timeoutMs:BUILDING_CACHE_PROBE_TIMEOUT_MS,retryCount:0});
+    return {
+      hit:data?.cached===true&&!!data?.buildingStats,
+      result:data?.cached===true&&data?.buildingStats?{status:"ok",data,target,memoryKey}:null,
+      target,memoryKey
+    };
+  }
+
+  async function fetchBuildingStatsForPack(pack,accessToken,force=false,options={}){
     if(!window.turf)throw new Error("Turf.js를 불러오지 못했습니다.");
     if(!geocoder)throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
     const geometry=terrainGeometryFromPack(pack);
@@ -4694,10 +4787,10 @@
     const memoryKey=`${target.scopeType}:${target.scopeKey}:${target.geometryHash}`;
     const scopePayload=analysisScopePayload(target,geometry);
 
-    if(!force){
+    if(!force&&options.skipCacheProbe!==true){
       const cacheProbe=await postBuildingStats(accessToken,{
         ...scopePayload,forceRefresh:false,force_refresh:false,cacheOnly:true,cache_only:true
-      });
+      },{timeoutMs:BUILDING_CACHE_PROBE_TIMEOUT_MS,retryCount:0});
       if(cacheProbe?.cached===true&&cacheProbe?.buildingStats){
         return {status:"ok",data:cacheProbe,target,memoryKey};
       }
@@ -4836,43 +4929,110 @@
     const packs=routePacksForTerrain();
     if(!packs.length){clearBuildingDisplay("분석할 폴리곤이 없습니다.");return;}
     const requestSeq=++buildingRequestSeq;
-    for(const [index,pack] of packs.entries()){
-      const routeKey=terrainPackRouteKey(pack,index);
-      const previous=buildingResultByRouteKey.get(routeKey);
-      if(force||!previous||previous.status==="error"){
-        buildingResultByRouteKey.set(routeKey,{status:force?"loading":"checking",message:force?"세대수를 새로 계산하고 있습니다.":"세대수 캐시를 확인하고 있습니다."});
-      }
-    }
-    renderTerrainCards(packs);
-    setBuildingStatus(`세부 구역별 배송호수·엘리베이터 정보를 조회하고 있습니다. (0/${packs.length})`,"loading");
     if(buildingRefreshBtn)buildingRefreshBtn.disabled=true;
-    let successCount=0,errorCount=0;
+
+    let successCount=0,errorCount=0,cacheHitCount=0;
     try{
       const accessToken=await getTerrainAccessToken();
-      for(let index=0;index<packs.length;index++){
-        if(requestSeq!==buildingRequestSeq)return;
-        const pack=packs[index], routeKey=terrainPackRouteKey(pack,index);
-        const previous=buildingResultByRouteKey.get(routeKey);
-        if(!force&&previous?.status==="ok"){successCount++;continue;}
-        try{
-          const result=await fetchBuildingStatsForPack(pack,accessToken,force);
-          if(requestSeq!==buildingRequestSeq)return;
-          buildingResultByRouteKey.set(routeKey,result); successCount++;
-        }catch(error){
-          if(requestSeq!==buildingRequestSeq)return;
-          const responseData=error?.responseData||null;
-          let message=String(error?.message||error||"배송 호수 분석 실패");
-          const legal=responseData?.diagnostics?.legalDongCodes;
-          if(Array.isArray(legal)&&legal.length){
-            const text=legal.map(row=>typeof row==="string"?row:row?.legalDongCode).filter(Boolean).join(", ");
-            if(text)message+=` · 조회 법정동 ${text}`;
-          }
-          buildingResultByRouteKey.set(routeKey,{status:"error",error:error?.name==="AbortError"?`요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS/1000)}초)`:message});
-          errorCount++;
+      const jobs=packs.map((pack,index)=>({pack,index,routeKey:terrainPackRouteKey(pack,index)}));
+
+      for(const job of jobs){
+        const previous=buildingResultByRouteKey.get(job.routeKey);
+        if(force){
+          buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"새 계산 대기 중입니다."});
+        }else if(!previous||previous.status==="error"){
+          buildingResultByRouteKey.set(job.routeKey,{status:"checking",message:"세대수 캐시를 확인하고 있습니다."});
         }
-        renderTerrainCards(packs);
-        setBuildingStatus(`세부 구역별 배송호수·엘리베이터 조회 중 (${index+1}/${packs.length})`,index+1<packs.length?"loading":(errorCount?"warn":"idle"));
       }
+      renderTerrainCards(packs);
+
+      const calcJobs=[];
+      if(!force){
+        setBuildingStatus(`세대수 캐시를 병렬 확인하고 있습니다. (0/${jobs.length})`,"loading");
+        let cursor=0,checked=0;
+        async function cacheWorker(){
+          while(true){
+            const i=cursor++;
+            if(i>=jobs.length)return;
+            if(requestSeq!==buildingRequestSeq)return;
+            const job=jobs[i];
+            const previous=buildingResultByRouteKey.get(job.routeKey);
+            if(previous?.status==="ok"){
+              successCount++;
+              checked++;
+              continue;
+            }
+            try{
+              const probe=await probeBuildingCacheForPack(job.pack,accessToken);
+              if(requestSeq!==buildingRequestSeq)return;
+              if(probe.hit){
+                buildingResultByRouteKey.set(job.routeKey,probe.result);
+                cacheHitCount++;
+                successCount++;
+              }else{
+                buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"캐시 없음 · 새 계산 대기 중입니다."});
+                calcJobs.push(job);
+              }
+            }catch(error){
+              if(requestSeq!==buildingRequestSeq)return;
+              // cache probe 실패는 분석 실패가 아니므로 신규 계산 큐로 넘긴다.
+              buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"캐시 확인 지연 · 새 계산 대기 중입니다."});
+              calcJobs.push(job);
+            }
+            checked++;
+            renderTerrainCards(packs);
+            setBuildingStatus(`세대수 캐시 확인 중 (${Math.min(checked,jobs.length)}/${jobs.length})`,"loading");
+          }
+        }
+        await Promise.all(Array.from({length:Math.min(BUILDING_CACHE_PROBE_CONCURRENCY,jobs.length)},cacheWorker));
+      }else{
+        calcJobs.push(...jobs);
+      }
+
+      if(requestSeq!==buildingRequestSeq)return;
+      if(!calcJobs.length){
+        setBuildingStatus(`${cacheHitCount}개 캐시 사용 · 배송호수·엘리베이터 확인 완료`,"idle");
+        return;
+      }
+
+      setBuildingStatus(`${calcJobs.length}개 라우트 새 계산 시작 · 동시 ${Math.min(BUILDING_CALC_CONCURRENCY,calcJobs.length)}개`,"loading");
+      let calcCursor=0,calcDone=0;
+      async function calcWorker(){
+        while(true){
+          const i=calcCursor++;
+          if(i>=calcJobs.length)return;
+          if(requestSeq!==buildingRequestSeq)return;
+          const job=calcJobs[i];
+          buildingResultByRouteKey.set(job.routeKey,{status:"loading",message:"새 세대수 계산을 시작합니다."});
+          renderTerrainCards(packs);
+          try{
+            const result=await fetchBuildingStatsForPack(job.pack,accessToken,force,{skipCacheProbe:true});
+            if(requestSeq!==buildingRequestSeq)return;
+            buildingResultByRouteKey.set(job.routeKey,result);
+            successCount++;
+          }catch(error){
+            if(requestSeq!==buildingRequestSeq)return;
+            const responseData=error?.responseData||null;
+            let message=String(error?.message||error||"배송 호수 분석 실패");
+            const legal=responseData?.diagnostics?.legalDongCodes;
+            if(Array.isArray(legal)&&legal.length){
+              const text=legal.map(row=>typeof row==="string"?row:row?.legalDongCode).filter(Boolean).join(", ");
+              if(text)message+=` · 조회 법정동 ${text}`;
+            }
+            if(error?.name==="AbortError")message=`요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS/1000)}초)`;
+            buildingResultByRouteKey.set(job.routeKey,{status:"error",error:message});
+            errorCount++;
+          }
+          calcDone++;
+          renderTerrainCards(packs);
+          setBuildingStatus(
+            `신규 계산 ${calcDone}/${calcJobs.length} · 캐시 ${cacheHitCount} · 실패 ${errorCount}`,
+            calcDone<calcJobs.length?"loading":(errorCount?"warn":"idle")
+          );
+        }
+      }
+      await Promise.all(Array.from({length:Math.min(BUILDING_CALC_CONCURRENCY,calcJobs.length)},calcWorker));
+
       if(requestSeq!==buildingRequestSeq)return;
       if(errorCount===0)setBuildingStatus(`${successCount}개 세부 구역의 배송호수·엘리베이터 분석이 완료되었습니다.`,"idle");
       else if(successCount>0)setBuildingStatus(`${successCount}개 완료 · ${errorCount}개 실패`,"warn");
@@ -4901,7 +5061,7 @@
     const pack=matchedId!=null?overlayById.get(matchedId):null;
     if(!pack)return;
     const routeKey=terrainPackRouteKey(pack);
-    buildingResultByRouteKey.set(routeKey,{status:"loading",message:"세대수를 새로 계산하고 있습니다."}); renderTerrainCards();
+    buildingResultByRouteKey.set(routeKey,{status:"loading",message:"새 세대수 계산을 시작합니다."}); renderTerrainCards();
     try{
       const token=await getTerrainAccessToken();
       const result=await fetchBuildingStatsForPack(pack,token,true);
@@ -4912,7 +5072,7 @@
 
   function buildingStatsHtml(item){
     if(!item)return '<div class="buildingStatsMessage">배송호수·엘리베이터 조회를 준비하고 있습니다.</div>';
-    if(item.status==="checking"||item.status==="loading")return `<div class="buildingStatsMessage">${escapeHtml(item.message||"세대수 데이터를 확인하고 있습니다.")}</div>`;
+    if(item.status==="checking"||item.status==="queued"||item.status==="loading")return `<div class="buildingStatsMessage">${escapeHtml(item.message||"세대수 데이터를 확인하고 있습니다.")}</div>`;
     if(item.status==="error")return `<div class="buildingStatsMessage error">${escapeHtml(item.error||"배송 호수 분석 실패")}</div>`;
     if(item.status!=="ok")return '<div class="buildingStatsMessage">배송호수·엘리베이터 조회를 준비하고 있습니다.</div>';
     const building=buildingStatsFromResponse(item.data);
@@ -4944,7 +5104,10 @@
       return { kind:"idle", label:isTerrain ? "지형정보 준비" : "세대수 준비", disabled:false };
     }
     if (item.status === "checking"){
-      return { kind:"loading", label:isTerrain ? "지형정보 확인중.." : "세대수 확인중..", disabled:true };
+      return { kind:"loading", label:isTerrain ? "지형정보 확인중.." : "캐시 확인중..", disabled:true };
+    }
+    if (item.status === "queued"){
+      return { kind:"loading", label:isTerrain ? "지형정보 대기" : "계산 대기", disabled:true };
     }
     if (item.status === "loading"){
       return { kind:"loading", label:isTerrain ? "지형정보 계산중.." : "세대수 계산중..", disabled:true };

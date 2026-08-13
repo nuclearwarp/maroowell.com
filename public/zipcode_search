@@ -3891,37 +3891,64 @@
         return results;
       }
 
+      function isBuildingAuthRejected(status, message) {
+        const code = Number(status || 0);
+        const text = String(message || "");
+        return code === 401 || code === 403 ||
+          /invalid or expired login session|jwt[^a-z0-9]*(?:expired|invalid)|(?:access|auth|login)[^\n]{0,24}(?:token|session)[^\n]{0,24}(?:expired|invalid)|token[^\n]{0,24}expired/i.test(text);
+      }
+
       async function postBuildingStats(session, payload) {
         let lastError = null;
+        let authRetried = false;
 
         for (let attempt = 0; attempt <= BUILDING_STATS_FETCH_RETRY_COUNT; attempt++) {
           try {
-            const res = await fetchWithTimeout(
-              BUILDING_STATS_API_URL,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${session.access_token}`
+            let currentSession = await getCurrentSession(false).catch(() => session || null);
+            if (!currentSession?.access_token) throw new Error("로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.");
+
+            const requestOnce = async (accessToken) => {
+              const res = await fetchWithTimeout(
+                BUILDING_STATS_API_URL,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${accessToken}`
+                  },
+                  body: JSON.stringify(payload),
+                  cache: "no-store"
                 },
-                body: JSON.stringify(payload),
-                cache: "no-store"
-              },
-              BUILDING_STATS_FETCH_TIMEOUT_MS
-            );
+                BUILDING_STATS_FETCH_TIMEOUT_MS
+              );
+              const text = await res.text();
+              let data = null;
+              try { data = text ? JSON.parse(text) : null; } catch {}
+              return { res, text, data };
+            };
 
-            const text = await res.text();
-            let data = null;
-            try { data = text ? JSON.parse(text) : null; } catch {}
+            let result = await requestOnce(currentSession.access_token);
+            let failureMessage = String(result.data?.error || result.data?.message || result.text || "");
 
-            if (!res.ok || data?.ok === false) {
-              const error = new Error(data?.error || data?.message || text || `HTTP ${res.status}`);
-              error.responseData = data && typeof data === "object" ? data : null;
-              error.httpStatus = res.status;
+            if (
+              (!result.res.ok || result.data?.ok === false) &&
+              !authRetried &&
+              isBuildingAuthRejected(result.res.status, failureMessage)
+            ) {
+              authRetried = true;
+              currentSession = await getCurrentSession(true);
+              result = await requestOnce(currentSession.access_token);
+              failureMessage = String(result.data?.error || result.data?.message || result.text || "");
+            }
+
+            if (!result.res.ok || result.data?.ok === false) {
+              const error = new Error(failureMessage || `HTTP ${result.res.status}`);
+              error.responseData = result.data && typeof result.data === "object" ? result.data : null;
+              error.httpStatus = result.res.status;
               throw error;
             }
 
-            return data || {};
+            return result.data || {};
           } catch (error) {
             lastError = error;
             const status = Number(error?.httpStatus || 0);
@@ -5600,11 +5627,41 @@
         );
       }
 
-      async function getCurrentSession() {
+      let analysisAuthRefreshPromise = null;
+
+      function sessionExpiresSoon(session, skewMs = 120000) {
+        const expiresAtMs = Number(session?.expires_at || 0) * 1000;
+        return Number.isFinite(expiresAtMs) && expiresAtMs > 0 &&
+          expiresAtMs <= Date.now() + Math.max(0, Number(skewMs) || 0);
+      }
+
+      async function refreshCurrentSession() {
+        if (!supabase?.auth) throw new Error("로그인 세션을 확인하지 못했습니다.");
+        if (!analysisAuthRefreshPromise) {
+          analysisAuthRefreshPromise = (async () => {
+            const { data, error } = await supabase.auth.refreshSession();
+            if (error) throw error;
+            const session = data?.session || null;
+            if (!session?.access_token) throw new Error("로그인 세션이 만료되었습니다.");
+            return session;
+          })().finally(() => {
+            analysisAuthRefreshPromise = null;
+          });
+        }
+        return await analysisAuthRefreshPromise;
+      }
+
+      async function getCurrentSession(forceRefresh = false) {
         try {
-          const { data } = await supabase.auth.getSession();
-          return data?.session || null;
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          let session = data?.session || null;
+          if (forceRefresh || sessionExpiresSoon(session)) {
+            session = await refreshCurrentSession();
+          }
+          return session;
         } catch {
+          if (forceRefresh) throw new Error("로그인 세션을 갱신하지 못했습니다. 다시 로그인해주세요.");
           return null;
         }
       }

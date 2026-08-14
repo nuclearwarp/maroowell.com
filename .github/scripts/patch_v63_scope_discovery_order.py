@@ -1,3 +1,4 @@
+# trigger: 2026-08-15
 from pathlib import Path
 import re
 

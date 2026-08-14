@@ -1,0 +1,195 @@
+name: Patch V63 scope discovery and zipcode building order
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-v63-scope-discovery-order.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch parcel discovery in both frontends
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          FRONTENDS = [
+              Path('public/zipcode_search'),
+              Path('public/coupangRouteMap.html'),
+          ]
+
+          def replace_required(text, old, new, path, expected_min=1):
+              count = text.count(old)
+              if count < expected_min:
+                  raise SystemExit(f'{path}: required anchor not found: {old!r}')
+              return text.replace(old, new)
+
+          helper_template = r'''
+{indent}function buildingDenseSampleMinimum(areaM2) {{
+{indent}  const area = Math.max(0, Number(areaM2) || 0);
+{indent}  if (area < 50000) return 0;
+{indent}  return Math.min(500, Math.max(60, Math.ceil(area / 350)));
+{indent}}}
+
+{indent}function buildingHalton(index, base) {{
+{indent}  let i = Math.max(1, Math.trunc(Number(index) || 1));
+{indent}  let f = 1;
+{indent}  let result = 0;
+{indent}  while (i > 0) {{
+{indent}    f /= base;
+{indent}    result += f * (i % base);
+{indent}    i = Math.floor(i / base);
+{indent}  }}
+{indent}  return result;
+{indent}}}
+
+{indent}function buildingScopeSamplingParts(feature) {{
+{indent}  const turfApi = window.turf;
+{indent}  const geometry = feature?.geometry;
+{indent}  if (!turfApi || !geometry) return [];
+{indent}  const polygons = geometry.type === "Polygon"
+{indent}    ? [geometry.coordinates]
+{indent}    : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
+{indent}  const parts = [];
+{indent}  for (const coordinates of polygons || []) {{
+{indent}    try {{
+{indent}      const polygon = turfApi.polygon(coordinates);
+{indent}      const area = Math.max(0, Number(turfApi.area(polygon)) || 0);
+{indent}      const bbox = turfApi.bbox(polygon).map(Number);
+{indent}      if (!area || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(value))) continue;
+{indent}      parts.push({{ area, bbox }});
+{indent}    }} catch {{}}
+{indent}  }}
+{indent}  return parts;
+{indent}}}
+'''
+
+          build_pattern = re.compile(
+              r'(?P<head>^(?P<fnindent>[ \t]*)function buildScopeDiscoveryPoints\(feature\)\s*\{[\s\S]*?)'
+              r'^(?P<retindent>[ \t]*)return \{ points, spacingMeters, areaM2 \};\s*$'
+              r'(?P<tail>^[ \t]*\})',
+              re.MULTILINE,
+          )
+
+          def add_dense_backfill(text, path):
+              if 'function buildingDenseSampleMinimum(areaM2)' not in text:
+                  fn_match = re.search(r'^(?P<indent>[ \t]*)function buildScopeDiscoveryPoints\(feature\)\s*\{', text, re.MULTILINE)
+                  if not fn_match:
+                      raise SystemExit(f'{path}: buildScopeDiscoveryPoints not found')
+                  indent = fn_match.group('indent')
+                  helper = helper_template.format(indent=indent)
+                  text = text[:fn_match.start()] + helper + '\n' + text[fn_match.start():]
+
+              match = build_pattern.search(text)
+              if not match:
+                  raise SystemExit(f'{path}: final buildScopeDiscoveryPoints return not found')
+              if 'const minimumDenseSamples = buildingDenseSampleMinimum(areaM2);' in match.group(0):
+                  return text
+
+              indent = match.group('retindent')
+              block = f'''{indent}const minimumDenseSamples = buildingDenseSampleMinimum(areaM2);\n{indent}if (minimumDenseSamples > 0 && points.length < minimumDenseSamples) {{\n{indent}  const samplingParts = buildingScopeSamplingParts(feature);\n{indent}  const totalSamplingArea = samplingParts.reduce((sum, part) => sum + part.area, 0);\n{indent}  const maxBackfillAttempts = Math.max(12000, minimumDenseSamples * 80);\n{indent}  for (let attempt = 1; points.length < minimumDenseSamples && attempt <= maxBackfillAttempts && totalSamplingArea > 0; attempt++) {{\n{indent}    let selector = buildingHalton(attempt, 5) * totalSamplingArea;\n{indent}    let part = samplingParts[samplingParts.length - 1];\n{indent}    for (const candidate of samplingParts) {{\n{indent}      selector -= candidate.area;\n{indent}      if (selector <= 0) {{ part = candidate; break; }}\n{indent}    }}\n{indent}    const [partMinLng, partMinLat, partMaxLng, partMaxLat] = part.bbox;\n{indent}    push(\n{indent}      partMinLng + (partMaxLng - partMinLng) * buildingHalton(attempt, 2),\n{indent}      partMinLat + (partMaxLat - partMinLat) * buildingHalton(attempt, 3)\n{indent}    );\n{indent}  }}\n{indent}}}\n\n{indent}return {{ points, spacingMeters, areaM2 }};'''
+              return text[:match.start('retindent')] + block + '\n' + match.group('tail') + text[match.end('tail'):]
+
+          for path in FRONTENDS:
+              text = path.read_text(encoding='utf-8')
+
+              text = replace_required(
+                  text,
+                  'const BUILDING_FRONT_DISCOVERY_VERSION = "V62_DENSE_PARCEL_900";',
+                  'const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";',
+                  path,
+              )
+              text = replace_required(
+                  text,
+                  'const BUILDING_KAKAO_CALL_TIMEOUT_MS = 6000;',
+                  'const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;',
+                  path,
+              )
+              text = replace_required(
+                  text,
+                  'const BUILDING_REVERSE_RETRY_COUNT = 2;',
+                  'const BUILDING_REVERSE_RETRY_COUNT = 3;',
+                  path,
+              )
+              text = replace_required(
+                  text,
+                  'const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 5;',
+                  'const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;',
+                  path,
+              )
+              text = replace_required(
+                  text,
+                  'const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 30;',
+                  'const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 80;',
+                  path,
+              )
+
+              # Kakao coord2Address가 순간적으로 막힐 때 즉시 재호출하지 않고 간격을 둔다.
+              text = text.replace(
+                  'if (attempt < BUILDING_REVERSE_RETRY_COUNT) return run();',
+                  'if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, attempt === 1 ? 300 : 900);'
+              )
+              text = text.replace(
+                  'window.setTimeout(run, attempt === 1 ? 160 : 360);',
+                  'window.setTimeout(run, attempt === 1 ? 300 : 900);'
+              )
+              text = text.replace(
+                  'if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, 160);',
+                  'if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, attempt === 1 ? 300 : 900);'
+              )
+
+              text = add_dense_backfill(text, path)
+              path.write_text(text, encoding='utf-8')
+
+          # zipcode_search의 경계/세대수 계산 시작 순서를 화면 정렬과 동일한 우편번호 오름차순으로 고정한다.
+          zip_path = Path('public/zipcode_search')
+          zip_text = zip_path.read_text(encoding='utf-8')
+          old_targets = 'const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));'
+          new_targets = 'const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z)).sort();'
+          if old_targets not in zip_text and new_targets not in zip_text:
+              raise SystemExit('zipcode_search: drawSelected target anchor not found')
+          zip_text = zip_text.replace(old_targets, new_targets, 1)
+          zip_text = zip_text.replace(
+              'const ZIPCODE_AREA_UI_VERSION = "2026-08-14-building-v62-dense-parcel-900";',
+              'const ZIPCODE_AREA_UI_VERSION = "2026-08-15-building-v63-dense-backfill-order";',
+              1,
+          )
+          zip_path.write_text(zip_text, encoding='utf-8')
+
+          # Validation: 판정/집계 함수는 건드리지 않고 discovery/호출 안정화와 zipcode 큐 시작순서만 바뀌었는지 핵심 anchor를 확인한다.
+          for path in FRONTENDS:
+              final = path.read_text(encoding='utf-8')
+              assert 'const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";' in final
+              assert 'const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;' in final
+              assert 'const BUILDING_REVERSE_RETRY_COUNT = 3;' in final
+              assert 'const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;' in final
+              assert 'const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 80;' in final
+              assert final.count('function buildingDenseSampleMinimum(areaM2)') == 1
+              assert final.count('const minimumDenseSamples = buildingDenseSampleMinimum(areaM2);') == 1
+              assert 'Math.ceil(area / 350)' in final
+              assert 'Math.min(500' in final
+
+          final_zip = zip_path.read_text(encoding='utf-8')
+          assert 'const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z)).sort();' in final_zip
+          PY
+
+      - name: Validate and commit frontend patch
+        shell: bash
+        run: |
+          git diff --check
+          git diff -- public/zipcode_search public/coupangRouteMap.html
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/zipcode_search public/coupangRouteMap.html
+          git commit -m "Stabilize parcel discovery and sort zipcode building loads"
+          git push

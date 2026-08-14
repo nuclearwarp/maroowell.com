@@ -2325,12 +2325,12 @@
   const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
   const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
   const BUILDING_CALC_CONCURRENCY = 1;
-  const BUILDING_FRONT_DISCOVERY_VERSION = "V62_DENSE_PARCEL_900";
+  const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";
 
   const BUILDING_GEOCODE_CONCURRENCY = 3;
   const BUILDING_GEOCODE_DELAY_MS = 70;
-  const BUILDING_KAKAO_CALL_TIMEOUT_MS = 6000;
-  const BUILDING_REVERSE_RETRY_COUNT = 2;
+  const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;
+  const BUILDING_REVERSE_RETRY_COUNT = 3;
   const BUILDING_GEOCODE_MAX_ROUNDS = 5;
   const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
@@ -2340,8 +2340,8 @@
   // 큰 아파트 필지만 살아남아 배송호수는 작아지고 엘리베이터 비율이 과대해지는 문제가 확인되어
   // discovery 밀도를 복원한다. Kakao 호출은 병렬화/짧은 pacing으로 처리해 예전 560포인트보다 빠르게 돈다.
   const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 900;
-  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 5;
-  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 30;
+  const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;
+  const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 80;
   const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.58;
   const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 7;
   const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 16;
@@ -4287,7 +4287,7 @@
         attempt += 1;
         if (callTimer) clearTimeout(callTimer);
         callTimer = window.setTimeout(() => {
-          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return run();
+          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, attempt === 1 ? 300 : 900);
           finish(null);
         }, BUILDING_KAKAO_CALL_TIMEOUT_MS);
 
@@ -4297,7 +4297,7 @@
             if (callTimer) clearTimeout(callTimer);
             if (status !== kakao.maps.services.Status.OK || !Array.isArray(result) || !result[0]) {
               if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
-                window.setTimeout(run, attempt === 1 ? 160 : 360);
+                window.setTimeout(run, attempt === 1 ? 300 : 900);
                 return;
               }
               finish(null);
@@ -4324,7 +4324,7 @@
             });
           });
         }catch{
-          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, 160);
+          if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, attempt === 1 ? 300 : 900);
           finish(null);
         }
       };
@@ -4410,6 +4410,42 @@
     return 0;
   }
 
+  function buildingDenseSampleMinimum(areaM2) {
+    const area = Math.max(0, Number(areaM2) || 0);
+    if (area < 50000) return 0;
+    return Math.min(500, Math.max(60, Math.ceil(area / 350)));
+  }
+
+  function buildingHalton(index, base) {
+    let n = Math.max(1, Math.trunc(Number(index) || 1));
+    let f = 1;
+    let result = 0;
+    while (n > 0) {
+      f /= base;
+      result += f * (n % base);
+      n = Math.floor(n / base);
+    }
+    return result;
+  }
+
+  function buildingScopeSamplingParts(feature) {
+    const turfApi = window.turf;
+    const geometry = feature?.geometry;
+    if (!turfApi || !geometry) return [];
+    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
+    const parts = [];
+    for (const coordinates of polygons || []) {
+      try {
+        const polygon = turfApi.polygon(coordinates);
+        const area = Math.max(0, Number(turfApi.area(polygon)) || 0);
+        const bbox = turfApi.bbox(polygon).map(Number);
+        if (!area || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(value))) continue;
+        parts.push({ area, bbox });
+      } catch {}
+    }
+    return parts;
+  }
+
   function buildScopeDiscoveryPoints(feature){
     const turf = window.turf;
     const points = [];
@@ -4451,6 +4487,26 @@
       }
       if(points.length>=BUILDING_SCOPE_DISCOVERY_MAX_POINTS) break;
     }
+    const minimumDenseSamples = buildingDenseSampleMinimum(areaM2);
+    if (minimumDenseSamples > 0 && points.length < minimumDenseSamples) {
+      const samplingParts = buildingScopeSamplingParts(feature);
+      const totalSamplingArea = samplingParts.reduce((sum, part) => sum + part.area, 0);
+      const maxBackfillAttempts = Math.max(12000, minimumDenseSamples * 80);
+      for (let attempt = 1; points.length < minimumDenseSamples && attempt <= maxBackfillAttempts && totalSamplingArea > 0; attempt++) {
+        let selector = buildingHalton(attempt, 5) * totalSamplingArea;
+        let part = samplingParts[samplingParts.length - 1];
+        for (const candidate of samplingParts) {
+          selector -= candidate.area;
+          if (selector <= 0) { part = candidate; break; }
+        }
+        const [partMinLng, partMinLat, partMaxLng, partMaxLat] = part.bbox;
+        push(
+          partMinLng + (partMaxLng - partMinLng) * buildingHalton(attempt, 2),
+          partMinLat + (partMaxLat - partMinLat) * buildingHalton(attempt, 3)
+        );
+      }
+    }
+
     return { points, spacingMeters, areaM2 };
   }
 

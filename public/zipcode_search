@@ -2008,19 +2008,19 @@
       const ZIP_SHARE_PAGE_PATH = "/zipcode_share.html";
       const TERRAIN_API_URL = `${ZIP_SHARE_API_BASE}/terrain`;
       const BUILDING_STATS_API_URL = `${ZIP_SHARE_API_BASE}/building/stats`;
-      const ZIPCODE_AREA_UI_VERSION = "2026-08-14-building-v62-dense-parcel-900";
+      const ZIPCODE_AREA_UI_VERSION = "2026-08-15-building-v63-dense-backfill-order";
       const TERRAIN_FETCH_TIMEOUT_MS = 30000;
       // coupangRouteMap V62와 동일한 건물 분석 프론트 설정.
       // 180초는 목표 시간이 아니라 Worker continuation 요청의 safety timeout이다.
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 180000;
       const BUILDING_STATS_FETCH_RETRY_COUNT = 0;
       const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
-      const BUILDING_FRONT_DISCOVERY_VERSION = "V62_DENSE_PARCEL_900";
+      const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";
 
       const BUILDING_GEOCODE_CONCURRENCY = 3;
       const BUILDING_GEOCODE_DELAY_MS = 70;
-      const BUILDING_KAKAO_CALL_TIMEOUT_MS = 6000;
-      const BUILDING_REVERSE_RETRY_COUNT = 2;
+      const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;
+      const BUILDING_REVERSE_RETRY_COUNT = 3;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
       const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
       const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
@@ -2029,8 +2029,8 @@
       // V62 dense parcel discovery: 작은 일반 지번/다가구/빌라를 누락하지 않도록
       // coupangRouteMap과 동일한 900-point / 7~16m 격자를 사용한다.
       const BUILDING_SCOPE_DISCOVERY_MAX_POINTS = 900;
-      const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 5;
-      const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 30;
+      const BUILDING_SCOPE_DISCOVERY_CONCURRENCY = 3;
+      const BUILDING_SCOPE_DISCOVERY_DELAY_MS = 80;
       const BUILDING_SCOPE_DISCOVERY_MIN_REVERSE_COVERAGE = 0.58;
       const BUILDING_SCOPE_DISCOVERY_MIN_SPACING_METERS = 7;
       const BUILDING_SCOPE_DISCOVERY_MAX_SPACING_METERS = 16;
@@ -3242,7 +3242,7 @@
             attempt += 1;
             if (callTimer) window.clearTimeout(callTimer);
             callTimer = window.setTimeout(() => {
-              if (attempt < BUILDING_REVERSE_RETRY_COUNT) return run();
+              if (attempt < BUILDING_REVERSE_RETRY_COUNT) return window.setTimeout(run, attempt === 1 ? 300 : 900);
               finish(null);
             }, BUILDING_KAKAO_CALL_TIMEOUT_MS);
 
@@ -3256,7 +3256,7 @@
                   !result[0]
                 ) {
                   if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
-                    window.setTimeout(run, attempt === 1 ? 160 : 360);
+                    window.setTimeout(run, attempt === 1 ? 300 : 900);
                     return;
                   }
                   finish(null);
@@ -3293,7 +3293,7 @@
               });
             } catch {
               if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
-                window.setTimeout(run, attempt === 1 ? 160 : 360);
+                window.setTimeout(run, attempt === 1 ? 300 : 900);
               } else {
                 finish(null);
               }
@@ -3341,6 +3341,42 @@
           }
         } catch {}
         return 0;
+      }
+
+      function buildingDenseSampleMinimum(areaM2) {
+        const area = Math.max(0, Number(areaM2) || 0);
+        if (area < 50000) return 0;
+        return Math.min(500, Math.max(60, Math.ceil(area / 350)));
+      }
+
+      function buildingHalton(index, base) {
+        let n = Math.max(1, Math.trunc(Number(index) || 1));
+        let f = 1;
+        let result = 0;
+        while (n > 0) {
+          f /= base;
+          result += f * (n % base);
+          n = Math.floor(n / base);
+        }
+        return result;
+      }
+
+      function buildingScopeSamplingParts(feature) {
+        const turfApi = window.turf;
+        const geometry = feature?.geometry;
+        if (!turfApi || !geometry) return [];
+        const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : (geometry.type === "MultiPolygon" ? geometry.coordinates : []);
+        const parts = [];
+        for (const coordinates of polygons || []) {
+          try {
+            const polygon = turfApi.polygon(coordinates);
+            const area = Math.max(0, Number(turfApi.area(polygon)) || 0);
+            const bbox = turfApi.bbox(polygon).map(Number);
+            if (!area || bbox.length !== 4 || bbox.some((value) => !Number.isFinite(value))) continue;
+            parts.push({ area, bbox });
+          } catch {}
+        }
+        return parts;
       }
 
       function buildScopeDiscoveryPoints(feature) {
@@ -3411,6 +3447,26 @@
             if (points.length >= BUILDING_SCOPE_DISCOVERY_MAX_POINTS) break;
           }
           if (points.length >= BUILDING_SCOPE_DISCOVERY_MAX_POINTS) break;
+        }
+
+        const minimumDenseSamples = buildingDenseSampleMinimum(areaM2);
+        if (minimumDenseSamples > 0 && points.length < minimumDenseSamples) {
+          const samplingParts = buildingScopeSamplingParts(feature);
+          const totalSamplingArea = samplingParts.reduce((sum, part) => sum + part.area, 0);
+          const maxBackfillAttempts = Math.max(12000, minimumDenseSamples * 80);
+          for (let attempt = 1; points.length < minimumDenseSamples && attempt <= maxBackfillAttempts && totalSamplingArea > 0; attempt++) {
+            let selector = buildingHalton(attempt, 5) * totalSamplingArea;
+            let part = samplingParts[samplingParts.length - 1];
+            for (const candidate of samplingParts) {
+              selector -= candidate.area;
+              if (selector <= 0) { part = candidate; break; }
+            }
+            const [partMinLng, partMinLat, partMaxLng, partMaxLat] = part.bbox;
+            push(
+              partMinLng + (partMaxLng - partMinLng) * buildingHalton(attempt, 2),
+              partMinLat + (partMaxLat - partMinLat) * buildingHalton(attempt, 3)
+            );
+          }
         }
 
         return { points, spacingMeters, areaM2 };
@@ -4930,7 +4986,7 @@
       }
 
       async function drawSelected() {
-        const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z));
+        const targets = [...state.selectedZips].filter(z => !state.geoByZip.has(z)).sort();
         if (!targets.length) return;
 
         const notFound = [];

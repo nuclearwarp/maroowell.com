@@ -500,10 +500,8 @@
             requestedLabel,
             inherited:source.inherited
           };
-          dom.qrTitle.textContent = `${requestedLabel} QR`;
-          dom.qrMeta.textContent = source.inherited
-            ? `${requestedLabel} → 본캠프 ${sourceLabel} QR 상속 · ${code}`
-            : `${sourceLabel} · ${code}`;
+          dom.qrTitle.textContent = `${sourceLabel} QR`;
+          dom.qrMeta.textContent = sourceLabel;
 
           await qrCodeLib.toCanvas(dom.qrCanvas,code,{
             width:300,
@@ -524,26 +522,30 @@
       function downloadCanvasBlob(){
         return new Promise((resolve) => {
           const qr = dom.qrCanvas;
-          const padding = 22;
-          const footer = 62;
+          const qrSize = 360;
+          const padding = 28;
+          const footer = 82;
           const out = document.createElement("canvas");
-          out.width = qr.width + padding * 2;
-          out.height = qr.height + padding * 2 + footer;
+          out.width = qrSize + padding * 2;
+          out.height = qrSize + padding * 2 + footer;
           const ctx = out.getContext("2d");
           if (!ctx) { resolve(null); return; }
+
           ctx.fillStyle = "#ffffff";
           ctx.fillRect(0,0,out.width,out.height);
-          ctx.drawImage(qr,padding,padding);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(qr,0,0,qr.width,qr.height,padding,padding,qrSize,qrSize);
+
+          const label = text(state.currentQr?.label) || "캠프";
           ctx.fillStyle = "#0f172a";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.font = '700 24px "Noto Sans KR", Arial, sans-serif';
-          const label = text(state.currentQr?.label) || "캠프";
-          ctx.fillText(label,out.width/2,qr.height + padding * 2 + footer/2,Math.max(120,out.width-32));
+          ctx.font = `700 30px ${getComputedStyle(document.body).fontFamily}`;
+          ctx.fillText(label,out.width/2,qrSize + padding * 2 + footer/2,Math.max(160,out.width-40));
           out.toBlob(resolve,"image/png");
         });
       }
-      async function copyQr(){const blob=await canvasBlob();if(!blob)return;try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);setStatus("QR 이미지를 복사했습니다.","ok");}catch{downloadQr();}}
+      async function copyQr(){const blob=await downloadCanvasBlob();if(!blob)return;try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);setStatus("캠프명이 포함된 QR 이미지를 복사했습니다.","ok");}catch{downloadQr();}}
       async function downloadQr(){const blob=await downloadCanvasBlob();if(!blob)return;const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`${state.currentQr?.label||"camp"}_QR.png`;a.click();URL.revokeObjectURL(url);}
 
       function bind() {

@@ -499,6 +499,7 @@
         >◀</button>
         <div class="tools">
           <button id="mapType" class="btn" type="button">위성</button>
+          <button id="roadview" class="btn" type="button">로드뷰</button>
           <button id="current" class="btn" type="button">내 위치</button>
         </div>
         <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -558,6 +559,7 @@
         copy: $("#copy"),
         openKakao: $("#openKakao"),
         mapType: $("#mapType"),
+        roadview: $("#roadview"),
         current: $("#current"),
         toast: $("#toast"),
         loading: $("#loading"),
@@ -589,6 +591,8 @@
         supabaseClient: null,
         ignoreMapClickUntil: 0,
         isRoadmap: true,
+        isRoadviewOn: false,
+        roadviewOverlay: null,
         selectedTypes: new Set()
       };
 
@@ -2392,6 +2396,18 @@
           dom.mapType.textContent = state.isRoadmap ? "위성" : "일반지도";
         });
 
+        dom.roadview.addEventListener("click", () => {
+          if (!state.map || !state.roadviewOverlay) {
+            showToast("로드뷰 오버레이를 사용할 수 없습니다.", true);
+            return;
+          }
+
+          state.isRoadviewOn = !state.isRoadviewOn;
+          state.roadviewOverlay.setMap(state.isRoadviewOn ? state.map : null);
+          dom.roadview.classList.toggle("primary", state.isRoadviewOn);
+          showToast(state.isRoadviewOn ? "로드뷰 도로 표시 ON" : "로드뷰 도로 표시 OFF");
+        });
+
         dom.current.addEventListener("click", () => {
           if (!navigator.geolocation) {
             showToast("위치 확인을 지원하지 않습니다.", true);
@@ -2596,6 +2612,13 @@
         });
 
         state.geocoder = new kakao.maps.services.Geocoder();
+
+        try {
+          state.roadviewOverlay = new kakao.maps.RoadviewOverlay();
+        } catch (error) {
+          console.warn("로드뷰 오버레이 초기화 실패", error);
+          state.roadviewOverlay = null;
+        }
 
         state.clusterer = new kakao.maps.MarkerClusterer({
           map: state.map,

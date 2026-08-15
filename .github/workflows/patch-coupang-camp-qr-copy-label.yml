@@ -1,0 +1,108 @@
+name: Patch coupang camp QR copy label
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-coupang-camp-qr-copy-label.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch live and public camp pages
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          paths = [Path('public/coupang_camp'), Path('coupang_camp')]
+
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+
+              old_meta = '''          dom.qrTitle.textContent = `${requestedLabel} QR`;
+          dom.qrMeta.textContent = source.inherited
+            ? `${requestedLabel} → 본캠프 ${sourceLabel} QR 상속 · ${code}`
+            : `${sourceLabel} · ${code}`;'''
+              new_meta = '''          dom.qrTitle.textContent = `${sourceLabel} QR`;
+          dom.qrMeta.textContent = sourceLabel;'''
+              if old_meta not in text and new_meta not in text:
+                  raise SystemExit(f'{path}: QR meta anchor not found')
+              text = text.replace(old_meta, new_meta, 1)
+
+              pattern = re.compile(r'''      function downloadCanvasBlob\(\)\{[\s\S]*?^      \}\n      async function copyQr\(\)\{[^\n]*\}\n      async function downloadQr\(\)\{[^\n]*\}''', re.MULTILINE)
+              replacement = '''      function downloadCanvasBlob(){
+        return new Promise((resolve) => {
+          const qr = dom.qrCanvas;
+          const qrSize = 360;
+          const padding = 28;
+          const footer = 82;
+          const out = document.createElement("canvas");
+          out.width = qrSize + padding * 2;
+          out.height = qrSize + padding * 2 + footer;
+          const ctx = out.getContext("2d");
+          if (!ctx) { resolve(null); return; }
+
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0,0,out.width,out.height);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(qr,0,0,qr.width,qr.height,padding,padding,qrSize,qrSize);
+
+          const label = text(state.currentQr?.label) || "캠프";
+          ctx.fillStyle = "#0f172a";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = `700 30px ${getComputedStyle(document.body).fontFamily}`;
+          ctx.fillText(label,out.width/2,qrSize + padding * 2 + footer/2,Math.max(160,out.width-40));
+          out.toBlob(resolve,"image/png");
+        });
+      }
+      async function copyQr(){const blob=await downloadCanvasBlob();if(!blob)return;try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);setStatus("캠프명이 포함된 QR 이미지를 복사했습니다.","ok");}catch{downloadQr();}}
+      async function downloadQr(){const blob=await downloadCanvasBlob();if(!blob)return;const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`${state.currentQr?.label||"camp"}_QR.png`;a.click();URL.revokeObjectURL(url);}'''
+
+              match = pattern.search(text)
+              if not match:
+                  if 'const qrSize = 360;' not in text or 'copyQr(){const blob=await downloadCanvasBlob()' not in text:
+                      raise SystemExit(f'{path}: QR export block not found')
+              else:
+                  text = text[:match.start()] + replacement + text[match.end():]
+
+              path.write_text(text, encoding='utf-8')
+
+              final = path.read_text(encoding='utf-8')
+              checks = [
+                  'dom.qrTitle.textContent = `${sourceLabel} QR`;',
+                  'dom.qrMeta.textContent = sourceLabel;',
+                  'const qrSize = 360;',
+                  'const footer = 82;',
+                  'ctx.imageSmoothingEnabled = false;',
+                  'ctx.font = `700 30px ${getComputedStyle(document.body).fontFamily}`;',
+                  'copyQr(){const blob=await downloadCanvasBlob()',
+                  '캠프명이 포함된 QR 이미지를 복사했습니다.',
+              ]
+              for check in checks:
+                  if check not in final:
+                      raise SystemExit(f'{path}: missing {check}')
+          PY
+
+          git diff --check
+          git diff -- public/coupang_camp coupang_camp
+
+      - name: Commit patch to main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/coupang_camp coupang_camp
+          git commit -m "Improve camp QR copy image and label"
+          git pull --rebase origin main
+          git push origin main

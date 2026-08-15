@@ -2663,7 +2663,7 @@
   }
 
   let map=null, geocoder=null, places=null;
-  let roadview=null, roadviewClient=null, roadviewOn=false;
+  let roadview=null, roadviewClient=null, roadviewOn=false, roadviewWalkerV64=null;
 
   let routeLabelOn = true;
   let vendorLabelOn = false;
@@ -6167,10 +6167,51 @@
       toggleMapTypeBtn.textContent = isSatellite ? "일반" : "위성";
     });
 
+    // MW_ROADVIEW_MAPWALKER_V64
+    function createRoadviewWalkerV64(position){
+      const root=document.createElement("div");
+      root.style.cssText="position:relative;width:46px;height:46px;pointer-events:none;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));";
+      const cone=document.createElement("div");
+      cone.style.cssText="position:absolute;left:50%;top:-21px;width:25px;height:32px;transform:translateX(-50%) rotate(0deg);transform-origin:50% 37px;background:rgba(37,99,235,.48);clip-path:polygon(50% 0,100% 100%,50% 77%,0 100%);";
+      const halo=document.createElement("div");
+      halo.style.cssText="position:absolute;left:50%;top:50%;width:30px;height:30px;transform:translate(-50%,-50%);border-radius:999px;background:rgba(37,99,235,.16);border:2px solid rgba(37,99,235,.72);";
+      const dot=document.createElement("div");
+      dot.style.cssText="position:absolute;left:50%;top:50%;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:999px;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 1px rgba(37,99,235,.25);";
+      root.appendChild(cone); root.appendChild(halo); root.appendChild(dot);
+      const overlay=new kakao.maps.CustomOverlay({position,content:root,xAnchor:.5,yAnchor:.5,zIndex:99});
+      return {
+        setMap(targetMap){overlay.setMap(targetMap);},
+        setPosition(nextPosition){if(nextPosition) overlay.setPosition(nextPosition);},
+        setAngle(angle){const pan=((Number(angle)||0)%360+360)%360;cone.style.transform=`translateX(-50%) rotate(${pan}deg)`;}
+      };
+    }
+    function syncRoadviewWalkerV64(){
+      if(!roadview || !map) return;
+      const position=roadview.getPosition?.() || map.getCenter();
+      if(!roadviewWalkerV64) roadviewWalkerV64=createRoadviewWalkerV64(position);
+      roadviewWalkerV64.setPosition(position);
+      if(roadviewOn) roadviewWalkerV64.setMap(map);
+      const viewpoint=roadview.getViewpoint?.();
+      if(viewpoint) roadviewWalkerV64.setAngle(viewpoint.pan);
+    }
     function ensureRoadview(){
       if (roadview && roadviewClient) return;
       roadview = new kakao.maps.Roadview($("roadview"));
       roadviewClient = new kakao.maps.RoadviewClient();
+      kakao.maps.event.addListener(roadview,"init",syncRoadviewWalkerV64);
+      kakao.maps.event.addListener(roadview,"viewpoint_changed",()=>{
+        if(!roadviewWalkerV64) syncRoadviewWalkerV64();
+        const viewpoint=roadview.getViewpoint?.();
+        if(viewpoint && roadviewWalkerV64) roadviewWalkerV64.setAngle(viewpoint.pan);
+      });
+      kakao.maps.event.addListener(roadview,"position_changed",()=>{
+        const position=roadview.getPosition?.();
+        if(!position) return;
+        if(!roadviewWalkerV64) syncRoadviewWalkerV64();
+        roadviewWalkerV64?.setPosition(position);
+        if(roadviewOn) roadviewWalkerV64?.setMap(map);
+        map.setCenter(position);
+      });
     }
     function setRoadviewAt(latlng){
       ensureRoadview();
@@ -6188,10 +6229,14 @@
       roadviewHintEl.style.display = roadviewOn ? "inline-flex" : "none";
       if (!roadviewOn){
         mapWrapEl.classList.remove("roadview-open");
+        try { map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); } catch {}
+        roadviewWalkerV64?.setMap(null);
         if (rvClick) kakao.maps.event.removeListener(map, "click", rvClick);
         rvClick=null;
         return;
       }
+      try { map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); } catch {}
+      roadviewWalkerV64?.setMap(map);
       rvClick = (e)=> e?.latLng && setRoadviewAt(e.latLng);
       kakao.maps.event.addListener(map, "click", rvClick);
     }

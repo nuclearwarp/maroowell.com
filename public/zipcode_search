@@ -2121,6 +2121,7 @@
         roadview: null,
         roadviewClient: null,
         roadviewClickHandler: null,
+        roadviewWalkerV64: null,
         colors: [
           "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
           "#22d3ee","#c084fc","#f472b6","#60a5fa",
@@ -2554,10 +2555,58 @@
         $("#toggleMapType").textContent = state.isSatellite ? "일반" : "위성";
       }
 
+      // MW_ROADVIEW_MAPWALKER_V64
+      function createRoadviewWalkerV64(position) {
+        const root = document.createElement("div");
+        root.style.cssText = "position:relative;width:46px;height:46px;pointer-events:none;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));";
+        const cone = document.createElement("div");
+        cone.style.cssText = "position:absolute;left:50%;top:-21px;width:25px;height:32px;transform:translateX(-50%) rotate(0deg);transform-origin:50% 37px;background:rgba(37,99,235,.48);clip-path:polygon(50% 0,100% 100%,50% 77%,0 100%);";
+        const halo = document.createElement("div");
+        halo.style.cssText = "position:absolute;left:50%;top:50%;width:30px;height:30px;transform:translate(-50%,-50%);border-radius:999px;background:rgba(37,99,235,.16);border:2px solid rgba(37,99,235,.72);";
+        const dot = document.createElement("div");
+        dot.style.cssText = "position:absolute;left:50%;top:50%;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:999px;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 1px rgba(37,99,235,.25);";
+        root.appendChild(cone);
+        root.appendChild(halo);
+        root.appendChild(dot);
+        const overlay = new kakao.maps.CustomOverlay({ position, content: root, xAnchor:.5, yAnchor:.5, zIndex:99 });
+        return {
+          setMap(targetMap) { overlay.setMap(targetMap); },
+          setPosition(nextPosition) { if (nextPosition) overlay.setPosition(nextPosition); },
+          setAngle(angle) {
+            const pan = ((Number(angle) || 0) % 360 + 360) % 360;
+            cone.style.transform = `translateX(-50%) rotate(${pan}deg)`;
+          }
+        };
+      }
+
+      function syncRoadviewWalkerV64() {
+        if (!state.roadview || !state.map) return;
+        const position = state.roadview.getPosition?.() || state.map.getCenter();
+        if (!state.roadviewWalkerV64) state.roadviewWalkerV64 = createRoadviewWalkerV64(position);
+        state.roadviewWalkerV64.setPosition(position);
+        if (state.roadviewOn) state.roadviewWalkerV64.setMap(state.map);
+        const viewpoint = state.roadview.getViewpoint?.();
+        if (viewpoint) state.roadviewWalkerV64.setAngle(viewpoint.pan);
+      }
+
       function ensureRoadview() {
         if (state.roadview && state.roadviewClient) return;
         state.roadview = new kakao.maps.Roadview($("#roadview"));
         state.roadviewClient = new kakao.maps.RoadviewClient();
+        kakao.maps.event.addListener(state.roadview, "init", syncRoadviewWalkerV64);
+        kakao.maps.event.addListener(state.roadview, "viewpoint_changed", () => {
+          if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
+          const viewpoint = state.roadview.getViewpoint?.();
+          if (viewpoint && state.roadviewWalkerV64) state.roadviewWalkerV64.setAngle(viewpoint.pan);
+        });
+        kakao.maps.event.addListener(state.roadview, "position_changed", () => {
+          const position = state.roadview.getPosition?.();
+          if (!position) return;
+          if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
+          state.roadviewWalkerV64?.setPosition(position);
+          if (state.roadviewOn) state.roadviewWalkerV64?.setMap(state.map);
+          state.map.setCenter(position);
+        });
       }
 
       function setRoadviewOverlay(on) {
@@ -2608,6 +2657,7 @@
 
         if (state.roadviewOn) {
           setRoadviewOverlay(true);
+          state.roadviewWalkerV64?.setMap(state.map);
           if (!state.roadviewClickHandler && state.map) {
             state.roadviewClickHandler = (mouseEvent) => {
               if (!state.roadviewOn) return;
@@ -2617,6 +2667,7 @@
           }
         } else {
           setRoadviewOverlay(false);
+          state.roadviewWalkerV64?.setMap(null);
           if (state.roadviewClickHandler && state.map) {
             kakao.maps.event.removeListener(state.map, "click", state.roadviewClickHandler);
           }

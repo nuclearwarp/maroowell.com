@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# trigger: 2026-08-15
 path = Path('public/coupang_camp_map')
 text = path.read_text(encoding='utf-8')
 

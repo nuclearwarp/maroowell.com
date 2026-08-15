@@ -1,0 +1,39 @@
+name: Sync public camp pages to root v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-public-camp-pages-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync live camp routes
+        shell: bash
+        run: |
+          set -e
+          git pull --rebase origin main
+          cp public/coupang_camp coupang_camp
+          cp public/coupang_camp_map coupang_camp_map
+
+          grep -q 'width="300" height="300"' coupang_camp
+          grep -q '상속할 본캠프 QR 코드가 없습니다' coupang_camp
+          grep -q 'function effectiveRegion' coupang_camp
+          grep -q 'id="roadview"' coupang_camp_map
+
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coupang_camp coupang_camp_map
+          git commit -m "Sync camp pages to live root routes"
+          git pull --rebase origin main
+          git push origin main

@@ -1,0 +1,2708 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="origin">
+  <title>쿠팡 캠프 지도</title>
+  <link rel="icon" href="/favicon.ico?v=2">
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=clusterer,services"></script>
+
+  <style>
+    @font-face{
+      font-family:"문경감홍사과체";
+      src:url("/assets/fonts/MungyeongGamhong.woff2") format("woff2");
+      font-display:swap;
+    }
+
+    :root{
+      --line:#d8e0ee;
+      --text:#0f172a;
+      --muted:#64748b;
+      --blue:#2563eb;
+      --bg:#eef3f8;
+      --font:"문경감홍사과체","Noto Sans KR",system-ui,sans-serif;
+    }
+
+    *{box-sizing:border-box}
+    html,body{
+      width:100%;
+      height:100%;
+      margin:0;
+      font-family:var(--font);
+      color:var(--text);
+      background:var(--bg);
+    }
+    body{overflow:hidden}
+    button,input,select{font:inherit}
+
+    .app{
+      height:100%;
+      display:grid;
+      grid-template-rows:56px 1fr;
+    }
+
+    .top{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:0 14px;
+      background:#fff;
+      border-bottom:1px solid var(--line);
+      z-index:30;
+    }
+
+    .logo{
+      width:32px;
+      height:32px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex:0 0 auto;
+    }
+    .logo img{width:30px;height:30px;object-fit:contain}
+
+    .title{display:flex;flex-direction:column;min-width:0}
+    .title b{font-size:18px;white-space:nowrap}
+    .title small{
+      margin-top:2px;
+      color:var(--muted);
+      font-size:11px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .spacer{flex:1}
+
+    .btn{
+      height:38px;
+      padding:0 13px;
+      border:1px solid #cbd5e1;
+      border-radius:999px;
+      background:#fff;
+      color:var(--text);
+      font-size:12px;
+      font-weight:800;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      white-space:nowrap;
+    }
+    .btn:hover{border-color:#93c5fd;background:#f8fbff}
+    .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+    .menuBtn{display:none;width:38px;padding:0;font-size:18px}
+
+    .work{
+      position:relative;
+      min-height:0;
+      display:grid;
+      grid-template-columns:390px minmax(0,1fr);
+      transition:grid-template-columns .2s ease;
+    }
+
+    .work.side-collapsed{
+      grid-template-columns:0 minmax(0,1fr);
+    }
+
+    .side{
+      min-width:0;
+      min-height:0;
+      background:#fff;
+      border-right:1px solid var(--line);
+      overflow:auto;
+      z-index:20;
+      transition:opacity .16s ease;
+    }
+
+    .work.side-collapsed .side{
+      width:0;
+      opacity:0;
+      overflow:hidden;
+      pointer-events:none;
+      border-right:0;
+    }
+
+    .sideToggle{
+      position:absolute;
+      top:12px;
+      left:12px;
+      z-index:18;
+      width:38px;
+      min-width:38px;
+      padding:0;
+      font-size:18px;
+      line-height:1;
+      box-shadow:0 10px 28px rgba(15,23,42,.18);
+    }
+    .inner{padding:14px}
+
+    .card{
+      margin-bottom:12px;
+      padding:13px;
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      box-shadow:0 7px 20px rgba(15,23,42,.05);
+    }
+
+    .head{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:10px;
+    }
+    .head b{font-size:14px}
+    .head span{font-size:11px;color:var(--muted)}
+
+    .field{display:grid;gap:6px;margin-top:9px}
+    .field label{font-size:11px;font-weight:800;color:#475569}
+    .control{
+      width:100%;
+      height:40px;
+      padding:0 11px;
+      border:1px solid #cbd5e1;
+      border-radius:12px;
+      background:#f8fafc;
+      outline:0;
+    }
+    .control:focus{
+      border-color:#60a5fa;
+      background:#fff;
+      box-shadow:0 0 0 3px rgba(37,99,235,.1);
+    }
+
+    .cols{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+    .actions{display:flex;gap:8px;margin-top:11px}
+    .actions > *{flex:1}
+
+    .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .stat{
+      padding:10px 6px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#f8fafc;
+      text-align:center;
+    }
+    .stat strong{display:block;font-size:17px}
+    .stat span{display:block;margin-top:4px;font-size:10px;color:var(--muted)}
+
+    .chips{display:flex;flex-wrap:wrap;gap:7px}
+    .chip{
+      min-height:30px;
+      padding:0 10px;
+      border:1px solid var(--line);
+      border-radius:999px;
+      background:#fff;
+      font-size:11px;
+      font-weight:800;
+      cursor:pointer;
+    }
+    .chip.active{border-color:#60a5fa;background:#eff6ff;color:#1d4ed8}
+    .dot{
+      display:inline-block;
+      width:9px;
+      height:9px;
+      margin-right:6px;
+      border-radius:50%;
+      vertical-align:1px;
+    }
+
+    .list{display:grid;gap:7px;max-height:38vh;overflow:auto}
+    .item{
+      width:100%;
+      padding:10px 11px;
+      border:1px solid var(--line);
+      border-radius:14px;
+      background:#fff;
+      text-align:left;
+      cursor:pointer;
+    }
+    .item:hover,.item.active{border-color:#60a5fa;background:#f8fbff}
+    .item strong{
+      display:block;
+      font-size:13px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .item span{
+      display:block;
+      margin-top:5px;
+      color:var(--muted);
+      font-size:11px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .empty{
+      padding:20px 10px;
+      border:1px dashed #cbd5e1;
+      border-radius:14px;
+      color:var(--muted);
+      font-size:12px;
+      text-align:center;
+    }
+
+    .detail{display:none}
+    .detail.show{display:block}
+    .detail h3{margin:0;font-size:16px}
+    .detail p{margin:5px 0 0;color:var(--muted);font-size:11px}
+    .rows{display:grid;gap:7px;margin-top:12px}
+    .row{
+      display:grid;
+      grid-template-columns:64px 1fr;
+      gap:8px;
+      font-size:12px;
+      line-height:1.45;
+      word-break:break-word;
+    }
+    .row b{color:var(--muted)}
+
+    .mapPane{position:relative;min-width:0;min-height:0}
+    #map{position:absolute;inset:0}
+    .tools{
+      position:absolute;
+      top:12px;
+      right:12px;
+      z-index:10;
+      display:flex;
+      gap:8px;
+    }
+    .tools .btn{box-shadow:0 10px 28px rgba(15,23,42,.15)}
+
+    .toast{
+      position:absolute;
+      left:50%;
+      bottom:18px;
+      transform:translate(-50%,10px);
+      z-index:40;
+      max-width:calc(100vw - 30px);
+      padding:10px 14px;
+      border-radius:999px;
+      background:rgba(15,23,42,.9);
+      color:#fff;
+      font-size:12px;
+      font-weight:800;
+      text-align:center;
+      opacity:0;
+      pointer-events:none;
+      transition:.18s;
+    }
+    .toast.show{opacity:1;transform:translate(-50%,0)}
+    .toast.err{background:rgba(185,28,28,.92)}
+
+    .loading{
+      position:absolute;
+      inset:0;
+      z-index:25;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(238,243,248,.82);
+    }
+    .loading.hide{display:none}
+    .loading div{
+      padding:16px 20px;
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      font-size:13px;
+      font-weight:900;
+      box-shadow:0 14px 38px rgba(15,23,42,.12);
+    }
+
+    .info{
+      min-width:210px;
+      max-width:280px;
+      padding:11px 12px;
+      border:1px solid rgba(15,23,42,.12);
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(15,23,42,.2);
+      transform:translateY(-8px);
+    }
+    .info strong{display:block;font-size:13px}
+    .info span{display:block;margin-top:4px;color:var(--muted);font-size:11px}
+
+    .routeInfo{
+      min-width:238px;
+      max-width:310px;
+      padding:12px 13px;
+      border:1px solid rgba(15,23,42,.14);
+      border-radius:14px;
+      background:#fff;
+      box-shadow:0 14px 34px rgba(15,23,42,.22);
+      transform:translateY(-7px);
+    }
+    .routeInfo strong{display:block;font-size:13px;line-height:1.35}
+    .routeInfo .routeArrow{margin:4px 0 8px;color:#64748b;font-size:11px;font-weight:800}
+    .routeInfo .routeRow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:6px}
+    .routeInfo .routeKey{color:#64748b;font-size:11px;font-weight:800}
+    .routeInfo .routeVal{color:#0f172a;font-size:12px;font-weight:950;text-align:right}
+    .routeInfo .routeTime{margin-top:8px;padding-top:7px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px}
+    .routeInfo.loadingRoute .routeVal{color:#2563eb}
+
+    @media(max-width:900px){
+      .app{grid-template-rows:54px 1fr}
+      .top{padding:0 10px}
+      .title b{font-size:16px}
+      .title small,.listLink{display:none}
+      .menuBtn{display:inline-flex}
+      .work,
+      .work.side-collapsed{
+        display:block;
+      }
+      .side,
+      .work.side-collapsed .side{
+        position:absolute;
+        left:0;
+        top:0;
+        bottom:0;
+        width:min(88vw,390px);
+        opacity:1;
+        overflow:auto;
+        pointer-events:auto;
+        border-right:1px solid var(--line);
+        transform:translateX(-105%);
+        transition:transform .2s ease;
+        box-shadow:0 14px 38px rgba(15,23,42,.18);
+      }
+      .work.open .side,
+      .work.side-collapsed.open .side{
+        transform:translateX(0);
+      }
+      .sideToggle{
+        top:10px;
+        left:10px;
+      }
+      .mapPane{position:absolute;inset:0}
+      .list{max-height:34vh}
+    }
+
+    .denied{
+      position:fixed;inset:0;z-index:30000;display:none;align-items:center;justify-content:center;
+      padding:24px;background:rgba(15,23,42,.72);backdrop-filter:blur(8px)
+    }
+    .denied.show{display:flex}
+    .deniedCard{width:min(460px,100%);padding:26px;border-radius:24px;background:#fff;border:1px solid #e2e8f0;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.35)}
+    .deniedCard h2{margin:0 0 10px;font-size:22px}.deniedCard p{margin:0 0 18px;color:#64748b;line-height:1.6}.deniedCard .actions{display:flex;justify-content:center;gap:10px}
+  </style>
+</head>
+
+<body>
+
+  <div id="denied" class="denied" aria-hidden="true">
+    <div class="deniedCard">
+      <h2>지도 조회 권한이 없습니다</h2>
+      <p>클렌징 히스토리를 조회할 수 있는 계정만 캠프 지도를 열 수 있습니다.</p>
+      <div class="actions"><a class="btn primary" href="/coupang_camp">캠프 목록으로</a><a class="btn" href="/login.html?next=%2Fcoupang_camp_map">로그인</a></div>
+    </div>
+  </div>
+  <div class="app">
+    <header class="top">
+      <a id="mwBoardMenuToggle" class="logo" href="/index.html" title="마루웰 메뉴">
+        <img src="/favicon.ico" alt="Maroowell">
+      </a>
+      <div class="title">
+        <b>쿠팡 캠프 지도</b>
+        <small>등록 캠프 위치 · 구분/지역별 조회</small>
+      </div>
+      <div class="spacer"></div>
+      <button id="menu" class="btn menuBtn" type="button" aria-label="필터 열기">☰</button>
+      <a class="btn listLink" href="/coupang_camp">목록 보기</a>
+      <button id="reload" class="btn primary" type="button">새로고침</button>
+    </header>
+
+    <main id="work" class="work">
+      <aside class="side">
+        <div class="inner">
+          <section class="card">
+            <div class="head"><b>캠프 필터</b><span>실시간 반영</span></div>
+            <div class="field">
+              <label for="q">검색</label>
+              <input id="q" class="control" type="search" placeholder="캠프명, 주소, 코드, 설명">
+            </div>
+            <div class="cols">
+              <div class="field">
+                <label for="type">구분</label>
+                <select id="type" class="control"><option value="">전체</option></select>
+              </div>
+              <div class="field">
+                <label for="region">지역</label>
+                <select id="region" class="control"><option value="">전체</option></select>
+              </div>
+            </div>
+            <div class="actions">
+              <button id="reset" class="btn" type="button">필터 초기화</button>
+              <button id="fit" class="btn" type="button">전체 위치 보기</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="head"><b>조회 현황</b><span id="time">-</span></div>
+            <div class="stats">
+              <div class="stat"><strong id="visible">0</strong><span>표시 캠프</span></div>
+              <div class="stat"><strong id="total">0</strong><span>전체 캠프</span></div>
+              <div class="stat"><strong id="missing">0</strong><span>위치 확인 실패</span></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="head"><b>구분별 보기</b><span>클릭 필터</span></div>
+            <div id="chips" class="chips"></div>
+          </section>
+
+          <section id="detail" class="card detail">
+            <div class="head"><b>선택 캠프</b><span id="dType"></span></div>
+            <h3 id="dTitle"></h3>
+            <p id="dSub"></p>
+            <div class="rows">
+              <div class="row"><b>주소</b><span id="dAddress"></span></div>
+              <div class="row"><b>지역</b><span id="dRegion"></span></div>
+              <div class="row"><b>코드</b><span id="dCode"></span></div>
+              <div class="row"><b>본캠프</b><span id="dParent"></span></div>
+              <div class="row"><b>받는 SH</b><span id="dSh"></span></div>
+              <div class="row"><b>설명</b><span id="dDesc"></span></div>
+              <div class="row"><b>좌표</b><span id="dCoord"></span></div>
+            </div>
+            <div class="actions">
+              <button id="copy" class="btn" type="button">주소 복사</button>
+              <button id="openKakao" class="btn primary" type="button">카카오맵 열기</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="head"><b>캠프 목록</b><span id="count">0건</span></div>
+            <div id="list" class="list"></div>
+          </section>
+        </div>
+      </aside>
+
+      <section class="mapPane">
+        <div id="map"></div>
+        <button
+          id="sideToggle"
+          class="btn sideToggle"
+          type="button"
+          aria-label="좌측 메뉴 접기"
+          title="좌측 메뉴 접기"
+        >◀</button>
+        <div class="tools">
+          <button id="mapType" class="btn" type="button">위성</button>
+          <button id="roadview" class="btn" type="button">로드뷰</button>
+          <button id="current" class="btn" type="button">내 위치</button>
+        </div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+        <div id="loading" class="loading"><div id="loadingText">캠프 지도를 불러오는 중...</div></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const CONFIG = window.MARUWELL_CONFIG || {};
+      const API_BASE =
+        CONFIG.BACKENDS?.coupangCamp ||
+        CONFIG.COUPANG_CAMP_API ||
+        "https://coupangcamp.brain-0f6.workers.dev";
+      const SUPABASE_URL = CONFIG.SUPABASE_URL || "";
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY || CONFIG.SUPABASE_PUBLISHABLE_KEY || "";
+
+      const MARKER_COLORS = [
+        "#2563eb", "#16a34a", "#f97316", "#7c3aed", "#db2777",
+        "#0891b2", "#ca8a04", "#475569", "#dc2626", "#0f766e"
+      ];
+
+      const $ = selector => document.querySelector(selector);
+
+      const dom = {
+        work: $("#work"),
+        menu: $("#menu"),
+        sideToggle: $("#sideToggle"),
+        reload: $("#reload"),
+        query: $("#q"),
+        type: $("#type"),
+        region: $("#region"),
+        reset: $("#reset"),
+        fit: $("#fit"),
+        chips: $("#chips"),
+        list: $("#list"),
+        count: $("#count"),
+        visible: $("#visible"),
+        total: $("#total"),
+        missing: $("#missing"),
+        time: $("#time"),
+        detail: $("#detail"),
+        detailType: $("#dType"),
+        detailTitle: $("#dTitle"),
+        detailSub: $("#dSub"),
+        detailAddress: $("#dAddress"),
+        detailRegion: $("#dRegion"),
+        detailCode: $("#dCode"),
+        detailParent: $("#dParent"),
+        detailSh: $("#dSh"),
+        detailDescription: $("#dDesc"),
+        denied: $("#denied"),
+        detailCoord: $("#dCoord"),
+        copy: $("#copy"),
+        openKakao: $("#openKakao"),
+        mapType: $("#mapType"),
+        roadview: $("#roadview"),
+        current: $("#current"),
+        toast: $("#toast"),
+        loading: $("#loading"),
+        loadingText: $("#loadingText")
+      };
+
+      const state = {
+        map: null,
+        clusterer: null,
+        geocoder: null,
+        geocodeCache: new Map(),
+        rows: [],
+        filteredRows: [],
+        markers: [],
+        markerEntries: [],
+        markerImages: new Map(),
+        labelOverlays: [],
+        labelLeaderLines: [],
+        labelLayoutTimer: null,
+        selectedRelationMarkers: [],
+        geocodeCacheSaveTimer: null,
+        colors: new Map(),
+        selected: null,
+        overlay: null,
+        routeOverlay: null,
+        relationLines: [],
+        routeCache: new Map(),
+        accessToken: "",
+        supabaseClient: null,
+        ignoreMapClickUntil: 0,
+        isRoadmap: true,
+        isRoadviewOn: false,
+        roadviewOverlay: null,
+        selectedTypes: new Set()
+      };
+
+      const text = value => String(value ?? "").trim();
+      const lower = value => text(value).toLowerCase();
+
+      const GEOCODE_CACHE_STORAGE_KEY = "mw_coupang_camp_geocode_v2";
+      const GEOCODE_CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 45;
+      const GEOCODE_CONCURRENCY = 8;
+
+      function loadPersistentGeocodeCache() {
+        try {
+          const raw = localStorage.getItem(GEOCODE_CACHE_STORAGE_KEY);
+          if (!raw) return;
+
+          const parsed = JSON.parse(raw);
+          const now = Date.now();
+
+          for (const [key, entry] of Object.entries(parsed || {})) {
+            if (!entry || now - Number(entry.savedAt || 0) > GEOCODE_CACHE_MAX_AGE) {
+              continue;
+            }
+
+            state.geocodeCache.set(key, entry.value ?? null);
+          }
+        } catch (error) {
+          console.warn("지오코딩 캐시를 읽지 못했습니다.", error);
+        }
+      }
+
+      function persistGeocodeCacheSoon() {
+        if (state.geocodeCacheSaveTimer) {
+          clearTimeout(state.geocodeCacheSaveTimer);
+        }
+
+        state.geocodeCacheSaveTimer = setTimeout(() => {
+          state.geocodeCacheSaveTimer = null;
+
+          try {
+            const savedAt = Date.now();
+            const payload = {};
+
+            for (const [key, value] of state.geocodeCache.entries()) {
+              payload[key] = { savedAt, value };
+            }
+
+            localStorage.setItem(
+              GEOCODE_CACHE_STORAGE_KEY,
+              JSON.stringify(payload)
+            );
+          } catch (error) {
+            console.warn("지오코딩 캐시를 저장하지 못했습니다.", error);
+          }
+        }, 250);
+      }
+
+      function setGeocodeCache(key, value) {
+        state.geocodeCache.set(key, value);
+        persistGeocodeCacheSoon();
+      }
+
+      function rowId(row) {
+        return row.id || [
+          row.camp,
+          row.mb_camp,
+          row.code,
+          row.latitude,
+          row.longitude
+        ].join("|");
+      }
+
+      function campName(row) {
+        if (row.camp && row.mb_camp && row.camp !== row.mb_camp) {
+          return `${row.camp} · ${row.mb_camp}`;
+        }
+        return row.camp || row.mb_camp || row.code || "이름 없는 캠프";
+      }
+
+      function getColor(type) {
+        const key = type || "미분류";
+        if (!state.colors.has(key)) {
+          state.colors.set(key, MARKER_COLORS[state.colors.size % MARKER_COLORS.length]);
+        }
+        return state.colors.get(key);
+      }
+
+      function showToast(message, isError = false) {
+        dom.toast.textContent = message;
+        dom.toast.className = `toast show${isError ? " err" : ""}`;
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => {
+          dom.toast.className = "toast";
+        }, 2400);
+      }
+
+      function isMobileRocketCamp(row) {
+        const type = text(row?.camp_type).toUpperCase();
+        const mbCamp = text(row?.mb_camp);
+
+        return (
+          type === "로켓" &&
+          mbCamp &&
+          mbCamp !== "본캠프" &&
+          mbCamp !== text(row?.camp)
+        );
+      }
+
+      function markerLabelLines(row) {
+        const type = text(row?.camp_type).toUpperCase();
+
+        // 서브허브는 코드 한 줄로 표시한다.
+        if (type === "SUB_HUB") {
+          return [text(row?.code) || text(row?.camp) || "SH"];
+        }
+
+        // 로켓캠프 중 MB캠프가 본캠프가 아니면
+        // 1행: 본 캠프명 / 2행: MB캠프명
+        if (isMobileRocketCamp(row)) {
+          return [
+            text(row?.camp) || "캠프",
+            text(row?.mb_camp) || "모바일캠프"
+          ];
+        }
+
+        return [
+          text(row?.camp) || text(row?.mb_camp) || text(row?.code) || "캠프"
+        ];
+      }
+
+      function escapeSvgText(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function markerTextWidth(label, fontSize) {
+        const scale = fontSize / 9.5;
+
+        return Array.from(label).reduce((sum, ch) => {
+          return sum + (/^[\x20-\x7E]$/.test(ch) ? 5.6 : 9.2) * scale;
+        }, 0);
+      }
+
+      function markerLabelWidth(lines, fontSizes, isSubHub, isMobile) {
+        const widest = Math.max(
+          ...lines.map((line, index) => {
+            const fontSize = fontSizes[index] || fontSizes[0] || 10.5;
+            return markerTextWidth(line, fontSize);
+          })
+        );
+
+        // SUB_HUB 코드는 영문 대문자·숫자·언더바 조합이 많고,
+        // 실제 굵은 폰트 폭이 계산값보다 넓을 수 있어 좌우 여백을 크게 준다.
+        const horizontalPadding = isSubHub ? 36 : isMobile ? 22 : 20;
+        const minimum = isSubHub ? 64 : isMobile ? 52 : 42;
+        const maximum = isSubHub ? 180 : isMobile ? 150 : 132;
+
+        return Math.max(
+          minimum,
+          Math.min(maximum, Math.ceil(widest + horizontalPadding))
+        );
+      }
+
+      const LABEL_MAX_LEVEL = 6;
+      const LABEL_STACK_GAP = 2;
+      const LABEL_COLLISION_PADDING = 6;
+
+      function markerVisualMetrics(row) {
+        const type = text(row?.camp_type) || "미분류";
+        const isSubHub = type.toUpperCase() === "SUB_HUB";
+        const isMobile = isMobileRocketCamp(row);
+        const lines = markerLabelLines(row);
+
+        const fontSizes = isSubHub
+          ? [13.5]
+          : isMobile
+            ? [12.5, 11.5]
+            : [12.5];
+
+        const width = markerLabelWidth(lines, fontSizes, isSubHub, isMobile);
+        const bubbleHeight = lines.length > 1 ? 40 : isSubHub ? 25 : 24;
+
+        return {
+          type,
+          isSubHub,
+          isMobile,
+          lines,
+          fontSizes,
+          width,
+          bubbleHeight,
+          pointerHeight: 6
+        };
+      }
+
+      function overlapMarkerKey(row) {
+        const latitude = Number(row?.latitude);
+        const longitude = Number(row?.longitude);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          return `invalid:${rowId(row)}`;
+        }
+
+        // 약 1m 안팎의 동일 위치는 하나의 붙임 그룹으로 묶는다.
+        return `${latitude.toFixed(5)}|${longitude.toFixed(5)}`;
+      }
+
+      function overlapSortLabel(row) {
+        return markerLabelLines(row).join(" ");
+      }
+
+      function compareOverlapRows(a, b) {
+        const aIsSubHub = text(a?.camp_type).toUpperCase() === "SUB_HUB";
+        const bIsSubHub = text(b?.camp_type).toUpperCase() === "SUB_HUB";
+
+        // 같은 위치에서는 SUB_HUB를 맨 위에 둔다.
+        if (aIsSubHub !== bIsSubHub) return aIsSubHub ? -1 : 1;
+
+        // 나머지는 가나다순 정렬
+        return overlapSortLabel(a).localeCompare(
+          overlapSortLabel(b),
+          "ko",
+          { numeric: true, sensitivity: "base" }
+        );
+      }
+
+      function buildMarkerGroups(rows) {
+        const grouped = new Map();
+
+        for (const row of rows) {
+          const key = overlapMarkerKey(row);
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(row);
+        }
+
+        return [...grouped.entries()].map(([key, groupRows]) => {
+          groupRows.sort(compareOverlapRows);
+
+          const items = groupRows.map(row => ({
+            row,
+            metrics: markerVisualMetrics(row)
+          }));
+
+          const width = Math.max(...items.map(item => item.metrics.width));
+          const height =
+            items.reduce((sum, item) => sum + item.metrics.bubbleHeight, 0) +
+            Math.max(0, items.length - 1) * LABEL_STACK_GAP +
+            items[items.length - 1].metrics.pointerHeight;
+
+          return {
+            key,
+            items,
+            width,
+            height,
+            latitude: Number(groupRows[0]?.latitude),
+            longitude: Number(groupRows[0]?.longitude),
+            hasSubHub: groupRows.some(
+              row => text(row?.camp_type).toUpperCase() === "SUB_HUB"
+            ),
+            sortLabel: groupRows.map(overlapSortLabel).join(" ")
+          };
+        });
+      }
+
+      function rectanglesOverlap(a, b, padding = LABEL_COLLISION_PADDING) {
+        return !(
+          a.right + padding <= b.left ||
+          a.left >= b.right + padding ||
+          a.bottom + padding <= b.top ||
+          a.top >= b.bottom + padding
+        );
+      }
+
+      function rectangleOverlapArea(a, b) {
+        const width = Math.max(
+          0,
+          Math.min(a.right, b.right) - Math.max(a.left, b.left)
+        );
+        const height = Math.max(
+          0,
+          Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+        );
+        return width * height;
+      }
+
+      function groupRectangle(group, anchor, offset) {
+        const left = anchor.x + offset.x - group.width / 2;
+        const bottom = anchor.y + offset.y;
+
+        return {
+          left,
+          top: bottom - group.height,
+          right: left + group.width,
+          bottom
+        };
+      }
+
+      function markerLayoutCandidates(group) {
+        const xStep = Math.max(54, Math.min(112, Math.round(group.width * 0.72)));
+        const yStep = Math.max(30, Math.min(68, Math.round(group.height * 0.48)));
+        const candidates = [{ x: 0, y: 0 }];
+
+        for (let level = 1; level <= 5; level++) {
+          const x = xStep * level;
+          const y = yStep * level;
+
+          candidates.push(
+            { x: 0, y: -y },
+            { x, y: 0 },
+            { x: -x, y: 0 },
+            { x: Math.round(x * 0.72), y: -Math.round(y * 0.65) },
+            { x: -Math.round(x * 0.72), y: -Math.round(y * 0.65) },
+            { x: Math.round(x * 0.72), y: Math.round(y * 0.62) },
+            { x: -Math.round(x * 0.72), y: Math.round(y * 0.62) },
+            { x: 0, y }
+          );
+        }
+
+        return candidates;
+      }
+
+      function viewportPenalty(rect, width, height) {
+        let penalty = 0;
+
+        if (rect.left < 4) penalty += (4 - rect.left) * 300;
+        if (rect.right > width - 4) penalty += (rect.right - width + 4) * 300;
+        if (rect.top < 4) penalty += (4 - rect.top) * 300;
+        if (rect.bottom > height - 4) penalty += (rect.bottom - height + 4) * 300;
+
+        return penalty;
+      }
+
+      function buildCollisionAwareGroupLayout(groups) {
+        const projection = state.map.getProjection();
+        const mapElement = document.getElementById("map");
+        const viewportWidth = mapElement?.clientWidth || window.innerWidth;
+        const viewportHeight = mapElement?.clientHeight || window.innerHeight;
+        const placed = [];
+        const layouts = new Map();
+
+        const prepared = groups
+          .map(group => {
+            const position = new kakao.maps.LatLng(
+              group.latitude,
+              group.longitude
+            );
+            const anchor = projection.containerPointFromCoords(position);
+
+            return { group, position, anchor };
+          })
+          .sort((a, b) => {
+            // SUB_HUB가 포함된 그룹은 원래 위치를 우선 확보한다.
+            if (a.group.hasSubHub !== b.group.hasSubHub) {
+              return a.group.hasSubHub ? -1 : 1;
+            }
+
+            return (
+              a.anchor.y - b.anchor.y ||
+              a.anchor.x - b.anchor.x ||
+              a.group.sortLabel.localeCompare(
+                b.group.sortLabel,
+                "ko",
+                { numeric: true, sensitivity: "base" }
+              )
+            );
+          });
+
+        for (const preparedGroup of prepared) {
+          const { group, anchor } = preparedGroup;
+          const candidates = markerLayoutCandidates(group);
+
+          let best = null;
+
+          for (const offset of candidates) {
+            const rect = groupRectangle(group, anchor, offset);
+            const collisions = placed.filter(item =>
+              rectanglesOverlap(rect, item.rect)
+            );
+
+            const overlapArea = collisions.reduce(
+              (sum, item) => sum + rectangleOverlapArea(rect, item.rect),
+              0
+            );
+
+            const score =
+              overlapArea * 10000 +
+              collisions.length * 1000000 +
+              viewportPenalty(
+                rect,
+                viewportWidth,
+                viewportHeight
+              ) +
+              Math.hypot(offset.x, offset.y);
+
+            if (!best || score < best.score) {
+              best = { offset, rect, score, collisions: collisions.length };
+            }
+
+            // 화면 안쪽이고 다른 마커와 겹치지 않는 가장 가까운 후보를 즉시 사용
+            if (
+              collisions.length === 0 &&
+              viewportPenalty(rect, viewportWidth, viewportHeight) === 0
+            ) {
+              best = { offset, rect, score, collisions: 0 };
+              break;
+            }
+          }
+
+          layouts.set(group.key, {
+            x: best?.offset?.x || 0,
+            y: best?.offset?.y || 0,
+            anchor,
+            rect: best?.rect || groupRectangle(group, anchor, { x: 0, y: 0 })
+          });
+
+          placed.push({
+            key: group.key,
+            rect: layouts.get(group.key).rect
+          });
+        }
+
+        return layouts;
+      }
+
+      function makeClusterDotImage(row) {
+        const type = text(row?.camp_type) || "미분류";
+        const isMobile = isMobileRocketCamp(row);
+        const key = `dot-one:${type}:${isMobile ? "mobile" : "base"}`;
+
+        if (state.markerImages.has(key)) {
+          return state.markerImages.get(key);
+        }
+
+        const color = isMobile ? "#7dd3fc" : getColor(type);
+        const textColor = isMobile ? "#0c4a6e" : "#ffffff";
+        const size = 24;
+        const center = size / 2;
+
+        const svg = [
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`,
+          '<defs>',
+          '<filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">',
+          '<feDropShadow dx="0" dy="1.2" stdDeviation="1.4" flood-color="#0f172a" flood-opacity=".28"/>',
+          '</filter>',
+          '</defs>',
+          '<g filter="url(#shadow)">',
+          `<circle cx="${center}" cy="${center}" r="10.5" fill="${color}" stroke="#ffffff" stroke-width="2"/>`,
+          '</g>',
+          `<text x="${center}" y="${center + 0.5}" text-anchor="middle" dominant-baseline="middle"`,
+          ` font-family="Arial, Noto Sans KR, sans-serif" font-size="11.5" font-weight="900"`,
+          ` fill="${textColor}">1</text>`,
+          '</svg>'
+        ].join("");
+
+        const image = new kakao.maps.MarkerImage(
+          "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+          new kakao.maps.Size(size, size),
+          { offset: new kakao.maps.Point(center, center) }
+        );
+
+        state.markerImages.set(key, image);
+        return image;
+      }
+
+      function selectedSubHubId() {
+        if (text(state.selected?.camp_type).toUpperCase() !== "SUB_HUB") {
+          return "";
+        }
+
+        return text(state.selected?.id);
+      }
+
+      function selectedSubHubRelatedRows() {
+        const shId = selectedSubHubId();
+        if (!shId) return [];
+
+        return state.rows
+          .filter(row => {
+            if (!row.hasValidCoordinates) return false;
+
+            return (
+              text(row.id) === shId ||
+              text(row.effective_receiving_sh_id) === shId
+            );
+          })
+          .sort((a, b) => {
+            const aIsSh = text(a.camp_type).toUpperCase() === "SUB_HUB";
+            const bIsSh = text(b.camp_type).toUpperCase() === "SUB_HUB";
+
+            if (aIsSh !== bIsSh) return aIsSh ? -1 : 1;
+
+            return campName(a).localeCompare(
+              campName(b),
+              "ko",
+              { numeric: true, sensitivity: "base" }
+            );
+          });
+      }
+
+      function uniqueRows(rows) {
+        const seen = new Set();
+
+        return rows.filter(row => {
+          const key = rowId(row);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+
+      function labelRowsForCurrentView() {
+        // SUB_HUB 선택 중에는 선택한 SH와 연결 캠프를
+        // renderSelectedSubHubMarkers()가 확대 단계와 무관하게 전담한다.
+        // 일반 라벨까지 동시에 그리면 같은 SH/캠프가 이중으로 표시되어 겹친다.
+        if (selectedSubHubId()) {
+          return [];
+        }
+
+        if (state.map.getLevel() <= LABEL_MAX_LEVEL) {
+          return state.filteredRows;
+        }
+
+        return [];
+      }
+
+      function relationRowsForCurrentView() {
+        return uniqueRows([
+          ...state.filteredRows,
+          ...selectedSubHubRelatedRows()
+        ]);
+      }
+
+
+      function forcedLabelRowIds() {
+        return new Set(
+          selectedSubHubRelatedRows().map(row => rowId(row))
+        );
+      }
+
+      function syncBaseMarkersForCurrentView() {
+        if (!state.clusterer) return;
+
+        state.clusterer.clear();
+
+        for (const entry of state.markerEntries) {
+          entry.marker.setMap(null);
+        }
+
+        const closeZoomShowsAllLabels =
+          state.map && state.map.getLevel() <= LABEL_MAX_LEVEL;
+
+        const forcedIds = forcedLabelRowIds();
+
+        const visibleMarkers = state.markerEntries
+          .filter(entry => {
+            // 가까이 확대된 상태에서는 모든 캠프가 텍스트 라벨로 표시되므로
+            // 뒤에 있는 숫자 1 마커를 전부 숨긴다.
+            if (closeZoomShowsAllLabels) return false;
+
+            // SUB_HUB 선택 중에는 선택한 SH와 연결 캠프가
+            // 강제 텍스트 라벨로 표시되므로 해당 숫자 마커만 숨긴다.
+            if (forcedIds.has(rowId(entry.row))) return false;
+
+            return true;
+          })
+          .map(entry => entry.marker);
+
+        if (visibleMarkers.length) {
+          state.clusterer.addMarkers(visibleMarkers);
+        }
+      }
+
+
+      function clearSelectedRelationMarkers() {
+        for (const marker of state.selectedRelationMarkers) {
+          marker.setMap(null);
+        }
+
+        state.selectedRelationMarkers = [];
+      }
+
+      function makeForcedRelationLabelImage(row, offsetX = 0, offsetY = 0) {
+        const metrics = markerVisualMetrics(row);
+        const key = [
+          "forced-relation",
+          metrics.type,
+          metrics.isMobile ? "mobile" : "base",
+          ...metrics.lines,
+          ...metrics.fontSizes,
+          Math.round(offsetX),
+          Math.round(offsetY)
+        ].join("|");
+
+        if (state.markerImages.has(key)) {
+          return state.markerImages.get(key);
+        }
+
+        const labelWidth = metrics.width;
+        const labelHeight = metrics.bubbleHeight + metrics.pointerHeight;
+        const padding = 5;
+
+        const minX = Math.min(0, offsetX - labelWidth / 2);
+        const maxX = Math.max(0, offsetX + labelWidth / 2);
+        const minY = Math.min(0, offsetY - labelHeight);
+        const maxY = Math.max(0, offsetY);
+
+        const imageWidth = Math.ceil(maxX - minX + padding * 2);
+        const imageHeight = Math.ceil(maxY - minY + padding * 2);
+        const anchorX = -minX + padding;
+        const anchorY = -minY + padding;
+        const labelLeft = anchorX + offsetX - labelWidth / 2;
+        const labelTop = anchorY + offsetY - labelHeight;
+        const bubbleColor = markerLabelBackground(metrics);
+        const textColor = markerLabelColor(metrics);
+        const borderColor = metrics.isMobile ? "#e0f2fe" : "#ffffff";
+        const centerX = labelLeft + labelWidth / 2;
+        const bubbleBottom = labelTop + metrics.bubbleHeight;
+
+        const textSvg = metrics.lines.length > 1
+          ? [
+              `<text x="${centerX}" y="${labelTop + 12.5}" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${metrics.fontSizes[0]}" font-weight="900" fill="${textColor}">`,
+              `${escapeSvgText(metrics.lines[0])}</text>`,
+              `<text x="${centerX}" y="${labelTop + 29.2}" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${metrics.fontSizes[1]}" font-weight="800" fill="${textColor}">`,
+              `${escapeSvgText(metrics.lines[1])}</text>`
+            ].join("")
+          : [
+              `<text x="${centerX}" y="${labelTop + 1 + metrics.bubbleHeight / 2}" text-anchor="middle" dominant-baseline="middle"`,
+              ` font-family="Arial, Noto Sans KR, sans-serif" font-size="${metrics.fontSizes[0]}" font-weight="900" fill="${textColor}">`,
+              `${escapeSvgText(metrics.lines[0])}</text>`
+            ].join("");
+
+        const connectorSvg =
+          Math.abs(offsetX) > 2 || Math.abs(offsetY) > 2
+            ? `<line x1="${anchorX}" y1="${anchorY}" x2="${centerX}" y2="${labelTop + labelHeight}" stroke="${bubbleColor}" stroke-width="1.8" stroke-opacity=".72"/>`
+            : "";
+
+        const svg = [
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${imageWidth}" height="${imageHeight}" viewBox="0 0 ${imageWidth} ${imageHeight}" overflow="visible">`,
+          '<defs>',
+          '<filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">',
+          '<feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#0f172a" flood-opacity=".28"/>',
+          '</filter>',
+          '</defs>',
+          connectorSvg,
+          '<g filter="url(#shadow)">',
+          `<rect x="${labelLeft}" y="${labelTop}" width="${labelWidth}" height="${metrics.bubbleHeight}" rx="7" fill="${bubbleColor}" stroke="${borderColor}" stroke-width="1.2"/>`,
+          `<path d="M${centerX - 4} ${bubbleBottom} L${centerX} ${labelTop + labelHeight} L${centerX + 4} ${bubbleBottom} Z" fill="${bubbleColor}" stroke="${borderColor}" stroke-width="1"/>`,
+          '</g>',
+          textSvg,
+          '</svg>'
+        ].join("");
+
+        const image = new kakao.maps.MarkerImage(
+          "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+          new kakao.maps.Size(imageWidth, imageHeight),
+          { offset: new kakao.maps.Point(anchorX, anchorY) }
+        );
+
+        state.markerImages.set(key, image);
+        return image;
+      }
+
+      function renderSelectedSubHubMarkers() {
+        clearSelectedRelationMarkers();
+
+        if (!state.map || !selectedSubHubId()) return;
+
+        const relatedRows = selectedSubHubRelatedRows();
+        if (!relatedRows.length) return;
+
+        const groups = buildMarkerGroups(relatedRows);
+        const layouts = buildCollisionAwareGroupLayout(groups);
+
+        for (const group of groups) {
+          const layout = layouts.get(group.key) || { x: 0, y: 0 };
+          let heightBelow = 0;
+
+          for (let index = group.items.length - 1; index >= 0; index--) {
+            const item = group.items[index];
+            const showPointer = index === group.items.length - 1;
+
+            const marker = new kakao.maps.Marker({
+              map: state.map,
+              position: new kakao.maps.LatLng(
+                item.row.latitude,
+                item.row.longitude
+              ),
+              image: makeForcedRelationLabelImage(
+                item.row,
+                layout.x,
+                layout.y - heightBelow
+              ),
+              title: campName(item.row),
+              zIndex: item.metrics.isSubHub ? 30000 - index : 29000 - index
+            });
+
+            kakao.maps.event.addListener(marker, "click", () => {
+              state.ignoreMapClickUntil = Date.now() + 250;
+              selectCamp(item.row, true);
+            });
+
+            state.selectedRelationMarkers.push(marker);
+
+            heightBelow +=
+              item.metrics.bubbleHeight +
+              (showPointer ? item.metrics.pointerHeight : 0) +
+              LABEL_STACK_GAP;
+          }
+        }
+      }
+
+
+      function clearLabelOverlays() {
+        if (state.labelLayoutTimer) {
+          clearTimeout(state.labelLayoutTimer);
+          state.labelLayoutTimer = null;
+        }
+
+        for (const overlay of state.labelOverlays) {
+          overlay.setMap(null);
+        }
+
+        for (const line of state.labelLeaderLines) {
+          line.setMap(null);
+        }
+
+        state.labelOverlays = [];
+        state.labelLeaderLines = [];
+      }
+
+      function markerLabelColor(metrics) {
+        return metrics.isMobile ? "#0c4a6e" : "#ffffff";
+      }
+
+      function markerLabelBackground(metrics) {
+        return metrics.isMobile ? "#7dd3fc" : getColor(metrics.type);
+      }
+
+      function createMarkerLabelElement(row, metrics, showPointer, offset) {
+        const root = document.createElement("button");
+        root.type = "button";
+        root.title = campName(row);
+        root.setAttribute("aria-label", campName(row));
+
+        Object.assign(root.style, {
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          width: `${metrics.width}px`,
+          height: `${metrics.bubbleHeight + (showPointer ? metrics.pointerHeight : 0)}px`,
+          margin: "0",
+          padding: "0",
+          border: "0",
+          background: "transparent",
+          cursor: "pointer",
+          fontFamily: "Arial, Noto Sans KR, sans-serif",
+          transform: `translate(${offset.x}px, ${offset.y}px)`,
+          transformOrigin: "50% 100%",
+          filter: "drop-shadow(0 1px 2px rgba(15,23,42,.28))",
+          zIndex: "1"
+        });
+
+        const bubble = document.createElement("span");
+        Object.assign(bubble.style, {
+          display: "flex",
+          flexDirection: metrics.lines.length > 1 ? "column" : "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "0",
+          width: `${metrics.width}px`,
+          height: `${metrics.bubbleHeight}px`,
+          padding: metrics.lines.length > 1 ? "3px 8px" : "0 10px",
+          border: `1.2px solid ${metrics.isMobile ? "#e0f2fe" : "#ffffff"}`,
+          borderRadius: "7px",
+          background: markerLabelBackground(metrics),
+          color: markerLabelColor(metrics),
+          boxSizing: "border-box",
+          whiteSpace: "nowrap",
+          overflow: "hidden"
+        });
+
+        metrics.lines.forEach((line, index) => {
+          const span = document.createElement("span");
+          span.textContent = line;
+          Object.assign(span.style, {
+            display: "block",
+            width: "100%",
+            overflow: "hidden",
+            textOverflow: "clip",
+            whiteSpace: "nowrap",
+            textAlign: "center",
+            lineHeight: metrics.lines.length > 1 ? "1.08" : "1",
+            fontSize: `${metrics.fontSizes[index] || metrics.fontSizes[0]}px`,
+            fontWeight: index === 0 ? "900" : "800"
+          });
+          bubble.appendChild(span);
+        });
+
+        root.appendChild(bubble);
+
+        if (showPointer) {
+          const pointer = document.createElement("span");
+          Object.assign(pointer.style, {
+            display: "block",
+            width: "0",
+            height: "0",
+            borderLeft: "5px solid transparent",
+            borderRight: "5px solid transparent",
+            borderTop: `6px solid ${markerLabelBackground(metrics)}`,
+            marginTop: "-1px"
+          });
+          root.appendChild(pointer);
+        }
+
+        root.addEventListener("pointerdown", event => {
+          event.stopPropagation();
+        });
+
+        root.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          state.ignoreMapClickUntil = Date.now() + 250;
+          selectCamp(row, true);
+        });
+
+        return root;
+      }
+
+      function renderLabelOverlays() {
+        clearLabelOverlays();
+
+        if (!state.map) return;
+
+        const labelRows = labelRowsForCurrentView();
+        if (!labelRows.length) return;
+
+        const groups = buildMarkerGroups(labelRows);
+        const layouts = buildCollisionAwareGroupLayout(groups);
+        const projection = state.map.getProjection();
+
+        for (const group of groups) {
+          const layout = layouts.get(group.key) || {
+            x: 0,
+            y: 0,
+            anchor: projection.containerPointFromCoords(
+              new kakao.maps.LatLng(group.latitude, group.longitude)
+            )
+          };
+
+          const position = new kakao.maps.LatLng(
+            group.latitude,
+            group.longitude
+          );
+
+          let heightBelow = 0;
+
+          for (let index = group.items.length - 1; index >= 0; index--) {
+            const item = group.items[index];
+            const showPointer = index === group.items.length - 1;
+
+            const overlay = new kakao.maps.CustomOverlay({
+              map: state.map,
+              position,
+              content: createMarkerLabelElement(
+                item.row,
+                item.metrics,
+                showPointer,
+                {
+                  x: layout.x,
+                  y: layout.y - heightBelow
+                }
+              ),
+              xAnchor: 0.5,
+              yAnchor: 1,
+              zIndex:
+                item.metrics.isSubHub
+                  ? 5000 - index
+                  : 4000 - index
+            });
+
+            state.labelOverlays.push(overlay);
+
+            heightBelow +=
+              item.metrics.bubbleHeight +
+              (showPointer ? item.metrics.pointerHeight : 0) +
+              LABEL_STACK_GAP;
+          }
+
+          // 다른 좌표의 라벨을 피하느라 그룹 전체가 이동한 경우에만
+          // 실제 좌표와 이동된 그룹 끝점을 짧은 보조선으로 연결한다.
+          if (Math.abs(layout.x) > 2 || Math.abs(layout.y) > 2) {
+            const shiftedPoint = new kakao.maps.Point(
+              layout.anchor.x + layout.x,
+              layout.anchor.y + layout.y
+            );
+            const shiftedPosition =
+              projection.coordsFromContainerPoint(shiftedPoint);
+
+            const leader = new kakao.maps.Polyline({
+              map: state.map,
+              path: [position, shiftedPosition],
+              strokeWeight: 2,
+              strokeColor: group.hasSubHub ? "#7c3aed" : "#64748b",
+              strokeOpacity: 0.62,
+              strokeStyle: "solid",
+              zIndex: 1800
+            });
+
+            state.labelLeaderLines.push(leader);
+          }
+        }
+      }
+
+      function scheduleLabelLayout() {
+        if (state.labelLayoutTimer) {
+          clearTimeout(state.labelLayoutTimer);
+        }
+
+        state.labelLayoutTimer = setTimeout(() => {
+          state.labelLayoutTimer = null;
+          syncBaseMarkersForCurrentView();
+          renderLabelOverlays();
+          renderSelectedSubHubMarkers();
+        }, 70);
+      }
+
+
+      function normalizeRow(row, index) {
+        const latitude = Number(row?.latitude);
+        const longitude = Number(row?.longitude);
+        const hasValidCoordinates =
+          Number.isFinite(latitude) &&
+          Number.isFinite(longitude) &&
+          latitude >= -90 && latitude <= 90 &&
+          longitude >= -180 && longitude <= 180 &&
+          !(latitude === 0 && longitude === 0);
+
+        return {
+          id: text(row?.id) || `row_${index}`,
+          camp_type: text(row?.camp_type) || "미분류",
+          camp: text(row?.camp),
+          mb_camp: text(row?.mb_camp),
+          address: text(row?.address),
+          region: text(row?.region || row?.area),
+          code: text(row?.code),
+          parent_camp_id: text(row?.parent_camp_id),
+          receiving_sh_id: text(row?.receiving_sh_id),
+          parent_camp: text(row?.parent_camp),
+          parent_camp_code: text(row?.parent_camp_code),
+          effective_receiving_sh_id: text(row?.effective_receiving_sh_id || row?.resolved_receiving_sh_id),
+          receiving_sh: text(row?.receiving_sh),
+          receiving_sh_code: text(row?.receiving_sh_code),
+          receiving_sh_latitude: Number(row?.receiving_sh_latitude),
+          receiving_sh_longitude: Number(row?.receiving_sh_longitude),
+          sh_assignment_type: text(row?.sh_assignment_type),
+          latitude,
+          longitude,
+          description: text(row?.description),
+          hasValidCoordinates,
+          coordinateSource: hasValidCoordinates ? "database" : "",
+          locationError: ""
+        };
+      }
+
+      function addressCandidates(address) {
+        const original = text(address);
+        if (!original) return [];
+
+        const values = [
+          original,
+          original.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim(),
+          original.replace(/[，,]/g, " ").replace(/\s+/g, " ").trim()
+        ].filter(Boolean);
+
+        return [...new Set(values)];
+      }
+
+      function geocodeAddress(address) {
+        const cacheKey = lower(address);
+        if (!cacheKey) return Promise.resolve(null);
+        if (state.geocodeCache.has(cacheKey)) {
+          return Promise.resolve(state.geocodeCache.get(cacheKey));
+        }
+
+        const candidates = addressCandidates(address);
+
+        return new Promise(resolve => {
+          const searchNext = index => {
+            if (index >= candidates.length) {
+              setGeocodeCache(cacheKey, null);
+              resolve(null);
+              return;
+            }
+
+            state.geocoder.addressSearch(candidates[index], (result, status) => {
+              if (status === kakao.maps.services.Status.OK && result?.[0]) {
+                const latitude = Number(result[0].y);
+                const longitude = Number(result[0].x);
+                const found = Number.isFinite(latitude) && Number.isFinite(longitude)
+                  ? { latitude, longitude }
+                  : null;
+
+                if (found) {
+                  setGeocodeCache(cacheKey, found);
+                  resolve(found);
+                } else {
+                  searchNext(index + 1);
+                }
+                return;
+              }
+
+              searchNext(index + 1);
+            });
+          };
+
+          searchNext(0);
+        });
+      }
+
+      function applyCachedGeocodeLocations(rows) {
+        let applied = 0;
+
+        for (const row of rows) {
+          if (!row.address) continue;
+
+          const cached = state.geocodeCache.get(lower(row.address));
+          if (!cached) continue;
+
+          const latitude = Number(cached.latitude);
+          const longitude = Number(cached.longitude);
+
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            continue;
+          }
+
+          row.latitude = latitude;
+          row.longitude = longitude;
+          row.hasValidCoordinates = true;
+          row.coordinateSource = "address-cache";
+          row.locationError = "";
+          applied++;
+        }
+
+        return applied;
+      }
+
+      async function resolveMissingLocations(rows) {
+        const targets = rows.filter(row => {
+          if (!row.address) return !row.hasValidCoordinates;
+          return !state.geocodeCache.has(lower(row.address));
+        });
+
+        if (!targets.length) {
+          return { resolved: 0, failed: 0, fallback: 0, checked: 0 };
+        }
+
+        let cursor = 0;
+        let completed = 0;
+        let resolved = 0;
+        let failed = 0;
+        let fallback = 0;
+
+        const worker = async () => {
+          while (true) {
+            const index = cursor++;
+            if (index >= targets.length) return;
+
+            const row = targets[index];
+            const hadDatabaseCoordinates = row.hasValidCoordinates;
+
+            if (row.address) {
+              const found = await geocodeAddress(row.address);
+
+              if (found) {
+                row.latitude = found.latitude;
+                row.longitude = found.longitude;
+                row.hasValidCoordinates = true;
+                row.coordinateSource = "address";
+                row.locationError = "";
+                resolved++;
+              } else if (hadDatabaseCoordinates) {
+                row.coordinateSource = "database-fallback";
+                row.locationError = "주소 검색 실패 · DB 좌표 사용";
+                fallback++;
+              } else {
+                row.hasValidCoordinates = false;
+                row.coordinateSource = "";
+                row.locationError = "주소 검색 실패";
+                failed++;
+              }
+            } else if (hadDatabaseCoordinates) {
+              row.coordinateSource = "database";
+              row.locationError = "";
+            } else {
+              row.hasValidCoordinates = false;
+              row.coordinateSource = "";
+              row.locationError = "주소 및 좌표 없음";
+              failed++;
+            }
+
+            completed++;
+            dom.loadingText.textContent =
+              `주소 위치를 백그라운드로 보정 중... ${completed}/${targets.length}`;
+          }
+        };
+
+        const workerCount = Math.min(GEOCODE_CONCURRENCY, targets.length);
+        await Promise.all(
+          Array.from({ length: workerCount }, () => worker())
+        );
+
+        return {
+          resolved,
+          failed,
+          fallback,
+          checked: targets.length
+        };
+      }
+
+
+      function sortedTypes() {
+        return [...new Set(
+          state.rows
+            .map(row => text(row.camp_type))
+            .filter(Boolean)
+        )].sort((a, b) =>
+          a.localeCompare(b, "ko", { numeric: true })
+        );
+      }
+
+      function updateSelectOptions(select, values) {
+        const currentValue = select.value;
+        select.replaceChildren(new Option("전체", ""));
+
+        for (const value of values) {
+          select.add(new Option(value, value));
+        }
+
+        if (values.includes(currentValue)) {
+          select.value = currentValue;
+        }
+      }
+
+      function syncTypeSelect() {
+        if (state.selectedTypes.size === 1) {
+          dom.type.value = [...state.selectedTypes][0];
+        } else {
+          dom.type.value = "";
+        }
+      }
+
+
+      function updateFilterOptions() {
+        const types = sortedTypes();
+        const regions = [...new Set(state.rows.map(row => row.region).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+
+        state.selectedTypes = new Set(
+          [...state.selectedTypes].filter(type => types.includes(type))
+        );
+
+        updateSelectOptions(dom.type, types);
+        updateSelectOptions(dom.region, regions);
+        syncTypeSelect();
+        renderTypeChips(types);
+      }
+
+      function renderTypeChips(types = sortedTypes()) {
+        const counts = new Map();
+        for (const row of state.rows) {
+          counts.set(row.camp_type, (counts.get(row.camp_type) || 0) + 1);
+        }
+
+        dom.chips.replaceChildren();
+
+        for (const type of types) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `chip${state.selectedTypes.has(type) ? " active" : ""}`;
+          button.dataset.type = type;
+
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          dot.style.background = getColor(type);
+
+          button.append(dot, document.createTextNode(`${type} ${counts.get(type) || 0}`));
+          dom.chips.appendChild(button);
+        }
+      }
+
+      function applyFilters(fitBounds = true) {
+        const query = lower(dom.query.value);
+        const selectedRegion = dom.region.value;
+
+        state.filteredRows = state.rows.filter(row => {
+          if (!row.hasValidCoordinates) return false;
+          if (state.selectedTypes.size && !state.selectedTypes.has(row.camp_type)) return false;
+          if (selectedRegion && row.region !== selectedRegion) return false;
+
+          if (query) {
+            const haystack = [
+              row.camp_type,
+              row.camp,
+              row.mb_camp,
+              row.address,
+              row.region,
+              row.code,
+              row.parent_camp,
+              row.receiving_sh,
+              row.receiving_sh_code,
+              row.description
+            ].map(lower).join("\n");
+
+            if (!haystack.includes(query)) return false;
+          }
+
+          return true;
+        });
+
+        if (state.selected && !state.filteredRows.some(row => rowId(row) === rowId(state.selected))) {
+          clearSelection();
+        }
+
+        renderMarkers(fitBounds);
+        renderList();
+        renderStats();
+        renderTypeChips();
+      }
+
+      function clearSelection() {
+        const hadSelection = !!state.selected;
+
+        state.selected = null;
+        dom.detail.classList.remove("show");
+
+        if (state.overlay) state.overlay.setMap(null);
+        state.overlay = null;
+
+        if (state.routeOverlay) state.routeOverlay.setMap(null);
+        state.routeOverlay = null;
+
+        clearSelectedRelationMarkers();
+
+        if (state.map && state.clusterer) {
+          clearRelationLines();
+          renderRelationLines();
+          scheduleLabelLayout();
+        }
+
+        if (hadSelection) {
+          renderList();
+        }
+      }
+
+
+      function isValidLatLng(latitude, longitude) {
+        return Number.isFinite(latitude) &&
+          Number.isFinite(longitude) &&
+          latitude >= -90 && latitude <= 90 &&
+          longitude >= -180 && longitude <= 180 &&
+          !(latitude === 0 && longitude === 0);
+      }
+
+      function receivingShPosition(row) {
+        if (isValidLatLng(row.receiving_sh_latitude, row.receiving_sh_longitude)) {
+          return {
+            latitude: row.receiving_sh_latitude,
+            longitude: row.receiving_sh_longitude
+          };
+        }
+
+        const shId = text(row.effective_receiving_sh_id);
+        if (!shId) return null;
+
+        const shRow = state.rows.find(item => text(item.id) === shId);
+        if (!shRow?.hasValidCoordinates) return null;
+
+        return {
+          latitude: shRow.latitude,
+          longitude: shRow.longitude
+        };
+      }
+
+      function clearRelationLines() {
+        for (const item of state.relationLines) {
+          item.visible?.setMap(null);
+          item.hit?.setMap(null);
+        }
+        state.relationLines = [];
+
+        if (state.routeOverlay) {
+          state.routeOverlay.setMap(null);
+          state.routeOverlay = null;
+        }
+      }
+
+      function formatDistance(meters) {
+        const value = Number(meters || 0);
+        if (value < 1000) return `${Math.round(value)}m`;
+        return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}km`;
+      }
+
+      function formatDuration(seconds) {
+        const totalMinutes = Math.max(1, Math.round(Number(seconds || 0) / 60));
+        if (totalMinutes < 60) return `${totalMinutes}분`;
+        const hours = Math.floor(totalMinutes / 60);
+        const minutes = totalMinutes % 60;
+        return minutes ? `${hours}시간 ${minutes}분` : `${hours}시간`;
+      }
+
+      function makeRouteOverlay(position, row, data = null, error = "") {
+        if (state.routeOverlay) state.routeOverlay.setMap(null);
+
+        const box = document.createElement("div");
+        box.className = `routeInfo${!data && !error ? " loadingRoute" : ""}`;
+
+        const title = document.createElement("strong");
+        title.textContent = `${row.receiving_sh_code || row.receiving_sh || "서브허브"} → ${campName(row)}`;
+
+        const arrow = document.createElement("div");
+        arrow.className = "routeArrow";
+        arrow.textContent = "서브허브 출발 · 캠프 도착";
+
+        box.append(title, arrow);
+
+        const addRow = (key, value) => {
+          const line = document.createElement("div");
+          line.className = "routeRow";
+          const keyNode = document.createElement("span");
+          keyNode.className = "routeKey";
+          keyNode.textContent = key;
+          const valueNode = document.createElement("span");
+          valueNode.className = "routeVal";
+          valueNode.textContent = value;
+          line.append(keyNode, valueNode);
+          box.appendChild(line);
+        };
+
+        if (error) {
+          addRow("길찾기", error);
+        } else if (!data) {
+          addRow("카카오지도", "현재 교통정보 조회 중...");
+        } else {
+          addRow(
+            "최단거리",
+            `${formatDistance(data.shortestDistance?.distance)} · ${formatDuration(data.shortestDistance?.duration)}`
+          );
+          addRow(
+            "현재 최단시간",
+            `${formatDuration(data.fastestTime?.duration)} · ${formatDistance(data.fastestTime?.distance)}`
+          );
+
+          const checked = document.createElement("div");
+          checked.className = "routeTime";
+          const queriedAt = data.queriedAt ? new Date(data.queriedAt) : new Date();
+          checked.textContent = `${queriedAt.toLocaleString("ko-KR")} 기준 · 카카오지도 자동차 길찾기`;
+          box.appendChild(checked);
+        }
+
+        state.routeOverlay = new kakao.maps.CustomOverlay({
+          position,
+          content: box,
+          yAnchor: 1.1,
+          zIndex: 40,
+          clickable: true
+        });
+        state.routeOverlay.setMap(state.map);
+      }
+
+      async function showRelationshipRoute(row, source, position) {
+        makeRouteOverlay(position, row);
+
+        const key = [
+          source.longitude,
+          source.latitude,
+          row.longitude,
+          row.latitude
+        ].join("|");
+
+        const cached = state.routeCache.get(key);
+        if (cached && Date.now() - cached.savedAt < 60000) {
+          makeRouteOverlay(position, row, cached.data);
+          return;
+        }
+
+        try {
+          if (state.supabaseClient) {
+            const { data: sessionData } = await state.supabaseClient.auth.getSession();
+            state.accessToken = sessionData?.session?.access_token || state.accessToken;
+          }
+          if (!state.accessToken) throw new Error("로그인 세션을 확인할 수 없습니다.");
+
+          const params = new URLSearchParams({
+            origin_lng: String(source.longitude),
+            origin_lat: String(source.latitude),
+            destination_lng: String(row.longitude),
+            destination_lat: String(row.latitude)
+          });
+
+          const response = await fetch(`${API_BASE}/directions?${params}`, {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${state.accessToken}`
+            },
+            cache: "no-store"
+          });
+
+          const data = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(data?.error || data?.message || `길찾기 HTTP ${response.status}`);
+          }
+
+          state.routeCache.set(key, { savedAt: Date.now(), data });
+          makeRouteOverlay(position, row, data);
+        } catch (error) {
+          console.error(error);
+          makeRouteOverlay(position, row, null, error?.message || String(error));
+        }
+      }
+
+      function renderRelationLines() {
+        const unique = new Set();
+
+        for (const row of relationRowsForCurrentView()) {
+          if (text(row.camp_type).toUpperCase() === "SUB_HUB") continue;
+          if (!row.effective_receiving_sh_id || !row.hasValidCoordinates) continue;
+
+          const source = receivingShPosition(row);
+          if (!source) continue;
+
+          const relationKey = [
+            row.effective_receiving_sh_id,
+            rowId(row),
+            source.latitude,
+            source.longitude,
+            row.latitude,
+            row.longitude
+          ].join("|");
+          if (unique.has(relationKey)) continue;
+          unique.add(relationKey);
+
+          const path = [
+            new kakao.maps.LatLng(source.latitude, source.longitude),
+            new kakao.maps.LatLng(row.latitude, row.longitude)
+          ];
+
+          const color = "#64748b";
+          const visible = new kakao.maps.Polyline({
+            map: state.map,
+            path,
+            strokeWeight: 4,
+            strokeColor: color,
+            strokeOpacity: 0.72,
+            strokeStyle: "solid",
+            zIndex: 2
+          });
+
+          // 보이는 선 자체를 충분히 굵게 표시하고, 클릭 영역은 더 넓게 확보한다.
+          const hit = new kakao.maps.Polyline({
+            map: state.map,
+            path,
+            strokeWeight: 18,
+            strokeColor: "#ffffff",
+            strokeOpacity: 0.01,
+            strokeStyle: "solid",
+            zIndex: 3
+          });
+
+          const highlight = () => visible.setOptions({
+            strokeWeight: 7,
+            strokeOpacity: 0.96,
+            strokeColor: "#2563eb"
+          });
+          const restore = () => visible.setOptions({
+            strokeWeight: 4,
+            strokeOpacity: 0.72,
+            strokeColor: color
+          });
+
+          kakao.maps.event.addListener(hit, "mouseover", highlight);
+          kakao.maps.event.addListener(hit, "mouseout", restore);
+          kakao.maps.event.addListener(hit, "click", event => {
+            state.ignoreMapClickUntil = Date.now() + 250;
+            highlight();
+            showRelationshipRoute(row, source, event.latLng);
+          });
+
+          state.relationLines.push({ visible, hit, row, source });
+        }
+      }
+
+      function renderMarkers(fitBounds) {
+        state.clusterer.clear();
+        for (const marker of state.markers) marker.setMap(null);
+        state.markers = [];
+        state.markerEntries = [];
+        clearLabelOverlays();
+        clearRelationLines();
+
+        if (state.overlay) state.overlay.setMap(null);
+
+        const bounds = new kakao.maps.LatLngBounds();
+
+        for (const row of state.filteredRows) {
+          const position = new kakao.maps.LatLng(row.latitude, row.longitude);
+          const marker = new kakao.maps.Marker({
+            position,
+            image: makeClusterDotImage(row),
+            title: campName(row),
+            zIndex:
+              text(row.camp_type).toUpperCase() === "SUB_HUB"
+                ? 3200
+                : 3000
+          });
+
+          kakao.maps.event.addListener(marker, "click", () => selectCamp(row, true));
+          state.markers.push(marker);
+          state.markerEntries.push({ marker, row });
+          bounds.extend(position);
+        }
+
+        renderRelationLines();
+        syncBaseMarkersForCurrentView();
+
+        if (fitBounds && state.markers.length) {
+          state.map.setBounds(bounds);
+        }
+
+        scheduleLabelLayout();
+      }
+
+      function renderList() {
+        dom.count.textContent = `${state.filteredRows.length.toLocaleString()}건`;
+        dom.list.replaceChildren();
+
+        if (!state.filteredRows.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = "조건에 맞는 위치 확인 캠프가 없습니다.";
+          dom.list.appendChild(empty);
+          return;
+        }
+
+        for (const row of state.filteredRows.slice(0, 500)) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `item${state.selected && rowId(state.selected) === rowId(row) ? " active" : ""}`;
+          button.dataset.id = rowId(row);
+
+          const title = document.createElement("strong");
+          const dot = document.createElement("i");
+          dot.className = "dot";
+          dot.style.background = getColor(row.camp_type);
+          title.append(dot, document.createTextNode(campName(row)));
+
+          const subtitle = document.createElement("span");
+          subtitle.textContent = [row.camp_type, row.region, row.receiving_sh ? `SH ${row.receiving_sh}` : "", row.address].filter(Boolean).join(" · ");
+
+          button.append(title, subtitle);
+          dom.list.appendChild(button);
+        }
+      }
+
+      function renderStats() {
+        dom.visible.textContent = state.filteredRows.length.toLocaleString();
+        dom.total.textContent = state.rows.length.toLocaleString();
+        dom.missing.textContent = state.rows
+          .filter(row => !row.hasValidCoordinates)
+          .length
+          .toLocaleString();
+        dom.time.textContent = new Date().toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit"
+        });
+      }
+
+      function makeInfoOverlay(row, position) {
+        const box = document.createElement("div");
+        box.className = "info";
+
+        const title = document.createElement("strong");
+        title.textContent = campName(row);
+
+        const meta = document.createElement("span");
+        meta.textContent = [row.camp_type, row.region].filter(Boolean).join(" · ");
+
+        const address = document.createElement("span");
+        address.textContent = row.address || "주소 없음";
+
+        box.append(title, meta, address);
+
+        if (state.overlay) state.overlay.setMap(null);
+        state.overlay = new kakao.maps.CustomOverlay({
+          position,
+          content: box,
+          yAnchor: 1.32,
+          zIndex: 20
+        });
+        state.overlay.setMap(state.map);
+      }
+
+      function selectCamp(row, focusMap) {
+        state.selected = row;
+        dom.detail.classList.add("show");
+        dom.detailType.textContent = row.camp_type;
+        dom.detailTitle.textContent = row.camp || row.mb_camp || row.code || "이름 없는 캠프";
+        dom.detailSub.textContent = row.mb_camp && row.mb_camp !== row.camp
+          ? `MB캠프 ${row.mb_camp}`
+          : "";
+        dom.detailAddress.textContent = row.address || "-";
+        dom.detailRegion.textContent = row.region || "-";
+        dom.detailCode.textContent = row.code || "-";
+        dom.detailParent.textContent = row.parent_camp || "-";
+        dom.detailSh.textContent = row.receiving_sh
+          ? `${row.receiving_sh}${row.sh_assignment_type === "INHERITED" ? " (본캠프 상속)" : " (직접 지정)"}`
+          : "미지정";
+        dom.detailDescription.textContent = row.description || "-";
+        const coordinateLabel =
+          row.coordinateSource === "address"
+            ? " (주소 우선 변환)"
+            : row.coordinateSource === "address-cache"
+              ? " (주소 캐시 적용)"
+              : row.coordinateSource === "database-fallback"
+              ? " (주소 검색 실패 · DB 좌표)"
+              : "";
+        dom.detailCoord.textContent = `${row.latitude}, ${row.longitude}${coordinateLabel}`;
+
+        const position = new kakao.maps.LatLng(row.latitude, row.longitude);
+
+        // 선택한 캠프의 상세정보는 왼쪽 패널에만 표시한다.
+        // 지도 위의 큰 설명 말풍선은 제거한다.
+        if (state.overlay) {
+          state.overlay.setMap(null);
+          state.overlay = null;
+        }
+
+        if (focusMap) {
+          state.map.panTo(position);
+          if (state.map.getLevel() > 5) state.map.setLevel(5, { anchor: position });
+        }
+
+        clearRelationLines();
+        renderRelationLines();
+        scheduleLabelLayout();
+        renderList();
+
+        if (window.matchMedia("(max-width:900px)").matches) {
+          dom.work.classList.remove("open");
+        }
+      }
+
+      async function loadRows() {
+        dom.loading.classList.remove("hide");
+
+        try {
+          const response = await fetch(`${API_BASE}/camps`, { cache: "no-store" });
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+          }
+
+          const rows = Array.isArray(data) ? data : (data?.rows || []);
+          state.rows = rows.map(normalizeRow);
+
+          const cachedCount = applyCachedGeocodeLocations(state.rows);
+
+          state.rows.sort((a, b) =>
+            campName(a).localeCompare(campName(b), "ko", { numeric: true })
+          );
+
+          clearSelection();
+          updateFilterOptions();
+          applyFilters(true);
+
+          // 데이터와 지도는 먼저 즉시 표시한다.
+          dom.loading.classList.add("hide");
+
+          const uncachedAddressCount = state.rows.filter(row =>
+            row.address && !state.geocodeCache.has(lower(row.address))
+          ).length;
+
+          if (uncachedAddressCount > 0) {
+            showToast(
+              `캠프 ${state.rows.length.toLocaleString()}건 표시 완료 · 주소 ${uncachedAddressCount.toLocaleString()}건 보정 중`
+            );
+
+            const geocodeResult = await resolveMissingLocations(state.rows);
+
+            state.rows.sort((a, b) =>
+              campName(a).localeCompare(campName(b), "ko", { numeric: true })
+            );
+
+            // 검색·선택 상태를 유지하고 보정된 좌표만 다시 반영한다.
+            applyFilters(false);
+
+            showToast(
+              `캠프 ${state.rows.length.toLocaleString()}건 · 주소 위치 ${geocodeResult.resolved.toLocaleString()}건 보정 완료`
+            );
+          } else {
+            showToast(
+              `캠프 ${state.rows.length.toLocaleString()}건을 불러왔습니다.${cachedCount ? ` · 주소 캐시 ${cachedCount.toLocaleString()}건 적용` : ""}`
+            );
+          }
+        } catch (error) {
+          console.error(error);
+          showToast(error?.message || String(error), true);
+        } finally {
+          dom.loadingText.textContent = "캠프 지도를 불러오는 중...";
+          dom.loading.classList.add("hide");
+        }
+      }
+
+
+      function bindEvents() {
+        let searchTimer = null;
+
+        dom.query.addEventListener("input", () => {
+          clearTimeout(searchTimer);
+          searchTimer = setTimeout(() => applyFilters(true), 180);
+        });
+
+        dom.type.addEventListener("change", () => {
+          state.selectedTypes.clear();
+          if (dom.type.value) state.selectedTypes.add(dom.type.value);
+          applyFilters(true);
+        });
+        dom.region.addEventListener("change", () => applyFilters(true));
+
+        dom.chips.addEventListener("click", event => {
+          const button = event.target.closest("[data-type]");
+          if (!button) return;
+
+          const type = button.dataset.type;
+          if (state.selectedTypes.has(type)) {
+            state.selectedTypes.delete(type);
+          } else {
+            state.selectedTypes.add(type);
+          }
+
+          syncTypeSelect();
+          applyFilters(true);
+        });
+
+        dom.list.addEventListener("click", event => {
+          const button = event.target.closest("[data-id]");
+          if (!button) return;
+          const row = state.filteredRows.find(item => rowId(item) === button.dataset.id);
+          if (row) selectCamp(row, true);
+        });
+
+        dom.reset.addEventListener("click", () => {
+          dom.query.value = "";
+          state.selectedTypes.clear();
+          dom.type.value = "";
+          dom.region.value = "";
+          applyFilters(true);
+        });
+
+        dom.fit.addEventListener("click", () => applyFilters(true));
+        dom.reload.addEventListener("click", loadRows);
+
+        dom.menu.addEventListener("click", () => {
+          if (isMobileSidebarLayout()) {
+            dom.work.classList.toggle("open");
+            updateSidebarToggleButton();
+          } else {
+            setSidebarCollapsed(
+              !dom.work.classList.contains("side-collapsed")
+            );
+          }
+        });
+
+        dom.sideToggle.addEventListener("pointerdown", event => {
+          event.stopPropagation();
+        });
+
+        dom.sideToggle.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+
+          const collapsed = isMobileSidebarLayout()
+            ? !dom.work.classList.contains("open")
+            : dom.work.classList.contains("side-collapsed");
+
+          setSidebarCollapsed(!collapsed);
+        });
+
+        dom.mapType.addEventListener("click", () => {
+          state.isRoadmap = !state.isRoadmap;
+          state.map.setMapTypeId(
+            state.isRoadmap
+              ? kakao.maps.MapTypeId.ROADMAP
+              : kakao.maps.MapTypeId.SKYVIEW
+          );
+          dom.mapType.textContent = state.isRoadmap ? "위성" : "일반지도";
+        });
+
+        dom.roadview.addEventListener("click", () => {
+          if (!state.map || !state.roadviewOverlay) {
+            showToast("로드뷰 오버레이를 사용할 수 없습니다.", true);
+            return;
+          }
+
+          state.isRoadviewOn = !state.isRoadviewOn;
+          state.roadviewOverlay.setMap(state.isRoadviewOn ? state.map : null);
+          dom.roadview.classList.toggle("primary", state.isRoadviewOn);
+          showToast(state.isRoadviewOn ? "로드뷰 도로 표시 ON" : "로드뷰 도로 표시 OFF");
+        });
+
+        dom.current.addEventListener("click", () => {
+          if (!navigator.geolocation) {
+            showToast("위치 확인을 지원하지 않습니다.", true);
+            return;
+          }
+
+          navigator.geolocation.getCurrentPosition(
+            position => {
+              const current = new kakao.maps.LatLng(
+                position.coords.latitude,
+                position.coords.longitude
+              );
+              state.map.panTo(current);
+              state.map.setLevel(5, { anchor: current });
+            },
+            () => showToast("현재 위치를 확인할 수 없습니다.", true),
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+          );
+        });
+
+        dom.copy.addEventListener("click", async () => {
+          if (!state.selected?.address) {
+            showToast("복사할 주소가 없습니다.", true);
+            return;
+          }
+
+          try {
+            await navigator.clipboard.writeText(state.selected.address);
+            showToast("주소를 복사했습니다.");
+          } catch {
+            showToast("주소 복사에 실패했습니다.", true);
+          }
+        });
+
+        dom.openKakao.addEventListener("click", () => {
+          if (!state.selected) return;
+          const label = encodeURIComponent(campName(state.selected));
+          const url = `https://map.kakao.com/link/map/${label},${state.selected.latitude},${state.selected.longitude}`;
+          window.open(url, "_blank", "noopener,noreferrer");
+        });
+
+        // ESC를 누르면 현재 캠프/서브허브 선택과 길찾기 팝업을 모두 해제한다.
+        window.addEventListener("keydown", event => {
+          if (event.key !== "Escape") return;
+          if (!state.selected && !state.routeOverlay) return;
+
+          event.preventDefault();
+          clearSelection();
+        });
+
+        // 지도 외부의 필터/상단 버튼 등 다른 영역을 클릭해도 선택을 해제한다.
+        // 캠프 목록과 상세 패널 내부 조작은 유지하고, 지도 내부는 Kakao map click에서 처리한다.
+        document.addEventListener("pointerdown", event => {
+          if (!state.selected) return;
+
+          const target = event.target;
+          if (!(target instanceof Node)) return;
+
+          const mapElement = document.getElementById("map");
+
+          if (
+            mapElement?.contains(target) ||
+            dom.sideToggle?.contains(target) ||
+            dom.list?.contains(target) ||
+            dom.detail?.contains(target)
+          ) {
+            return;
+          }
+
+          clearSelection();
+        });
+
+        window.addEventListener("resize", () => {
+          if (!state.map) return;
+
+          if (isMobileSidebarLayout()) {
+            dom.work.classList.remove("side-collapsed");
+          } else {
+            dom.work.classList.remove("open");
+          }
+
+          updateSidebarToggleButton();
+          state.map.relayout();
+          scheduleLabelLayout();
+        });
+      }
+
+
+      async function loadMapAccess() {
+        if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) return false;
+        try {
+          const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+            auth: { persistSession:true, storage:sessionStorage, autoRefreshToken:true, detectSessionInUrl:true }
+          });
+          state.supabaseClient = sb;
+          const { data } = await sb.auth.getSession();
+          const token = data?.session?.access_token || "";
+          if (!token) return false;
+          state.accessToken = token;
+          const response = await fetch(`${API_BASE}/access`, {
+            headers: { Authorization:`Bearer ${token}` },
+            cache: "no-store"
+          });
+          const access = await response.json().catch(() => null);
+          return response.ok && (access?.canClhi === true || access?.access?.can_clhi === true);
+        } catch (error) {
+          console.error(error);
+          return false;
+        }
+      }
+
+      const SIDEBAR_STATE_KEY = "mw_coupang_camp_map_sidebar_collapsed";
+
+      function isMobileSidebarLayout() {
+        return window.matchMedia("(max-width:900px)").matches;
+      }
+
+      function updateSidebarToggleButton() {
+        const collapsed = isMobileSidebarLayout()
+          ? !dom.work.classList.contains("open")
+          : dom.work.classList.contains("side-collapsed");
+
+        dom.sideToggle.textContent = collapsed ? "▶" : "◀";
+        dom.sideToggle.setAttribute(
+          "aria-label",
+          collapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"
+        );
+        dom.sideToggle.title = collapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기";
+      }
+
+      function relayoutMapAfterSidebarChange() {
+        const center = state.map?.getCenter?.();
+
+        window.setTimeout(() => {
+          if (!state.map) return;
+
+          state.map.relayout();
+          if (center) state.map.setCenter(center);
+          scheduleLabelLayout();
+        }, 220);
+      }
+
+      function setSidebarCollapsed(collapsed, persist = true) {
+        if (isMobileSidebarLayout()) {
+          dom.work.classList.toggle("open", !collapsed);
+        } else {
+          dom.work.classList.toggle("side-collapsed", collapsed);
+          dom.work.classList.remove("open");
+
+          if (persist) {
+            try {
+              localStorage.setItem(
+                SIDEBAR_STATE_KEY,
+                collapsed ? "1" : "0"
+              );
+            } catch {}
+          }
+        }
+
+        updateSidebarToggleButton();
+        relayoutMapAfterSidebarChange();
+      }
+
+      function restoreSidebarState() {
+        if (isMobileSidebarLayout()) {
+          dom.work.classList.remove("open");
+          dom.work.classList.remove("side-collapsed");
+        } else {
+          let collapsed = false;
+
+          try {
+            collapsed =
+              localStorage.getItem(SIDEBAR_STATE_KEY) === "1";
+          } catch {}
+
+          dom.work.classList.toggle("side-collapsed", collapsed);
+        }
+
+        updateSidebarToggleButton();
+      }
+
+
+      function showDenied() {
+        dom.loading.classList.add("hide");
+        dom.denied.classList.add("show");
+        dom.denied.setAttribute("aria-hidden", "false");
+        document.documentElement.style.visibility = "visible";
+      }
+
+      async function init() {
+        loadPersistentGeocodeCache();
+
+        const allowed = await loadMapAccess();
+        if (!allowed) {
+          showDenied();
+          return;
+        }
+
+        state.map = new kakao.maps.Map($("#map"), {
+          center: new kakao.maps.LatLng(36.45, 127.85),
+          level: 13
+        });
+
+        state.geocoder = new kakao.maps.services.Geocoder();
+
+        try {
+          state.roadviewOverlay = new kakao.maps.RoadviewOverlay();
+        } catch (error) {
+          console.warn("로드뷰 오버레이 초기화 실패", error);
+          state.roadviewOverlay = null;
+        }
+
+        state.clusterer = new kakao.maps.MarkerClusterer({
+          map: state.map,
+          averageCenter: true,
+          minLevel: 7,
+          gridSize: 48,
+          calculator: [10, 30, 70],
+          styles: [
+            {
+              width:"30px", height:"30px",
+              background:"rgba(56,189,248,.82)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#082f49",
+              textAlign:"center",
+              fontSize:"11px",
+              fontWeight:"900",
+              lineHeight:"26px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"33px", height:"33px",
+              background:"rgba(34,197,94,.82)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#052e16",
+              textAlign:"center",
+              fontSize:"11px",
+              fontWeight:"900",
+              lineHeight:"29px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"36px", height:"36px",
+              background:"rgba(132,204,22,.84)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#1a2e05",
+              textAlign:"center",
+              fontSize:"12px",
+              fontWeight:"900",
+              lineHeight:"32px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            },
+            {
+              width:"39px", height:"39px",
+              background:"rgba(245,158,11,.86)",
+              border:"2px solid rgba(255,255,255,.92)",
+              borderRadius:"50%",
+              color:"#451a03",
+              textAlign:"center",
+              fontSize:"12px",
+              fontWeight:"900",
+              lineHeight:"35px",
+              boxShadow:"0 3px 10px rgba(15,23,42,.22)"
+            }
+          ]
+        });
+
+        kakao.maps.event.addListener(state.map, "idle", () => {
+          scheduleLabelLayout();
+        });
+
+        kakao.maps.event.addListener(state.map, "click", () => {
+          if (Date.now() < state.ignoreMapClickUntil) return;
+          clearSelection();
+        });
+
+        bindEvents();
+        restoreSidebarState();
+        loadRows();
+        document.documentElement.style.visibility = "visible";
+      }
+
+      if (window.kakao?.maps) {
+        kakao.maps.load(init);
+      } else {
+        document.documentElement.style.visibility = "visible";
+        dom.loading.classList.add("hide");
+        showToast("카카오 지도 SDK를 불러오지 못했습니다.", true);
+      }
+    })();
+  </script>
+
+  <script src="/board-menu.js"></script>
+</body>
+</html>

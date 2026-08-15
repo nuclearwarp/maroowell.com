@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="origin" />
+  <title>쿠팡 캠프 조회</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    @font-face{
+      font-family:"문경감홍사과체";
+      src:url("/assets/fonts/MungyeongGamhong.woff2") format("woff2"),url("/assets/fonts/MungyeongGamhong.woff") format("woff"),url("/assets/fonts/MungyeongGamhong.ttf") format("truetype");
+      font-weight:400 1000;font-style:normal;font-display:swap;
+    }
+    :root{
+      --bg:#f6f8fc;--surface:#fff;--line:#d7dfeb;--line2:#cfd8e6;--txt:#0f172a;--muted:#64748b;
+      --blue:#2563eb;--green:#16a34a;--red:#dc2626;--head:#dce8f5;--filter:#edf3fb;--dirty:#e0eeff;
+      --font:"문경감홍사과체","Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:var(--font);color:var(--txt);background:var(--bg)}
+    body{overflow:hidden}.app{height:100%;display:grid;grid-template-rows:58px 58px 1fr 44px}
+    .topbar,.toolbar,.statusbar{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);padding:0 14px}
+    .topbar{box-shadow:0 2px 14px rgba(15,23,42,.05)}.toolbar{overflow:auto hidden;padding:9px 12px}.statusbar{border-top:1px solid var(--line);border-bottom:0}
+    .logo{width:32px;height:32px;display:flex;align-items:center;justify-content:center;text-decoration:none}.logo img{width:30px;height:30px}
+    .titleBox{display:flex;align-items:center;gap:10px;min-width:0}.titleText{display:flex;flex-direction:column}.titleText b{font-size:19px;line-height:1.05}.titleText small{font-size:11px;color:var(--muted);margin-top:4px}.spacer{flex:1}
+    .btn{height:40px;padding:0 15px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;color:#0f172a;font:700 13px var(--font);cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+    .btn:hover{border-color:#93c5fd;background:#f8fbff}.btn.primary{background:linear-gradient(#3b82f6,#2563eb);border-color:#2563eb;color:#fff}.btn.ok{background:linear-gradient(#22c55e,#16a34a);border-color:#16a34a;color:#fff}.btn.danger{background:#fff5f5;border-color:#fecaca;color:#dc2626}.btn.map{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}.btn:disabled{opacity:.45;cursor:not-allowed}
+    .group{display:flex;align-items:center;gap:8px;padding-right:12px;border-right:1px solid var(--line);flex:0 0 auto}.group:last-child{border-right:0}.helper{font-size:12px;color:var(--muted);white-space:nowrap}.toggle{display:flex;align-items:center;gap:7px;border:1px solid #cbd5e1;border-radius:999px;padding:8px 12px;background:#fff;font-size:12px}.toggle input{width:16px;height:16px;margin:0;accent-color:var(--blue)}
+    .sheetWrap{overflow:auto;background:#eef3f8}.sheetInner{min-width:2260px}table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed}th,td{border-right:1px solid var(--line2);border-bottom:1px solid var(--line2)}th:first-child,td:first-child{border-left:1px solid var(--line2)}
+    thead th{position:sticky;top:0;z-index:4;background:var(--head);padding:10px 7px;text-align:center;font-size:13px;white-space:nowrap}thead tr.filterRow th{top:42px;z-index:3;background:var(--filter);padding:6px}
+    tbody td{padding:0;background:#fff;vertical-align:middle}tbody tr:nth-child(even) td{background:#f8fbff}tbody tr.newRow td{background:#ecfdf5!important}tbody tr.deleted td{opacity:.42;text-decoration:line-through}.dirtyCell{box-shadow:inset 0 0 0 2px #60a5fa;background:var(--dirty)!important}
+    .cellInput,.cellSelect,.cellTextarea{width:100%;min-height:44px;border:0;outline:0;background:transparent;padding:9px 8px;font:500 13px var(--font);color:var(--txt)}.cellTextarea{height:44px;resize:none;overflow:hidden;line-height:1.35}.cellSelect{cursor:pointer}.center{text-align:center}.right{text-align:right;font-variant-numeric:tabular-nums}.cellInput:disabled,.cellSelect:disabled,.cellTextarea:disabled{opacity:1;color:#0f172a;cursor:default}
+    .filterInput,.filterSelect{width:100%;height:34px;border:1px solid #c7d2e2;border-radius:10px;background:#fff;padding:0 9px;font:500 12px var(--font);outline:0}.filterInput:focus,.filterSelect:focus{border-color:#60a5fa;box-shadow:0 0 0 2px rgba(96,165,250,.16)}
+    .campCell{display:grid;grid-template-columns:minmax(0,1fr) 42px}.qrBtn{border:0;border-left:1px solid var(--line2);background:#f8fafc;color:#2563eb;font:800 12px var(--font);cursor:pointer}.qrBtn:hover{background:#eff6ff}
+    .relationWrap{display:flex;flex-direction:column;min-height:44px}.relationWrap select{min-height:30px;padding-top:5px;padding-bottom:3px}.relationMeta{min-height:14px;padding:0 8px 5px;font-size:10px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.relationMeta.direct{color:#1d4ed8}.relationMeta.inherited{color:#15803d}.relationMeta.unassigned{color:#a16207}
+    .actionCell{text-align:center;padding:5px}.deleteBtn{height:30px;padding:0 10px;border-radius:999px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;font:750 12px var(--font);cursor:pointer}
+    .pill{height:30px;padding:0 12px;border-radius:999px;border:1px solid #cbd5e1;background:#f8fafc;color:#475569;display:inline-flex;align-items:center;font-size:12px;white-space:nowrap}.pill.ok{background:#ecfdf5;border-color:#bbf7d0;color:#15803d}.pill.warn{background:#fffbeb;border-color:#fde68a;color:#a16207}.statusText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#64748b}.statusText.ok{color:#15803d}.statusText.err{color:#dc2626}.statusText.warn{color:#a16207}
+    .empty td{height:180px;text-align:center;color:#64748b;background:#fff!important}
+    .modal{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.55);padding:20px}.modal.show{display:flex}.modalCard{width:min(500px,100%);border-radius:22px;background:#fff;border:1px solid #e2e8f0;box-shadow:0 26px 80px rgba(15,23,42,.3);overflow:hidden}.modalHead,.modalActions{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px;border-bottom:1px solid #e2e8f0}.modalActions{border-top:1px solid #e2e8f0;border-bottom:0;justify-content:flex-end}.modalBody{padding:20px;text-align:center}.qrBox{display:inline-flex;padding:12px;border:1px solid #e2e8f0;border-radius:18px;background:#fff}.qrMeta{margin-top:13px;font-size:13px;color:#475569;line-height:1.55}
+    @media(max-width:980px){.app{grid-template-rows:auto auto 1fr 44px}.topbar{min-height:58px;flex-wrap:wrap;padding:8px}.titleText small{display:none}.btn{height:36px;padding:0 11px}.sheetInner{min-width:2100px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a id="mwBoardMenuToggle" class="logo" href="/index.html" title="마루웰 메뉴"><img src="/favicon.ico" alt="Maroowell"></a>
+      <div class="titleBox">
+        <div class="titleText"><b>쿠팡 캠프 조회</b><small>캠프 정보 · 본캠프 · 수신 서브허브 관리</small></div>
+        <a id="btnMap" class="btn map" href="/coupang_camp_map" hidden>지도</a>
+      </div>
+      <div class="spacer"></div>
+      <button id="btnReload" class="btn primary" type="button">불러오기</button>
+      <button id="btnAddRow" class="btn ok" type="button" disabled>행 추가</button>
+      <button id="btnSaveAll" class="btn ok" type="button" disabled>전체 저장</button>
+      <button id="btnCsv" class="btn" type="button">CSV 다운로드</button>
+      <button id="btnLogout" class="btn danger" type="button">로그아웃</button>
+    </header>
+
+    <section class="toolbar">
+      <div class="group"><label class="toggle"><input id="onlyChanged" type="checkbox">변경 행만 보기</label></div>
+      <div class="group"><button id="btnClearFilters" class="btn" type="button">필터 초기화</button></div>
+      <div class="group"><span id="accessText" class="helper">권한 확인 중...</span></div>
+      <div class="group"><span class="helper">모바일/미니캠프는 본캠프 SH를 자동 상속하며 직접 SH 지정 시 우선 적용</span></div>
+    </section>
+
+    <main class="sheetWrap">
+      <div class="sheetInner">
+        <table>
+          <colgroup>
+            <col style="width:125px"><col style="width:220px"><col style="width:155px"><col style="width:230px"><col style="width:245px">
+            <col style="width:330px"><col style="width:135px"><col style="width:155px"><col style="width:135px"><col style="width:135px"><col style="width:310px"><col style="width:85px">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>구분</th><th>캠프명</th><th>MB캠프</th><th>본캠프</th><th>받는 SH</th><th>주소</th><th>지역</th><th>코드</th><th>위도</th><th>경도</th><th>설명</th><th>작업</th>
+            </tr>
+            <tr class="filterRow">
+              <th><select id="fType" class="filterSelect"><option value="">전체</option></select></th>
+              <th><input id="fCamp" class="filterInput" placeholder="캠프명"></th>
+              <th><input id="fMb" class="filterInput" placeholder="MB캠프"></th>
+              <th><input id="fParent" class="filterInput" placeholder="본캠프"></th>
+              <th><input id="fSh" class="filterInput" placeholder="받는 SH"></th>
+              <th><input id="fAddress" class="filterInput" placeholder="주소"></th>
+              <th><select id="fRegion" class="filterSelect"><option value="">전체</option></select></th>
+              <th><input id="fCode" class="filterInput" placeholder="코드"></th>
+              <th><input id="fLat" class="filterInput" placeholder="위도"></th>
+              <th><input id="fLng" class="filterInput" placeholder="경도"></th>
+              <th><input id="fDesc" class="filterInput" placeholder="설명"></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="sheetBody"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <footer class="statusbar">
+      <span id="pillReady" class="pill">준비 중</span>
+      <span id="pillRows" class="pill">0행</span>
+      <span id="pillDirty" class="pill">변경 0</span>
+      <span id="statusText" class="statusText">캠프 데이터를 불러오는 중입니다.</span>
+    </footer>
+  </div>
+
+  <div id="qrModal" class="modal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead"><b id="qrTitle">QR</b><button id="qrClose" class="btn" type="button">닫기</button></div>
+      <div class="modalBody"><div class="qrBox"><canvas id="qrCanvas" width="300" height="300"></canvas></div><div id="qrMeta" class="qrMeta"></div></div>
+      <div class="modalActions"><button id="qrCopy" class="btn primary" type="button">이미지 복사</button><button id="qrDownload" class="btn" type="button">다운로드</button></div>
+    </div>
+  </div>
+
+  <script>
+    (async () => {
+      "use strict";
+
+      const CONFIG = window.MARUWELL_CONFIG || {};
+      const API_BASE = CONFIG.BACKENDS?.coupangCamp || CONFIG.COUPANG_CAMP_API || "https://coupangcamp.brain-0f6.workers.dev";
+      const SUPABASE_URL = CONFIG.SUPABASE_URL || "";
+      const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY || CONFIG.SUPABASE_PUBLISHABLE_KEY || "";
+      const FIELDS = ["camp_type","camp","mb_camp","parent_camp_id","receiving_sh_id","address","region","code","latitude","longitude","description"];
+      const $ = (selector) => document.querySelector(selector);
+      const esc = (value) => String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+      const text = (value) => String(value ?? "").trim();
+      const normType = (value) => text(value).toUpperCase().replaceAll("-","_").replaceAll(" ","_");
+      const LEGACY_ROCKET_TYPES = new Set(["MOBILE_CAMP", "MINI_CAMP"]);
+      const normalizeCampType = (value) => {
+        const original = text(value);
+        return LEGACY_ROCKET_TYPES.has(normType(original)) ? "로켓" : original;
+      };
+      const nullableId = (value) => { const n = Number(value); return value === "" || value == null || !Number.isSafeInteger(n) || n <= 0 ? null : n; };
+
+      const dom = {
+        body:$("#sheetBody"),reload:$("#btnReload"),add:$("#btnAddRow"),save:$("#btnSaveAll"),csv:$("#btnCsv"),logout:$("#btnLogout"),map:$("#btnMap"),
+        clear:$("#btnClearFilters"),onlyChanged:$("#onlyChanged"),accessText:$("#accessText"),ready:$("#pillReady"),rows:$("#pillRows"),dirty:$("#pillDirty"),status:$("#statusText"),
+        fType:$("#fType"),fCamp:$("#fCamp"),fMb:$("#fMb"),fParent:$("#fParent"),fSh:$("#fSh"),fAddress:$("#fAddress"),fRegion:$("#fRegion"),fCode:$("#fCode"),fLat:$("#fLat"),fLng:$("#fLng"),fDesc:$("#fDesc"),
+        qrModal:$("#qrModal"),qrTitle:$("#qrTitle"),qrCanvas:$("#qrCanvas"),qrMeta:$("#qrMeta"),qrClose:$("#qrClose"),qrCopy:$("#qrCopy"),qrDownload:$("#qrDownload")
+      };
+
+      const state = { rows:[], deletedIds:new Set(), canEdit:false, canClhi:false, token:"", sb:null, currentQr:null, renderTimer:null };
+
+      function setStatus(message, kind="") {
+        dom.status.textContent = message;
+        dom.status.className = `statusText ${kind}`.trim();
+      }
+
+      function rowKey(row) { return String(row._key); }
+      function rowByKey(key) { return state.rows.find((row) => rowKey(row) === String(key)) || null; }
+      function byId() { return new Map(state.rows.filter((row) => !row._deleted && row.id != null).map((row) => [String(row.id), row])); }
+      function isSubHub(row) { return normType(row?.camp_type) === "SUB_HUB"; }
+      function isBaseCampRow(row) {
+        if (!row || isSubHub(row)) return false;
+        const mb = text(row.mb_camp);
+        return !mb || mb === "본캠프" || mb === text(row.camp);
+      }
+      function isDirty(row) { return row._new || row._deleted || FIELDS.some((field) => String(row[field] ?? "") !== String(row._original?.[field] ?? "")); }
+
+      function baseByCamp() {
+        const map = new Map();
+        for (const row of state.rows) {
+          if (row._deleted || !isBaseCampRow(row) || !text(row.camp) || map.has(text(row.camp))) continue;
+          map.set(text(row.camp), row);
+        }
+        return map;
+      }
+
+      function resolveParent(row, index=byId(), bases=baseByCamp()) {
+        const explicit = nullableId(row.parent_camp_id);
+        if (explicit != null) return { row:index.get(String(explicit)) || null, type:"DIRECT" };
+        if (!isBaseCampRow(row)) {
+          const inferred = bases.get(text(row.camp)) || null;
+          if (inferred && inferred !== row) return { row:inferred, type:"INFERRED" };
+        }
+        return { row:null, type:"UNASSIGNED" };
+      }
+
+      function currentParent(row, index=byId(), bases=baseByCamp()) { return resolveParent(row,index,bases).row; }
+
+      function inheritedParent(row, index=byId(), bases=baseByCamp()) {
+        if (!row || isSubHub(row) || isBaseCampRow(row)) return null;
+        return resolveParent(row,index,bases).row || null;
+      }
+
+      function effectiveRegion(row, index=byId(), bases=baseByCamp()) {
+        const parent = inheritedParent(row,index,bases);
+        return text(parent?.region) || text(row?.region);
+      }
+
+      function qrSource(row, index=byId(), bases=baseByCamp()) {
+        const parent = inheritedParent(row,index,bases);
+        return {
+          row: parent || row,
+          inherited: !!parent
+        };
+      }
+      function resolveSh(row, index=byId(), bases=baseByCamp()) {
+        const visited = new Set(); let current = row; let inherited = false;
+        while (current) {
+          const id = nullableId(current.id); if (id != null) { if (visited.has(String(id))) break; visited.add(String(id)); }
+          const direct = nullableId(current.receiving_sh_id);
+          if (direct != null) return { row:index.get(String(direct)) || null, type:inherited ? "INHERITED" : "DIRECT" };
+          const parent = resolveParent(current,index,bases).row; if (!parent) break;
+          current = parent; inherited = true;
+        }
+        return { row:null, type:"UNASSIGNED" };
+      }
+
+      function parentCandidates(row) {
+        return state.rows.filter((candidate) => {
+          if (candidate._deleted || candidate.id == null || candidate === row || !isBaseCampRow(candidate)) return false;
+          return true;
+        }).sort((a,b) => text(a.camp).localeCompare(text(b.camp),"ko",{numeric:true}));
+      }
+
+      function shCandidates() {
+        return state.rows.filter((row) => !row._deleted && row.id != null && isSubHub(row)).sort((a,b) => text(a.camp).localeCompare(text(b.camp),"ko",{numeric:true}));
+      }
+
+      function inputHtml(row, field, cls="") {
+        const disabled = !state.canEdit || row._deleted || isSubHub(row) && (field === "parent_camp_id" || field === "receiving_sh_id");
+        const value = row[field] ?? "";
+        if (field === "description" || field === "address") return `<textarea class="cellTextarea ${cls}" data-field="${field}" ${disabled?"disabled":""}>${esc(value)}</textarea>`;
+        return `<input class="cellInput ${cls}" data-field="${field}" value="${esc(value)}" ${disabled?"disabled":""}>`;
+      }
+
+      function regionInputHtml(row) {
+        const parent = inheritedParent(row);
+        const value = parent ? effectiveRegion(row) : text(row.region);
+        const disabled = !state.canEdit || row._deleted || !!parent;
+        const title = parent
+          ? `본캠프 ${text(parent.camp) || "-"} 지역 상속 · ${value || "미지정"}`
+          : "";
+        return `<input class="cellInput center" data-field="region" value="${esc(value)}" ${disabled?"disabled":""} ${title?`title="${esc(title)}"`:""}>`;
+      }
+
+      function typeSelectHtml(row) {
+        const currentType = normalizeCampType(row.camp_type);
+        const types = [...new Set(
+          state.rows
+            .map((item) => normalizeCampType(item.camp_type))
+            .filter(Boolean)
+        )];
+
+        // 모바일캠프와 미니캠프는 MB캠프 열에서 이미 구분되므로
+        // 구분 항목에서는 모두 '로켓'으로 통합한다.
+        for (const required of ["로켓","CAMP","SUB_HUB"]) {
+          if (!types.includes(required)) types.push(required);
+        }
+
+        const visibleTypes = types
+          .filter((value) => !LEGACY_ROCKET_TYPES.has(normType(value)))
+          .sort((a,b) => a.localeCompare(b,"ko",{numeric:true}));
+
+        return `<select class="cellSelect center" data-field="camp_type" ${!state.canEdit||row._deleted?"disabled":""}>${visibleTypes.map((v)=>`<option value="${esc(v)}" ${currentType===v?"selected":""}>${esc(v)}</option>`).join("")}</select>`;
+      }
+
+      function parentSelectHtml(row) {
+        if (isSubHub(row)) return `<div class="relationWrap"><select class="cellSelect" disabled><option>해당 없음</option></select><div class="relationMeta">SUB_HUB</div></div>`;
+        const selected = nullableId(row.parent_camp_id);
+        const parentResolved = resolveParent(row);
+        const blankLabel = selected == null && parentResolved.row ? `자동 · ${parentResolved.row.camp} 본캠프` : "본캠프 없음";
+        const options = [`<option value="" ${selected==null?"selected":""}>${esc(blankLabel)}</option>`];
+        for (const item of parentCandidates(row)) options.push(`<option value="${item.id}" ${selected===item.id?"selected":""}>${esc(item.camp || item.code || item.id)}${text(item.mb_camp)?` · ${esc(item.mb_camp)}`:""}</option>`);
+        const meta = parentResolved.row ? `${parentResolved.type === "DIRECT" ? "직접 연결" : "캠프명 자동 연결"} · ${parentResolved.row.camp}` : "미연결";
+        return `<div class="relationWrap"><select class="cellSelect" data-field="parent_camp_id" ${!state.canEdit||row._deleted?"disabled":""}>${options.join("")}</select><div class="relationMeta ${parentResolved.type === "INFERRED" ? "inherited" : ""}">${esc(meta)}</div></div>`;
+      }
+
+      function shSelectHtml(row) {
+        if (isSubHub(row)) return `<div class="relationWrap"><select class="cellSelect" disabled><option>해당 없음</option></select><div class="relationMeta">SUB_HUB</div></div>`;
+        const index = byId();
+        const direct = nullableId(row.receiving_sh_id);
+        const resolved = resolveSh(row,index);
+        const blankLabel = direct == null && resolved.row ? `상속 · ${resolved.row.camp}` : "받는 SH 미지정";
+        const options = [`<option value="" ${direct==null?"selected":""}>${esc(blankLabel)}</option>`];
+        for (const item of shCandidates()) options.push(`<option value="${item.id}" ${direct===item.id?"selected":""}>${esc(item.camp || item.code || item.id)}</option>`);
+        const metaClass = resolved.type.toLowerCase();
+        const meta = resolved.row ? `${resolved.type === "DIRECT" ? "직접" : "본캠프 상속"} · ${resolved.row.camp}` : "미지정";
+        return `<div class="relationWrap"><select class="cellSelect" data-field="receiving_sh_id" ${!state.canEdit||row._deleted?"disabled":""}>${options.join("")}</select><div class="relationMeta ${metaClass}">${esc(meta)}</div></div>`;
+      }
+
+      function renderRow(row) {
+        const dirty = isDirty(row); const disabledDelete = !state.canEdit;
+        return `<tr data-key="${esc(rowKey(row))}" class="${row._new?"newRow":""} ${row._deleted?"deleted":""}">
+          <td class="${dirty?"dirtyCell":""}">${typeSelectHtml(row)}</td>
+          <td class="${dirty?"dirtyCell":""}"><div class="campCell">${inputHtml(row,"camp","center")}<button class="qrBtn" type="button" data-qr="1">QR</button></div></td>
+          <td>${inputHtml(row,"mb_camp","center")}</td>
+          <td class="${dirty?"dirtyCell":""}">${parentSelectHtml(row)}</td>
+          <td class="${dirty?"dirtyCell":""}">${shSelectHtml(row)}</td>
+          <td>${inputHtml(row,"address")}</td><td>${regionInputHtml(row)}</td><td>${inputHtml(row,"code","center")}</td>
+          <td>${inputHtml(row,"latitude","right")}</td><td>${inputHtml(row,"longitude","right")}</td><td>${inputHtml(row,"description")}</td>
+          <td class="actionCell"><button class="deleteBtn" type="button" data-delete="1" ${disabledDelete?"disabled":""}>${row._deleted?"복원":"삭제"}</button></td>
+        </tr>`;
+      }
+
+      function filterRows() {
+        const f = {
+          type:text(dom.fType.value),camp:text(dom.fCamp.value).toLowerCase(),mb:text(dom.fMb.value).toLowerCase(),parent:text(dom.fParent.value).toLowerCase(),sh:text(dom.fSh.value).toLowerCase(),address:text(dom.fAddress.value).toLowerCase(),region:text(dom.fRegion.value),code:text(dom.fCode.value).toLowerCase(),lat:text(dom.fLat.value).toLowerCase(),lng:text(dom.fLng.value).toLowerCase(),desc:text(dom.fDesc.value).toLowerCase()
+        };
+        const index = byId(); const bases = baseByCamp();
+
+        // 새로 추가한 입력 행은 모든 필터와 '변경 행만 보기' 조건을 무시하고
+        // 항상 표 최상단에 표시한다.
+        const newRows = state.rows.filter((row) => row._new);
+
+        const filteredRows = state.rows.filter((row) => {
+          if (row._new) return false;
+          if (dom.onlyChanged.checked && !isDirty(row)) return false;
+
+          const parent = currentParent(row,index,bases);
+          const sh = resolveSh(row,index,bases).row;
+
+          return (!f.type || text(row.camp_type)===f.type) &&
+            (!f.camp || text(row.camp).toLowerCase().includes(f.camp)) &&
+            (!f.mb || text(row.mb_camp).toLowerCase().includes(f.mb)) &&
+            (!f.parent || text(parent?.camp).toLowerCase().includes(f.parent)) &&
+            (!f.sh || text(sh?.camp).toLowerCase().includes(f.sh)) &&
+            (!f.address || text(row.address).toLowerCase().includes(f.address)) &&
+            (!f.region || effectiveRegion(row,index,bases)===f.region) &&
+            (!f.code || text(row.code).toLowerCase().includes(f.code)) &&
+            (!f.lat || text(row.latitude).toLowerCase().includes(f.lat)) &&
+            (!f.lng || text(row.longitude).toLowerCase().includes(f.lng)) &&
+            (!f.desc || text(row.description).toLowerCase().includes(f.desc));
+        });
+
+        return [...newRows, ...filteredRows];
+      }
+
+      function render() {
+        const rows = filterRows();
+        dom.body.innerHTML = rows.length ? rows.map(renderRow).join("") : `<tr class="empty"><td colspan="12">조건에 맞는 캠프가 없습니다.</td></tr>`;
+        const dirtyCount = state.rows.filter(isDirty).length;
+        dom.rows.textContent = `${rows.length.toLocaleString()} / ${state.rows.length.toLocaleString()}행`;
+        dom.dirty.textContent = `변경 ${dirtyCount.toLocaleString()}`;
+        dom.dirty.className = `pill ${dirtyCount?"warn":""}`;
+        dom.save.disabled = !state.canEdit || dirtyCount === 0;
+      }
+
+      function updateFilterOptions() {
+        const types = [...new Set(
+          state.rows
+            .map((row) => normalizeCampType(row.camp_type))
+            .filter(Boolean)
+        )]
+          .filter((value) => !LEGACY_ROCKET_TYPES.has(normType(value)))
+          .sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
+
+        const index = byId(); const bases = baseByCamp();
+        const regions = [...new Set(state.rows.map((row)=>effectiveRegion(row,index,bases)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"ko",{numeric:true}));
+        const oldType = normalizeCampType(dom.fType.value), oldRegion = dom.fRegion.value;
+        dom.fType.innerHTML = `<option value="">전체</option>${types.map((v)=>`<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
+        dom.fRegion.innerHTML = `<option value="">전체</option>${regions.map((v)=>`<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
+        dom.fType.value = types.includes(oldType) ? oldType : "";
+        dom.fRegion.value = oldRegion;
+      }
+
+      async function sessionToken() {
+        if (!state.sb) return "";
+        const { data } = await state.sb.auth.getSession();
+        return data?.session?.access_token || "";
+      }
+
+      async function loadAccess() {
+        state.token = await sessionToken();
+        const headers = state.token ? { Authorization:`Bearer ${state.token}` } : {};
+        try {
+          const response = await fetch(`${API_BASE}/access`, { headers, cache:"no-store" });
+          const data = await response.json();
+          state.canEdit = data?.canEdit === true;
+          state.canClhi = data?.canClhi === true || data?.access?.can_clhi === true;
+          dom.add.disabled = !state.canEdit;
+          dom.map.hidden = !state.canClhi;
+          dom.accessText.textContent = state.canEdit ? `최고관리자 · 수정 가능${state.canClhi?" · 지도 가능":""}` : state.canClhi ? "조회 전용 · 지도 가능" : "조회 전용";
+        } catch (error) {
+          state.canEdit = false; state.canClhi = false; dom.add.disabled = true; dom.map.hidden = true; dom.accessText.textContent = "조회 전용";
+        }
+      }
+
+      function normalizeIncoming(row,index) {
+        const out = { id:nullableId(row.id), _key:row.id != null ? `id_${row.id}` : `new_${index}_${Date.now()}`, _new:false, _deleted:false };
+
+        for (const field of FIELDS) {
+          if (field.endsWith("_id")) {
+            out[field] = nullableId(row[field]);
+          } else if (field === "camp_type") {
+            out[field] = normalizeCampType(row[field]);
+          } else {
+            out[field] = text(row[field]);
+          }
+        }
+
+        out._original = Object.fromEntries(FIELDS.map((field)=>[field,out[field]]));
+        return out;
+      }
+
+      async function loadRows() {
+        dom.reload.disabled = true; dom.ready.textContent = "불러오는 중"; setStatus("캠프 데이터를 불러오는 중입니다.");
+        try {
+          const response = await fetch(`${API_BASE}/camps`, { cache:"no-store" });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+          const rows = Array.isArray(data) ? data : data?.rows || [];
+          state.rows = rows.map(normalizeIncoming); state.deletedIds.clear(); updateFilterOptions(); render();
+          dom.ready.textContent = "준비 완료"; dom.ready.className = "pill ok"; setStatus(`캠프 ${rows.length.toLocaleString()}건을 불러왔습니다.`,"ok");
+        } catch (error) {
+          console.error(error); dom.ready.textContent = "오류"; dom.ready.className = "pill warn"; setStatus(error.message || String(error),"err");
+        } finally { dom.reload.disabled = false; }
+      }
+
+      function addRow() {
+        if (!state.canEdit) return;
+        const row = { id:null,_key:`new_${Date.now()}_${Math.random().toString(36).slice(2)}`,_new:true,_deleted:false,camp_type:"CAMP",camp:"",mb_camp:"",parent_camp_id:null,receiving_sh_id:null,address:"",region:"",code:"",latitude:"",longitude:"",description:"" };
+        row._original = Object.fromEntries(FIELDS.map((field)=>[field,""]));
+        state.rows.unshift(row);
+        render();
+
+        // 필터 적용 중이거나 아래쪽을 보고 있어도 새 행이 바로 보이도록 최상단 이동
+        const sheetWrap = dom.body.closest(".sheetWrap");
+        if (sheetWrap) sheetWrap.scrollTop = 0;
+
+        requestAnimationFrame(() => {
+          dom.body
+            .querySelector(`tr[data-key="${CSS.escape(rowKey(row))}"] [data-field="camp"]`)
+            ?.focus();
+        });
+
+        setStatus("새 행을 최상단에 추가했습니다.","ok");
+      }
+
+      function payload(row) {
+        return {
+          camp_type:text(row.camp_type)||null,camp:text(row.camp)||null,mb_camp:text(row.mb_camp)||null,parent_camp_id:nullableId(row.parent_camp_id),receiving_sh_id:nullableId(row.receiving_sh_id),address:text(row.address)||null,region:effectiveRegion(row)||null,code:text(row.code)||null,latitude:text(row.latitude)||null,longitude:text(row.longitude)||null,description:text(row.description)||null
+        };
+      }
+
+      async function saveAll() {
+        if (!state.canEdit) return;
+        state.token = await sessionToken();
+        if (!state.token) { setStatus("로그인이 필요합니다.","err"); return; }
+        const inserts = state.rows.filter((row)=>row._new&&!row._deleted).map(payload);
+        const updates = state.rows.filter((row)=>!row._new&&!row._deleted&&isDirty(row)).map((row)=>({id:row.id,payload:payload(row)}));
+        const deletes = [...state.deletedIds];
+        if (!inserts.length&&!updates.length&&!deletes.length) return;
+        dom.save.disabled = true; setStatus("캠프 관계와 정보를 저장하는 중입니다...");
+        try {
+          const response = await fetch(`${API_BASE}/camps/batch`, { method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${state.token}`},body:JSON.stringify({inserts,updates,deletes}) });
+          const data = await response.json(); if (!response.ok) throw new Error(data?.error || data?.detail || `HTTP ${response.status}`);
+          setStatus(`저장 완료 · 추가 ${data.inserted||0}, 수정 ${data.updated||0}, 삭제 ${data.deleted||0}`,"ok"); await loadRows();
+        } catch (error) { console.error(error); setStatus(error.message || String(error),"err"); alert(error.message || String(error)); render(); }
+      }
+
+      function csvCell(value) { const s = String(value ?? ""); return `"${s.replaceAll('"','""')}"`; }
+      function downloadCsv() {
+        const index = byId(); const bases = baseByCamp(); const headers = ["구분","캠프명","MB캠프","본캠프","본캠프ID","받는SH","받는SHID","배정방식","주소","지역","코드","위도","경도","설명"];
+        const lines = [headers.map(csvCell).join(",")];
+        for (const row of filterRows().filter((r)=>!r._deleted)) { const parent=currentParent(row,index,bases), resolved=resolveSh(row,index,bases); lines.push([row.camp_type,row.camp,row.mb_camp,parent?.camp||"",row.parent_camp_id||"",resolved.row?.camp||"",resolved.row?.id||"",resolved.type,row.address,effectiveRegion(row,index,bases),row.code,row.latitude,row.longitude,row.description].map(csvCell).join(",")); }
+        const blob = new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url;a.download=`coupang_camps_${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url);
+      }
+
+      let qrCodeLibPromise = null;
+
+      async function getQrCodeLib() {
+        if (window.QRCode?.toCanvas) return window.QRCode;
+
+        if (!qrCodeLibPromise) {
+          qrCodeLibPromise = import("https://esm.sh/qrcode@1.5.4")
+            .then((module) => module.default || module)
+            .then((library) => {
+              if (!library?.toCanvas) throw new Error("QR 코드 라이브러리를 불러오지 못했습니다.");
+              return library;
+            })
+            .catch((error) => {
+              qrCodeLibPromise = null;
+              throw error;
+            });
+        }
+
+        return qrCodeLibPromise;
+      }
+
+      async function openQr(row) {
+        const source = qrSource(row);
+        const sourceRow = source.row || row;
+        const code = text(sourceRow?.code);
+        if (!code) {
+          setStatus(source.inherited ? "상속할 본캠프 QR 코드가 없습니다." : "QR을 만들 캠프 코드가 없습니다.","err");
+          return;
+        }
+
+        try {
+          const qrCodeLib = await getQrCodeLib();
+          const requestedLabel = text(row.camp) || code;
+          const sourceLabel = text(sourceRow?.camp) || code;
+          state.currentQr = {
+            code,
+            label:sourceLabel,
+            requestedLabel,
+            inherited:source.inherited
+          };
+          dom.qrTitle.textContent = `${requestedLabel} QR`;
+          dom.qrMeta.textContent = source.inherited
+            ? `${requestedLabel} → 본캠프 ${sourceLabel} QR 상속 · ${code}`
+            : `${sourceLabel} · ${code}`;
+
+          await qrCodeLib.toCanvas(dom.qrCanvas,code,{
+            width:300,
+            margin:2,
+            errorCorrectionLevel:"M"
+          });
+
+          dom.qrModal.classList.add("show");
+          dom.qrModal.setAttribute("aria-hidden","false");
+        } catch (error) {
+          console.error("QR 생성 실패", error);
+          setStatus("QR 코드 라이브러리 로드 또는 생성에 실패했습니다.","err");
+          alert("QR 코드를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        }
+      }
+      function closeQr(){dom.qrModal.classList.remove("show");dom.qrModal.setAttribute("aria-hidden","true");}
+      function canvasBlob(){return new Promise((resolve)=>dom.qrCanvas.toBlob(resolve,"image/png"));}
+      function downloadCanvasBlob(){
+        return new Promise((resolve) => {
+          const qr = dom.qrCanvas;
+          const padding = 22;
+          const footer = 62;
+          const out = document.createElement("canvas");
+          out.width = qr.width + padding * 2;
+          out.height = qr.height + padding * 2 + footer;
+          const ctx = out.getContext("2d");
+          if (!ctx) { resolve(null); return; }
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0,0,out.width,out.height);
+          ctx.drawImage(qr,padding,padding);
+          ctx.fillStyle = "#0f172a";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = '700 24px "Noto Sans KR", Arial, sans-serif';
+          const label = text(state.currentQr?.label) || "캠프";
+          ctx.fillText(label,out.width/2,qr.height + padding * 2 + footer/2,Math.max(120,out.width-32));
+          out.toBlob(resolve,"image/png");
+        });
+      }
+      async function copyQr(){const blob=await canvasBlob();if(!blob)return;try{await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);setStatus("QR 이미지를 복사했습니다.","ok");}catch{downloadQr();}}
+      async function downloadQr(){const blob=await downloadCanvasBlob();if(!blob)return;const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`${state.currentQr?.label||"camp"}_QR.png`;a.click();URL.revokeObjectURL(url);}
+
+      function bind() {
+        dom.reload.addEventListener("click",loadRows);dom.add.addEventListener("click",addRow);dom.save.addEventListener("click",saveAll);dom.csv.addEventListener("click",downloadCsv);dom.clear.addEventListener("click",()=>{for(const el of [dom.fType,dom.fCamp,dom.fMb,dom.fParent,dom.fSh,dom.fAddress,dom.fRegion,dom.fCode,dom.fLat,dom.fLng,dom.fDesc])el.value="";render();});
+        for (const el of [dom.fType,dom.fCamp,dom.fMb,dom.fParent,dom.fSh,dom.fAddress,dom.fRegion,dom.fCode,dom.fLat,dom.fLng,dom.fDesc,dom.onlyChanged]) el.addEventListener(el.tagName==="INPUT"&&el.type!=="checkbox"?"input":"change",()=>{clearTimeout(state.renderTimer);state.renderTimer=setTimeout(render,120);});
+        dom.body.addEventListener("input",(event)=>{const input=event.target.closest("[data-field]");if(!input)return;const tr=input.closest("tr[data-key]");const row=rowByKey(tr?.dataset.key);if(!row)return;row[input.dataset.field]=input.dataset.field.endsWith("_id")?nullableId(input.value):input.value;const dirtyCount=state.rows.filter(isDirty).length;dom.dirty.textContent=`변경 ${dirtyCount.toLocaleString()}`;dom.dirty.className=`pill ${dirtyCount?"warn":""}`;dom.save.disabled=!state.canEdit||dirtyCount===0;input.closest("td")?.classList.toggle("dirtyCell",isDirty(row));});
+        dom.body.addEventListener("change",(event)=>{const input=event.target.closest("[data-field]");if(!input)return;const tr=input.closest("tr[data-key]");const row=rowByKey(tr?.dataset.key);if(!row)return;row[input.dataset.field]=input.dataset.field.endsWith("_id")?nullableId(input.value):input.value;if(input.dataset.field==="camp_type"&&isSubHub(row)){row.parent_camp_id=null;row.receiving_sh_id=null;}updateFilterOptions();render();});
+        dom.body.addEventListener("click",(event)=>{const tr=event.target.closest("tr[data-key]");const row=rowByKey(tr?.dataset.key);if(!row)return;if(event.target.closest("[data-qr]")){openQr(row);return;}if(event.target.closest("[data-delete]")){if(!state.canEdit)return;if(row._new){state.rows=state.rows.filter((r)=>r!==row);}else{row._deleted=!row._deleted;if(row._deleted)state.deletedIds.add(row.id);else state.deletedIds.delete(row.id);}render();}});
+        dom.logout.addEventListener("click",async()=>{try{await state.sb?.auth.signOut();}catch{}location.href="/index.html";});dom.qrClose.addEventListener("click",closeQr);dom.qrModal.addEventListener("click",(e)=>{if(e.target===dom.qrModal)closeQr();});dom.qrCopy.addEventListener("click",copyQr);dom.qrDownload.addEventListener("click",downloadQr);
+      }
+
+      try {
+        if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient) state.sb = window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,storage:sessionStorage,autoRefreshToken:true,detectSessionInUrl:true}});
+        bind(); await loadAccess(); await loadRows(); render();
+      } catch (error) { console.error(error); setStatus(error.message || String(error),"err"); }
+      finally { document.documentElement.style.visibility="visible"; }
+    })();
+  </script>
+  <script src="/board-menu.js"></script>
+</body>
+</html>

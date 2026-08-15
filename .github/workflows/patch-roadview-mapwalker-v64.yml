@@ -1,0 +1,253 @@
+name: Patch roadview map walker V64
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-roadview-mapwalker-v64.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch zipcode and route map roadview UX
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          walker_helper_state = r'''
+      function createRoadviewWalkerV64(position) {
+        const root = document.createElement("div");
+        root.style.cssText = "position:relative;width:46px;height:46px;pointer-events:none;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));";
+
+        const cone = document.createElement("div");
+        cone.style.cssText = "position:absolute;left:50%;top:-21px;width:25px;height:32px;transform:translateX(-50%) rotate(0deg);transform-origin:50% 37px;background:rgba(37,99,235,.48);clip-path:polygon(50% 0,100% 100%,50% 77%,0 100%);";
+
+        const halo = document.createElement("div");
+        halo.style.cssText = "position:absolute;left:50%;top:50%;width:30px;height:30px;transform:translate(-50%,-50%);border-radius:999px;background:rgba(37,99,235,.16);border:2px solid rgba(37,99,235,.72);";
+
+        const dot = document.createElement("div");
+        dot.style.cssText = "position:absolute;left:50%;top:50%;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:999px;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 1px rgba(37,99,235,.25);";
+
+        root.appendChild(cone);
+        root.appendChild(halo);
+        root.appendChild(dot);
+
+        const overlay = new kakao.maps.CustomOverlay({
+          position,
+          content: root,
+          xAnchor: 0.5,
+          yAnchor: 0.5,
+          zIndex: 99,
+        });
+
+        return {
+          overlay,
+          setMap(targetMap) { overlay.setMap(targetMap); },
+          setPosition(nextPosition) { if (nextPosition) overlay.setPosition(nextPosition); },
+          setAngle(angle) {
+            const pan = ((Number(angle) || 0) % 360 + 360) % 360;
+            cone.style.transform = `translateX(-50%) rotate(${pan}deg)`;
+          },
+        };
+      }
+
+      function syncRoadviewWalkerV64() {
+        if (!state.roadview || !state.map) return;
+        const position = state.roadview.getPosition?.() || state.map.getCenter();
+        if (!state.roadviewWalkerV64) {
+          state.roadviewWalkerV64 = createRoadviewWalkerV64(position);
+        }
+        state.roadviewWalkerV64.setPosition(position);
+        if (state.roadviewOn) state.roadviewWalkerV64.setMap(state.map);
+        const viewpoint = state.roadview.getViewpoint?.();
+        if (viewpoint) state.roadviewWalkerV64.setAngle(viewpoint.pan);
+      }
+'''
+
+          zipcode = Path('public/zipcode_search')
+          text = zipcode.read_text(encoding='utf-8')
+          if 'MW_ROADVIEW_MAPWALKER_V64' not in text:
+              text = text.replace(
+                  '        roadviewClickHandler: null,',
+                  '        roadviewClickHandler: null,\n        roadviewWalkerV64: null,',
+                  1,
+              )
+
+              old_ensure = '''      function ensureRoadview() {
+        if (state.roadview && state.roadviewClient) return;
+        state.roadview = new kakao.maps.Roadview($("#roadview"));
+        state.roadviewClient = new kakao.maps.RoadviewClient();
+      }
+'''
+              new_ensure = '''      // MW_ROADVIEW_MAPWALKER_V64
+''' + walker_helper_state + '''
+      function ensureRoadview() {
+        if (state.roadview && state.roadviewClient) return;
+        state.roadview = new kakao.maps.Roadview($("#roadview"));
+        state.roadviewClient = new kakao.maps.RoadviewClient();
+
+        kakao.maps.event.addListener(state.roadview, "init", () => {
+          syncRoadviewWalkerV64();
+        });
+        kakao.maps.event.addListener(state.roadview, "viewpoint_changed", () => {
+          if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
+          const viewpoint = state.roadview.getViewpoint?.();
+          if (viewpoint && state.roadviewWalkerV64) state.roadviewWalkerV64.setAngle(viewpoint.pan);
+        });
+        kakao.maps.event.addListener(state.roadview, "position_changed", () => {
+          const position = state.roadview.getPosition?.();
+          if (!position) return;
+          if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
+          state.roadviewWalkerV64?.setPosition(position);
+          if (state.roadviewOn) state.roadviewWalkerV64?.setMap(state.map);
+          state.map.setCenter(position);
+        });
+      }
+'''
+              if old_ensure not in text:
+                  raise SystemExit('zipcode_search: ensureRoadview anchor not found')
+              text = text.replace(old_ensure, new_ensure, 1)
+
+              text = text.replace(
+                  '          setRoadviewOverlay(true);',
+                  '          setRoadviewOverlay(true);\n          state.roadviewWalkerV64?.setMap(state.map);',
+                  1,
+              )
+              text = text.replace(
+                  '          setRoadviewOverlay(false);',
+                  '          setRoadviewOverlay(false);\n          state.roadviewWalkerV64?.setMap(null);',
+                  1,
+              )
+
+          zipcode.write_text(text, encoding='utf-8')
+
+          route = Path('public/coupangRouteMap.html')
+          text = route.read_text(encoding='utf-8')
+          if 'MW_ROADVIEW_MAPWALKER_V64' not in text:
+              text = text.replace(
+                  '  let roadview=null, roadviewClient=null, roadviewOn=false;',
+                  '  let roadview=null, roadviewClient=null, roadviewOn=false, roadviewWalkerV64=null;',
+                  1,
+              )
+
+              old_ensure = '''    function ensureRoadview(){
+      if (roadview && roadviewClient) return;
+      roadview = new kakao.maps.Roadview($("roadview"));
+      roadviewClient = new kakao.maps.RoadviewClient();
+    }
+'''
+              route_helper = r'''
+    // MW_ROADVIEW_MAPWALKER_V64
+    function createRoadviewWalkerV64(position){
+      const root=document.createElement("div");
+      root.style.cssText="position:relative;width:46px;height:46px;pointer-events:none;filter:drop-shadow(0 2px 3px rgba(15,23,42,.28));";
+      const cone=document.createElement("div");
+      cone.style.cssText="position:absolute;left:50%;top:-21px;width:25px;height:32px;transform:translateX(-50%) rotate(0deg);transform-origin:50% 37px;background:rgba(37,99,235,.48);clip-path:polygon(50% 0,100% 100%,50% 77%,0 100%);";
+      const halo=document.createElement("div");
+      halo.style.cssText="position:absolute;left:50%;top:50%;width:30px;height:30px;transform:translate(-50%,-50%);border-radius:999px;background:rgba(37,99,235,.16);border:2px solid rgba(37,99,235,.72);";
+      const dot=document.createElement("div");
+      dot.style.cssText="position:absolute;left:50%;top:50%;width:12px;height:12px;transform:translate(-50%,-50%);border-radius:999px;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 1px rgba(37,99,235,.25);";
+      root.appendChild(cone); root.appendChild(halo); root.appendChild(dot);
+      const overlay=new kakao.maps.CustomOverlay({position,content:root,xAnchor:.5,yAnchor:.5,zIndex:99});
+      return {
+        setMap(targetMap){overlay.setMap(targetMap);},
+        setPosition(nextPosition){if(nextPosition) overlay.setPosition(nextPosition);},
+        setAngle(angle){const pan=((Number(angle)||0)%360+360)%360;cone.style.transform=`translateX(-50%) rotate(${pan}deg)`;}
+      };
+    }
+    function syncRoadviewWalkerV64(){
+      if(!roadview || !map) return;
+      const position=roadview.getPosition?.() || map.getCenter();
+      if(!roadviewWalkerV64) roadviewWalkerV64=createRoadviewWalkerV64(position);
+      roadviewWalkerV64.setPosition(position);
+      if(roadviewOn) roadviewWalkerV64.setMap(map);
+      const viewpoint=roadview.getViewpoint?.();
+      if(viewpoint) roadviewWalkerV64.setAngle(viewpoint.pan);
+    }
+'''
+              new_ensure = route_helper + '''
+    function ensureRoadview(){
+      if (roadview && roadviewClient) return;
+      roadview = new kakao.maps.Roadview($("roadview"));
+      roadviewClient = new kakao.maps.RoadviewClient();
+      kakao.maps.event.addListener(roadview,"init",()=>syncRoadviewWalkerV64());
+      kakao.maps.event.addListener(roadview,"viewpoint_changed",()=>{
+        if(!roadviewWalkerV64) syncRoadviewWalkerV64();
+        const viewpoint=roadview.getViewpoint?.();
+        if(viewpoint && roadviewWalkerV64) roadviewWalkerV64.setAngle(viewpoint.pan);
+      });
+      kakao.maps.event.addListener(roadview,"position_changed",()=>{
+        const position=roadview.getPosition?.();
+        if(!position) return;
+        if(!roadviewWalkerV64) syncRoadviewWalkerV64();
+        roadviewWalkerV64?.setPosition(position);
+        if(roadviewOn) roadviewWalkerV64?.setMap(map);
+        map.setCenter(position);
+      });
+    }
+'''
+              if old_ensure not in text:
+                  raise SystemExit('coupangRouteMap: ensureRoadview anchor not found')
+              text = text.replace(old_ensure, new_ensure, 1)
+
+              pattern = re.compile(r'''    function setRoadviewOn\(on\)\{[\s\S]*?^    \}\n    toggleRoadviewBtn\.addEventListener\("click", \(\)=> setRoadviewOn\(!roadviewOn\)\);''', re.MULTILINE)
+              replacement = '''    function setRoadviewOn(on){
+      roadviewOn=!!on;
+      toggleRoadviewBtn.textContent = roadviewOn ? "로드뷰 종료" : "로드뷰";
+      roadviewHintEl.style.display = roadviewOn ? "inline-flex" : "none";
+      if (!roadviewOn){
+        mapWrapEl.classList.remove("roadview-open");
+        try { map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); } catch {}
+        roadviewWalkerV64?.setMap(null);
+        if (rvClick) kakao.maps.event.removeListener(map, "click", rvClick);
+        rvClick=null;
+        return;
+      }
+      try { map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); } catch {}
+      roadviewWalkerV64?.setMap(map);
+      rvClick = (e)=> e?.latLng && setRoadviewAt(e.latLng);
+      kakao.maps.event.addListener(map, "click", rvClick);
+    }
+    toggleRoadviewBtn.addEventListener("click", ()=> setRoadviewOn(!roadviewOn));'''
+              text, count = pattern.subn(replacement, text, count=1)
+              if count != 1:
+                  raise SystemExit('coupangRouteMap: setRoadviewOn block not found')
+
+          route.write_text(text, encoding='utf-8')
+
+          # live root file mirrors the public page
+          Path('coupangRouteMap.html').write_text(text, encoding='utf-8')
+
+          for path in [zipcode, route, Path('coupangRouteMap.html')]:
+              final = path.read_text(encoding='utf-8')
+              if 'MW_ROADVIEW_MAPWALKER_V64' not in final:
+                  raise SystemExit(f'{path}: walker patch missing')
+              if 'viewpoint_changed' not in final or 'position_changed' not in final:
+                  raise SystemExit(f'{path}: roadview sync events missing')
+              if path.name == 'coupangRouteMap.html' and 'MapTypeId.ROADVIEW' not in final:
+                  raise SystemExit(f'{path}: roadview blue-road overlay missing')
+          PY
+
+          git diff --check
+          git diff -- public/zipcode_search public/coupangRouteMap.html coupangRouteMap.html
+
+      - name: Commit to main
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/zipcode_search public/coupangRouteMap.html coupangRouteMap.html
+          git rm .github/workflows/patch-roadview-mapwalker-v64.yml
+          git commit -m "Sync roadview roads and viewing direction"
+          git pull --rebase origin main
+          git push origin main

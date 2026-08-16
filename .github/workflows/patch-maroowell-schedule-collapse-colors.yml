@@ -2,9 +2,11 @@ name: Patch maroowell schedule collapse and colors
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - '.github/workflows/patch-maroowell-schedule-collapse-colors.yml'
+      - '.github/scripts/patch_maroowell_schedule_collapse_colors.py'
 
 permissions:
   contents: write
@@ -17,290 +19,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch schedule UI and canonical save behavior
+      - name: Apply schedule patch
+        run: python3 .github/scripts/patch_maroowell_schedule_collapse_colors.py
+
+      - name: Validate inline JavaScript
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('public/maroowell_schedule')
-          text = path.read_text(encoding='utf-8')
-
-          def replace_once(old, new, label):
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{label}: expected exactly 1 anchor, found {count}')
-              text = text.replace(old, new, 1)
-
-          old_palette = '''      const LIGHT_PALETTE = [
-        "#e9d5ff","#bae6fd","#fde68a","#bbf7d0","#fecaca","#bfdbfe","#fbcfe8","#fed7aa","#ccfbf1","#ddd6fe",
-        "#d9f99d","#fef3c7","#cffafe","#fae8ff","#dcfce7","#fee2e2","#e0f2fe","#fce7f3","#ede9fe","#ecfccb",
-        "#dbeafe","#ffedd5","#fef9c3","#f5d0fe","#c7d2fe","#fecdd3","#e2e8f0","#fef2f2","#f0fdf4","#eff6ff","#fff7ed"
-      ];'''
-          new_palette = '''      // 최대 40명까지 같은 화면에서 사람별 색상이 겹치지 않도록 40개 고유색을 사용한다.
-      const LIGHT_PALETTE = [
-        "#f39b9b","#c3f4d1","#c17df2","#eee6b5","#9be4f3","#f4c3dd","#9af27d","#b7b5ee","#f3b89b","#c3f4e1",
-        "#e97df2","#e2eeb5","#9bc7f3","#f4c3cd","#7df287","#cab5ee","#f3d69b","#c3f4f2","#f27dd5","#cfeeb5",
-        "#9baaf3","#f4c9c3","#7df2ae","#ddb5ee","#f2f39b","#c3e5f4","#f27dad","#bceeb5","#aa9bf3","#f4d9c3",
-        "#7df2d5","#eeb5eb","#d5f39b","#c3d5f4","#f27d86","#b5eec1","#c79bf3","#f4eac3","#7de8f2","#eeb5d8"
-      ];'''
-          replace_once(old_palette, new_palette, '40-color palette')
-
-          child_exists = '''      function childScheduleExistsInCurrentWeek(parent){
-        if(!parent || !Array.isArray(parent.children) || !parent.children.length) return false;
-        for(const child of parent.children){
-          for(const date of state.weekDates){
-            if(compact(valueForCell(date,child.label))) return true;
-          }
-        }
-        return false;
-      }
-'''
-
-          helpers = child_exists + '''
-      function assignmentIdentity(value,sourceRow){
-        const raw=clean(
-          value ||
-          sourceRow?.driver_owner_name ||
-          sourceRow?.driver_display_name ||
-          sourceRow?.driver_name ||
-          sourceRow?.driver_export_name ||
-          sourceRow?.driver_coupang_id
-        );
-        if(!raw)return "";
-        const account=resolveAccount(raw);
-        return keyOf(account?.colorKey || account?.ownerName || account?.exportId || raw);
-      }
-
-      function scheduleRowAssignmentValue(row){
-        return clean(row?.driver_display_name || row?.driver_name || row?.driver_owner_name);
-      }
-
-      function scheduleRowAssignmentIdentity(row){
-        return assignmentIdentity(scheduleRowAssignmentValue(row),row);
-      }
-
-      function scheduleRowMapKey(row){
-        return `${row?.schedule_date||""}||${normalizeWave(row?.wave)}||${normalizeRouteLabel(row?.route_label)}`;
-      }
-
-      // 예전 데이터에 "부모 405D + 405D01~04가 모두 같은 기사"처럼 중복 저장된 경우가 있다.
-      // 조회 시에는 이를 실제 한 라우트 배정으로 보고 부모 행 하나로 합친다.
-      // 서서브 중 하나라도 비어 있거나 담당자가 다르면 진짜 분할 배정이므로 절대 합치지 않는다.
-      function collapseUniformChildSchedulesForDisplay(){
-        if(!Array.isArray(state.schedules) || !state.schedules.length)return 0;
-
-        const rowMap=new Map();
-        for(const row of state.schedules){
-          rowMap.set(scheduleRowMapKey(row),row);
-        }
-
-        const removeKeys=new Set();
-        const syntheticParents=[];
-        let collapsed=0;
-
-        for(const parent of state.routeParents){
-          if(parent?.isOff || !Array.isArray(parent?.children) || !parent.children.length)continue;
-
-          for(const date of state.weekDates){
-            const childRows=parent.children.map(child=>
-              rowMap.get(`${date}||${state.wave}||${normalizeRouteLabel(child.label)}`) || null
-            );
-
-            if(childRows.some(row=>!row || row.is_active===false || !scheduleRowAssignmentValue(row)))continue;
-
-            const identities=childRows.map(scheduleRowAssignmentIdentity);
-            const identity=identities[0];
-            if(!identity || identities.some(value=>value!==identity))continue;
-
-            const parentMapKey=`${date}||${state.wave}||${normalizeRouteLabel(parent.label)}`;
-            const parentRow=rowMap.get(parentMapKey) || null;
-            const parentIdentity=parentRow && parentRow.is_active!==false ? scheduleRowAssignmentIdentity(parentRow) : "";
-
-            // 같은 날짜에 부모가 다른 기사로 명시되어 있으면 데이터 충돌이므로 자동 병합하지 않는다.
-            if(parentIdentity && parentIdentity!==identity)continue;
-
-            if(!parentIdentity){
-              const first=childRows[0];
-              const synthetic={
-                ...first,
-                route_label:normalizeRouteLabel(parent.label),
-                row_order:Math.min(...childRows.map(row=>Number(row?.row_order||0)))
-              };
-              delete synthetic.id;
-              syntheticParents.push(synthetic);
-              rowMap.set(parentMapKey,synthetic);
-            }
-
-            for(const row of childRows){
-              removeKeys.add(scheduleRowMapKey(row));
-            }
-            collapsed++;
-          }
-        }
-
-        if(!collapsed)return 0;
-
-        state.schedules=state.schedules
-          .filter(row=>!removeKeys.has(scheduleRowMapKey(row)))
-          .concat(syntheticParents);
-
-        return collapsed;
-      }
-
-      // 사용자가 모든 서서브를 같은 기사로 채우면 저장 직전에 부모 라우트 한 건으로 정규화한다.
-      // 부모를 저장하고 서서브들은 is_active:false로 보내 기존 Worker 삭제 로직을 그대로 사용한다.
-      function normalizeUniformChildrenBeforeSave(){
-        let collapsed=0;
-
-        for(const parent of state.routeParents){
-          if(parent?.isOff || !Array.isArray(parent?.children) || !parent.children.length)continue;
-
-          for(const date of state.weekDates){
-            const childValues=parent.children.map(child=>clean(valueForCell(date,child.label)));
-            if(childValues.some(value=>!value))continue;
-
-            const identities=parent.children.map((child,index)=>
-              assignmentIdentity(childValues[index],rowForCell(date,child.label))
-            );
-            const identity=identities[0];
-            if(!identity || identities.some(value=>value!==identity))continue;
-
-            const parentValue=clean(valueForCell(date,parent.label));
-            if(parentValue && assignmentIdentity(parentValue,rowForCell(date,parent.label))!==identity)continue;
-
-            const firstChild=parent.children[0];
-            const firstSource=rowForCell(date,firstChild.label) || {};
-            const parentSource=rowForCell(date,parent.label) || firstSource;
-            const rowOrder=Math.min(...parent.children.map(child=>Number(rowForCell(date,child.label)?.row_order||0)));
-
-            const parentRecord=makeDirtyRecord({
-              date,
-              routeLabel:parent.label,
-              value:childValues[0],
-              rowOrder,
-              source:parentSource
-            });
-            parentRecord._autoUniformCollapse=true;
-            state.dirty.set(scheduleKey(date,parent.label),parentRecord);
-
-            for(const child of parent.children){
-              const childSource=rowForCell(date,child.label) || {};
-              const clearRecord=makeDirtyRecord({
-                date,
-                routeLabel:child.label,
-                value:"",
-                rowOrder:Number(childSource?.row_order||0),
-                source:childSource
-              });
-              clearRecord._autoUniformCollapse=true;
-              state.dirty.set(scheduleKey(date,child.label),clearRecord);
-            }
-
-            collapsed++;
-          }
-        }
-
-        return collapsed;
-      }
-'''
-          replace_once(child_exists, helpers, 'uniform child helpers')
-
-          old_expand = '''        state.expanded.clear();
-        for(const p of state.routeParents){
-          if(!p.children || !p.children.length) continue;
-          if(childScheduleExistsInCurrentWeek(p)){
-            state.expanded.add(p.key);
-          }
-        }
-
-        buildDisplayRows();'''
-          new_expand = '''        // 같은 기사로 꽉 찬 서서브 묶음은 조회 단계에서 부모 라우트 한 건으로 합친 뒤
-        // 실제로 분할된 라우트만 기본 펼침 상태로 둔다.
-        const collapsedUniformCount=collapseUniformChildSchedulesForDisplay();
-        if(collapsedUniformCount){
-          makeScheduleMap();
-        }
-
-        state.expanded.clear();
-        for(const p of state.routeParents){
-          if(!p.children || !p.children.length) continue;
-          if(childScheduleExistsInCurrentWeek(p)){
-            state.expanded.add(p.key);
-          }
-        }
-
-        buildDisplayRows();'''
-          replace_once(old_expand, new_expand, 'default expansion normalization')
-
-          old_save_head = '''      async function saveAll(){
-        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
-        if(state.dirty.size===0){alert("저장할 변경사항이 없습니다.");return}
-
-        hideSuggest();
-
-        const dirtyItems=Array.from(state.dirty.values());'''
-          new_save_head = '''      async function saveAll(){
-        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
-
-        // 서서브 전체가 동일 기사면 DB에는 부모 라우트 하나만 남도록 저장 payload를 정규화한다.
-        normalizeUniformChildrenBeforeSave();
-
-        if(state.dirty.size===0){alert("저장할 변경사항이 없습니다.");return}
-
-        hideSuggest();
-
-        const dirtyItems=Array.from(state.dirty.values());'''
-          replace_once(old_save_head, new_save_head, 'save normalization')
-
-          path.write_text(text, encoding='utf-8')
-
-          final = path.read_text(encoding='utf-8')
-          checks = [
-              '최대 40명까지 같은 화면에서 사람별 색상이 겹치지 않도록 40개 고유색',
-              'function collapseUniformChildSchedulesForDisplay()',
-              'function normalizeUniformChildrenBeforeSave()',
-              'const collapsedUniformCount=collapseUniformChildSchedulesForDisplay();',
-              'normalizeUniformChildrenBeforeSave();',
-              'parentRecord._autoUniformCollapse=true;',
-          ]
-          for check in checks:
-              if check not in final:
-                  raise SystemExit(f'missing validation anchor: {check}')
-
-          # Palette must contain exactly 40 unique colors in the replacement block.
-          palette = [
-            '#f39b9b','#c3f4d1','#c17df2','#eee6b5','#9be4f3','#f4c3dd','#9af27d','#b7b5ee','#f3b89b','#c3f4e1',
-            '#e97df2','#e2eeb5','#9bc7f3','#f4c3cd','#7df287','#cab5ee','#f3d69b','#c3f4f2','#f27dd5','#cfeeb5',
-            '#9baaf3','#f4c9c3','#7df2ae','#ddb5ee','#f2f39b','#c3e5f4','#f27dad','#bceeb5','#aa9bf3','#f4d9c3',
-            '#7df2d5','#eeb5eb','#d5f39b','#c3d5f4','#f27d86','#b5eec1','#c79bf3','#f4eac3','#7de8f2','#eeb5d8'
-          ]
-          assert len(palette) == 40 and len(set(palette)) == 40
-          PY
-
           git diff --check
-
-          # Syntax-check every inline script block that contains JavaScript.
           python3 - <<'PY'
           from pathlib import Path
           import re
           html = Path('public/maroowell_schedule').read_text(encoding='utf-8')
-          blocks = re.findall(r'<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)</script>', html, flags=re.I)
-          checked = 0
+          blocks = re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)</script>', html, flags=re.I)
+          files = []
           for i, block in enumerate(blocks):
               if not block.strip():
                   continue
               p = Path(f'/tmp/maroowell_schedule_inline_{i}.js')
               p.write_text(block, encoding='utf-8')
-              print(p)
-              checked += 1
-          if checked == 0:
+              files.append(str(p))
+          if not files:
               raise SystemExit('no inline JavaScript blocks found')
+          print('\n'.join(files))
           PY
           for f in /tmp/maroowell_schedule_inline_*.js; do node --check "$f"; done
-
-          git diff -- public/maroowell_schedule
 
       - name: Commit patch to main
         shell: bash

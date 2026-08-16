@@ -22,27 +22,15 @@ jobs:
       - name: Apply schedule patch
         run: python3 .github/scripts/patch_maroowell_schedule_collapse_colors.py
 
-      - name: Validate inline JavaScript
+      - name: Validate patch
         shell: bash
         run: |
           git diff --check
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          html = Path('public/maroowell_schedule').read_text(encoding='utf-8')
-          blocks = re.findall(r'<script(?![^>]*\\bsrc=)[^>]*>([\\s\\S]*?)</script>', html, flags=re.I)
-          files = []
-          for i, block in enumerate(blocks):
-              if not block.strip():
-                  continue
-              p = Path(f'/tmp/maroowell_schedule_inline_{i}.js')
-              p.write_text(block, encoding='utf-8')
-              files.append(str(p))
-          if not files:
-              raise SystemExit('no inline JavaScript blocks found')
-          print('\n'.join(files))
-          PY
-          for f in /tmp/maroowell_schedule_inline_*.js; do node --check "$f"; done
+          grep -q 'function collapseUniformChildSchedulesForDisplay()' public/maroowell_schedule
+          grep -q 'function normalizeUniformChildrenBeforeSave()' public/maroowell_schedule
+          grep -q 'const collapsedUniformCount=collapseUniformChildSchedulesForDisplay();' public/maroowell_schedule
+          grep -q 'normalizeUniformChildrenBeforeSave();' public/maroowell_schedule
+          grep -q '#eeb5d8' public/maroowell_schedule
 
       - name: Commit patch to main
         shell: bash

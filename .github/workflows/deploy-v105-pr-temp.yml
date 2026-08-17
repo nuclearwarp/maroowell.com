@@ -1,0 +1,50 @@
+name: Deploy Maroowell Android v1.0.5 APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-v105-pr-temp.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download signed APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 'https://sdmntprjapaneast.oaiusercontent.com/files/00000000-49e8-8209-9eb9-e9aee45ab854/raw?se=2026-08-17T23%3A35%3A18Z&sp=r&sv=2026-02-06&sr=b&scid=d1a53580-cb2a-5fa9-86c4-4724720d4d69&skoid=b1bca990-dcac-4c31-8ca1-ac563cf24c54&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-17T22%3A41%3A13Z&ske=2026-08-18T22%3A41%3A13Z&sks=b&skv=2026-02-06&sig=%2Bt3/PdRE58rskhbhGEY61rmwtABqk2/eokrenvjVbA4%3D' -o artifact.zip
+          unzip -o artifact.zip -d artifact
+          APK=$(find artifact -type f -name 'Maroowell-1.0.5.apk' | head -n 1)
+          test -n "$APK"
+          mkdir -p apk-dist/downloads
+          cp "$APK" apk-dist/downloads/Maroowell-1.0.5.apk
+          cp "$APK" apk-dist/downloads/maroowell-latest.apk
+          sha256sum apk-dist/downloads/Maroowell-1.0.5.apk
+
+      - name: Deploy and verify
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          cat > wrangler-apk.toml <<'TOML'
+          name = "maroowell-app-download"
+          account_id = "0f644373a9db40f2b36e4ffece348c46"
+          compatibility_date = "2026-08-18"
+          workers_dev = true
+          routes = [
+            { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" }
+          ]
+
+          [assets]
+          directory = "./apk-dist"
+          TOML
+          npx wrangler@4 deploy --config wrangler-apk.toml
+          curl -fL --retry 5 --retry-delay 3 -o /tmp/verify.apk https://maroowell-app-download.brain-0f6.workers.dev/downloads/Maroowell-1.0.5.apk
+          test -s /tmp/verify.apk
+          sha256sum /tmp/verify.apk

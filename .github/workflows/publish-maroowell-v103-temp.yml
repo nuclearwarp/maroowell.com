@@ -1,0 +1,79 @@
+name: Publish Maroowell Android v1.0.3 test APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-maroowell-v103-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed v1.0.3 APK artifact
+        shell: bash
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://sdmntprjapaneast.oaiusercontent.com/files/00000000-70a0-8209-84d3-340c3bc7af28/raw?se=2026-08-17T21%3A59%3A31Z&sp=r&sv=2026-02-06&sr=b&scid=87080a31-49d6-5848-ba14-9549caa5853d&skoid=03727f49-62d3-42ac-8350-1c0e6559d238&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-17T20%3A35%3A27Z&ske=2026-08-18T20%3A35%3A27Z&sks=b&skv=2026-02-06&sig=4L2bb0XDn78x6dRmOqwhc7TzhuddumbX436X5vFlSfI%3D' -o artifact.zip
+          unzip -o artifact.zip -d artifact
+          APK=$(find artifact -type f -name 'Maroowell-1.0.3.apk' | head -n 1)
+          test -n "$APK"
+          mkdir -p apk-dist/downloads
+          cp "$APK" apk-dist/downloads/Maroowell-1.0.3.apk
+          sha256sum apk-dist/downloads/Maroowell-1.0.3.apk
+
+      - name: Deploy versioned APK to Cloudflare
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          cat > wrangler-apk.toml <<'TOML'
+          name = "maroowell-app-download"
+          account_id = "0f644373a9db40f2b36e4ffece348c46"
+          compatibility_date = "2026-08-18"
+          workers_dev = true
+          routes = [
+            { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" }
+          ]
+
+          [assets]
+          directory = "./apk-dist"
+          TOML
+          npx wrangler@4 deploy --config wrangler-apk.toml
+          curl -fLI --retry 5 --retry-delay 3 https://maroowell-app-download.brain-0f6.workers.dev/downloads/Maroowell-1.0.3.apk
+
+      - name: Update public version metadata
+        shell: bash
+        run: |
+          cat > app_version.json <<'JSON'
+          {
+            "versionCode": 4,
+            "versionName": "1.0.3-test",
+            "updatedAt": "2026-08-18",
+            "fileName": "Maroowell-1.0.3.apk",
+            "downloadUrl": "https://maroowell-app-download.brain-0f6.workers.dev/downloads/Maroowell-1.0.3.apk",
+            "changes": [
+              "앱 전체 기본 글꼴을 시스템 기본 글꼴로 복원",
+              "홈 Maroowell 브랜드 문구에 문경사과감홍체와 노란색 브랜드 컬러 적용"
+            ]
+          }
+          JSON
+          cp app_version.json public/app_version.json
+
+      - name: Commit metadata and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app_version.json public/app_version.json
+          git rm .github/workflows/publish-maroowell-v103-temp.yml
+          git commit -m "Publish Android test v1.0.3"
+          git pull --rebase origin main
+          git push origin main

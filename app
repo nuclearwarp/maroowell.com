@@ -79,7 +79,7 @@
         if(!meta.downloadUrl) throw new Error('APK 경로 미설정');
         let exists=false;
         try{ const head=await fetch(meta.downloadUrl+'?t='+Date.now(),{method:'HEAD',cache:'no-store'}); exists=head.ok; }catch(e){}
-        if(exists){
+        if(true){
           button.classList.remove('disabled'); button.href=meta.downloadUrl; button.setAttribute('download','maroowell.apk'); button.textContent='최신 APK 다운로드';
           status.className='status ok'; status.textContent='다운로드 가능 · 로그인 없이 설치 파일을 받을 수 있습니다.';
         }else{

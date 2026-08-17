@@ -1,0 +1,59 @@
+name: Publish Maroowell Android test APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-maroowell-test-apk-temp.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed APK artifact
+        shell: bash
+        run: |
+          curl -fL --retry 3 --retry-delay 2 'https://sdmntprjapaneast.oaiusercontent.com/files/00000000-b8e0-8209-87f2-0f446a17bdc0/raw?se=2026-08-17T02%3A06%3A25Z&sp=r&sv=2026-02-06&sr=b&scid=449197d7-2db6-527c-9b5a-ccb04659300f&skoid=b1bca990-dcac-4c31-8ca1-ac563cf24c54&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-16T21%3A43%3A08Z&ske=2026-08-17T21%3A43%3A08Z&sks=b&skv=2026-02-06&sig=h64C1ccu/Xm23F81z0l9f8/iL20jIXCsu8n%2BN7K03fs%3D' -o artifact.zip
+          unzip -o artifact.zip -d artifact
+          APK=$(find artifact -name '*.apk' -type f | head -n 1)
+          test -n "$APK"
+          mkdir -p apk-dist/downloads
+          cp "$APK" apk-dist/downloads/maroowell-latest.apk
+          ls -lh apk-dist/downloads/maroowell-latest.apk
+          sha256sum apk-dist/downloads/maroowell-latest.apk
+
+      - name: Deploy public APK route to Cloudflare
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          cat > wrangler-apk.toml <<'TOML'
+          name = "maroowell-app-download"
+          account_id = "0f644373a9db40f2b36e4ffece348c46"
+          compatibility_date = "2026-08-17"
+          workers_dev = true
+          routes = [
+            { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" }
+          ]
+
+          [assets]
+          directory = "./apk-dist"
+          TOML
+          npx wrangler@4 deploy --config wrangler-apk.toml
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/publish-maroowell-test-apk-temp.yml
+          git commit -m "Remove temporary APK publishing workflow"
+          git push origin main

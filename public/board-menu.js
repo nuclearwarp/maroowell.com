@@ -276,7 +276,7 @@ out.app_only = accountState.app_only === true;
     });
 
     document.getElementById("mwDeniedLogin")?.addEventListener("click", () => {
-      location.href = `/login.html?next=${encodeURIComponent(location.pathname)}`;
+      location.href = `/?next=${encodeURIComponent(location.pathname)}`;
     });
   }
 

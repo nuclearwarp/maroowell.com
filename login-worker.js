@@ -4,7 +4,7 @@ var login_worker_default = {
     try {
       const url = new URL(request.url);
       if (url.pathname === "/")
-        url.pathname = "/login.html";
+        url.pathname = "/";
       if (url.pathname === "/config.js" || url.pathname.endsWith("/config.js")) {
         if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
           return new Response("Missing SUPABASE_URL / SUPABASE_ANON_KEY", { status: 500 });
@@ -12,7 +12,7 @@ var login_worker_default = {
         const body = `window.MARUWELL_CONFIG = {
   SUPABASE_URL: ${JSON.stringify(env.SUPABASE_URL)},
   SUPABASE_ANON_KEY: ${JSON.stringify(env.SUPABASE_ANON_KEY)},
-  PATHS: { login:"/login.html", index:"/index.html", route:"/coupangRouteMap.html" }
+  PATHS: { login:"/", index:"/index.html", route:"/coupangRouteMap.html" }
 };`;
         return new Response(body, {
           headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" }

@@ -1,0 +1,53 @@
+name: Fix login redirects
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-login-redirects.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Replace stale login redirects
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          allowed = {'.html', '.js', '.ts', '.tsx', '.jsx', '.json', '.md', ''}
+          changed = []
+          for p in Path('.').rglob('*'):
+              if not p.is_file() or '.git' in p.parts or p.as_posix() == '.github/workflows/fix-login-redirects.yml':
+                  continue
+              if p.suffix.lower() not in allowed:
+                  continue
+              try:
+                  s = p.read_text(encoding='utf-8')
+              except Exception:
+                  continue
+              n = s
+              n = n.replace('https://maroowell.com/login.html', 'https://maroowell.com/')
+              n = n.replace('https://www.maroowell.com/login.html', 'https://www.maroowell.com/')
+              n = n.replace('/login.html', '/')
+              if n != s:
+                  p.write_text(n, encoding='utf-8')
+                  changed.append(p.as_posix())
+          print('\n'.join(changed))
+          PY
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'Redirect signed-out users to site root'
+            git push origin main
+          fi

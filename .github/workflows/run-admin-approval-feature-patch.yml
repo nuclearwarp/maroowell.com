@@ -1,0 +1,33 @@
+name: Run admin approval feature patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-admin-approval-feature-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/admin-approval-app-only
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Execute patch embedded on feature branch
+        run: |
+          sed -n "/python - <<'PY'/,/^          PY$/p" .github/workflows/patch-admin-approval-app-only.yml | sed '1d;$d;s/^          //' > /tmp/patch_admin.py
+          python /tmp/patch_admin.py
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add public
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add web signup approval app-only and account matching'
+            git push origin feature/admin-approval-app-only
+          fi

@@ -3,7 +3,7 @@
 <head>
   <script src="/config.js"></script>
   <script>
-    function MAROOWELL_ENABLE_SIGNUP() { return false; }
+    function MAROOWELL_ENABLE_SIGNUP() { return true; }
   </script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
@@ -1007,6 +1007,25 @@
     return false;
   }
 
+  async function webAccountState() {
+    const { data, error } = await supabase.rpc("mw_my_account_state").maybeSingle();
+    if (error || !data) throw new Error("계정 승인 상태를 확인하지 못했습니다.");
+    return data;
+  }
+
+  async function enforceWebAccountState() {
+    const state = await webAccountState();
+    let message = "";
+    if (state.approval_status === "pending") message = "가입 승인 대기 중입니다. 관리자 승인 후 이용할 수 있습니다.";
+    else if (state.approval_status === "rejected") message = "가입 승인이 거절된 계정입니다. 관리자에게 문의해주세요.";
+    else if (state.approval_status !== "approved") message = "계정 승인 상태를 확인할 수 없습니다.";
+    else if (state.app_only === true) message = "앱 전용 계정입니다. 마루웰 앱에서 로그인해주세요.";
+    if (!message) return state;
+    await supabase.auth.signOut();
+    sessionBridge.broadcastAuthState("SIGNED_OUT");
+    throw new Error(message);
+  }
+
   function clearFlowFromUrl() {
     const url = new URL(location.href);
     url.searchParams.delete("flow");
@@ -1218,6 +1237,12 @@
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
     if (currentFlow === FLOW_SIGNUP_COMPLETE || currentFlow === FLOW_RECOVERY) return;
+    try {
+      await enforceWebAccountState();
+    } catch (e) {
+      setStatus(e?.message || String(e), "error");
+      return;
+    }
     if (redirectIfLoggedIn._scheduled) return;
     redirectIfLoggedIn._scheduled = true;
     location.replace(next);
@@ -1235,6 +1260,7 @@
 
       const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
       if (error) throw error;
+      await enforceWebAccountState();
 
       try {
         if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
@@ -1336,8 +1362,8 @@
         return;
       }
 
-      setStatus("회원가입 완료. 인증 메일을 확인하세요.", "success");
-      showMessageModal("확인 메일 발송", "확인 메일을 보냈습니다.\n메일의 버튼을 누르면 다시 Maroowell.com으로 돌아와 인증 완료 창이 뜹니다.", {
+      setStatus("가입 요청 완료. 인증 메일을 확인하세요.", "success");
+      showMessageModal("확인 메일 발송", "확인 메일을 보냈습니다.\n이메일 인증 후에도 관리자 승인이 완료되어야 로그인할 수 있습니다.", {
         badge: "EMAIL VERIFICATION"
       });
     } catch (e) {
@@ -1375,24 +1401,15 @@
     }
   }
 
-  function handleSignupCompletedSession() {
+  async function handleSignupCompletedSession() {
     if (handledSignupFlow) return;
     handledSignupFlow = true;
     suppressAutoRedirect = true;
-    showMessageModal("이메일 인증 완료", "확인 메일 인증이 완료되었습니다.\n계속을 누르면 Maroowell 서비스로 이동합니다.", {
-      badge: "VERIFIED",
-      primaryText: "계속",
-      secondaryText: "로그인 화면에 머물기",
-      onPrimary: () => {
-        clearFlowFromUrl();
-        redirectToApp();
-      },
-      onSecondary: () => {
-        clearFlowFromUrl();
-        suppressAutoRedirect = false;
-        closeModal(true);
-        setStatus("이메일 인증이 완료되었습니다. 로그인 상태입니다.", "success");
-      }
+    try { await supabase.auth.signOut(); } catch {}
+    sessionBridge.broadcastAuthState("SIGNED_OUT");
+    clearFlowFromUrl();
+    showMessageModal("이메일 인증 완료", "이메일 인증이 완료되었습니다.\n관리자 승인 후 로그인할 수 있습니다.", {
+      badge: "APPROVAL PENDING"
     });
   }
 
@@ -1426,6 +1443,10 @@
   if (btnSignUp && ENABLE_SIGNUP) {
     btnSignUp.addEventListener("click", openSignupModal);
   }
+  if (ENABLE_SIGNUP && params.get("signup") === "1") {
+    suppressAutoRedirect = true;
+    setTimeout(openSignupModal, 80);
+  }
 
   password.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
@@ -1445,7 +1466,7 @@
   (async () => {
     if (!requireSupabase()) return;
 
-    supabase.auth.onAuthStateChange((event, session) => {
+    supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_OUT") {
         sessionBridge.broadcastAuthState("SIGNED_OUT");
       } else if (session && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED")) {
@@ -1468,6 +1489,12 @@
         return;
       }
       if (suppressAutoRedirect || redirectIfLoggedIn._scheduled) return;
+      try {
+        await enforceWebAccountState();
+      } catch (e) {
+        setStatus(e?.message || String(e), "error");
+        return;
+      }
       redirectIfLoggedIn._scheduled = true;
       location.replace(next);
     });

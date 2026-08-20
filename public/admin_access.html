@@ -131,6 +131,19 @@
       <div class="sub" id="statusText">대기 중</div>
     </div>
 
+
+    <div class="card">
+      <div class="sectionTitle">가입 승인 / 계정 검색</div>
+      <div class="row">
+        <button id="copySignupLinkBtn" class="ok">회원가입 링크 복사</button>
+        <button id="loadPendingBtn" class="warn">승인 대기 조회</button>
+        <input id="accountSearchInput" placeholder="이름 · 이메일 · 쿠팡ID 검색" />
+        <button id="accountSearchBtn">계정 검색</button>
+      </div>
+      <div class="muted" style="margin-top:10px">신규 가입자는 자동으로 승인 대기에 들어갑니다. 이름이 정확히 1명과 일치하면 maroowell_info PK를 추천합니다.</div>
+      <div class="list" id="pendingUserList"></div>
+      <div class="list" id="accountSearchList"></div>
+    </div>
     <div class="layout">
       <div>
         <div class="card">
@@ -604,6 +617,90 @@
     return result;
   }
 
+  async function loadPendingAccounts() {
+    setStatus("승인 대기 조회 중...");
+    const rows = await rpc("mw_admin_pending_users", { p_query: "" });
+    renderPendingAccounts(Array.isArray(rows) ? rows : []);
+    setStatus(`승인 대기 ${(rows || []).length}건`, "ok");
+  }
+
+  async function searchAccounts() {
+    const q = $("accountSearchInput").value.trim();
+    if (!q) throw new Error("검색어를 입력하세요.");
+    setStatus("계정 검색 중...");
+    const rows = await rpc("mw_admin_search_accounts", { p_query: q });
+    renderAccountSearch(Array.isArray(rows) ? rows : []);
+    setStatus(`계정 검색 ${(rows || []).length}건`, "ok");
+  }
+
+  function renderPendingAccounts(rows) {
+    const list = $("pendingUserList");
+    if (!rows.length) {
+      list.innerHTML = `<div class="muted">승인 대기 계정이 없습니다.</div>`;
+      return;
+    }
+    list.innerHTML = rows.map(row => {
+      const uid = row.user_id || "";
+      const name = row.display_name || row.email || "이름 없음";
+      const suggestedId = row.suggested_info_id || "";
+      const suggestedName = row.suggested_person_name || "";
+      return `<div class="userCard">
+        <div class="name">${escapeHtml(name)}</div>
+        <div class="email">${escapeHtml(row.email || "")}</div>
+        <div class="meta">${suggestedId ? `추천 매칭: ${escapeHtml(suggestedName)} · PK ${escapeHtml(suggestedId)}` : "maroowell_info 자동 매칭 없음"}</div>
+        <div class="row" style="margin-top:10px">
+<input data-pending-pk="${escapeHtml(uid)}" placeholder="maroowell_info PK" value="${escapeHtml(suggestedId)}" />
+<label class="pill"><input type="checkbox" data-pending-app="${escapeHtml(uid)}" style="min-width:auto;width:auto;height:auto" /> 앱 전용</label>
+<button class="small ok" data-pending-action="approve" data-user-id="${escapeHtml(uid)}">승인</button>
+<button class="small danger" data-pending-action="reject" data-user-id="${escapeHtml(uid)}">거절</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function renderAccountSearch(rows) {
+    const list = $("accountSearchList");
+    if (!rows.length) { list.innerHTML = `<div class="muted">검색 결과가 없습니다.</div>`; return; }
+    list.innerHTML = rows.map(row => `<div class="userCard">
+      <div class="name" data-account-pick="1" data-email="${escapeHtml(row.email || "")}" data-name="${escapeHtml(row.display_name || row.email || "")}">${escapeHtml(row.display_name || row.email || "이름 없음")}</div>
+      <div class="email">${escapeHtml(row.email || "")}</div>
+      <div class="badges">
+        <span class="badge ${row.approval_status === "approved" ? "maroowell" : "scheduleOff"}">${escapeHtml(row.approval_status || "-")}</span>
+        ${row.app_only ? `<span class="badge dragon">앱 전용</span>` : `<span class="badge">웹 허용</span>`}
+      </div>
+      <div class="meta">maroowell_info: ${escapeHtml(row.info_person_name || "미연결")} ${row.maroowell_info_id ? `· PK ${escapeHtml(row.maroowell_info_id)}` : ""}</div>
+      <div class="meta">쿠팡ID: ${escapeHtml(row.info_coupang_id || "-")} · 캠프: ${escapeHtml(row.info_camp_code || "-")} · ${escapeHtml(row.info_wave || "-")}</div>
+      <div class="row" style="margin-top:10px">
+        <input data-search-pk="${escapeHtml(row.user_id || "")}" placeholder="maroowell_info PK" value="${escapeHtml(row.maroowell_info_id || "")}" />
+        <label class="pill"><input type="checkbox" data-search-app="${escapeHtml(row.user_id || "")}" ${row.app_only ? "checked" : ""} style="min-width:auto;width:auto;height:auto" /> 앱 전용</label>
+        <button class="small ok" data-account-state="approved" data-user-id="${escapeHtml(row.user_id || "")}">승인/수정</button>
+        <button class="small warn" data-account-state="pending" data-user-id="${escapeHtml(row.user_id || "")}">대기</button>
+      </div>
+    </div>`).join("");
+  }
+
+  async function setAccountState(userId, state, source) {
+    const pkInput = document.querySelector(`[data-${source}-pk="${CSS.escape(userId)}"]`);
+    const appInput = document.querySelector(`[data-${source}-app="${CSS.escape(userId)}"]`);
+    const pkRaw = pkInput?.value?.trim() || "";
+    const pk = pkRaw ? Number(pkRaw) : null;
+    if (pkRaw && !Number.isFinite(pk)) throw new Error("maroowell_info PK를 숫자로 입력하세요.");
+    await rpc("mw_admin_set_account_state", {
+      p_user_id: userId,
+      p_approval_status: state,
+      p_app_only: appInput?.checked === true,
+      p_maroowell_info_id: pk
+    });
+    await loadPendingAccounts();
+    const q = $("accountSearchInput").value.trim();
+    if (q) await searchAccounts();
+  }
+
+  async function copySignupLink() {
+    await navigator.clipboard.writeText("https://maroowell.com/?signup=1");
+    setStatus("회원가입 링크 복사 완료", "ok");
+  }
+
   async function checkMe() {
     showRawOnly();
     setStatus("관리자 세션 확인 중...");
@@ -929,6 +1026,24 @@
     setStatus("API 주소 저장됨", "ok");
   };
 
+  $("copySignupLinkBtn").onclick = () => run(copySignupLink);
+  $("loadPendingBtn").onclick = () => run(loadPendingAccounts);
+  $("accountSearchBtn").onclick = () => run(searchAccounts);
+  $("accountSearchInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); run(searchAccounts); }
+  });
+  $("pendingUserList").onclick = event => {
+    const btn = event.target.closest("[data-pending-action]");
+    if (!btn) return;
+    run(() => setAccountState(btn.dataset.userId, btn.dataset.pendingAction === "approve" ? "approved" : "rejected", "pending"));
+  };
+  $("accountSearchList").onclick = event => {
+    const pick = event.target.closest("[data-account-pick]");
+    if (pick) { setTarget(pick.dataset.name || "", pick.dataset.email || ""); return; }
+    const btn = event.target.closest("[data-account-state]");
+    if (btn) run(() => setAccountState(btn.dataset.userId, btn.dataset.accountState, "search"));
+  };
+
   $("checkMeBtn").onclick = () => run(checkMe);
   $("loadUsersBtn").onclick = () => run(loadUsers);
   $("scanBtn").onclick = () => run(scan);
@@ -987,6 +1102,7 @@
     initSupabase();
     checkMe().catch(() => {});
     loadUsers().catch(() => {});
+    loadPendingAccounts().catch(() => {});
   } catch (e) {
     setStatus(e.message, "bad");
   }

@@ -6,7 +6,7 @@
 
   const PAGES = [
     { key:"mw-schedule", label:"마루웰 입차 스케줄", path:"/maroowell_schedule", aliases:["/maroowell_schedule","/maroowell_schedule.html"], requireRoleLevel:30, desc:"마루웰 입차 스케줄" },
-    { key:"info", label:"마루웰 정보", path:"/maroowell_info", aliases:["/maroowell_info","/maroowell_info.html"], requireRoleLevel:30, desc:"마루웰 기본 정보" },
+    { key:"info", label:"마루웰 정보", path:"/maroowell_info", aliases:["/maroowell_info","/maroowell_info.html"], requireRoleLevel:60, desc:"마루웰 기본 정보" },
 
     { key:"zipcode_search", label:"우편번호 검색기", path:"/zipcode_search", aliases:["/zipcode_search","/zipcode_search.html"], public:true, desc:"우편번호 / 지도 조회" },
     { key:"route", label:"라우트 편집기", path:"/coupangRouteMap.html", aliases:["/coupangRouteMap","/coupangRouteMap.html"], public:true, desc:"라우트 / 벤더 / 입차지 편집" },
@@ -96,7 +96,9 @@
     max_role_level: 0,
     is_dragon_car_admin: false,
     can_clhi: false,
-    signed_in: false
+    signed_in: false,
+    approval_status: "pending",
+    app_only: false
   });
 
   const isSuper = access =>
@@ -105,6 +107,8 @@
     Number(access?.max_role_level || 0) >= 90;
 
   function canAccessPage(page, access) {
+    if (access?.signed_in && access?.approval_status !== "approved") return false;
+    if (access?.signed_in && access?.app_only === true) return false;
     if (!page || page.public) return true;
 
     const mw = access?.is_maroowell === true;
@@ -186,6 +190,16 @@
         out.is_admin = data.is_admin === true;
         out.max_role_level = Number(data.max_role_level || 0);
         out.is_dragon_car_admin = data.is_dragon_car_admin === true;
+      }
+
+      try {
+        const { data: accountState } = await sb.rpc("mw_my_account_state").maybeSingle();
+        if (accountState) {
+out.approval_status = accountState.approval_status || "pending";
+out.app_only = accountState.app_only === true;
+        }
+      } catch {
+        out.approval_status = "pending";
       }
 
       if (isSuper(out)) {

@@ -21,4 +21,37 @@ window.MARUWELL_CONFIG = {
   }
 };
 
+// Android 앱의 날짜 상세에서 /maroowell_route_info?camp=...&route=... 로 들어오면
+// 기존 카카오 라우트정보 화면의 검색칸을 채우고 초기화가 끝난 뒤 자동 조회합니다.
+window.addEventListener("DOMContentLoaded", () => {
+  const path = String(location.pathname || "").replace(/\.html$/i, "").replace(/\/$/, "");
+  if (path !== "/maroowell_route_info") return;
+
+  const params = new URLSearchParams(location.search);
+  const camp = String(params.get("camp") || "").trim();
+  const route = String(params.get("route") || "").trim();
+  if (!camp) return;
+
+  const campInput = document.getElementById("campInput");
+  const routeInput = document.getElementById("routeSearchInput");
+  const loadBtn = document.getElementById("loadBtn");
+  if (!campInput || !routeInput || !loadBtn) return;
+
+  campInput.value = camp;
+  routeInput.value = route;
+
+  let attempts = 0;
+  const timer = setInterval(() => {
+    attempts += 1;
+    const status = document.getElementById("statusText")?.textContent || "";
+    const ready = status.includes("Camp") && status.includes("Route") && status.includes("조회");
+    if (ready) {
+      clearInterval(timer);
+      loadBtn.click();
+      return;
+    }
+    if (attempts >= 50) clearInterval(timer);
+  }, 200);
+});
+
 // deploy kick: freshbag restore

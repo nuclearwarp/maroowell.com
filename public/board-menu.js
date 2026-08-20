@@ -149,73 +149,177 @@
     return "접근 권한이 없습니다.";
   }
 
+  function getSupabaseProjectRef(url) {
+    try {
+      return new URL(url).hostname.split(".")[0] || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function decodeStoredAuthValue(value) {
+    const raw = String(value || "");
+    if (!raw.startsWith("base64-")) return raw;
+
+    try {
+      let encoded = raw.slice(7).replace(/-/g, "+").replace(/_/g, "/");
+      encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
+      const bytes = Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    } catch {
+      return "";
+    }
+  }
+
+  function parseStoredSession(value) {
+    const decoded = decodeStoredAuthValue(value);
+    if (!decoded) return null;
+
+    try {
+      const parsed = JSON.parse(decoded);
+      return parsed?.currentSession || parsed?.session || parsed || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readStoredSession(supabaseUrl) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef) return null;
+
+    const baseKey = `sb-${projectRef}-auth-token`;
+
+    try {
+      const storage = window.sessionStorage;
+      const direct = storage.getItem(baseKey);
+      if (direct) return parseStoredSession(direct);
+
+      const chunks = [];
+      for (let i = 0; i < storage.length; i++) {
+        const key = storage.key(i) || "";
+        const match = key.match(new RegExp(`^${baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(\\d+)$`));
+        if (!match) continue;
+        chunks.push({ index:Number(match[1]), value:storage.getItem(key) || "" });
+      }
+
+      if (!chunks.length) return null;
+      chunks.sort((a, b) => a.index - b.index);
+      return parseStoredSession(chunks.map(item => item.value).join(""));
+    } catch {
+      return null;
+    }
+  }
+
+  function decodeJwtPayload(token) {
+    try {
+      const part = String(token || "").split(".")[1];
+      if (!part) return null;
+      let encoded = part.replace(/-/g, "+").replace(/_/g, "/");
+      encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
+      return JSON.parse(decodeURIComponent(Array.from(atob(encoded), ch =>
+        "%" + ch.charCodeAt(0).toString(16).padStart(2, "0")
+      ).join("")));
+    } catch {
+      return null;
+    }
+  }
+
+  async function supabaseJson(path, { token, method = "GET", body, object = false } = {}) {
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
+    const url = String(SUPABASE_URL || "").replace(/\/+$/, "") + path;
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      Accept: object ? "application/vnd.pgrst.object+json" : "application/json"
+    };
+
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store"
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`;
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        message = parsed?.message || parsed?.error || parsed?.details || message;
+      } catch {}
+      throw new Error(message);
+    }
+
+    if (!text) return null;
+    try { return JSON.parse(text); } catch { return null; }
+  }
+
   async function loadAccess() {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const out = defaultAccess();
 
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) return out;
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || typeof window.fetch !== "function") return out;
 
-    const storage = (() => {
-      try {
-        return sessionStorage;
-      } catch {
-        return undefined;
-      }
-    })();
+    const session = readStoredSession(SUPABASE_URL);
+    const accessToken = String(session?.access_token || "");
+    if (!accessToken) return out;
 
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        persistSession: !!storage,
-        storage,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    });
+    const jwt = decodeJwtPayload(accessToken) || {};
+    const uid = String(session?.user?.id || jwt.sub || "");
+    if (!uid) return out;
+
+    out.signed_in = true;
+    out.user_id = uid;
+    out.email = String(session?.user?.email || jwt.email || "");
 
     try {
-      const { data: sessionData } = await sb.auth.getSession();
-      const session = sessionData?.session;
-      const uid = session?.user?.id;
-
-      if (!uid) return out;
-
-      out.signed_in = true;
-      out.user_id = uid;
-      out.email = session?.user?.email || "";
-
-      const { data } = await sb.rpc("mw_my_access").maybeSingle();
+      const [data, accountState] = await Promise.all([
+        supabaseJson("/rest/v1/rpc/mw_my_access", {
+          token: accessToken,
+          method: "POST",
+          body: {},
+          object: true
+        }),
+        supabaseJson("/rest/v1/rpc/mw_my_account_state", {
+          token: accessToken,
+          method: "POST",
+          body: {},
+          object: true
+        })
+      ]);
 
       if (data) {
         out.is_maroowell = data.is_maroowell === true;
         out.is_admin = data.is_admin === true;
         out.max_role_level = Number(data.max_role_level || 0);
         out.is_dragon_car_admin = data.is_dragon_car_admin === true;
+        if (!out.email) out.email = String(data.email || "");
       }
 
-      try {
-        const { data: accountState } = await sb.rpc("mw_my_account_state").maybeSingle();
-        if (accountState) {
-out.approval_status = accountState.approval_status || "pending";
-out.app_only = accountState.app_only === true;
-        }
-      } catch {
-        out.approval_status = "pending";
+      if (accountState) {
+        out.approval_status = accountState.approval_status || "pending";
+        out.app_only = accountState.app_only === true;
       }
 
       if (isSuper(out)) {
         out.can_clhi = true;
       } else {
-        const { data: clhi } = await sb
-          .from("cleansing_history_access")
-          .select("can_select")
-          .eq("user_id", uid)
-          .maybeSingle();
-
-        out.can_clhi = clhi?.can_select === true;
+        const query = new URLSearchParams({
+          select: "can_select",
+          user_id: `eq.${uid}`,
+          limit: "1"
+        });
+        const rows = await supabaseJson(`/rest/v1/cleansing_history_access?${query.toString()}`, {
+          token: accessToken
+        });
+        out.can_clhi = Array.isArray(rows) && rows[0]?.can_select === true;
       }
 
       return out;
-    } catch {
+    } catch (error) {
+      console.warn("[board-menu] access lookup failed", error);
       return out;
     }
   }

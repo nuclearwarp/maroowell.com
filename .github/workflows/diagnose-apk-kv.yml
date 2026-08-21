@@ -1,0 +1,57 @@
+name: Diagnose APK KV permission
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-apk-kv.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test Cloudflare KV access
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set +e
+          mkdir -p .diagnostics
+          OUT=.diagnostics/apk-kv.txt
+          : > "$OUT"
+          printf 'checked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+          BODY=$(mktemp)
+          CODE=$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            'https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46/storage/kv/namespaces?per_page=100')
+          printf 'list_http=%s\n' "$CODE" >> "$OUT"
+          python3 - "$BODY" "$OUT" <<'PY'
+          import json,sys
+          bpath,out=sys.argv[1:]
+          try:
+              b=json.load(open(bpath,encoding='utf-8'))
+              with open(out,'a',encoding='utf-8') as f:
+                  f.write('success='+str(bool(b.get('success'))).lower()+'\n')
+                  names=[x.get('title') for x in (b.get('result') or [])]
+                  f.write('namespace_exists='+str('maroowell-app-downloads' in names).lower()+'\n')
+                  if b.get('errors'):
+                      e=b['errors'][0]
+                      f.write('error_code='+str(e.get('code',''))+'\n')
+                      f.write('error_message='+str(e.get('message','')).replace('\n',' ')[:300]+'\n')
+          except Exception as e:
+              with open(out,'a',encoding='utf-8') as f: f.write('parse_error='+type(e).__name__+'\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OUT"
+          git commit -m 'Record APK KV permission diagnostic' || exit 0
+          git pull --rebase origin main
+          git push origin main

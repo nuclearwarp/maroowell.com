@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Deploy Worker
+      - name: Deploy Worker with Durable Object storage
         id: deploy
         continue-on-error: true
         shell: bash
@@ -34,10 +34,7 @@ jobs:
           set -o pipefail
           mkdir -p .diagnostics
           : > .diagnostics/apk-worker-wrangler.log
-          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-            echo 'CLOUDFLARE_API_TOKEN missing' | tee .diagnostics/apk-worker-wrangler.log
-            exit 2
-          fi
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
           cat > wrangler-apk.toml <<'TOML'
           name = "maroowell-app-download"
           main = "workers/apk-download/index.js"
@@ -45,8 +42,18 @@ jobs:
           compatibility_date = "2026-08-21"
           workers_dev = true
           routes = [
-            { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" }
+            { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" },
+            { pattern = "maroowell.com/upload/*", zone_name = "maroowell.com" }
           ]
+
+          [durable_objects]
+          bindings = [
+            { name = "APK_STORE", class_name = "ApkStore" }
+          ]
+
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = ["ApkStore"]
           TOML
           npx wrangler@4 deploy --config wrangler-apk.toml 2>&1 | tee .diagnostics/apk-worker-wrangler.log
 
@@ -57,6 +64,7 @@ jobs:
         run: |
           set -o pipefail
           curl -fsS --retry 5 --retry-delay 2 https://maroowell-app-download.brain-0f6.workers.dev/health 2>&1 | tee .diagnostics/apk-worker-health.log
+          grep -q 'durable-object' .diagnostics/apk-worker-health.log
 
       - name: Record deployment result
         if: always()

@@ -33,6 +33,8 @@
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
   function normalizePath(path) {
     let value = String(path || "").trim();
     if (!value) return "/";
@@ -133,16 +135,12 @@
     } catch { return null; }
   }
 
-  function readStoredSession(supabaseUrl) {
-    const projectRef = getSupabaseProjectRef(supabaseUrl);
-    if (!projectRef) return null;
-    const baseKey = `sb-${projectRef}-auth-token`;
+  function readSessionFromStorage(storage, baseKey) {
     try {
-      const storage = window.sessionStorage;
-      const direct = storage.getItem(baseKey);
+      const direct = storage?.getItem(baseKey);
       if (direct) return parseStoredSession(direct);
       const chunks = [];
-      for (let i = 0; i < storage.length; i++) {
+      for (let i = 0; storage && i < storage.length; i++) {
         const key = storage.key(i) || "";
         const match = key.match(new RegExp(`^${baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.(\\d+)$`));
         if (!match) continue;
@@ -152,6 +150,19 @@
       chunks.sort((a, b) => a.index - b.index);
       return parseStoredSession(chunks.map(item => item.value).join(""));
     } catch { return null; }
+  }
+
+  function readStoredSession(supabaseUrl) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef) return null;
+    const baseKey = `sb-${projectRef}-auth-token`;
+    const local = readSessionFromStorage(window.localStorage, baseKey);
+    const session = readSessionFromStorage(window.sessionStorage, baseKey);
+    if (!local) return session;
+    if (!session) return local;
+    const localExpiry = Number(local.expires_at || 0);
+    const sessionExpiry = Number(session.expires_at || 0);
+    return sessionExpiry >= localExpiry ? session : local;
   }
 
   async function requestSessionCopy(supabaseUrl, timeoutMs = 1400) {
@@ -168,8 +179,13 @@
       try {
         for (const row of entries || []) {
           if (!row || !matchesKey(row.key)) continue;
-          if (row.value == null) sessionStorage.removeItem(row.key);
-          else sessionStorage.setItem(row.key, row.value);
+          if (row.value == null) {
+            sessionStorage.removeItem(row.key);
+            localStorage.removeItem(row.key);
+          } else {
+            sessionStorage.setItem(row.key, row.value);
+            localStorage.setItem(row.key, row.value);
+          }
         }
       } catch {}
     };
@@ -223,7 +239,7 @@
     try { return JSON.parse(text); } catch { return null; }
   }
 
-  async function loadAccess() {
+  async function loadAccessOnce() {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const out = defaultAccess();
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || typeof window.fetch !== "function") return out;
@@ -240,33 +256,41 @@
     out.signed_in = true;
     out.user_id = uid;
     out.email = String(session?.user?.email || jwt.email || "");
-    try {
-      const [data, accountState] = await Promise.all([
-        supabaseJson("/rest/v1/rpc/mw_my_access", { token:accessToken, method:"POST", body:{}, object:true }),
-        supabaseJson("/rest/v1/rpc/mw_my_account_state", { token:accessToken, method:"POST", body:{}, object:true })
-      ]);
-      if (data) {
-        out.is_maroowell = data.is_maroowell === true;
-        out.is_admin = data.is_admin === true;
-        out.max_role_level = Number(data.max_role_level || 0);
-        out.is_dragon_car_admin = data.is_dragon_car_admin === true;
-        if (!out.email) out.email = String(data.email || "");
-      }
-      if (accountState) {
-        out.approval_status = accountState.approval_status || "pending";
-        out.app_only = accountState.app_only === true;
-      }
-      if (isSuper(out)) out.can_clhi = true;
-      else {
-        const query = new URLSearchParams({ select:"can_select", user_id:`eq.${uid}`, limit:"1" });
-        const rows = await supabaseJson(`/rest/v1/cleansing_history_access?${query.toString()}`, { token:accessToken });
-        out.can_clhi = Array.isArray(rows) && rows[0]?.can_select === true;
-      }
-      return out;
-    } catch (error) {
-      console.warn("[board-menu] access lookup failed", error);
-      return out;
+
+    const [data, accountState] = await Promise.all([
+      supabaseJson("/rest/v1/rpc/mw_my_access", { token:accessToken, method:"POST", body:{}, object:true }),
+      supabaseJson("/rest/v1/rpc/mw_my_account_state", { token:accessToken, method:"POST", body:{}, object:true })
+    ]);
+
+    if (!data || !accountState) throw new Error("권한 응답이 비어 있습니다.");
+    out.is_maroowell = data.is_maroowell === true;
+    out.is_admin = data.is_admin === true;
+    out.max_role_level = Number(data.max_role_level || 0);
+    out.is_dragon_car_admin = data.is_dragon_car_admin === true;
+    if (!out.email) out.email = String(data.email || "");
+    out.approval_status = accountState.approval_status || "pending";
+    out.app_only = accountState.app_only === true;
+
+    if (isSuper(out)) out.can_clhi = true;
+    else {
+      const query = new URLSearchParams({ select:"can_select", user_id:`eq.${uid}`, limit:"1" });
+      const rows = await supabaseJson(`/rest/v1/cleansing_history_access?${query.toString()}`, { token:accessToken });
+      out.can_clhi = Array.isArray(rows) && rows[0]?.can_select === true;
     }
+    return out;
+  }
+
+  async function loadAccess() {
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        return await loadAccessOnce();
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await wait(250 * (attempt + 1));
+      }
+    }
+    throw lastError || new Error("권한 정보를 확인하지 못했습니다.");
   }
 
   function injectStyles() {
@@ -289,6 +313,19 @@
     document.getElementById("mwDeniedLogin")?.addEventListener("click", () => { location.href = `/?next=${encodeURIComponent(location.pathname)}`; });
   }
 
+  function showAccessLookupError(error) {
+    injectStyles();
+    const existing = document.getElementById("mwAccessLookupError");
+    if (existing) existing.remove();
+    const box = document.createElement("div");
+    box.id = "mwAccessLookupError";
+    box.className = "mw-denied-screen";
+    box.innerHTML = `<div class="mw-denied-card"><h2>권한 확인 실패</h2><p>로그인 권한을 확인하지 못했습니다.\n권한을 없는 것으로 임의 처리하지 않고 조회를 중단했습니다.</p><div class="mw-denied-meta">${esc(error?.message || "일시적인 권한 조회 오류")}</div><div class="mw-denied-actions"><button class="mw-denied-btn" id="mwAccessRetry">다시 확인</button><button class="mw-denied-btn danger" id="mwAccessLogin">로그인 화면</button></div></div>`;
+    document.body.appendChild(box);
+    document.getElementById("mwAccessRetry")?.addEventListener("click", () => location.reload());
+    document.getElementById("mwAccessLogin")?.addEventListener("click", () => { location.href = `/?next=${encodeURIComponent(location.pathname)}`; });
+  }
+
   function renderMenu(access) {
     injectStyles();
     const backdrop = document.createElement("div"); backdrop.className = "mw-board-backdrop";
@@ -306,9 +343,14 @@
 
   async function init() {
     const current = findCurrentPage();
-    const access = await loadAccess();
-    if (current && !canAccessPage(current, access)) { showDenied(current, access); return; }
-    renderMenu(access);
+    try {
+      const access = await loadAccess();
+      if (current && !canAccessPage(current, access)) { showDenied(current, access); return; }
+      renderMenu(access);
+    } catch (error) {
+      console.error("[board-menu] access lookup failed after retries", error);
+      showAccessLookupError(error);
+    }
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once:true });

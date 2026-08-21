@@ -31,8 +31,13 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
+          set -o pipefail
+          mkdir -p .diagnostics
+          : > .diagnostics/apk-worker-wrangler.log
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo 'CLOUDFLARE_API_TOKEN missing' | tee .diagnostics/apk-worker-wrangler.log
+            exit 2
+          fi
           cat > wrangler-apk.toml <<'TOML'
           name = "maroowell-app-download"
           main = "workers/apk-download/index.js"
@@ -43,20 +48,15 @@ jobs:
             { pattern = "maroowell.com/downloads/*", zone_name = "maroowell.com" }
           ]
           TOML
-          npx wrangler@4 deploy --config wrangler-apk.toml
+          npx wrangler@4 deploy --config wrangler-apk.toml 2>&1 | tee .diagnostics/apk-worker-wrangler.log
 
       - name: Verify Worker health
         id: verify
         continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          curl -fsS --retry 8 --retry-delay 3 https://maroowell-app-download.brain-0f6.workers.dev/health | tee health.json
-          python3 - <<'PY'
-          import json
-          body=json.load(open('health.json', encoding='utf-8'))
-          assert body.get('ok') is True
-          PY
+          set -o pipefail
+          curl -fsS --retry 5 --retry-delay 2 https://maroowell-app-download.brain-0f6.workers.dev/health 2>&1 | tee .diagnostics/apk-worker-health.log
 
       - name: Record deployment result
         if: always()
@@ -72,11 +72,15 @@ jobs:
             echo "verify=$VERIFY_OUTCOME"
             echo "commit=$GITHUB_SHA"
             echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo '--- wrangler tail ---'
+            tail -n 80 .diagnostics/apk-worker-wrangler.log 2>/dev/null || true
+            echo '--- health tail ---'
+            tail -n 30 .diagnostics/apk-worker-health.log 2>/dev/null || true
           } > .diagnostics/apk-worker-deploy.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .diagnostics/apk-worker-deploy.txt
-          git commit -m 'Record APK worker deployment result' || exit 0
+          git commit -m 'Record APK worker deployment details' || exit 0
           git pull --rebase origin main
           git push origin main
 

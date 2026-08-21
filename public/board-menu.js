@@ -35,93 +35,53 @@
 
   function normalizePath(path) {
     let value = String(path || "").trim();
-
     if (!value) return "/";
-
     if (value.startsWith("http://") || value.startsWith("https://")) {
-      try {
-        value = new URL(value).pathname || "/";
-      } catch {
-        return "/";
-      }
+      try { value = new URL(value).pathname || "/"; } catch { return "/"; }
     }
-
     value = value.replace(/[?#].*$/, "");
-
     if (!value.startsWith("/")) value = "/" + value;
     if (value.length > 1 && value.endsWith("/")) value = value.slice(0, -1);
-
     return value || "/";
   }
 
   function pathVariants(path) {
     const value = normalizePath(path);
     const set = new Set([value]);
-
     if (value === "/") {
-      set.add("/index");
-      set.add("/index.html");
+      set.add("/index"); set.add("/index.html");
     } else if (value === "/index" || value === "/index.html") {
-      set.add("/");
-      set.add("/index");
-      set.add("/index.html");
-    } else if (value.endsWith(".html")) {
-      set.add(value.slice(0, -5));
-    } else {
-      set.add(value + ".html");
-    }
-
+      set.add("/"); set.add("/index"); set.add("/index.html");
+    } else if (value.endsWith(".html")) set.add(value.slice(0, -5));
+    else set.add(value + ".html");
     return [...set];
   }
 
   function isCurrentPage(page) {
     const current = new Set(pathVariants(location.pathname || "/"));
-
     for (const item of [page.path, ...(page.aliases || [])]) {
-      for (const value of pathVariants(item)) {
-        if (current.has(value)) return true;
-      }
+      for (const value of pathVariants(item)) if (current.has(value)) return true;
     }
-
     return false;
   }
 
   const findCurrentPage = () => PAGES.find(isCurrentPage) || null;
-
-  const defaultAccess = () => ({
-    user_id: "",
-    email: "",
-    is_maroowell: false,
-    is_admin: false,
-    max_role_level: 0,
-    is_dragon_car_admin: false,
-    can_clhi: false,
-    signed_in: false,
-    approval_status: "pending",
-    app_only: false
-  });
-
-  const isSuper = access =>
-    access?.is_maroowell === true &&
-    access?.is_admin === true &&
-    Number(access?.max_role_level || 0) >= 90;
+  const defaultAccess = () => ({ user_id:"", email:"", is_maroowell:false, is_admin:false, max_role_level:0, is_dragon_car_admin:false, can_clhi:false, signed_in:false, approval_status:"pending", app_only:false });
+  const isSuper = access => access?.is_maroowell === true && access?.is_admin === true && Number(access?.max_role_level || 0) >= 90;
 
   function canAccessPage(page, access) {
     if (access?.signed_in && access?.approval_status !== "approved") return false;
     if (access?.signed_in && access?.app_only === true) return false;
     if (!page || page.public) return true;
-
     const mw = access?.is_maroowell === true;
     const role = Number(access?.max_role_level || 0);
     const dragon = access?.is_dragon_car_admin === true;
-
     if (page.requireSuperAdmin) return isSuper(access);
     if (page.requireClhi) return isSuper(access) || access?.can_clhi === true;
     if (page.requireTeamOrDragonCarAdmin) return (mw && role >= 30) || dragon;
     if (page.requireDragonCarAdmin) return dragon;
     if (page.requireMaroowell) return mw;
     if (page.requireRoleLevel) return mw && role >= Number(page.requireRoleLevel);
-
     return true;
   }
 
@@ -150,50 +110,37 @@
   }
 
   function getSupabaseProjectRef(url) {
-    try {
-      return new URL(url).hostname.split(".")[0] || "";
-    } catch {
-      return "";
-    }
+    try { return new URL(url).hostname.split(".")[0] || ""; } catch { return ""; }
   }
 
   function decodeStoredAuthValue(value) {
     const raw = String(value || "");
     if (!raw.startsWith("base64-")) return raw;
-
     try {
       let encoded = raw.slice(7).replace(/-/g, "+").replace(/_/g, "/");
       encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
       const bytes = Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0));
       return new TextDecoder().decode(bytes);
-    } catch {
-      return "";
-    }
+    } catch { return ""; }
   }
 
   function parseStoredSession(value) {
     const decoded = decodeStoredAuthValue(value);
     if (!decoded) return null;
-
     try {
       const parsed = JSON.parse(decoded);
       return parsed?.currentSession || parsed?.session || parsed || null;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
   function readStoredSession(supabaseUrl) {
     const projectRef = getSupabaseProjectRef(supabaseUrl);
     if (!projectRef) return null;
-
     const baseKey = `sb-${projectRef}-auth-token`;
-
     try {
       const storage = window.sessionStorage;
       const direct = storage.getItem(baseKey);
       if (direct) return parseStoredSession(direct);
-
       const chunks = [];
       for (let i = 0; i < storage.length; i++) {
         const key = storage.key(i) || "";
@@ -201,13 +148,53 @@
         if (!match) continue;
         chunks.push({ index:Number(match[1]), value:storage.getItem(key) || "" });
       }
-
       if (!chunks.length) return null;
       chunks.sort((a, b) => a.index - b.index);
       return parseStoredSession(chunks.map(item => item.value).join(""));
-    } catch {
-      return null;
-    }
+    } catch { return null; }
+  }
+
+  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef || readStoredSession(supabaseUrl)) return !!readStoredSession(supabaseUrl);
+    if (!("BroadcastChannel" in window)) return false;
+    const channelName = "mw-auth-bridge:" + projectRef;
+    const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const requestId = tabId + ":" + Date.now().toString(36);
+    let channel = null;
+    const base = "sb-" + projectRef + "-auth-token";
+    const matchesKey = key => !!key && (key === base || key.startsWith(base + ".") || key.startsWith(base + "-code-verifier"));
+    const writeEntries = entries => {
+      try {
+        for (const row of entries || []) {
+          if (!row || !matchesKey(row.key)) continue;
+          if (row.value == null) sessionStorage.removeItem(row.key);
+          else sessionStorage.setItem(row.key, row.value);
+        }
+      } catch {}
+    };
+    return await new Promise(resolve => {
+      let finished = false;
+      const finish = value => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        try { channel?.close(); } catch {}
+        resolve(!!value);
+      };
+      const timer = setTimeout(() => finish(!!readStoredSession(supabaseUrl)), Math.max(300, Number(timeoutMs) || 1400));
+      try {
+        channel = new BroadcastChannel(channelName);
+        channel.addEventListener("message", event => {
+          const msg = event.data || {};
+          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+          if (msg.type !== "MW_SESSION_RESPONSE" || msg.requestId !== requestId) return;
+          writeEntries(msg.entries);
+          finish(!!readStoredSession(supabaseUrl));
+        });
+        channel.postMessage({ type:"MW_SESSION_REQUEST", projectRef, requestId, fromTabId:tabId });
+      } catch { finish(false); }
+    });
   }
 
   function decodeJwtPayload(token) {
@@ -216,42 +203,22 @@
       if (!part) return null;
       let encoded = part.replace(/-/g, "+").replace(/_/g, "/");
       encoded += "=".repeat((4 - (encoded.length % 4)) % 4);
-      return JSON.parse(decodeURIComponent(Array.from(atob(encoded), ch =>
-        "%" + ch.charCodeAt(0).toString(16).padStart(2, "0")
-      ).join("")));
-    } catch {
-      return null;
-    }
+      return JSON.parse(decodeURIComponent(Array.from(atob(encoded), ch => "%" + ch.charCodeAt(0).toString(16).padStart(2, "0")).join("")));
+    } catch { return null; }
   }
 
   async function supabaseJson(path, { token, method = "GET", body, object = false } = {}) {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const url = String(SUPABASE_URL || "").replace(/\/+$/, "") + path;
-    const headers = {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${token}`,
-      Accept: object ? "application/vnd.pgrst.object+json" : "application/json"
-    };
-
+    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, Accept: object ? "application/vnd.pgrst.object+json" : "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-
-    const res = await fetch(url, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: "no-store"
-    });
-
+    const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
     const text = await res.text();
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
-      try {
-        const parsed = text ? JSON.parse(text) : null;
-        message = parsed?.message || parsed?.error || parsed?.details || message;
-      } catch {}
+      try { const parsed = text ? JSON.parse(text) : null; message = parsed?.message || parsed?.error || parsed?.details || message; } catch {}
       throw new Error(message);
     }
-
     if (!text) return null;
     try { return JSON.parse(text); } catch { return null; }
   }
@@ -259,37 +226,25 @@
   async function loadAccess() {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const out = defaultAccess();
-
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || typeof window.fetch !== "function") return out;
-
-    const session = readStoredSession(SUPABASE_URL);
+    let session = readStoredSession(SUPABASE_URL);
+    if (!session) {
+      await requestSessionCopy(SUPABASE_URL, 1400);
+      session = readStoredSession(SUPABASE_URL);
+    }
     const accessToken = String(session?.access_token || "");
     if (!accessToken) return out;
-
     const jwt = decodeJwtPayload(accessToken) || {};
     const uid = String(session?.user?.id || jwt.sub || "");
     if (!uid) return out;
-
     out.signed_in = true;
     out.user_id = uid;
     out.email = String(session?.user?.email || jwt.email || "");
-
     try {
       const [data, accountState] = await Promise.all([
-        supabaseJson("/rest/v1/rpc/mw_my_access", {
-          token: accessToken,
-          method: "POST",
-          body: {},
-          object: true
-        }),
-        supabaseJson("/rest/v1/rpc/mw_my_account_state", {
-          token: accessToken,
-          method: "POST",
-          body: {},
-          object: true
-        })
+        supabaseJson("/rest/v1/rpc/mw_my_access", { token:accessToken, method:"POST", body:{}, object:true }),
+        supabaseJson("/rest/v1/rpc/mw_my_account_state", { token:accessToken, method:"POST", body:{}, object:true })
       ]);
-
       if (data) {
         out.is_maroowell = data.is_maroowell === true;
         out.is_admin = data.is_admin === true;
@@ -297,26 +252,16 @@
         out.is_dragon_car_admin = data.is_dragon_car_admin === true;
         if (!out.email) out.email = String(data.email || "");
       }
-
       if (accountState) {
         out.approval_status = accountState.approval_status || "pending";
         out.app_only = accountState.app_only === true;
       }
-
-      if (isSuper(out)) {
-        out.can_clhi = true;
-      } else {
-        const query = new URLSearchParams({
-          select: "can_select",
-          user_id: `eq.${uid}`,
-          limit: "1"
-        });
-        const rows = await supabaseJson(`/rest/v1/cleansing_history_access?${query.toString()}`, {
-          token: accessToken
-        });
+      if (isSuper(out)) out.can_clhi = true;
+      else {
+        const query = new URLSearchParams({ select:"can_select", user_id:`eq.${uid}`, limit:"1" });
+        const rows = await supabaseJson(`/rest/v1/cleansing_history_access?${query.toString()}`, { token:accessToken });
         out.can_clhi = Array.isArray(rows) && rows[0]?.can_select === true;
       }
-
       return out;
     } catch (error) {
       console.warn("[board-menu] access lookup failed", error);
@@ -326,137 +271,46 @@
 
   function injectStyles() {
     if (document.getElementById("mw-board-menu-style")) return;
-
     const style = document.createElement("style");
     style.id = "mw-board-menu-style";
     style.textContent = `
-      .mw-board-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);backdrop-filter:blur(2px);z-index:99990;display:none}
-      .mw-board-backdrop.open{display:block}
-      .mw-board-panel{position:fixed;top:18px;left:18px;width:min(380px,calc(100vw - 36px));max-height:min(78vh,720px);overflow:auto;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(15,26,45,.98),rgba(8,14,26,.98));box-shadow:0 22px 80px rgba(0,0,0,.45);z-index:99991;display:none}
-      .mw-board-panel.open{display:block}
-      .mw-board-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.08)}
-      .mw-board-title{font-size:16px;font-weight:900;color:#eef4ff}
-      .mw-board-close{height:34px;min-width:34px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#d7e4ff;font-weight:900;cursor:pointer}
-      .mw-board-body{padding:12px}
-      .mw-board-desc{color:rgba(230,238,252,.68);font-size:12px;line-height:1.5;margin:0 2px 10px}
-      .mw-board-list{display:grid;gap:10px}
-      .mw-board-item{border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;color:#fff;cursor:pointer;text-align:left;width:100%;text-decoration:none;display:block}
-      .mw-board-item:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18)}
-      .mw-board-item.current{border-color:rgba(96,165,250,.55);background:rgba(59,130,246,.14);box-shadow:inset 0 0 0 1px rgba(96,165,250,.22)}
-      .mw-board-item-title{font-size:15px;font-weight:900;line-height:1.2;margin-bottom:6px}
-      .mw-board-item-sub{font-size:12px;color:rgba(230,238,252,.66);line-height:1.45}
-      .mw-board-badge{display:inline-flex;align-items:center;justify-content:center;margin-left:8px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#dbe7ff;font-size:11px;font-weight:900;vertical-align:middle}
-      .mw-denied-screen{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,rgba(11,18,32,.98),rgba(7,11,19,.99));color:#e6eefc;font-family:system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif}
-      .mw-denied-card{width:min(560px,calc(100vw - 28px));border:1px solid rgba(255,255,255,.12);border-radius:22px;background:#101827;box-shadow:0 24px 70px rgba(0,0,0,.46);padding:24px}
-      .mw-denied-card h2{margin:0 0 10px;font-size:24px}
-      .mw-denied-card p{margin:0;color:#b8c3d9;line-height:1.65;white-space:pre-wrap;font-size:14px}
-      .mw-denied-meta{margin-top:14px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e6eefc;font-size:13px;font-weight:800;line-height:1.6;word-break:break-word}
-      .mw-denied-actions{margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
-      .mw-denied-btn{height:40px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#162744;color:#e6eefc;cursor:pointer;font-weight:900}
-      .mw-denied-btn.danger{background:rgba(107,27,27,.35);border-color:rgba(255,60,60,.22);color:#ffccd3}
-    `;
+      .mw-board-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);backdrop-filter:blur(2px);z-index:99990;display:none}.mw-board-backdrop.open{display:block}
+      .mw-board-panel{position:fixed;top:18px;left:18px;width:min(380px,calc(100vw - 36px));max-height:min(78vh,720px);overflow:auto;border-radius:20px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(180deg,rgba(15,26,45,.98),rgba(8,14,26,.98));box-shadow:0 22px 80px rgba(0,0,0,.45);z-index:99991;display:none}.mw-board-panel.open{display:block}
+      .mw-board-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.08)}.mw-board-title{font-size:16px;font-weight:900;color:#eef4ff}.mw-board-close{height:34px;min-width:34px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#d7e4ff;font-weight:900;cursor:pointer}
+      .mw-board-body{padding:12px}.mw-board-desc{color:rgba(230,238,252,.68);font-size:12px;line-height:1.5;margin:0 2px 10px}.mw-board-list{display:grid;gap:10px}.mw-board-item{border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);border-radius:16px;padding:14px;color:#fff;cursor:pointer;text-align:left;width:100%;text-decoration:none;display:block}.mw-board-item:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18)}.mw-board-item.current{border-color:rgba(96,165,250,.55);background:rgba(59,130,246,.14);box-shadow:inset 0 0 0 1px rgba(96,165,250,.22)}.mw-board-item-title{font-size:15px;font-weight:900;line-height:1.2;margin-bottom:6px}.mw-board-item-sub{font-size:12px;color:rgba(230,238,252,.66);line-height:1.45}.mw-board-badge{display:inline-flex;align-items:center;justify-content:center;margin-left:8px;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#dbe7ff;font-size:11px;font-weight:900;vertical-align:middle}
+      .mw-denied-screen{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(180deg,rgba(11,18,32,.98),rgba(7,11,19,.99));color:#e6eefc;font-family:system-ui,-apple-system,'Noto Sans KR',Segoe UI,Roboto,Arial,sans-serif}.mw-denied-card{width:min(560px,calc(100vw - 28px));border:1px solid rgba(255,255,255,.12);border-radius:22px;background:#101827;box-shadow:0 24px 70px rgba(0,0,0,.46);padding:24px}.mw-denied-card h2{margin:0 0 10px;font-size:24px}.mw-denied-card p{margin:0;color:#b8c3d9;line-height:1.65;white-space:pre-wrap;font-size:14px}.mw-denied-meta{margin-top:14px;padding:12px 14px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e6eefc;font-size:13px;font-weight:800;line-height:1.6;word-break:break-word}.mw-denied-actions{margin-top:18px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}.mw-denied-btn{height:40px;padding:0 14px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#162744;color:#e6eefc;cursor:pointer;font-weight:900}.mw-denied-btn.danger{background:rgba(107,27,27,.35);border-color:rgba(255,60,60,.22);color:#ffccd3}`;
     document.head.appendChild(style);
   }
 
   function showDenied(page, access) {
     injectStyles();
-
-    document.body.innerHTML = `
-      <div class="mw-denied-screen">
-        <div class="mw-denied-card">
-          <h2>접근 권한 없음</h2>
-          <p>${esc(requirementText(page))}</p>
-          <div class="mw-denied-meta">현재 계정: ${esc(access?.email || "로그인 확인 불가")}</div>
-          <div class="mw-denied-actions">
-            <button class="mw-denied-btn" id="mwDeniedHome">홈으로</button>
-            <button class="mw-denied-btn danger" id="mwDeniedLogin">로그인</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.getElementById("mwDeniedHome")?.addEventListener("click", () => {
-      location.href = "/zipcode_search";
-    });
-
-    document.getElementById("mwDeniedLogin")?.addEventListener("click", () => {
-      location.href = `/?next=${encodeURIComponent(location.pathname)}`;
-    });
+    document.body.innerHTML = `<div class="mw-denied-screen"><div class="mw-denied-card"><h2>접근 권한 없음</h2><p>${esc(requirementText(page))}</p><div class="mw-denied-meta">현재 계정: ${esc(access?.email || "로그인 확인 불가")}</div><div class="mw-denied-actions"><button class="mw-denied-btn" id="mwDeniedHome">홈으로</button><button class="mw-denied-btn danger" id="mwDeniedLogin">로그인</button></div></div></div>`;
+    document.getElementById("mwDeniedHome")?.addEventListener("click", () => { location.href = "/zipcode_search"; });
+    document.getElementById("mwDeniedLogin")?.addEventListener("click", () => { location.href = `/?next=${encodeURIComponent(location.pathname)}`; });
   }
 
   function renderMenu(access) {
     injectStyles();
-
-    const backdrop = document.createElement("div");
-    backdrop.className = "mw-board-backdrop";
-
-    const panel = document.createElement("div");
-    panel.className = "mw-board-panel";
-
+    const backdrop = document.createElement("div"); backdrop.className = "mw-board-backdrop";
+    const panel = document.createElement("div"); panel.className = "mw-board-panel";
     const visiblePages = PAGES.filter(page => canAccessPage(page, access));
     const current = findCurrentPage();
-
-    panel.innerHTML = `
-      <div class="mw-board-head">
-        <div class="mw-board-title">마루웰 메뉴</div>
-        <button type="button" class="mw-board-close">닫기</button>
-      </div>
-      <div class="mw-board-body">
-        <p class="mw-board-desc">접근 가능한 페이지가 표시됩니다.</p>
-        <div class="mw-board-list">
-          ${visiblePages.map(page => `
-            <a class="mw-board-item ${current?.key === page.key ? "current" : ""}" href="${esc(page.path)}">
-              <div class="mw-board-item-title">
-                ${esc(page.label)}
-                ${pageBadge(page) ? `<span class="mw-board-badge">${esc(pageBadge(page))}</span>` : ""}
-              </div>
-              <div class="mw-board-item-sub">${esc(page.desc || "")}</div>
-            </a>
-          `).join("")}
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(backdrop);
-    document.body.appendChild(panel);
-
-    const open = () => {
-      backdrop.classList.add("open");
-      panel.classList.add("open");
-    };
-
-    const close = () => {
-      backdrop.classList.remove("open");
-      panel.classList.remove("open");
-    };
-
-    backdrop.addEventListener("click", close);
-    panel.querySelector(".mw-board-close")?.addEventListener("click", close);
-
+    panel.innerHTML = `<div class="mw-board-head"><div class="mw-board-title">마루웰 메뉴</div><button type="button" class="mw-board-close">닫기</button></div><div class="mw-board-body"><p class="mw-board-desc">접근 가능한 페이지가 표시됩니다.</p><div class="mw-board-list">${visiblePages.map(page => `<a class="mw-board-item ${current?.key === page.key ? "current" : ""}" href="${esc(page.path)}"><div class="mw-board-item-title">${esc(page.label)}${pageBadge(page) ? `<span class="mw-board-badge">${esc(pageBadge(page))}</span>` : ""}</div><div class="mw-board-item-sub">${esc(page.desc || "")}</div></a>`).join("")}</div></div>`;
+    document.body.appendChild(backdrop); document.body.appendChild(panel);
+    const open = () => { backdrop.classList.add("open"); panel.classList.add("open"); };
+    const close = () => { backdrop.classList.remove("open"); panel.classList.remove("open"); };
+    backdrop.addEventListener("click", close); panel.querySelector(".mw-board-close")?.addEventListener("click", close);
     const toggle = document.getElementById("mwBoardMenuToggle");
-    if (toggle) {
-      toggle.addEventListener("click", event => {
-        event.preventDefault();
-        open();
-      });
-    }
+    if (toggle) toggle.addEventListener("click", event => { event.preventDefault(); open(); });
   }
 
   async function init() {
     const current = findCurrentPage();
     const access = await loadAccess();
-
-    if (current && !canAccessPage(current, access)) {
-      showDenied(current, access);
-      return;
-    }
-
+    if (current && !canAccessPage(current, access)) { showDenied(current, access); return; }
     renderMenu(access);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init, { once: true });
-  } else {
-    init();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once:true });
+  else init();
 })();

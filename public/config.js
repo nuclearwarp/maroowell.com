@@ -275,6 +275,130 @@ window.MARUWELL_CONFIG = {
   };
 })();
 
+// coupangRouteMap 분석 scope 정규화.
+// routes/subroutes 테이블은 제거되었으므로 라우트 분석은 subsubroutes.id만 사용한다.
+// 우편번호 분석과 라우트 분석이 같은 캐시 테이블을 사용하더라도 식별자는 절대 섞지 않는다.
+(() => {
+  if (window.__MW_ROUTE_ANALYSIS_SCOPE_GUARD__) return;
+  if (typeof window.fetch !== "function") return;
+
+  const currentPath = String(location.pathname || "")
+    .replace(/\.html$/i, "")
+    .replace(/\/$/, "");
+  if (currentPath !== "/coupangRouteMap") return;
+
+  window.__MW_ROUTE_ANALYSIS_SCOPE_GUARD__ = true;
+  const previousFetch = window.fetch.bind(window);
+
+  function requestUrl(input) {
+    try {
+      if (typeof input === "string") return new URL(input, location.href);
+      if (input instanceof URL) return input;
+      if (input && typeof input.url === "string") return new URL(input.url, location.href);
+    } catch {}
+    return null;
+  }
+
+  function routeAnalysisEndpoint(url) {
+    if (!url) return false;
+    if (url.hostname !== "zip.maroowell.com") return false;
+    return url.pathname === "/terrain" || url.pathname === "/building/stats";
+  }
+
+  function finitePositiveId(...values) {
+    for (const value of values) {
+      if (value === null || value === undefined || value === "") continue;
+      const n = Number(value);
+      if (Number.isSafeInteger(n) && n > 0) return n;
+    }
+    return null;
+  }
+
+  function normalizeRouteAnalysisPayload(payload) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+
+    // 레거시 subroute는 현재 스키마에 존재하지 않는다.
+    delete payload.subrouteId;
+    delete payload.subroute_id;
+
+    let scopeType = String(payload.scopeType || payload.scope_type || "").trim();
+    if (scopeType === "subroute") {
+      // 옛 호출이 남아 있더라도 실제 subsubroute id가 있을 때만 정규화한다.
+      const migratedId = finitePositiveId(
+        payload.subsubrouteId,
+        payload.subsubroute_id,
+        payload.scopeKey,
+        payload.scope_key
+      );
+      if (!migratedId) {
+        throw new Error("라우트 분석 요청에 폐기된 subroute scope가 사용되었습니다.");
+      }
+      scopeType = "subsubroute";
+    }
+
+    if (scopeType === "zipcode") {
+      throw new Error("라우트 편집기에서는 zipcode 분석 scope를 사용할 수 없습니다.");
+    }
+
+    if (scopeType === "subsubroute") {
+      const subsubrouteId = finitePositiveId(
+        payload.subsubrouteId,
+        payload.subsubroute_id,
+        payload.scopeKey,
+        payload.scope_key
+      );
+      if (!subsubrouteId) {
+        throw new Error("라우트 분석에는 유효한 subsubroutes.id가 필요합니다.");
+      }
+
+      payload.scopeType = "subsubroute";
+      payload.scope_type = "subsubroute";
+      payload.scopeKey = String(subsubrouteId);
+      payload.scope_key = String(subsubrouteId);
+      payload.subsubrouteId = subsubrouteId;
+      payload.subsubroute_id = subsubrouteId;
+
+      // 라우트 캐시에 우편번호 식별자가 섞이지 않도록 제거한다.
+      delete payload.zipcode;
+      delete payload.zip_code;
+      delete payload.postalCode;
+      delete payload.postal_code;
+    } else if (scopeType === "route_polygon") {
+      payload.scopeType = "route_polygon";
+      payload.scope_type = "route_polygon";
+      delete payload.subsubrouteId;
+      delete payload.subsubroute_id;
+      delete payload.zipcode;
+      delete payload.zip_code;
+      delete payload.postalCode;
+      delete payload.postal_code;
+    }
+
+    return payload;
+  }
+
+  window.fetch = async function mwRouteAnalysisScopeFetch(input, init) {
+    const url = requestUrl(input);
+    const method = String(init?.method || input?.method || "GET").toUpperCase();
+    if (!routeAnalysisEndpoint(url) || method !== "POST" || typeof init?.body !== "string") {
+      return previousFetch(input, init);
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(init.body);
+    } catch {
+      return previousFetch(input, init);
+    }
+
+    const normalized = normalizeRouteAnalysisPayload(payload);
+    return previousFetch(input, {
+      ...init,
+      body: JSON.stringify(normalized)
+    });
+  };
+})();
+
 // Android 앱의 날짜 상세에서 /maroowell_route_info?camp=...&route=... 로 들어오면
 // 기존 카카오 라우트정보 화면의 검색칸을 채우고 초기화가 끝난 뒤 자동 조회합니다.
 window.addEventListener("DOMContentLoaded", () => {

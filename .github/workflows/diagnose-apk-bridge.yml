@@ -1,0 +1,93 @@
+name: Diagnose APK bridge credentials
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diagnose-apk-bridge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diagnose bridge credentials without exposing secrets
+        shell: bash
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          PAT: ${{ secrets.PAT }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          ANDROID_REPO_TOKEN: ${{ secrets.ANDROID_REPO_TOKEN }}
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEFAULT_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .diagnostics
+          OUT=.diagnostics/apk-bridge.txt
+          : > "$OUT"
+          printf 'checked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT"
+
+          check_repo_token() {
+            NAME="$1"
+            VALUE="$2"
+            if [ -z "$VALUE" ]; then
+              printf '%s=missing\n' "$NAME" >> "$OUT"
+              return
+            fi
+            echo "::add-mask::$VALUE"
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $VALUE" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              https://api.github.com/repos/nuclearwarp/maroowell-android)
+            if [ "$CODE" = "200" ]; then
+              printf '%s=android_repo_access_ok\n' "$NAME" >> "$OUT"
+            else
+              printf '%s=android_repo_http_%s\n' "$NAME" "$CODE" >> "$OUT"
+            fi
+          }
+
+          check_repo_token DEFAULT_GITHUB_TOKEN "$DEFAULT_GITHUB_TOKEN"
+          check_repo_token GH_PAT "$GH_PAT"
+          check_repo_token PAT "$PAT"
+          check_repo_token GITHUB_PAT "$GITHUB_PAT"
+          check_repo_token PERSONAL_ACCESS_TOKEN "$PERSONAL_ACCESS_TOKEN"
+          check_repo_token ANDROID_REPO_TOKEN "$ANDROID_REPO_TOKEN"
+          check_repo_token REPO_TOKEN "$REPO_TOKEN"
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo 'CLOUDFLARE_API_TOKEN=missing' >> "$OUT"
+          else
+            echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+            BODY=$(mktemp)
+            CODE=$(curl -sS -o "$BODY" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' \
+              https://api.cloudflare.com/client/v4/user/tokens/verify)
+            if [ "$CODE" = "200" ] && python3 - "$BODY" <<'PY'
+          import json, sys
+          b=json.load(open(sys.argv[1], encoding='utf-8'))
+          raise SystemExit(0 if b.get('success') is True else 1)
+          PY
+            then
+              echo 'CLOUDFLARE_API_TOKEN=valid' >> "$OUT"
+            else
+              printf 'CLOUDFLARE_API_TOKEN=http_%s\n' "$CODE" >> "$OUT"
+            fi
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$OUT"
+          git commit -m 'Record APK bridge credential diagnostic' || exit 0
+          git pull --rebase origin main
+          git push origin main

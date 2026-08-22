@@ -4,16 +4,15 @@
   if (window.__MW_BOARD_MENU_INIT__) return;
   window.__MW_BOARD_MENU_INIT__ = true;
 
+  const BUILD = "20260822-auth-guard-v2";
   const PAGES = [
     { key:"mw-schedule", label:"마루웰 입차 스케줄", path:"/maroowell_schedule", aliases:["/maroowell_schedule","/maroowell_schedule.html"], requireRoleLevel:30, desc:"마루웰 입차 스케줄" },
     { key:"info", label:"마루웰 정보", path:"/maroowell_info", aliases:["/maroowell_info","/maroowell_info.html"], requireRoleLevel:60, desc:"마루웰 기본 정보" },
-
     { key:"zipcode_search", label:"우편번호 검색기", path:"/zipcode_search", aliases:["/zipcode_search","/zipcode_search.html"], public:true, desc:"우편번호 / 지도 조회" },
     { key:"route", label:"라우트 편집기", path:"/coupangRouteMap.html", aliases:["/coupangRouteMap","/coupangRouteMap.html"], public:true, desc:"라우트 / 벤더 / 입차지 편집" },
     { key:"coupang-camps", label:"쿠팡 캠프 조회", path:"/coupang_camp", aliases:["/coupang_camp","/coupang_camp.html"], public:true, desc:"쿠팡 캠프 / 주소조회" },
     { key:"freshbag-view", label:"프레시백 현황 조회", path:"/coupang_freshbag", aliases:["/coupang_freshbag","/coupang_freshbag.html"], public:true, desc:"프레시백 가중요인 현황 조회 / 업로드" },
     { key:"cleansing_history", label:"클렌징 히스토리", path:"/cleansing_history", aliases:["/cleansing_history","/cleansing_history.html"], requireClhi:true, desc:"클렌징 히스토리 조회" },
-
     { key:"mw-route-info", label:"마루웰 라우트정보", path:"/maroowell_route_info", aliases:["/maroowell_route_info","/maroowell_route_info.html"], requireMaroowell:true, desc:"마루웰 라우트 정보 조회" },
     { key:"mw-freshbag-ratio", label:"마루웰 회수율", path:"/maroowell_freshbag_ratio", aliases:["/maroowell_freshbag_ratio","/maroowell_freshbag_ratio.html"], requireMaroowell:true, desc:"마루웰 프레시백 회수율 조회" },
     { key:"mw-route", label:"마루웰 라우트 단가", path:"/maroowell_route", aliases:["/maroowell_route","/maroowell_route.html"], requireRoleLevel:60, desc:"라우트 단가 / 주소 / 원청 관리" },
@@ -32,7 +31,6 @@
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   function normalizePath(path) {
@@ -50,11 +48,9 @@
   function pathVariants(path) {
     const value = normalizePath(path);
     const set = new Set([value]);
-    if (value === "/") {
-      set.add("/index"); set.add("/index.html");
-    } else if (value === "/index" || value === "/index.html") {
-      set.add("/"); set.add("/index"); set.add("/index.html");
-    } else if (value.endsWith(".html")) set.add(value.slice(0, -5));
+    if (value === "/") { set.add("/index"); set.add("/index.html"); }
+    else if (value === "/index" || value === "/index.html") { set.add("/"); set.add("/index"); set.add("/index.html"); }
+    else if (value.endsWith(".html")) set.add(value.slice(0, -5));
     else set.add(value + ".html");
     return [...set];
   }
@@ -68,7 +64,11 @@
   }
 
   const findCurrentPage = () => PAGES.find(isCurrentPage) || null;
-  const defaultAccess = () => ({ user_id:"", email:"", is_maroowell:false, is_admin:false, max_role_level:0, is_dragon_car_admin:false, can_clhi:false, signed_in:false, approval_status:"pending", app_only:false });
+  const defaultAccess = () => ({
+    user_id:"", email:"", is_maroowell:false, is_admin:false, max_role_level:0,
+    is_dragon_car_admin:false, can_clhi:false, signed_in:false,
+    approval_status:"pending", app_only:false
+  });
   const isSuper = access => access?.is_maroowell === true && access?.is_admin === true && Number(access?.max_role_level || 0) >= 90;
 
   function canAccessPage(page, access) {
@@ -165,54 +165,6 @@
     return sessionExpiry >= localExpiry ? session : local;
   }
 
-  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400) {
-    const projectRef = getSupabaseProjectRef(supabaseUrl);
-    if (!projectRef || readStoredSession(supabaseUrl)) return !!readStoredSession(supabaseUrl);
-    if (!("BroadcastChannel" in window)) return false;
-    const channelName = "mw-auth-bridge:" + projectRef;
-    const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const requestId = tabId + ":" + Date.now().toString(36);
-    let channel = null;
-    const base = "sb-" + projectRef + "-auth-token";
-    const matchesKey = key => !!key && (key === base || key.startsWith(base + ".") || key.startsWith(base + "-code-verifier"));
-    const writeEntries = entries => {
-      try {
-        for (const row of entries || []) {
-          if (!row || !matchesKey(row.key)) continue;
-          if (row.value == null) {
-            sessionStorage.removeItem(row.key);
-            localStorage.removeItem(row.key);
-          } else {
-            sessionStorage.setItem(row.key, row.value);
-            localStorage.setItem(row.key, row.value);
-          }
-        }
-      } catch {}
-    };
-    return await new Promise(resolve => {
-      let finished = false;
-      const finish = value => {
-        if (finished) return;
-        finished = true;
-        clearTimeout(timer);
-        try { channel?.close(); } catch {}
-        resolve(!!value);
-      };
-      const timer = setTimeout(() => finish(!!readStoredSession(supabaseUrl)), Math.max(300, Number(timeoutMs) || 1400));
-      try {
-        channel = new BroadcastChannel(channelName);
-        channel.addEventListener("message", event => {
-          const msg = event.data || {};
-          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
-          if (msg.type !== "MW_SESSION_RESPONSE" || msg.requestId !== requestId) return;
-          writeEntries(msg.entries);
-          finish(!!readStoredSession(supabaseUrl));
-        });
-        channel.postMessage({ type:"MW_SESSION_REQUEST", projectRef, requestId, fromTabId:tabId });
-      } catch { finish(false); }
-    });
-  }
-
   function decodeJwtPayload(token) {
     try {
       const part = String(token || "").split(".")[1];
@@ -223,17 +175,95 @@
     } catch { return null; }
   }
 
+  function isSessionFresh(session, skewSeconds = 45) {
+    const token = String(session?.access_token || "");
+    if (!token) return false;
+    const jwt = decodeJwtPayload(token) || {};
+    const exp = Number(session?.expires_at || jwt.exp || 0);
+    if (!exp) return true;
+    return exp > (Date.now() / 1000) + Math.max(0, Number(skewSeconds) || 0);
+  }
+
+  function sessionEmail(session) {
+    const jwt = decodeJwtPayload(session?.access_token || "") || {};
+    return String(session?.user?.email || jwt.email || "");
+  }
+
+  async function requestSessionCopy(supabaseUrl, timeoutMs = 1600, force = false) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef) return false;
+    const existing = readStoredSession(supabaseUrl);
+    if (!force && isSessionFresh(existing)) return true;
+    if (!("BroadcastChannel" in window)) return false;
+
+    const channelName = "mw-auth-bridge:" + projectRef;
+    const tabId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const requestId = tabId + ":" + Date.now().toString(36);
+    const base = "sb-" + projectRef + "-auth-token";
+    const matchesKey = key => !!key && (key === base || key.startsWith(base + ".") || key.startsWith(base + "-code-verifier"));
+    let channel = null;
+
+    const writeEntries = entries => {
+      try {
+        for (const row of entries || []) {
+          if (!row || !matchesKey(row.key)) continue;
+          for (const storage of [window.sessionStorage, window.localStorage]) {
+            if (row.value == null) storage.removeItem(row.key);
+            else storage.setItem(row.key, row.value);
+          }
+        }
+      } catch {}
+    };
+
+    return await new Promise(resolve => {
+      let finished = false;
+      const finish = value => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        try { channel?.close(); } catch {}
+        resolve(!!value);
+      };
+      const timer = setTimeout(() => finish(isSessionFresh(readStoredSession(supabaseUrl), 5)), Math.max(400, Number(timeoutMs) || 1600));
+      try {
+        channel = new BroadcastChannel(channelName);
+        channel.addEventListener("message", event => {
+          const msg = event.data || {};
+          if (msg.projectRef !== projectRef || msg.fromTabId === tabId) return;
+          if (msg.type !== "MW_SESSION_RESPONSE" || msg.requestId !== requestId) return;
+          writeEntries(msg.entries);
+          finish(isSessionFresh(readStoredSession(supabaseUrl), 5));
+        });
+        channel.postMessage({ type:"MW_SESSION_REQUEST", projectRef, requestId, fromTabId:tabId, force:!!force });
+      } catch { finish(false); }
+    });
+  }
+
   async function supabaseJson(path, { token, method = "GET", body, object = false } = {}) {
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const url = String(SUPABASE_URL || "").replace(/\/+$/, "") + path;
-    const headers = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, Accept: object ? "application/vnd.pgrst.object+json" : "application/json" };
+    const headers = {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      Accept: object ? "application/vnd.pgrst.object+json" : "application/json"
+    };
     if (body !== undefined) headers["Content-Type"] = "application/json";
-    const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store"
+    });
     const text = await res.text();
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
-      try { const parsed = text ? JSON.parse(text) : null; message = parsed?.message || parsed?.error || parsed?.details || message; } catch {}
-      throw new Error(message);
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        message = parsed?.message || parsed?.error || parsed?.details || message;
+      } catch {}
+      const error = new Error(message);
+      error.status = res.status;
+      throw error;
     }
     if (!text) return null;
     try { return JSON.parse(text); } catch { return null; }
@@ -243,13 +273,24 @@
     const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
     const out = defaultAccess();
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || typeof window.fetch !== "function") return out;
+
     let session = readStoredSession(SUPABASE_URL);
-    if (!session) {
-      await requestSessionCopy(SUPABASE_URL, 1400);
+    if (!isSessionFresh(session)) {
+      await requestSessionCopy(SUPABASE_URL, 1800, true);
       session = readStoredSession(SUPABASE_URL);
     }
+
     const accessToken = String(session?.access_token || "");
     if (!accessToken) return out;
+    if (!isSessionFresh(session, 5)) {
+      const email = sessionEmail(session);
+      const error = new Error(email
+        ? `로그인 세션 갱신이 지연되고 있습니다. (${email}) 잠시 후 다시 확인해주세요.`
+        : "로그인 세션 갱신이 지연되고 있습니다. 잠시 후 다시 확인해주세요.");
+      error.status = 401;
+      throw error;
+    }
+
     const jwt = decodeJwtPayload(accessToken) || {};
     const uid = String(session?.user?.id || jwt.sub || "");
     if (!uid) return out;
@@ -282,12 +323,16 @@
 
   async function loadAccess() {
     let lastError = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         return await loadAccessOnce();
       } catch (error) {
         lastError = error;
-        if (attempt < 3) await wait(250 * (attempt + 1));
+        if (Number(error?.status || 0) === 401) {
+          const { SUPABASE_URL } = window.MARUWELL_CONFIG || {};
+          if (SUPABASE_URL) await requestSessionCopy(SUPABASE_URL, 1800, true);
+        }
+        if (attempt < 4) await wait(350 * (attempt + 1));
       }
     }
     throw lastError || new Error("권한 정보를 확인하지 못했습니다.");
@@ -336,12 +381,14 @@
     document.body.appendChild(backdrop); document.body.appendChild(panel);
     const open = () => { backdrop.classList.add("open"); panel.classList.add("open"); };
     const close = () => { backdrop.classList.remove("open"); panel.classList.remove("open"); };
-    backdrop.addEventListener("click", close); panel.querySelector(".mw-board-close")?.addEventListener("click", close);
+    backdrop.addEventListener("click", close);
+    panel.querySelector(".mw-board-close")?.addEventListener("click", close);
     const toggle = document.getElementById("mwBoardMenuToggle");
     if (toggle) toggle.addEventListener("click", event => { event.preventDefault(); open(); });
   }
 
   async function init() {
+    console.info("[board-menu] build", BUILD);
     const current = findCurrentPage();
     try {
       const access = await loadAccess();

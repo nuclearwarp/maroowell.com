@@ -1,0 +1,76 @@
+name: Publish v1.1.7 APK to public download path
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v117-from-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download and verify signed v1.1.7 artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-1ba0-8206-b66d-4ebad4efd0b1/raw?se=2026-08-22T16%3A01%3A48Z&sp=r&sv=2026-02-06&sr=b&scid=5d09173e-7d5f-5ebf-a698-dc4a7c45a0c7&skoid=3e273c3d-5ea1-4088-9e18-79685531b184&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-22T01%3A26%3A13Z&ske=2026-08-23T01%3A26%3A13Z&sks=b&skv=2026-02-06&sig=x8EMV1dVmR8areDLxQKvfTYqwR0SFPfZxG337vfzLnM%3D'
+          curl -fL --retry 3 --retry-all-errors "$URL" -o /tmp/v117.zip
+          rm -rf /tmp/v117
+          mkdir -p /tmp/v117
+          unzip -q /tmp/v117.zip -d /tmp/v117
+          test -f /tmp/v117/Maroowell-1.1.7.apk
+          test -f /tmp/v117/maroowell-latest.apk
+          EXPECTED_SHA='5da212eee2374fcdd69cc425a335898d4dbe0359b53ded573bdb8ff111e12347'
+          EXPECTED_SIZE='7991918'
+          for APK in /tmp/v117/Maroowell-1.1.7.apk /tmp/v117/maroowell-latest.apk; do
+            test "$(head -c 2 "$APK")" = 'PK'
+            test "$(stat -c%s "$APK")" = "$EXPECTED_SIZE"
+            test "$(sha256sum "$APK" | awk '{print $1}')" = "$EXPECTED_SHA"
+          done
+
+      - name: Install APK into served public directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/apk
+          cp /tmp/v117/Maroowell-1.1.7.apk public/apk/Maroowell-1.1.7.apk
+          cp /tmp/v117/maroowell-latest.apk public/apk/maroowell-latest.apk
+          cat > public/app_version.json <<'JSON'
+          {
+            "versionCode": 19,
+            "versionName": "1.1.7",
+            "updatedAt": "2026-08-23",
+            "fileName": "Maroowell-1.1.7.apk",
+            "downloadUrl": "https://maroowell.com/apk/Maroowell-1.1.7.apk",
+            "changes": [
+              "우편번호 검색 화면을 앱에 맞게 정리하고 웹 검색 기능은 그대로 유지",
+              "라우트 편집을 기존 웹 모바일 화면 기반으로 변경",
+              "쿠팡 캠프 조회에 목록/지도 전환 기능 추가",
+              "운영 도구 4종을 팀장 권한 이상으로 제한",
+              "프백 현황과 클렌징 히스토리를 웹 기준 기능과 표시 방식에 맞게 개선"
+            ]
+          }
+          JSON
+          test "$(sha256sum public/apk/Maroowell-1.1.7.apk | awk '{print $1}')" = '5da212eee2374fcdd69cc425a335898d4dbe0359b53ded573bdb8ff111e12347'
+
+      - name: Commit public v1.1.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/apk/Maroowell-1.1.7.apk public/apk/maroowell-latest.apk public/app_version.json
+          git diff --cached --check
+          git commit -m 'Publish Maroowell Android v1.1.7'
+          git push origin HEAD:main

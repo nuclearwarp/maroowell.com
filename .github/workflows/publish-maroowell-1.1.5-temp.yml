@@ -1,0 +1,56 @@
+name: Publish Maroowell 1.1.5 APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-maroowell-1.1.5-temp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download signed 1.1.5 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p apk
+          curl --fail --location --retry 3 --output apk/Maroowell-1.1.5.apk 'https://release-assets.githubusercontent.com/github-production-release-asset/1336492663/da3dd74f-d6c6-4d9b-9951-5d3e6633d84d?sp=r&sv=2018-11-09&sr=b&spr=https&se=2026-08-22T13%3A07%3A19Z&rscd=attachment%3B+filename%3DMaroowell-1.1.5.apk&rsct=application%2Fvnd.android.package-archive&skoid=96c2d410-5711-43a1-aedd-ab1947aa7ab0&sktid=398a6654-997b-47e9-b12b-9515b896b4de&skt=2026-08-22T12%3A06%3A53Z&ske=2026-08-22T13%3A07%3A19Z&sks=b&skv=2018-11-09&sig=bNEkOQTGe13UPWi7tabKApRQJ%2B89twWLQCAy5ry43x4%3D&jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmVsZWFzZS1hc3NldHMuZ2l0aHVidXNlcmNvbnRlbnQuY29tIiwia2V5Ijoia2V5MSIsImV4cCI6MTc4NzQwMTg5MiwibmJmIjoxNzg3NDAxNTkyLCJwYXRoIjoicmVsZWFzZWFzc2V0cHJvZHVjdGlvbi5ibG9iLmNvcmUud2luZG93cy5uZXQifQ.8gYvI2Iv0SANtG9FGlwnMgRNj9NxzLTDNqt_Oc6CyM0&response-content-disposition=attachment%3B%20filename%3DMaroowell-1.1.5.apk&response-content-type=application%2Fvnd.android.package-archive'
+          test "$(head -c 2 apk/Maroowell-1.1.5.apk)" = 'PK'
+          test "$(stat -c%s apk/Maroowell-1.1.5.apk)" -gt 1000000
+          sha256sum apk/Maroowell-1.1.5.apk
+
+      - name: Update public app version manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('public/app_version.json')
+          d = json.loads(p.read_text())
+          d['versionCode'] = 17
+          d['versionName'] = '1.1.5'
+          d['updatedAt'] = '2026-08-22'
+          d['fileName'] = 'Maroowell-1.1.5.apk'
+          d['downloadUrl'] = 'https://maroowell.com/apk/Maroowell-1.1.5.apk'
+          p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + '\n')
+          PY
+
+      - name: Commit public APK and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add apk/Maroowell-1.1.5.apk public/app_version.json
+          git commit -m 'Publish Maroowell Android v1.1.5'
+          git pull --rebase origin main
+          git push origin main

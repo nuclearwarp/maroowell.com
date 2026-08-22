@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  patch-audit-purge:
+  fix:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Harden web permission guard and bust browser cache
+      - name: Harden web permission guard and bust cached guard URL
         shell: bash
         run: |
           set -euo pipefail
@@ -37,24 +37,32 @@ jobs:
 
           board = Path('public/board-menu.js')
           s = board.read_text(encoding='utf-8')
-          original = s
+          version = '20260822-auth-guard-v2'
 
-          marker = '  const BOARD_MENU_BUILD = "20260822-auth-guard-v2";\n'
+          anchor = '  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));\n'
+          marker = f'  const BOARD_MENU_BUILD = "{version}";\n'
           if marker not in s:
-              anchor = '  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));\n'
               if anchor not in s:
-                  raise SystemExit('board-menu wait anchor not found')
+                  raise SystemExit('wait anchor not found')
               s = s.replace(anchor, anchor + marker, 1)
 
-          old = '  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400) {\n    const projectRef = getSupabaseProjectRef(supabaseUrl);\n    if (!projectRef || readStoredSession(supabaseUrl)) return !!readStoredSession(supabaseUrl);\n'
-          new = '  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400, force = false) {\n    const projectRef = getSupabaseProjectRef(supabaseUrl);\n    if (!projectRef) return false;\n    const existing = readStoredSession(supabaseUrl);\n    if (!force && isSessionFresh(existing)) return true;\n'
+          old = '''  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef || readStoredSession(supabaseUrl)) return !!readStoredSession(supabaseUrl);
+'''
+          new = '''  async function requestSessionCopy(supabaseUrl, timeoutMs = 1400, force = false) {
+    const projectRef = getSupabaseProjectRef(supabaseUrl);
+    if (!projectRef) return false;
+    const existing = readStoredSession(supabaseUrl);
+    if (!force && isSessionFresh(existing)) return true;
+'''
           if old in s:
               s = s.replace(old, new, 1)
-          elif 'async function requestSessionCopy(supabaseUrl, timeoutMs = 1400, force = false)' not in s:
+          elif 'requestSessionCopy(supabaseUrl, timeoutMs = 1400, force = false)' not in s:
               raise SystemExit('requestSessionCopy target not found')
 
           helper_anchor = '  async function supabaseJson(path, { token, method = "GET", body, object = false } = {}) {\n'
-          helper = r'''  function isSessionFresh(session, skewSeconds = 45) {
+          helper = '''  function isSessionFresh(session, skewSeconds = 45) {
     const token = String(session?.access_token || "");
     if (!token) return false;
     const jwt = decodeJwtPayload(token) || {};
@@ -70,28 +78,27 @@ jobs:
   }
 
 '''
-          if helper.strip() not in s:
+          if 'function isSessionFresh(' not in s:
               if helper_anchor not in s:
                   raise SystemExit('supabaseJson anchor not found')
               s = s.replace(helper_anchor, helper + helper_anchor, 1)
 
-          old_error = '''      throw new Error(message);
+          target = '''      throw new Error(message);
+    }
+    if (!text) return null;
 '''
-          new_error = '''      const error = new Error(message);
+          repl = '''      const error = new Error(message);
       error.status = res.status;
       throw error;
+    }
+    if (!text) return null;
 '''
-          # Only the REST helper should be converted; replace the first occurrence after supabaseJson.
-          supa_at = s.find(helper_anchor)
-          if supa_at < 0:
-              raise SystemExit('supabaseJson missing after helper insert')
-          err_at = s.find(old_error, supa_at)
-          if err_at >= 0:
-              s = s[:err_at] + new_error + s[err_at + len(old_error):]
-          elif 'error.status = res.status;' not in s[supa_at:supa_at+2500]:
-              raise SystemExit('supabaseJson error target not found')
+          if target in s:
+              s = s.replace(target, repl, 1)
+          elif 'error.status = res.status;' not in s:
+              raise SystemExit('status-aware REST error target not found')
 
-          old_session = '''    let session = readStoredSession(SUPABASE_URL);
+          old = '''    let session = readStoredSession(SUPABASE_URL);
     if (!session) {
       await requestSessionCopy(SUPABASE_URL, 1400);
       session = readStoredSession(SUPABASE_URL);
@@ -99,7 +106,7 @@ jobs:
     const accessToken = String(session?.access_token || "");
     if (!accessToken) return out;
 '''
-          new_session = '''    let session = readStoredSession(SUPABASE_URL);
+          new = '''    let session = readStoredSession(SUPABASE_URL);
     if (!isSessionFresh(session)) {
       await requestSessionCopy(SUPABASE_URL, 1800, true);
       session = readStoredSession(SUPABASE_URL);
@@ -115,12 +122,12 @@ jobs:
       throw error;
     }
 '''
-          if old_session in s:
-              s = s.replace(old_session, new_session, 1)
+          if old in s:
+              s = s.replace(old, new, 1)
           elif '로그인 세션 갱신이 지연되고 있습니다.' not in s:
-              raise SystemExit('loadAccessOnce session target not found')
+              raise SystemExit('loadAccessOnce session block not found')
 
-          old_retry = '''  async function loadAccess() {
+          old = '''  async function loadAccess() {
     let lastError = null;
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
@@ -133,7 +140,7 @@ jobs:
     throw lastError || new Error("권한 정보를 확인하지 못했습니다.");
   }
 '''
-          new_retry = '''  async function loadAccess() {
+          new = '''  async function loadAccess() {
     let lastError = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       try {
@@ -150,39 +157,31 @@ jobs:
     throw lastError || new Error("권한 정보를 확인하지 못했습니다.");
   }
 '''
-          if old_retry in s:
-              s = s.replace(old_retry, new_retry, 1)
-          elif 'for (let attempt = 0; attempt < 5; attempt++)' not in s:
-              raise SystemExit('loadAccess retry target not found')
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif 'attempt < 5' not in s:
+              raise SystemExit('loadAccess retry block not found')
 
-          init_anchor = '''  async function init() {
+          init_old = '''  async function init() {
     const current = findCurrentPage();
 '''
           init_new = '''  async function init() {
     console.info("[board-menu] build", BOARD_MENU_BUILD);
     const current = findCurrentPage();
 '''
-          if init_anchor in s:
-              s = s.replace(init_anchor, init_new, 1)
+          if init_old in s:
+              s = s.replace(init_old, init_new, 1)
 
-          if s == original:
-              print('board-menu.js already hardened')
-          else:
-              board.write_text(s, encoding='utf-8')
-              print('patched public/board-menu.js')
+          board.write_text(s, encoding='utf-8')
 
-          # Give every page a new browser URL for the guard so an old cached JS file cannot survive this deploy.
-          version = '20260822-auth-guard-v2'
-          changed = []
+          # Cache-bust every page that loads the shared guard.
           pattern = re.compile(r'(<script\s+src=["\'])/board-menu\.js(?:\?[^"\']*)?(["\']\s*>\s*</script>)', re.I)
-          skip_prefixes = ('.git/', '.github/')
+          changed = []
           for p in Path('.').rglob('*'):
               if not p.is_file() or p == board:
                   continue
               posix = p.as_posix()
-              if posix.startswith(skip_prefixes):
-                  continue
-              if p.suffix.lower() not in {'.html', '.htm', '.js', ''}:
+              if posix.startswith('.git/') or posix.startswith('.github/'):
                   continue
               try:
                   text = p.read_text(encoding='utf-8')
@@ -194,37 +193,33 @@ jobs:
               if updated != text:
                   p.write_text(updated, encoding='utf-8')
                   changed.append(posix)
-          print('cache-busted references:', len(changed))
-          for item in changed:
-              print(' -', item)
 
-          # Add a small deploy marker for public verification without exposing any secret.
           diag = Path('.diagnostics/web-auth-fix.txt')
           diag.parent.mkdir(parents=True, exist_ok=True)
           diag.write_text(
-              'build=20260822-auth-guard-v2\n'
-              'reason=prevent transient-or-stale Supabase session failures from becoming false access-denied decisions\n'
-              'cache_bust=/board-menu.js?v=20260822-auth-guard-v2\n',
+              f'build={version}\n'
+              'reason=stale-or-transient auth must not become false permission denial\n'
+              f'cache_bust=/board-menu.js?v={version}\n'
+              f'cache_busted_files={len(changed)}\n',
               encoding='utf-8'
           )
+          print('cache-busted files:', len(changed))
           PY
           git diff --check
 
-      - name: Commit web fix and remove one-shot workflow
+      - name: Commit web fix
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-web-auth-guard-temp.yml
-          git add public .diagnostics *.html 2>/dev/null || true
-          # Include extensionless root/public pages that reference board-menu.js.
-          git add -u
+          git add -A
           git commit -m "Fix false web access denial and bust auth guard cache"
           git pull --rebase origin main
           git push origin main
 
-      - name: Inspect Cloudflare routes, audit routeinfo worker, and purge zone cache
+      - name: Audit Cloudflare edge and purge stale web cache
         id: cloudflare
         continue-on-error: true
         shell: bash
@@ -232,110 +227,71 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: '0f644373a9db40f2b36e4ffece348c46'
         run: |
-          set -euo pipefail
-          test -n "${CLOUDFLARE_API_TOKEN:-}"
-          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H 'Content-Type: application/json')
-
-          zone_json=$(curl -fsS "${auth[@]}" 'https://api.cloudflare.com/client/v4/zones?name=maroowell.com&status=active')
-          zone_id=$(python -c 'import json,sys; x=json.load(sys.stdin); print(x["result"][0]["id"])' <<<"$zone_json")
-          test -n "$zone_id"
-
+          set +e
           mkdir -p .diagnostics
-          routes_json=$(curl -fsS "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes")
-          dns_json=$(curl -fsS "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=maroowell.com")
-
-          # Pull the deployed routeinfo Worker only into the ephemeral runner, then record boolean audit facts.
-          routeinfo_fetch=0
-          if curl -fsS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/routeinfo" \
-            -o /tmp/routeinfo-worker; then
-            routeinfo_fetch=1
+          : > .diagnostics/web-auth-cloudflare.txt
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo 'cloudflare_token_present=false' >> .diagnostics/web-auth-cloudflare.txt
+            exit 0
           fi
-
-          has_auth_header=0; has_mw_access=0; has_no_store=0; has_cors=0; has_service_role_ref=0
-          if [ "$routeinfo_fetch" = 1 ]; then
-            grep -a -qi 'Authorization' /tmp/routeinfo-worker && has_auth_header=1 || true
-            grep -a -Eqi 'mw_my_access|is_maroowell|user_access' /tmp/routeinfo-worker && has_mw_access=1 || true
-            grep -a -Eqi 'Cache-Control.{0,40}(no-store|private)|no-store.{0,40}Cache-Control' /tmp/routeinfo-worker && has_no_store=1 || true
-            grep -a -qi 'Access-Control-Allow-Origin' /tmp/routeinfo-worker && has_cors=1 || true
-            grep -a -Eqi 'SERVICE_ROLE|service_role' /tmp/routeinfo-worker && has_service_role_ref=1 || true
-          fi
-
-          purge_json=$(curl -fsS -X POST "${auth[@]}" \
-            "https://api.cloudflare.com/client/v4/zones/${zone_id}/purge_cache" \
-            --data '{"purge_everything":true}')
-          purge_ok=$(python -c 'import json,sys; print(str(bool(json.load(sys.stdin).get("success"))).lower())' <<<"$purge_json")
-
-          python - "$routes_json" "$dns_json" "$purge_ok" "$routeinfo_fetch" "$has_auth_header" "$has_mw_access" "$has_no_store" "$has_cors" "$has_service_role_ref" <<'PY'
-          import json, sys
-          routes = json.loads(sys.argv[1]).get('result') or []
-          dns = json.loads(sys.argv[2]).get('result') or []
-          out = []
-          out.append('cloudflare_zone=maroowell.com')
-          out.append('purge_success=' + sys.argv[3])
-          out.append('worker_routes_count=' + str(len(routes)))
-          for r in routes:
-              pattern = str(r.get('pattern') or '')
-              script = str(r.get('script') or r.get('script_name') or '')
-              out.append(f'worker_route={pattern} -> {script}')
-          if dns:
-              row = dns[0]
-              out.append('apex_dns_type=' + str(row.get('type') or ''))
-              out.append('apex_dns_proxied=' + str(bool(row.get('proxied'))).lower())
-              out.append('apex_dns_target=' + str(row.get('content') or ''))
-          out.append('routeinfo_worker_fetch=' + sys.argv[4])
-          out.append('routeinfo_has_authorization_logic=' + sys.argv[5])
-          out.append('routeinfo_has_maroowell_access_logic=' + sys.argv[6])
-          out.append('routeinfo_has_private_cache_control=' + sys.argv[7])
-          out.append('routeinfo_has_cors_logic=' + sys.argv[8])
-          out.append('routeinfo_mentions_service_role_binding=' + sys.argv[9])
-          print('\n'.join(out))
-          open('.diagnostics/web-auth-cloudflare.txt','w',encoding='utf-8').write('\n'.join(out)+'\n')
+          echo 'cloudflare_token_present=true' >> .diagnostics/web-auth-cloudflare.txt
+          H1="Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+          zone_json=$(curl -sS -H "$H1" 'https://api.cloudflare.com/client/v4/zones?name=maroowell.com&status=active')
+          zone_id=$(printf '%s' "$zone_json" | python -c 'import json,sys; x=json.load(sys.stdin); r=x.get("result") or []; print(r[0].get("id","") if r else "")' 2>/dev/null)
+          echo "zone_found=$([ -n "$zone_id" ] && echo true || echo false)" >> .diagnostics/web-auth-cloudflare.txt
+          if [ -n "$zone_id" ]; then
+            routes_json=$(curl -sS -H "$H1" "https://api.cloudflare.com/client/v4/zones/${zone_id}/workers/routes")
+            python - "$routes_json" >> .diagnostics/web-auth-cloudflare.txt <<'PY'
+          import json,sys
+          try: x=json.loads(sys.argv[1]); rows=x.get('result') or []
+          except Exception: rows=[]
+          print('worker_routes_count=' + str(len(rows)))
+          for r in rows:
+              print('worker_route=' + str(r.get('pattern') or '') + ' -> ' + str(r.get('script') or r.get('script_name') or ''))
           PY
+            purge=$(curl -sS -X POST -H "$H1" -H 'Content-Type: application/json' "https://api.cloudflare.com/client/v4/zones/${zone_id}/purge_cache" --data '{"purge_everything":true}')
+            purge_ok=$(printf '%s' "$purge" | python -c 'import json,sys; print(str(bool(json.load(sys.stdin).get("success"))).lower())' 2>/dev/null)
+            echo "purge_success=${purge_ok:-false}" >> .diagnostics/web-auth-cloudflare.txt
+          fi
 
-      - name: Verify deployed web guard and routeinfo behavior
+          # Inspect the deployed routeinfo Worker without ever printing its source/secrets.
+          code=$(curl -sS -o /tmp/routeinfo-worker -w '%{http_code}' -H "$H1" "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/workers/scripts/routeinfo")
+          echo "routeinfo_script_fetch_http=${code}" >> .diagnostics/web-auth-cloudflare.txt
+          if [ "$code" = 200 ]; then
+            grep -a -qi 'Authorization' /tmp/routeinfo-worker; echo "routeinfo_has_authorization_logic=$([ $? -eq 0 ] && echo true || echo false)" >> .diagnostics/web-auth-cloudflare.txt
+            grep -a -Eqi 'mw_my_access|is_maroowell|user_access' /tmp/routeinfo-worker; echo "routeinfo_has_maroowell_access_logic=$([ $? -eq 0 ] && echo true || echo false)" >> .diagnostics/web-auth-cloudflare.txt
+            grep -a -qi 'Access-Control-Allow-Origin' /tmp/routeinfo-worker; echo "routeinfo_has_cors_logic=$([ $? -eq 0 ] && echo true || echo false)" >> .diagnostics/web-auth-cloudflare.txt
+            grep -a -Eqi 'Cache-Control.{0,50}(no-store|private)|no-store.{0,50}Cache-Control' /tmp/routeinfo-worker; echo "routeinfo_has_private_cache_control=$([ $? -eq 0 ] && echo true || echo false)" >> .diagnostics/web-auth-cloudflare.txt
+          fi
+
+          options_code=$(curl -sS -o /tmp/routeinfo-options -w '%{http_code}' --max-time 10 -X OPTIONS 'https://routeinfo.brain-0f6.workers.dev/route-info/routes' -H 'Origin: https://maroowell.com' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type')
+          unauth_code=$(curl -sS -o /tmp/routeinfo-unauth -w '%{http_code}' --max-time 10 -X POST 'https://routeinfo.brain-0f6.workers.dev/route-info/routes' -H 'Origin: https://maroowell.com' -H 'Content-Type: application/json' --data '{}')
+          health_code=$(curl -sS -o /tmp/routeinfo-health -w '%{http_code}' --max-time 10 'https://routeinfo.brain-0f6.workers.dev/health')
+          echo "routeinfo_options_http=${options_code:-000}" >> .diagnostics/web-auth-cloudflare.txt
+          echo "routeinfo_unauth_http=${unauth_code:-000}" >> .diagnostics/web-auth-cloudflare.txt
+          echo "routeinfo_health_http=${health_code:-000}" >> .diagnostics/web-auth-cloudflare.txt
+          exit 0
+
+      - name: Verify live web guard
         id: verify
         continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set +e
+          mkdir -p .diagnostics
           ok=0
           for i in $(seq 1 24); do
-            if curl -fsS --max-time 10 "https://maroowell.com/board-menu.js?mwfix=20260822-auth-guard-v2-${GITHUB_RUN_ID}-${i}" -o /tmp/board-menu-live.js; then
-              if grep -q '20260822-auth-guard-v2' /tmp/board-menu-live.js && grep -q 'error.status = res.status' /tmp/board-menu-live.js; then
-                ok=1
-                break
-              fi
+            curl -fsS --max-time 10 "https://maroowell.com/board-menu.js?mwfix=20260822-auth-guard-v2-${GITHUB_RUN_ID}-${i}" -o /tmp/board-menu-live.js
+            if [ $? -eq 0 ] && grep -q '20260822-auth-guard-v2' /tmp/board-menu-live.js && grep -q 'error.status = res.status' /tmp/board-menu-live.js; then
+              ok=1
+              break
             fi
             sleep 5
           done
-          echo "web_guard_live=$ok" | tee .diagnostics/web-auth-live.txt
+          echo "web_guard_live=${ok}" > .diagnostics/web-auth-live.txt
+          exit $([ "$ok" = 1 ] && echo 0 || echo 1)
 
-          options_code=$(curl -sS -o /tmp/routeinfo-options.txt -w '%{http_code}' --max-time 10 \
-            -X OPTIONS 'https://routeinfo.brain-0f6.workers.dev/route-info/routes' \
-            -H 'Origin: https://maroowell.com' \
-            -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: authorization,content-type' || true)
-          unauth_code=$(curl -sS -o /tmp/routeinfo-unauth.txt -w '%{http_code}' --max-time 10 \
-            -X POST 'https://routeinfo.brain-0f6.workers.dev/route-info/routes' \
-            -H 'Origin: https://maroowell.com' \
-            -H 'Content-Type: application/json' \
-            --data '{}' || true)
-          health_code=$(curl -sS -o /tmp/routeinfo-health.txt -w '%{http_code}' --max-time 10 \
-            'https://routeinfo.brain-0f6.workers.dev/health' || true)
-          {
-            echo "routeinfo_options_http=${options_code:-000}"
-            echo "routeinfo_unauth_http=${unauth_code:-000}"
-            echo "routeinfo_health_http=${health_code:-000}"
-          } | tee -a .diagnostics/web-auth-live.txt
-
-          test "$ok" = 1
-          case "${unauth_code:-000}" in
-            401|403) : ;;
-            *) echo "WARNING: routeinfo unauthenticated POST did not return 401/403" ;;
-          esac
-
-      - name: Record Cloudflare audit results
+      - name: Record edge verification
         if: always()
         shell: bash
         env:
@@ -343,18 +299,18 @@ jobs:
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
         run: |
           set -euo pipefail
-          {
-            echo "cloudflare_step=${CF_OUTCOME}"
-            echo "verify_step=${VERIFY_OUTCOME}"
-            echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } >> .diagnostics/web-auth-live.txt
+          echo "cloudflare_step=${CF_OUTCOME}" >> .diagnostics/web-auth-live.txt
+          echo "verify_step=${VERIFY_OUTCOME}" >> .diagnostics/web-auth-live.txt
+          echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> .diagnostics/web-auth-live.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main
-          git add .diagnostics/web-auth-cloudflare.txt .diagnostics/web-auth-live.txt 2>/dev/null || true
+          git add .diagnostics/web-auth-cloudflare.txt .diagnostics/web-auth-live.txt
           git commit -m "Record web auth Cloudflare verification" || exit 0
           git push origin main
 
-      - name: Fail if live web guard verification failed
+      - name: Fail if live guard did not deploy
         if: steps.verify.outcome != 'success'
         run: exit 1
+
+# retrigger 2026-08-22T18:40+09:00

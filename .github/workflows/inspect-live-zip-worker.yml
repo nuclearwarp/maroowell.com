@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   inspect:
@@ -18,13 +18,16 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Inspect Cloudflare account and live Worker
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          mkdir -p /tmp/cf-inspect
+          mkdir -p /tmp/cf-inspect .diagnostics
 
           npx --yes wrangler@4 whoami --json > /tmp/cf-inspect/whoami.json
           npx --yes wrangler@4 versions list --name zip-api --json > /tmp/cf-inspect/zip-api-versions.json || true
@@ -47,24 +50,15 @@ jobs:
           found_source=0
           while IFS= read -r account_id; do
             [ -n "$account_id" ] || continue
-            list_out="/tmp/cf-inspect/scripts-${account_id}.json"
-            list_code=$(curl -sS -o "$list_out" -w '%{http_code}' \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts" || true)
-            echo "account=${account_id} list_http=${list_code}" >> /tmp/cf-inspect/download-summary.txt
-
             for script_name in zip-api zip maroowell-zip; do
               out="/tmp/cf-inspect/${script_name}-${account_id}.raw"
-              hdr="/tmp/cf-inspect/${script_name}-${account_id}.headers"
-              code=$(curl -sS -D "$hdr" -o "$out" -w '%{http_code}' \
+              code=$(curl -sS -o "$out" -w '%{http_code}' \
                 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
                 "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts/${script_name}" || true)
               bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
-              echo "account=${account_id} script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
+              echo "script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
               if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
                 cp "$out" /tmp/cf-inspect/live-zip-worker.raw
-                cp "$hdr" /tmp/cf-inspect/live-zip-worker.headers
-                echo "matched_account=${account_id}" >> /tmp/cf-inspect/download-summary.txt
                 echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
                 found_source=1
                 break 2
@@ -76,13 +70,47 @@ jobs:
             echo 'No downloaded candidate contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
           fi
 
-          # Never include the API token in artifacts.
-          grep -RIl "$CLOUDFLARE_API_TOKEN" /tmp/cf-inspect | xargs -r rm -f
+          node <<'NODE'
+          const fs = require('fs');
+          const summary = fs.readFileSync('/tmp/cf-inspect/download-summary.txt','utf8');
+          let out = '# Live zip Worker diagnostic\n\n```text\n' + summary.replace(/[0-9a-f]{32}/gi,'[account-id-redacted]') + '```\n';
+          const p='/tmp/cf-inspect/live-zip-worker.raw';
+          if (fs.existsSync(p)) {
+            const text=fs.readFileSync(p,'utf8');
+            out += `\nsource_sha256: ${require('crypto').createHash('sha256').update(text).digest('hex')}\n`;
+            const lines=text.split(/\r?\n/);
+            const terms=['unclassifiedUnitCount','unclassified_unit_count','residentialUnitCount','deliveryUnitCount','householdCount','kapt','KAPT'];
+            const hits=[];
+            for(let i=0;i<lines.length;i++) if(terms.some(t=>lines[i].includes(t))) hits.push(i);
+            const wanted=new Set();
+            for(const i of hits) for(let j=Math.max(0,i-12);j<=Math.min(lines.length-1,i+20);j++) wanted.add(j);
+            let last=-2;
+            out+='\n## Relevant source excerpts\n\n```js\n';
+            for(const i of [...wanted].sort((a,b)=>a-b)) {
+              if(i>last+1) out+='\n// ...\n';
+              let line=lines[i]
+                .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/g,'$1[redacted]')
+                .replace(/(service[_-]?role[^\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{20,}/ig,'$1[redacted]')
+                .replace(/([A-Za-z0-9_-]{40,})/g,'[long-token-redacted]');
+              out+=String(i+1).padStart(5,' ')+' | '+line+'\n';
+              last=i;
+            }
+            out+='```\n';
+          }
+          fs.writeFileSync('.diagnostics/live-zip-worker-summary.md',out);
+          NODE
 
-      - name: Upload inspection artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: live-zip-worker-inspection
-          path: /tmp/cf-inspect
-          if-no-files-found: error
-          retention-days: 1
+          if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/live-zip-worker-summary.md; then
+            echo 'Token leakage guard failed' >&2
+            exit 1
+          fi
+
+      - name: Commit sanitized diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/live-zip-worker-summary.md
+          git commit -m 'Record live zip worker diagnostic'
+          git push origin HEAD:main

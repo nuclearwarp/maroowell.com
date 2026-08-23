@@ -31,27 +31,16 @@ jobs:
           set +x
           mkdir -p /tmp/cf-inspect .diagnostics
 
-          raw_code=$(curl -sS -D /tmp/cf-inspect/raw.headers -o /tmp/cf-inspect/raw.bin -w '%{http_code}' \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}" || true)
-
           v2_code=$(curl -sS -D /tmp/cf-inspect/v2.headers -o /tmp/cf-inspect/v2.bin -w '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" || true)
 
-          RAW_HTTP="$raw_code" V2_HTTP="$v2_code" node <<'NODE'
+          V2_HTTP="$v2_code" node <<'NODE'
           const fs = require('fs');
           const crypto = require('crypto');
-
-          const scriptName = process.env.CLOUDFLARE_SCRIPT_NAME;
-          const raw = fs.existsSync('/tmp/cf-inspect/raw.bin') ? fs.readFileSync('/tmp/cf-inspect/raw.bin') : Buffer.alloc(0);
-          const v2 = fs.existsSync('/tmp/cf-inspect/v2.bin') ? fs.readFileSync('/tmp/cf-inspect/v2.bin') : Buffer.alloc(0);
-          const rawHeaders = fs.existsSync('/tmp/cf-inspect/raw.headers') ? fs.readFileSync('/tmp/cf-inspect/raw.headers','utf8') : '';
-          const v2Headers = fs.existsSync('/tmp/cf-inspect/v2.headers') ? fs.readFileSync('/tmp/cf-inspect/v2.headers','utf8') : '';
-
-          const rawType = (rawHeaders.match(/^content-type:\s*([^\r\n]+)/im)||[])[1] || '';
-          const v2Type = (v2Headers.match(/^content-type:\s*([^\r\n]+)/im)||[])[1] || '';
-          const candidate = v2.length >= raw.length ? v2 : raw;
+          const candidate = fs.existsSync('/tmp/cf-inspect/v2.bin') ? fs.readFileSync('/tmp/cf-inspect/v2.bin') : Buffer.alloc(0);
+          const headers = fs.existsSync('/tmp/cf-inspect/v2.headers') ? fs.readFileSync('/tmp/cf-inspect/v2.headers','utf8') : '';
+          const contentType = (headers.match(/^content-type:\s*([^\r\n]+)/im)||[])[1] || '';
           const text = candidate.toString('utf8');
 
           function redact(s) {
@@ -63,64 +52,25 @@ jobs:
               .replace(/eyJ[A-Za-z0-9._-]{40,}/g, '[jwt-redacted]');
           }
 
-          const terms = [
-            '/building/stats',
-            'unclassifiedUnitCount', 'unclassified_unit_count',
-            'residentialUnitCount', 'residential_unit_count',
-            'commercialUnitCount', 'commercial_unit_count',
-            'deliveryUnitCount', 'delivery_unit_count',
-            'householdCount', 'household_count',
-            'KAPT', 'kapt', 'household',
-            'elevatorUnitCount', 'elevator_unit_count',
-            'walkupUnitCount', 'walkup_unit_count'
-          ];
+          const startMarker = '// K-APT에서 총세대수가 정상 확인된 단지만 먼저 집계한다.';
+          const endMarker = 'const topContributors';
+          const start = text.indexOf(startMarker);
+          const end0 = start >= 0 ? text.indexOf(endMarker, start) : -1;
+          if (start < 0 || end0 < 0) throw new Error('Target aggregation block not found');
+          const end = Math.min(text.length, end0 + 1200);
+          const target = redact(text.slice(start, end));
 
-          const hits = [];
-          for (const term of terms) {
-            let from = 0;
-            let count = 0;
-            while (count < 8) {
-              const i = text.indexOf(term, from);
-              if (i < 0) break;
-              hits.push({term, i});
-              from = i + Math.max(1, term.length);
-              count++;
-            }
-          }
-          hits.sort((a,b)=>a.i-b.i);
-
-          // Merge nearby excerpts to avoid dumping the whole Worker.
-          const ranges=[];
-          for (const hit of hits) {
-            const start=Math.max(0, hit.i-1400);
-            const end=Math.min(text.length, hit.i+2600);
-            const prev=ranges[ranges.length-1];
-            if (prev && start <= prev.end + 500) prev.end=Math.max(prev.end,end);
-            else ranges.push({start,end});
-          }
-
-          let out = '# Live Cloudflare building Worker diagnostic\n\n';
-          out += `worker: ${scriptName}\n\n`;
+          const sourceVersionMatch = text.match(/const BUILDING_STATS_SOURCE_VERSION\s*=\s*\n?\s*"([^"]+)"/);
+          let out = '# Live Cloudflare building Worker target block\n\n';
+          out += `worker: ${process.env.CLOUDFLARE_SCRIPT_NAME}\n\n`;
           out += '```text\n';
-          out += `raw_http=${process.env.RAW_HTTP || ''} raw_bytes=${raw.length} raw_content_type=${rawType}\n`;
-          out += `v2_http=${process.env.V2_HTTP || ''} v2_bytes=${v2.length} v2_content_type=${v2Type}\n`;
-          out += `selected_bytes=${candidate.length}\n`;
-          out += `contains_building_stats=${text.includes('/building/stats')}\n`;
+          out += `v2_http=${process.env.V2_HTTP || ''}\n`;
+          out += `bytes=${candidate.length}\n`;
+          out += `content_type=${contentType}\n`;
           out += `source_sha256=${crypto.createHash('sha256').update(candidate).digest('hex')}\n`;
-          out += `hit_count=${hits.length} excerpt_ranges=${ranges.length}\n`;
-          out += '```\n';
-
-          if (ranges.length) {
-            out += '\n## Relevant source excerpts\n';
-            for (let n=0;n<ranges.length;n++) {
-              const r=ranges[n];
-              let excerpt=redact(text.slice(r.start,r.end));
-              // Keep artifact compact and text-friendly.
-              excerpt=excerpt.replace(/\u0000/g,'');
-              out += `\n### Excerpt ${n+1} (${r.start}-${r.end})\n\n\`\`\`js\n${excerpt}\n\`\`\`\n`;
-            }
-          }
-
+          out += `source_version=${sourceVersionMatch ? sourceVersionMatch[1] : 'unknown'}\n`;
+          out += `target_start=${start} target_end=${end}\n`;
+          out += '```\n\n## Aggregation block\n\n```js\n' + target + '\n```\n';
           fs.writeFileSync('.diagnostics/live-zip-worker-summary.md', out);
           NODE
 
@@ -140,5 +90,5 @@ jobs:
             echo 'No diagnostic changes'
             exit 0
           fi
-          git commit -m 'Record purple-resonance building worker diagnostic'
+          git commit -m 'Record live KAPT parcel aggregation block'
           git push origin HEAD:main

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>마루웰 PUSH 알림</title>
+  <link rel="icon" href="/favicon.ico?v=2" />
+  <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/board-menu.js" defer></script>
+  <style>
+    :root{--bg:#081120;--panel:#101b2f;--panel2:#0d1728;--line:rgba(255,255,255,.12);--txt:#edf4ff;--muted:#9fb0d0;--blue:#2563eb;--red:#dc2626;--amber:#d97706;--green:#16a34a}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Noto Sans KR",Segoe UI,Roboto,Arial,sans-serif}body{padding-bottom:40px}button,input,textarea,select{font:inherit}
+    .top{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);background:rgba(8,17,32,.96);backdrop-filter:blur(10px)}.top img{width:34px;height:34px}.top h1{font-size:20px;margin:0}.top p{font-size:12px;margin:3px 0 0;color:var(--muted);font-weight:800}.spacer{flex:1}.badge{padding:8px 11px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:900;color:#bfdbfe;background:rgba(255,255,255,.05)}
+    .wrap{max-width:1180px;margin:0 auto;padding:18px}.grid{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(360px,.92fr);gap:16px}@media(max-width:900px){.grid{grid-template-columns:1fr}.wrap{padding:12px}}
+    .card{border:1px solid var(--line);border-radius:20px;background:linear-gradient(180deg,var(--panel),var(--panel2));box-shadow:0 16px 42px rgba(0,0,0,.2);overflow:hidden}.cardHead{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}.cardHead h2{margin:0;font-size:17px}.cardBody{padding:17px}.hint{font-size:12px;color:var(--muted);line-height:1.5}
+    .form{display:grid;gap:14px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:600px){.row{grid-template-columns:1fr}}.field{display:grid;gap:6px}.field label{font-size:12px;font-weight:900;color:#bfdbfe}.input,.select,.textarea{width:100%;border:1px solid rgba(255,255,255,.16);background:#07101d;color:var(--txt);border-radius:12px;outline:none}.input,.select{height:44px;padding:0 12px}.textarea{min-height:145px;padding:12px;resize:vertical}.input:focus,.select:focus,.textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(96,165,250,.12)}
+    .typeRow{display:flex;gap:8px;flex-wrap:wrap}.typeBtn{border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);border-radius:999px;padding:9px 13px;font-weight:900;cursor:pointer}.typeBtn.active[data-value="emergency"]{background:rgba(220,38,38,.35);border-color:#f87171}.typeBtn.active[data-value="important"]{background:rgba(217,119,6,.35);border-color:#fbbf24}.typeBtn.active[data-value="normal"]{background:rgba(37,99,235,.35);border-color:#60a5fa}
+    .campBox{display:flex;gap:8px;flex-wrap:wrap}.camp{display:flex;gap:7px;align-items:center;padding:9px 11px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.04);cursor:pointer}.camp input{accent-color:#2563eb}.camp small{color:var(--muted)}
+    .actions{display:flex;gap:9px;flex-wrap:wrap}.btn{border:0;border-radius:12px;padding:11px 15px;color:#fff;font-weight:1000;cursor:pointer}.btn:disabled{opacity:.45;cursor:not-allowed}.btn.preview{background:#334155}.btn.send{background:var(--red)}.btn.refresh{background:#1d4ed8}.btn.secondary{background:#475569}
+    .preview{display:none;margin-top:4px;border:1px solid rgba(96,165,250,.35);background:rgba(37,99,235,.10);border-radius:14px;padding:13px}.preview.show{display:block}.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:9px}.num{padding:10px;border-radius:12px;background:rgba(255,255,255,.06);text-align:center}.num b{display:block;font-size:22px}.num span{font-size:11px;color:var(--muted);font-weight:900}
+    .status{display:none;margin-bottom:12px;padding:11px 13px;border-radius:12px;font-size:13px;font-weight:800}.status.show{display:block}.status.ok{background:rgba(22,163,74,.16);border:1px solid rgba(74,222,128,.35);color:#bbf7d0}.status.err{background:rgba(220,38,38,.16);border:1px solid rgba(248,113,113,.35);color:#fecaca}
+    .scopeHelp{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,.04);font-size:12px;color:var(--muted)}
+    .history{display:grid;gap:10px}.notice{border:1px solid var(--line);border-radius:14px;padding:13px;background:rgba(255,255,255,.035)}.noticeTop{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:1000}.pill.emergency{background:rgba(220,38,38,.24);color:#fecaca}.pill.important{background:rgba(217,119,6,.24);color:#fde68a}.pill.normal{background:rgba(37,99,235,.22);color:#bfdbfe}.notice h3{margin:9px 0 4px;font-size:15px}.notice p{margin:0;color:#cbd5e1;font-size:13px;line-height:1.45;white-space:pre-wrap}.meta{margin-top:9px;color:var(--muted);font-size:11px}.statline{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.stat{font-size:11px;padding:5px 7px;border-radius:8px;background:rgba(255,255,255,.06);color:#cbd5e1}.empty{padding:30px;text-align:center;color:var(--muted)}
+    .loading{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(5,10,18,.88);font-weight:900}.hidden{display:none!important}
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">PUSH 발송 권한 확인 중...</div>
+  <header class="top">
+    <a href="/" aria-label="홈"><img src="/favicon.ico?v=2" alt="마루웰"></a>
+    <div><h1>PUSH 알림</h1><p>긴급 상황 · 팀 공지 · 전사 알림</p></div>
+    <div class="spacer"></div><span id="roleBadge" class="badge">권한 확인 중</span>
+  </header>
+
+  <main class="wrap">
+    <div class="grid">
+      <section class="card">
+        <div class="cardHead"><h2>알림 발송</h2></div>
+        <div class="cardBody">
+          <div id="status" class="status"></div>
+          <div class="form">
+            <div class="field"><label>알림 종류</label><div class="typeRow" id="typeRow"><button class="typeBtn active" data-value="emergency">🚨 긴급</button><button class="typeBtn" data-value="important">⚠️ 중요</button><button class="typeBtn" data-value="normal">🔔 일반</button></div></div>
+            <div class="row"><div class="field"><label>소속</label><select id="vendor" class="select"></select></div><div class="field"><label>발송 범위</label><select id="scope" class="select"></select></div></div>
+            <div class="field" id="campField"><label>대상 캠프</label><div id="campBox" class="campBox"></div><div class="hint">팀장은 본인에게 등록된 캠프만 선택할 수 있고, 총괄팀장 이상은 소속 벤더 전체 캠프를 선택할 수 있습니다.</div></div>
+            <div id="scopeHelp" class="scopeHelp"></div>
+            <div class="field"><label>제목</label><input id="title" class="input" maxlength="120" placeholder="예: 카카오톡 장애 관련 긴급 안내"></div>
+            <div class="field"><label>내용</label><textarea id="body" class="textarea" maxlength="2000" placeholder="기사님에게 전달할 내용을 입력하세요."></textarea></div>
+            <div class="actions"><button id="previewBtn" class="btn preview">대상 확인</button><button id="sendBtn" class="btn send" disabled>긴급 PUSH 발송</button></div>
+            <div id="preview" class="preview"><b id="previewTitle">발송 대상</b><div class="nums"><div class="num"><b id="recipientCount">0</b><span>등록 인원</span></div><div class="num"><b id="deviceCount">0</b><span>수신 가능 기기</span></div><div class="num"><b id="roleLevel">-</b><span>발송 권한</span></div></div><p class="hint" style="margin-bottom:0">실제 PUSH는 앱 1.1.8 이상에서 FCM 토큰이 등록된 기기에 전송됩니다.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHead"><h2>발송 이력</h2><div class="spacer"></div><button id="refreshBtn" class="btn refresh">새로고침</button></div>
+        <div class="cardBody"><div id="history" class="history"><div class="empty">발송 이력을 불러오는 중...</div></div></div>
+      </section>
+    </div>
+  </main>
+
+<script>
+(() => {
+  'use strict';
+  const cfg = window.MARUWELL_CONFIG || {};
+  const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true} });
+  const $ = id => document.getElementById(id);
+  const state = { session:null, context:null, noticeType:'emergency', preview:null };
+  const fnBase = String(cfg.SUPABASE_URL || '').replace(/\/+$/, '') + '/functions/v1';
+
+  function showStatus(msg, ok=false){ const el=$('status'); el.textContent=msg; el.className='status show '+(ok?'ok':'err'); }
+  function clearStatus(){ $('status').className='status'; $('status').textContent=''; }
+  function selectedMembership(){ const id=$('vendor').value; return (state.context?.memberships||[]).find(m=>m.vendor_id===id)||null; }
+  function selectedCamps(){ return [...document.querySelectorAll('#campBox input:checked')].map(x=>x.value); }
+  function formatDate(v){ try{return new Intl.DateTimeFormat('ko-KR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v));}catch{return String(v||'');} }
+  function esc(v){ return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  async function callFunction(name, payload){
+    const token=state.session?.access_token;
+    if(!token) throw new Error('로그인이 필요합니다.');
+    const res=await fetch(`${fnBase}/${name}`,{method:'POST',headers:{'Content-Type':'application/json','apikey':cfg.SUPABASE_ANON_KEY,'Authorization':`Bearer ${token}`},body:JSON.stringify(payload),cache:'no-store'});
+    const text=await res.text(); let data={}; try{data=JSON.parse(text);}catch{data={error:text};}
+    if(!res.ok) throw new Error(data?.error||`HTTP ${res.status}`);
+    return data;
+  }
+
+  function renderVendors(){
+    const memberships=state.context?.memberships||[];
+    $('vendor').innerHTML=memberships.map(m=>`<option value="${esc(m.vendor_id)}">${esc(m.vendor_name)} · Lv.${m.role_level}</option>`).join('');
+    if(state.context?.company_admin) $('vendor').insertAdjacentHTML('beforeend','<option value="__company__">마루웰 전사 관리자</option>');
+    renderScope();
+  }
+  function renderScope(){
+    const company=$('vendor').value==='__company__';
+    const m=selectedMembership();
+    const opts=[];
+    if(company){ opts.push('<option value="company">전사 전체</option>'); }
+    else if(m){ opts.push('<option value="camp">캠프 선택</option>'); if(m.can_vendor_broadcast) opts.push('<option value="vendor">소속 전체 캠프</option>'); }
+    $('scope').innerHTML=opts.join(''); renderCamps(); invalidatePreview();
+  }
+  function renderCamps(){
+    const m=selectedMembership(); const scope=$('scope').value;
+    $('campField').classList.toggle('hidden',scope!=='camp');
+    if(!m){ $('campBox').innerHTML=''; return; }
+    const camps=m.camps||[];
+    $('campBox').innerHTML=camps.length?camps.map(c=>`<label class="camp"><input type="checkbox" value="${esc(c.camp)}"><b>${esc(c.camp)}</b><small>${c.registered_users}명 / ${c.active_devices}기기</small></label>`).join(''):'<div class="hint">등록된 캠프가 없습니다.</div>';
+    document.querySelectorAll('#campBox input').forEach(x=>x.addEventListener('change',invalidatePreview));
+    const lv=m.role_level||0;
+    $('scopeHelp').textContent=lv>=60?'총괄팀장 이상: 소속 전체 또는 원하는 캠프를 선택해서 발송할 수 있습니다.':'팀장: 등록된 담당 캠프의 등록 인원에게만 발송할 수 있습니다.';
+  }
+  function invalidatePreview(){ state.preview=null; $('preview').classList.remove('show'); $('sendBtn').disabled=true; }
+  function payload(action){
+    const scope=$('scope').value; const company=scope==='company'; const m=selectedMembership();
+    return {action,target_scope:scope,vendor_id:company?null:m?.vendor_id||null,target_camps:scope==='camp'?selectedCamps():[],notice_type:state.noticeType,title:$('title').value.trim(),body:$('body').value.trim(),send_push:true,show_on_home:false,require_ack:false};
+  }
+  async function preview(){
+    clearStatus(); const p=payload('preview'); if(p.target_scope==='camp'&&!p.target_camps.length) return showStatus('대상 캠프를 하나 이상 선택하세요.');
+    $('previewBtn').disabled=true; try{ const data=await callFunction('app-push-dispatch',p); state.preview=data; $('recipientCount').textContent=data.recipient_count??0; $('deviceCount').textContent=data.active_device_count??0; $('roleLevel').textContent='Lv.'+(data.sender_role_level??'-'); $('preview').classList.add('show'); $('sendBtn').disabled=(data.recipient_count??0)<1; if((data.active_device_count??0)<1) showStatus('대상 인원은 있으나 현재 PUSH 수신 가능 기기가 0대입니다. 앱 1.1.8 로그인 후 토큰이 등록되어야 합니다.'); }catch(e){showStatus(e.message||String(e));}finally{$('previewBtn').disabled=false;}
+  }
+  async function send(){
+    const p=payload('send'); if(!p.title||!p.body) return showStatus('제목과 내용을 입력하세요.'); if(!state.preview) return showStatus('먼저 대상 확인을 눌러주세요.');
+    const target=`등록 ${state.preview.recipient_count||0}명 / 수신 가능 ${state.preview.active_device_count||0}기기`;
+    if(!confirm(`${target}에게 PUSH를 발송할까요?\n\n${p.title}`)) return;
+    $('sendBtn').disabled=true; clearStatus(); try{ const data=await callFunction('app-push-dispatch',p); showStatus(`발송 완료 · 성공 ${data.sent_users||0}명 / 실패 ${data.failed_users||0}명 / 미수신 ${data.skipped_users||0}명`,true); $('title').value=''; $('body').value=''; invalidatePreview(); await loadHistory(); }catch(e){showStatus(e.message||String(e)); $('sendBtn').disabled=false;}
+  }
+  function renderHistory(rows){
+    if(!rows?.length){ $('history').innerHTML='<div class="empty">아직 발송된 알림이 없습니다.</div>'; return; }
+    $('history').innerHTML=rows.map(n=>{const s=n.stats||{};const type=n.notice_type||'normal';const scope=n.target_scope==='company'?'전사':n.target_scope==='vendor'?'소속 전체':(n.target_camps||[]).join(', ');return `<article class="notice"><div class="noticeTop"><span class="pill ${esc(type)}">${type==='emergency'?'긴급':type==='important'?'중요':'일반'}</span><span class="pill normal">${esc(scope||'-')}</span></div><h3>${esc(n.title)}</h3><p>${esc(n.body)}</p><div class="meta">${esc(formatDate(n.created_at))} · 대상 ${n.recipient_count||0}명</div><div class="statline"><span class="stat">성공 ${s.sent||0}</span><span class="stat">실패 ${s.failed||0}</span><span class="stat">미수신 ${s.skipped||0}</span><span class="stat">대기 ${s.pending||0}</span><span class="stat">열람 ${s.opened||0}</span><span class="stat">확인 ${s.acknowledged||0}</span></div></article>`;}).join('');
+  }
+  async function loadHistory(){ try{ const data=await callFunction('app-push-console',{action:'history'}); renderHistory(data.notices||[]); }catch(e){ $('history').innerHTML=`<div class="empty">${esc(e.message||String(e))}</div>`; } }
+
+  async function init(){
+    try{
+      let {data:{session}}=await sb.auth.getSession(); if(!session){ location.replace('/?next='+encodeURIComponent(location.pathname)); return; }
+      state.session=session;
+      const data=await callFunction('app-push-console',{action:'bootstrap'}); state.context=data;
+      $('roleBadge').textContent=data.company_admin?'전사 관리자':`팀장 이상 · ${Math.max(...(data.memberships||[]).map(m=>m.role_level||0))}`;
+      renderVendors(); renderHistory(data.notices||[]); $('loading').classList.add('hidden');
+    }catch(e){ $('loading').textContent=e.message||String(e); setTimeout(()=>location.replace('/'),1800); }
+  }
+
+  $('vendor').addEventListener('change',renderScope); $('scope').addEventListener('change',()=>{renderCamps();invalidatePreview();});
+  $('previewBtn').addEventListener('click',preview); $('sendBtn').addEventListener('click',send); $('refreshBtn').addEventListener('click',loadHistory);
+  $('title').addEventListener('input',invalidatePreview); $('body').addEventListener('input',invalidatePreview);
+  document.querySelectorAll('.typeBtn').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.typeBtn').forEach(x=>x.classList.remove('active'));btn.classList.add('active');state.noticeType=btn.dataset.value;invalidatePreview();$('sendBtn').textContent=state.noticeType==='emergency'?'긴급 PUSH 발송':'PUSH 발송';}));
+  init();
+})();
+</script>
+</body>
+</html>

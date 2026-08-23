@@ -16,45 +16,77 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Inspect live Worker source
+      - name: Discover accounts and inspect live Worker source
         shell: bash
         run: |
           set -euo pipefail
           set +x
           mkdir -p /tmp/cf-inspect .diagnostics
           : > /tmp/cf-inspect/download-summary.txt
-          found_source=0
 
-          for script_name in zip-api zip maroowell-zip; do
-            out="/tmp/cf-inspect/${script_name}.raw"
-            code=$(curl -sS -o "$out" -w '%{http_code}' \
+          accounts_http=$(curl -sS -o /tmp/cf-inspect/accounts.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            'https://api.cloudflare.com/client/v4/accounts?per_page=50' || true)
+          echo "accounts_http=${accounts_http}" >> /tmp/cf-inspect/download-summary.txt
+
+          node <<'NODE' > /tmp/cf-inspect/accounts.tsv
+          const fs=require('fs');
+          let data={}; try{data=JSON.parse(fs.readFileSync('/tmp/cf-inspect/accounts.json','utf8'));}catch{}
+          for(const a of data.result||[]) if(a?.id) console.log(`${a.id}\t${String(a.name||'').replace(/[\r\n\t]/g,' ')}`);
+          NODE
+
+          found_source=0
+          while IFS=$'\t' read -r account_id account_name; do
+            [ -n "$account_id" ] || continue
+            echo "account_name=${account_name}" >> /tmp/cf-inspect/download-summary.txt
+            scripts_file="/tmp/cf-inspect/scripts-${account_id}.json"
+            scripts_http=$(curl -sS -o "$scripts_file" -w '%{http_code}' \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${script_name}" || true)
-            bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
-            echo "script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
-            if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
-              cp "$out" /tmp/cf-inspect/live-zip-worker.raw
-              echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
-              found_source=1
-              break
-            fi
-          done
+              "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts" || true)
+            echo "scripts_http=${scripts_http}" >> /tmp/cf-inspect/download-summary.txt
+
+            node - "$scripts_file" <<'NODE' > /tmp/cf-inspect/script-names.txt
+          const fs=require('fs');
+          const p=process.argv[2];
+          let data={}; try{data=JSON.parse(fs.readFileSync(p,'utf8'));}catch{}
+          const rows=Array.isArray(data.result)?data.result:[];
+          for(const r of rows){ const id=String(r?.id||r?.name||'').trim(); if(id) console.log(id); }
+          NODE
+
+            while IFS= read -r script_name; do
+              [ -n "$script_name" ] || continue
+              echo "script_name=${script_name}" >> /tmp/cf-inspect/download-summary.txt
+              out="/tmp/cf-inspect/source.raw"
+              code=$(curl -sS -o "$out" -w '%{http_code}' \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts/${script_name}" || true)
+              bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
+              echo "source_http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
+              if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
+                cp "$out" /tmp/cf-inspect/live-zip-worker.raw
+                echo "matched_account_name=${account_name}" >> /tmp/cf-inspect/download-summary.txt
+                echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
+                found_source=1
+                break 2
+              fi
+            done < /tmp/cf-inspect/script-names.txt
+          done < /tmp/cf-inspect/accounts.tsv
 
           if [ "$found_source" != "1" ]; then
-            echo 'No downloaded candidate contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
+            echo 'No accessible Worker source contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
           fi
 
           node <<'NODE'
           const fs = require('fs');
           const crypto = require('crypto');
-          const summary = fs.readFileSync('/tmp/cf-inspect/download-summary.txt','utf8');
+          let summary = fs.readFileSync('/tmp/cf-inspect/download-summary.txt','utf8');
+          summary=summary.replace(/[0-9a-f]{32}/gi,'[account-id-redacted]');
           let out = '# Live zip Worker diagnostic\n\n```text\n' + summary + '```\n';
           const p='/tmp/cf-inspect/live-zip-worker.raw';
           if (fs.existsSync(p)) {

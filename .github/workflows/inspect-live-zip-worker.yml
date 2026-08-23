@@ -16,55 +16,36 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Inspect Cloudflare account and live Worker
+      - name: Inspect live Worker source
         shell: bash
         run: |
           set -euo pipefail
           set +x
           mkdir -p /tmp/cf-inspect .diagnostics
-
-          npx --yes wrangler@4 whoami --json > /tmp/cf-inspect/whoami.json
-          npx --yes wrangler@4 versions list --name zip-api --json > /tmp/cf-inspect/zip-api-versions.json || true
-          npx --yes wrangler@4 deployments status --name zip-api --json > /tmp/cf-inspect/zip-api-deployment.json || true
-
-          node <<'NODE' > /tmp/cf-inspect/account-candidates.txt
-          const fs = require('fs');
-          const data = JSON.parse(fs.readFileSync('/tmp/cf-inspect/whoami.json','utf8'));
-          const found = new Set();
-          function walk(v, key='') {
-            if (typeof v === 'string' && /^[0-9a-f]{32}$/i.test(v) && /account|id/i.test(key)) found.add(v);
-            else if (Array.isArray(v)) for (const x of v) walk(x, key);
-            else if (v && typeof v === 'object') for (const [k,x] of Object.entries(v)) walk(x, k);
-          }
-          walk(data);
-          for (const id of found) console.log(id);
-          NODE
-
           : > /tmp/cf-inspect/download-summary.txt
           found_source=0
-          while IFS= read -r account_id; do
-            [ -n "$account_id" ] || continue
-            for script_name in zip-api zip maroowell-zip; do
-              out="/tmp/cf-inspect/${script_name}-${account_id}.raw"
-              code=$(curl -sS -o "$out" -w '%{http_code}' \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts/${script_name}" || true)
-              bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
-              echo "script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
-              if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
-                cp "$out" /tmp/cf-inspect/live-zip-worker.raw
-                echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
-                found_source=1
-                break 2
-              fi
-            done
-          done < /tmp/cf-inspect/account-candidates.txt
+
+          for script_name in zip-api zip maroowell-zip; do
+            out="/tmp/cf-inspect/${script_name}.raw"
+            code=$(curl -sS -o "$out" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${script_name}" || true)
+            bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
+            echo "script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
+            if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
+              cp "$out" /tmp/cf-inspect/live-zip-worker.raw
+              echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
+              found_source=1
+              break
+            fi
+          done
 
           if [ "$found_source" != "1" ]; then
             echo 'No downloaded candidate contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
@@ -72,25 +53,25 @@ jobs:
 
           node <<'NODE'
           const fs = require('fs');
+          const crypto = require('crypto');
           const summary = fs.readFileSync('/tmp/cf-inspect/download-summary.txt','utf8');
-          let out = '# Live zip Worker diagnostic\n\n```text\n' + summary.replace(/[0-9a-f]{32}/gi,'[account-id-redacted]') + '```\n';
+          let out = '# Live zip Worker diagnostic\n\n```text\n' + summary + '```\n';
           const p='/tmp/cf-inspect/live-zip-worker.raw';
           if (fs.existsSync(p)) {
             const text=fs.readFileSync(p,'utf8');
-            out += `\nsource_sha256: ${require('crypto').createHash('sha256').update(text).digest('hex')}\n`;
+            out += `\nsource_sha256: ${crypto.createHash('sha256').update(text).digest('hex')}\n`;
             const lines=text.split(/\r?\n/);
-            const terms=['unclassifiedUnitCount','unclassified_unit_count','residentialUnitCount','deliveryUnitCount','householdCount','kapt','KAPT'];
+            const terms=['unclassifiedUnitCount','unclassified_unit_count','residentialUnitCount','residential_unit_count','deliveryUnitCount','delivery_unit_count','householdCount','household_count','kapt','KAPT'];
             const hits=[];
             for(let i=0;i<lines.length;i++) if(terms.some(t=>lines[i].includes(t))) hits.push(i);
             const wanted=new Set();
-            for(const i of hits) for(let j=Math.max(0,i-12);j<=Math.min(lines.length-1,i+20);j++) wanted.add(j);
+            for(const i of hits) for(let j=Math.max(0,i-16);j<=Math.min(lines.length-1,i+28);j++) wanted.add(j);
             let last=-2;
             out+='\n## Relevant source excerpts\n\n```js\n';
             for(const i of [...wanted].sort((a,b)=>a-b)) {
               if(i>last+1) out+='\n// ...\n';
               let line=lines[i]
                 .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/g,'$1[redacted]')
-                .replace(/(service[_-]?role[^\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{20,}/ig,'$1[redacted]')
                 .replace(/([A-Za-z0-9_-]{40,})/g,'[long-token-redacted]');
               out+=String(i+1).padStart(5,' ')+' | '+line+'\n';
               last=i;

@@ -1,0 +1,68 @@
+name: Publish Maroowell Android v1.1.10
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-v1110-from-artifact.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download verified signed APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_URL='https://sdmntprjapaneast.oaiusercontent.com/files/00000000-c640-8209-a8b8-e8975eef5fbe/raw?se=2026-08-23T06%3A32%3A03Z&sp=r&sv=2026-02-06&sr=b&scid=b3a2fe2a-68dd-5832-806d-1bf5309b12c5&skoid=03727f49-62d3-42ac-8350-1c0e6559d238&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-23T01%3A53%3A47Z&ske=2026-08-24T01%3A53%3A47Z&sks=b&skv=2026-02-06&sig=cyhnzM0L3Bhh0a1Gp1YZGyGeIB34BzIObpTv2gzXjeU%3D'
+          curl -fL --retry 3 --retry-delay 1 "$ARTIFACT_URL" -o /tmp/maroowell-v1110.zip
+          rm -rf /tmp/maroowell-v1110
+          mkdir -p /tmp/maroowell-v1110
+          unzip -q /tmp/maroowell-v1110.zip -d /tmp/maroowell-v1110
+          test -f /tmp/maroowell-v1110/Maroowell-1.1.10.apk
+          test "$(stat -c%s /tmp/maroowell-v1110/Maroowell-1.1.10.apk)" = "9319379"
+          echo '4976eadf5c725f5c4295d70fde9abd546434236f429bd947c4230c3ab1f1caeb  /tmp/maroowell-v1110/Maroowell-1.1.10.apk' | sha256sum -c -
+
+      - name: Publish APK and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/apk
+          cp /tmp/maroowell-v1110/Maroowell-1.1.10.apk public/apk/Maroowell-1.1.10.apk
+          cp /tmp/maroowell-v1110/Maroowell-1.1.10.apk public/apk/maroowell-latest.apk
+          cat > public/app_version.json <<'JSON'
+          {
+            "versionCode": 22,
+            "versionName": "1.1.10",
+            "updatedAt": "2026-08-23",
+            "fileName": "Maroowell-1.1.10.apk",
+            "downloadUrl": "https://raw.githubusercontent.com/nuclearwarp/maroowell.com/main/public/apk/Maroowell-1.1.10.apk",
+            "changes": [
+              "마루웰 정보 조회를 네이티브 화면으로 전환하고 PK를 숨김",
+              "마루웰 정보의 수정 기능을 버튼 형태로 변경",
+              "우편번호 검색을 웹페이지가 아닌 앱 네이티브 UI로 전환",
+              "쿠팡 캠프 조회를 앱 네이티브 UI로 전환",
+              "프백 현황을 앱 네이티브 UI로 전환"
+            ]
+          }
+          JSON
+          rm -f .github/workflows/publish-v1110-from-artifact.yml
+
+      - name: Commit published APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A public/apk public/app_version.json .github/workflows/publish-v1110-from-artifact.yml
+          git commit -m 'Publish Maroowell Android v1.1.10'
+          git pull --rebase origin main
+          git push origin HEAD:main

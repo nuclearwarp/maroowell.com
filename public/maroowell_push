@@ -7,7 +7,7 @@
   <link rel="icon" href="/favicon.ico?v=2" />
   <script src="/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="/board-menu.js?v=20260823-push2" defer></script>
+  <script src="/board-menu.js?v=20260823-push3" defer></script>
   <style>
     :root{
       --bg:#f6f8fc;--card:#fff;--line:#dbe3ef;--line2:#cbd5e1;--text:#0f172a;--muted:#64748b;
@@ -55,7 +55,7 @@
           <div class="form">
             <div class="field"><label>알림 종류</label><div class="typeRow"><button class="typeBtn active" data-value="emergency" type="button">🚨 긴급</button><button class="typeBtn" data-value="important" type="button">⚠️ 중요</button><button class="typeBtn" data-value="normal" type="button">🔔 일반</button></div></div>
             <div class="row"><div class="field"><label>소속</label><select id="vendor" class="select"></select></div><div class="field"><label>발송 범위</label><select id="scope" class="select"></select></div></div>
-            <div class="field" id="campField"><label>대상 캠프</label><div id="campBox" class="campBox"></div><div class="hint">팀장은 본인에게 등록된 캠프만 선택할 수 있고, 총괄팀장 이상은 소속 벤더 전체 캠프를 선택할 수 있습니다.</div></div>
+            <div class="field" id="campField"><label>대상 캠프</label><div id="campBox" class="campBox"></div><div class="hint">마루웰 팀장은 본인에게 등록된 캠프만 선택할 수 있고, 총괄팀장 이상은 소속 전체 캠프를 선택할 수 있습니다.</div></div>
             <div id="scopeHelp" class="scopeHelp"></div>
             <div class="field"><label>제목</label><input id="title" class="input" maxlength="120" placeholder="예: 카카오톡 장애 관련 긴급 안내"></div>
             <div class="field"><label>내용</label><textarea id="body" class="textarea" maxlength="2000" placeholder="기사님에게 전달할 내용을 입력하세요."></textarea></div>
@@ -131,8 +131,8 @@
 
   function renderVendors(){
     const memberships=state.context?.memberships||[];
-    $('vendor').innerHTML=memberships.map(m=>`<option value="${esc(m.vendor_id)}">${esc(m.vendor_name)} · Lv.${m.role_level}</option>`).join('');
-    if(state.context?.company_admin) $('vendor').insertAdjacentHTML('beforeend','<option value="__company__">마루웰 전사 관리자</option>');
+    $('vendor').innerHTML=memberships.map(m=>`<option value="${esc(m.vendor_id)}">마루웰 팀장</option>`).join('');
+    if(state.context?.company_admin) $('vendor').insertAdjacentHTML('beforeend','<option value="__company__">마루웰 운영</option>');
     renderScope();
   }
   function renderScope(){
@@ -144,11 +144,11 @@
   function renderCamps(){
     const m=selectedMembership(); const scope=$('scope').value;
     $('campField').classList.toggle('hidden',scope!=='camp');
-    if(!m){ $('campBox').innerHTML=''; $('scopeHelp').textContent='전사 공지는 전체 앱 사용자에게 발송됩니다.'; return; }
+    if(!m){ $('campBox').innerHTML=''; $('scopeHelp').textContent='마루웰 운영: 전체 앱 사용자에게 전사 공지를 발송합니다.'; return; }
     const camps=m.camps||[];
     $('campBox').innerHTML=camps.length?camps.map(c=>`<label class="camp"><input type="checkbox" value="${esc(c.camp)}"><b>${esc(c.camp)}</b><small>${c.registered_users}명 / ${c.active_devices}기기</small></label>`).join(''):'<div class="hint">등록된 담당 캠프가 없습니다.</div>';
     document.querySelectorAll('#campBox input').forEach(x=>x.addEventListener('change',invalidatePreview));
-    $('scopeHelp').textContent=(m.role_level||0)>=60?'총괄팀장 이상: 소속 전체 또는 원하는 캠프를 선택해서 발송할 수 있습니다.':'팀장: 등록된 담당 캠프의 등록 인원에게만 발송할 수 있습니다.';
+    $('scopeHelp').textContent=(m.role_level||0)>=60?'마루웰 총괄팀장: 소속 전체 또는 원하는 캠프를 선택해서 발송할 수 있습니다.':'마루웰 팀장: Lv.30 이상부터 담당 캠프의 등록 인원에게 발송할 수 있습니다.';
   }
   function invalidatePreview(){ state.preview=null; $('preview').classList.remove('show'); $('sendBtn').disabled=true; }
   function payload(action){ const scope=$('scope').value; const company=scope==='company'; const m=selectedMembership(); return {action,target_scope:scope,vendor_id:company?null:m?.vendor_id||null,target_camps:scope==='camp'?selectedCamps():[],notice_type:state.noticeType,title:$('title').value.trim(),body:$('body').value.trim(),send_push:true,show_on_home:false,require_ack:false}; }
@@ -159,7 +159,7 @@
     $('previewBtn').disabled=true;
     try{
       const data=await callFunction('app-push-dispatch',p); state.preview=data;
-      $('recipientCount').textContent=data.recipient_count??0; $('deviceCount').textContent=data.active_device_count??0; $('roleLevel').textContent='Lv.'+(data.sender_role_level??'-'); $('preview').classList.add('show'); $('sendBtn').disabled=(data.recipient_count??0)<1;
+      $('recipientCount').textContent=data.recipient_count??0; $('deviceCount').textContent=data.active_device_count??0; $('roleLevel').textContent=p.target_scope==='company'?'운영':'팀장'; $('preview').classList.add('show'); $('sendBtn').disabled=(data.recipient_count??0)<1;
       if((data.active_device_count??0)<1) showStatus('대상 인원은 있으나 현재 PUSH 수신 가능 기기가 0대입니다. 앱 1.1.8 로그인 후 토큰이 등록되어야 합니다.');
     }catch(e){showStatus(e.message||String(e));}finally{$('previewBtn').disabled=false;}
   }
@@ -191,8 +191,7 @@
       }
       state.session=session;
       const data=await callFunction('app-push-console',{action:'bootstrap'}); state.context=data;
-      const maxLevel=Math.max(0,...(data.memberships||[]).map(m=>Number(m.role_level||0)));
-      $('roleBadge').textContent=data.company_admin?'전사 관리자':`팀장 Lv.${maxLevel}`;
+      $('roleBadge').textContent=data.company_admin?'마루웰 운영':'마루웰 팀장';
       renderVendors(); renderHistory(data.notices||[]); $('loading').classList.add('hidden');
     }catch(e){
       $('loadingText').textContent='PUSH 권한 확인 실패'; $('loadingSub').textContent=e.message||String(e); $('loginBtn').classList.remove('hidden');

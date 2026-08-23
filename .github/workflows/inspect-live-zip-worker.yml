@@ -1,0 +1,88 @@
+name: Inspect live Cloudflare zip worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-live-zip-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect Cloudflare account and live Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-inspect
+
+          npx --yes wrangler@4 whoami --json > /tmp/cf-inspect/whoami.json
+          npx --yes wrangler@4 versions list --name zip-api --json > /tmp/cf-inspect/zip-api-versions.json || true
+          npx --yes wrangler@4 deployments status --name zip-api --json > /tmp/cf-inspect/zip-api-deployment.json || true
+
+          node <<'NODE' > /tmp/cf-inspect/account-candidates.txt
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/cf-inspect/whoami.json','utf8'));
+          const found = new Set();
+          function walk(v, key='') {
+            if (typeof v === 'string' && /^[0-9a-f]{32}$/i.test(v) && /account|id/i.test(key)) found.add(v);
+            else if (Array.isArray(v)) for (const x of v) walk(x, key);
+            else if (v && typeof v === 'object') for (const [k,x] of Object.entries(v)) walk(x, k);
+          }
+          walk(data);
+          for (const id of found) console.log(id);
+          NODE
+
+          : > /tmp/cf-inspect/download-summary.txt
+          found_source=0
+          while IFS= read -r account_id; do
+            [ -n "$account_id" ] || continue
+            list_out="/tmp/cf-inspect/scripts-${account_id}.json"
+            list_code=$(curl -sS -o "$list_out" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts" || true)
+            echo "account=${account_id} list_http=${list_code}" >> /tmp/cf-inspect/download-summary.txt
+
+            for script_name in zip-api zip maroowell-zip; do
+              out="/tmp/cf-inspect/${script_name}-${account_id}.raw"
+              hdr="/tmp/cf-inspect/${script_name}-${account_id}.headers"
+              code=$(curl -sS -D "$hdr" -o "$out" -w '%{http_code}' \
+                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts/${script_name}" || true)
+              bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
+              echo "account=${account_id} script=${script_name} http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
+              if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
+                cp "$out" /tmp/cf-inspect/live-zip-worker.raw
+                cp "$hdr" /tmp/cf-inspect/live-zip-worker.headers
+                echo "matched_account=${account_id}" >> /tmp/cf-inspect/download-summary.txt
+                echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
+                found_source=1
+                break 2
+              fi
+            done
+          done < /tmp/cf-inspect/account-candidates.txt
+
+          if [ "$found_source" != "1" ]; then
+            echo 'No downloaded candidate contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
+          fi
+
+          # Never include the API token in artifacts.
+          grep -RIl "$CLOUDFLARE_API_TOKEN" /tmp/cf-inspect | xargs -r rm -f
+
+      - name: Upload inspection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-zip-worker-inspection
+          path: /tmp/cf-inspect
+          if-no-files-found: error
+          retention-days: 1

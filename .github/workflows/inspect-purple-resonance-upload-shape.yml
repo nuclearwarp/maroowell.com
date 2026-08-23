@@ -1,0 +1,85 @@
+name: Inspect purple-resonance upload shape
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-purple-resonance-upload-shape.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download and inspect multipart
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/purple-shape .diagnostics
+          curl -fsS -D /tmp/purple-shape/headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/purple-shape/body
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import json,re
+
+          headers=Path('/tmp/purple-shape/headers').read_text(errors='ignore')
+          m=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',headers)
+          if not m: raise SystemExit('content-type missing')
+          ctype=m[-1].strip()
+          raw=Path('/tmp/purple-shape/body').read_bytes()
+          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          rows=[]
+          metadata=None
+          for part in msg.iter_parts():
+            name=part.get_param('name',header='content-disposition')
+            filename=part.get_filename()
+            payload=part.get_payload(decode=True) or b''
+            ct=part.get_content_type()
+            rows.append({'name':name,'filename':filename,'content_type':ct,'bytes':len(payload)})
+            if name=='metadata':
+              try: metadata=json.loads(payload.decode())
+              except Exception as e: metadata={'parse_error':str(e),'preview':payload[:500].decode(errors='replace')}
+          if isinstance(metadata,dict):
+            # Keep only non-secret structural metadata. Never dump binding values.
+            safe={}
+            for k in ['main_module','body_part','compatibility_date','compatibility_flags','usage_model','placement','tail_consumers','limits','migrations','assets']:
+              if k in metadata: safe[k]=metadata[k]
+            bindings=[]
+            for b in metadata.get('bindings') or []:
+              if isinstance(b,dict): bindings.append({'name':b.get('name'),'type':b.get('type')})
+            safe['bindings']=bindings
+          else:
+            safe=metadata
+          out=['# purple-resonance-61ea upload shape','',f'- content_type: `{ctype}`',f'- multipart_bytes: {len(raw)}','', '## Parts','']
+          for r in rows: out.append(f"- name=`{r['name']}` filename=`{r['filename']}` type=`{r['content_type']}` bytes={r['bytes']}")
+          out += ['', '## Sanitized metadata','', '```json', json.dumps(safe,ensure_ascii=False,indent=2), '```']
+          Path('.diagnostics/purple-resonance-upload-shape.md').write_text('\n'.join(out),encoding='utf-8')
+          PY
+
+      - name: Commit diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/purple-resonance-upload-shape.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record purple-resonance upload shape'
+          git push origin HEAD:main

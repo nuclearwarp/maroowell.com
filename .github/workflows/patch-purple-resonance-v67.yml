@@ -1,0 +1,133 @@
+name: Patch purple-resonance KAPT dedupe V67
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-purple-resonance-v67.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download current production Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-v67 .diagnostics
+          curl -fsS -D /tmp/cf-v67/headers.txt \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v67/worker.multipart
+          grep -qi '^content-type: multipart/form-data' /tmp/cf-v67/headers.txt
+
+      - name: Patch KAPT duplicate counting and cache version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/cf-v67/worker.multipart')
+          data=p.read_bytes()
+          text=data.decode('utf-8')
+
+          old_version='BUILDING_HUB_KAPT_V66_HSPMS_WELFARE_RESCUE_2026-08-15'
+          new_version='BUILDING_HUB_KAPT_V67_KAPT_PARCEL_DEDUPE_2026-08-23'
+          if old_version not in text:
+              if new_version in text:
+                  raise SystemExit('V67 already deployed')
+              raise SystemExit('Expected V66 source version not found')
+          text=text.replace(old_version,new_version,1)
+
+          old='''      const unitType = classifyDeliveryUnit(candidate.row, parentClassification, {\n        floorRows: parcelResult.floorRows || [],\n        parentRow,\n        parcelMatches,\n      });\n\n      // V48: K-APT가 이 필지의 총세대수를 공식값으로 제공하면 residential 전유호는\n      // Building HUB의 부모 분류가 잘못되어 있어도 중복 합산하지 않는다. commercial은 계속 센다.\n      if (coveredByKapt && unitType === "residential") {\n        continue;\n      }\n'''
+          new='''      let unitType = classifyDeliveryUnit(candidate.row, parentClassification, {\n        floorRows: parcelResult.floorRows || [],\n        parentRow,\n        parcelMatches,\n      });\n\n      // V67: K-APT 총세대수로 이미 확정된 필지에서는 아파트 전유호를 다시 세지 않는다.\n      // 기존 V48은 residential만 제외해, 부모 매칭/용도 판정이 애매한 동일 아파트 전유호가\n      // unclassified로 다시 합산되는 문제가 있었다. 명확한 상가만 commercial로 보존한다.\n      if (coveredByKapt && unitType !== "commercial") {\n        const candidateClassification = buildingHousingClassification(candidate.row);\n        const clearlyCommercial = Boolean(\n          (candidateClassification?.commercial && !candidateClassification?.residential) ||\n          (parentClassification?.commercial && !parentClassification?.residential)\n        );\n        if (clearlyCommercial) unitType = "commercial";\n        else continue;\n      }\n'''
+          if old not in text:
+              raise SystemExit('Exclusive-unit KAPT guard anchor not found')
+          text=text.replace(old,new,1)
+
+          old_hp='''      for (const part of housePriceSplit) {\n        addCount(part.type, part.units, `house-price:${parcelKey}`, elevator, {\n'''
+          new_hp='''      for (const part of housePriceSplit) {\n        // V67: K-APT가 세대수를 확정한 필지의 주거/미분류 fallback은 중복이므로 제외한다.\n        if (coveredByKapt && part.type !== "commercial") continue;\n        addCount(part.type, part.units, `house-price:${parcelKey}`, elevator, {\n'''
+          if old_hp not in text:
+              raise SystemExit('House-price split anchor not found')
+          text=text.replace(old_hp,new_hp,1)
+
+          old_recap='''      for (const part of recapSplit) {\n        addCount(part.type, part.units, `recap:${parcelKey}`, elevator, {\n'''
+          new_recap='''      for (const part of recapSplit) {\n        // V67: 혼합용도 recap이라도 K-APT 확정 주거세대는 다시 합산하지 않고 상가만 보존한다.\n        if (coveredByKapt && part.type !== "commercial") continue;\n        addCount(part.type, part.units, `recap:${parcelKey}`, elevator, {\n'''
+          if old_recap not in text:
+              raise SystemExit('Recap split anchor not found')
+          text=text.replace(old_recap,new_recap,1)
+
+          # Validation: no broad post-total subtraction hack; dedupe happens before addCount.
+          assert new_version in text
+          assert 'if (coveredByKapt && unitType !== "commercial")' in text
+          assert text.count('if (coveredByKapt && part.type !== "commercial")') >= 2
+          p.write_bytes(text.encode('utf-8'))
+          PY
+
+      - name: Deploy patched multipart Worker preserving bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          content_type=$(grep -i '^content-type:' /tmp/cf-v67/headers.txt | tail -1 | sed -E 's/^[Cc]ontent-[Tt]ype:[[:space:]]*//' | tr -d '\r')
+          test -n "$content_type"
+          code=$(curl -sS -o /tmp/cf-v67/deploy-response.json -w '%{http_code}' \
+            -X PUT \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: $content_type" \
+            --data-binary @/tmp/cf-v67/worker.multipart \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}" || true)
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "Cloudflare deploy failed HTTP $code" >&2
+            cat /tmp/cf-v67/deploy-response.json >&2
+            exit 1
+          fi
+
+      - name: Verify live V67 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          sleep 3
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v67/live.multipart
+          grep -a -q 'BUILDING_HUB_KAPT_V67_KAPT_PARCEL_DEDUPE_2026-08-23' /tmp/cf-v67/live.multipart
+          grep -a -q 'coveredByKapt && unitType !== "commercial"' /tmp/cf-v67/live.multipart
+          sha256sum /tmp/cf-v67/live.multipart | awk '{print $1}' > /tmp/cf-v67/live.sha
+
+          cat > .diagnostics/purple-resonance-v67.md <<EOF
+          # purple-resonance-61ea V67 deployment
+
+          - status: deployed
+          - source_version: BUILDING_HUB_KAPT_V67_KAPT_PARCEL_DEDUPE_2026-08-23
+          - live_multipart_sha256: $(cat /tmp/cf-v67/live.sha)
+          - change: K-APT covered parcels no longer double-count residential/unclassified Building HUB units; clearly commercial units remain counted.
+          - cache: source version bumped, so old V66 polygon_building_stats cache entries are not reused.
+          EOF
+
+      - name: Commit deployment record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/purple-resonance-v67.md
+          git commit -m 'Record purple-resonance V67 deployment'
+          git push origin HEAD:main

@@ -4,9 +4,10 @@
   if (window.__MW_BOARD_MENU_INIT__) return;
   window.__MW_BOARD_MENU_INIT__ = true;
 
-  const BUILD = "20260822-auth-guard-v3";
+  const BUILD = "20260823-push-board-v1";
   const PAGES = [
     { key:"mw-schedule", label:"마루웰 입차 스케줄", path:"/maroowell_schedule", aliases:["/maroowell_schedule","/maroowell_schedule.html"], requireRoleLevel:30, desc:"마루웰 입차 스케줄" },
+    { key:"mw-push", label:"PUSH 알림", path:"/maroowell_push", aliases:["/maroowell_push","/maroowell_push.html"], requireRoleLevel:30, desc:"긴급 PUSH / 팀 공지 발송" },
     { key:"info", label:"마루웰 정보", path:"/maroowell_info", aliases:["/maroowell_info","/maroowell_info.html"], requireRoleLevel:60, desc:"마루웰 기본 정보" },
     { key:"zipcode_search", label:"우편번호 검색기", path:"/zipcode_search", aliases:["/zipcode_search","/zipcode_search.html"], public:true, desc:"우편번호 / 지도 조회" },
     { key:"route", label:"라우트 편집기", path:"/coupangRouteMap.html", aliases:["/coupangRouteMap","/coupangRouteMap.html"], public:true, desc:"라우트 / 벤더 / 입차지 편집" },

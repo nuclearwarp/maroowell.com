@@ -1,4 +1,4 @@
-name: Inspect live Cloudflare zip worker
+name: Inspect live Cloudflare building worker
 
 on:
   push:
@@ -16,101 +16,112 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Discover accounts and inspect live Worker source
+      - name: Download exact production Worker source
         shell: bash
         run: |
           set -euo pipefail
           set +x
           mkdir -p /tmp/cf-inspect .diagnostics
-          : > /tmp/cf-inspect/download-summary.txt
 
-          accounts_http=$(curl -sS -o /tmp/cf-inspect/accounts.json -w '%{http_code}' \
+          raw_code=$(curl -sS -D /tmp/cf-inspect/raw.headers -o /tmp/cf-inspect/raw.bin -w '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            'https://api.cloudflare.com/client/v4/accounts?per_page=50' || true)
-          echo "accounts_http=${accounts_http}" >> /tmp/cf-inspect/download-summary.txt
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}" || true)
 
-          node <<'NODE' > /tmp/cf-inspect/accounts.tsv
-          const fs=require('fs');
-          let data={}; try{data=JSON.parse(fs.readFileSync('/tmp/cf-inspect/accounts.json','utf8'));}catch{}
-          for(const a of data.result||[]) if(a?.id) console.log(`${a.id}\t${String(a.name||'').replace(/[\r\n\t]/g,' ')}`);
-          NODE
+          v2_code=$(curl -sS -D /tmp/cf-inspect/v2.headers -o /tmp/cf-inspect/v2.bin -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" || true)
 
-          found_source=0
-          while IFS=$'\t' read -r account_id account_name; do
-            [ -n "$account_id" ] || continue
-            echo "account_name=${account_name}" >> /tmp/cf-inspect/download-summary.txt
-            scripts_file="/tmp/cf-inspect/scripts-${account_id}.json"
-            scripts_http=$(curl -sS -o "$scripts_file" -w '%{http_code}' \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts" || true)
-            echo "scripts_http=${scripts_http}" >> /tmp/cf-inspect/download-summary.txt
-
-            node - "$scripts_file" <<'NODE' > /tmp/cf-inspect/script-names.txt
-          const fs=require('fs');
-          const p=process.argv[2];
-          let data={}; try{data=JSON.parse(fs.readFileSync(p,'utf8'));}catch{}
-          const rows=Array.isArray(data.result)?data.result:[];
-          for(const r of rows){ const id=String(r?.id||r?.name||'').trim(); if(id) console.log(id); }
-          NODE
-
-            while IFS= read -r script_name; do
-              [ -n "$script_name" ] || continue
-              echo "script_name=${script_name}" >> /tmp/cf-inspect/download-summary.txt
-              out="/tmp/cf-inspect/source.raw"
-              code=$(curl -sS -o "$out" -w '%{http_code}' \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                "https://api.cloudflare.com/client/v4/accounts/${account_id}/workers/scripts/${script_name}" || true)
-              bytes=$(wc -c < "$out" 2>/dev/null || echo 0)
-              echo "source_http=${code} bytes=${bytes}" >> /tmp/cf-inspect/download-summary.txt
-              if [ "$code" = "200" ] && grep -a -q '/building/stats' "$out"; then
-                cp "$out" /tmp/cf-inspect/live-zip-worker.raw
-                echo "matched_account_name=${account_name}" >> /tmp/cf-inspect/download-summary.txt
-                echo "matched_script=${script_name}" >> /tmp/cf-inspect/download-summary.txt
-                found_source=1
-                break 2
-              fi
-            done < /tmp/cf-inspect/script-names.txt
-          done < /tmp/cf-inspect/accounts.tsv
-
-          if [ "$found_source" != "1" ]; then
-            echo 'No accessible Worker source contained /building/stats' >> /tmp/cf-inspect/download-summary.txt
-          fi
-
-          node <<'NODE'
+          RAW_HTTP="$raw_code" V2_HTTP="$v2_code" node <<'NODE'
           const fs = require('fs');
           const crypto = require('crypto');
-          let summary = fs.readFileSync('/tmp/cf-inspect/download-summary.txt','utf8');
-          summary=summary.replace(/[0-9a-f]{32}/gi,'[account-id-redacted]');
-          let out = '# Live zip Worker diagnostic\n\n```text\n' + summary + '```\n';
-          const p='/tmp/cf-inspect/live-zip-worker.raw';
-          if (fs.existsSync(p)) {
-            const text=fs.readFileSync(p,'utf8');
-            out += `\nsource_sha256: ${crypto.createHash('sha256').update(text).digest('hex')}\n`;
-            const lines=text.split(/\r?\n/);
-            const terms=['unclassifiedUnitCount','unclassified_unit_count','residentialUnitCount','residential_unit_count','deliveryUnitCount','delivery_unit_count','householdCount','household_count','kapt','KAPT'];
-            const hits=[];
-            for(let i=0;i<lines.length;i++) if(terms.some(t=>lines[i].includes(t))) hits.push(i);
-            const wanted=new Set();
-            for(const i of hits) for(let j=Math.max(0,i-16);j<=Math.min(lines.length-1,i+28);j++) wanted.add(j);
-            let last=-2;
-            out+='\n## Relevant source excerpts\n\n```js\n';
-            for(const i of [...wanted].sort((a,b)=>a-b)) {
-              if(i>last+1) out+='\n// ...\n';
-              let line=lines[i]
-                .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/g,'$1[redacted]')
-                .replace(/([A-Za-z0-9_-]{40,})/g,'[long-token-redacted]');
-              out+=String(i+1).padStart(5,' ')+' | '+line+'\n';
-              last=i;
-            }
-            out+='```\n';
+
+          const scriptName = process.env.CLOUDFLARE_SCRIPT_NAME;
+          const raw = fs.existsSync('/tmp/cf-inspect/raw.bin') ? fs.readFileSync('/tmp/cf-inspect/raw.bin') : Buffer.alloc(0);
+          const v2 = fs.existsSync('/tmp/cf-inspect/v2.bin') ? fs.readFileSync('/tmp/cf-inspect/v2.bin') : Buffer.alloc(0);
+          const rawHeaders = fs.existsSync('/tmp/cf-inspect/raw.headers') ? fs.readFileSync('/tmp/cf-inspect/raw.headers','utf8') : '';
+          const v2Headers = fs.existsSync('/tmp/cf-inspect/v2.headers') ? fs.readFileSync('/tmp/cf-inspect/v2.headers','utf8') : '';
+
+          const rawType = (rawHeaders.match(/^content-type:\s*([^\r\n]+)/im)||[])[1] || '';
+          const v2Type = (v2Headers.match(/^content-type:\s*([^\r\n]+)/im)||[])[1] || '';
+          const candidate = v2.length >= raw.length ? v2 : raw;
+          const text = candidate.toString('utf8');
+
+          function redact(s) {
+            return String(s)
+              .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, '$1[redacted]')
+              .replace(/(service[_-]?role[^\r\n:=]{0,40}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/(apikey[^\r\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/(secret[^\r\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/eyJ[A-Za-z0-9._-]{40,}/g, '[jwt-redacted]');
           }
-          fs.writeFileSync('.diagnostics/live-zip-worker-summary.md',out);
+
+          const terms = [
+            '/building/stats',
+            'unclassifiedUnitCount', 'unclassified_unit_count',
+            'residentialUnitCount', 'residential_unit_count',
+            'commercialUnitCount', 'commercial_unit_count',
+            'deliveryUnitCount', 'delivery_unit_count',
+            'householdCount', 'household_count',
+            'KAPT', 'kapt', 'household',
+            'elevatorUnitCount', 'elevator_unit_count',
+            'walkupUnitCount', 'walkup_unit_count'
+          ];
+
+          const hits = [];
+          for (const term of terms) {
+            let from = 0;
+            let count = 0;
+            while (count < 8) {
+              const i = text.indexOf(term, from);
+              if (i < 0) break;
+              hits.push({term, i});
+              from = i + Math.max(1, term.length);
+              count++;
+            }
+          }
+          hits.sort((a,b)=>a.i-b.i);
+
+          // Merge nearby excerpts to avoid dumping the whole Worker.
+          const ranges=[];
+          for (const hit of hits) {
+            const start=Math.max(0, hit.i-1400);
+            const end=Math.min(text.length, hit.i+2600);
+            const prev=ranges[ranges.length-1];
+            if (prev && start <= prev.end + 500) prev.end=Math.max(prev.end,end);
+            else ranges.push({start,end});
+          }
+
+          let out = '# Live Cloudflare building Worker diagnostic\n\n';
+          out += `worker: ${scriptName}\n\n`;
+          out += '```text\n';
+          out += `raw_http=${process.env.RAW_HTTP || ''} raw_bytes=${raw.length} raw_content_type=${rawType}\n`;
+          out += `v2_http=${process.env.V2_HTTP || ''} v2_bytes=${v2.length} v2_content_type=${v2Type}\n`;
+          out += `selected_bytes=${candidate.length}\n`;
+          out += `contains_building_stats=${text.includes('/building/stats')}\n`;
+          out += `source_sha256=${crypto.createHash('sha256').update(candidate).digest('hex')}\n`;
+          out += `hit_count=${hits.length} excerpt_ranges=${ranges.length}\n`;
+          out += '```\n';
+
+          if (ranges.length) {
+            out += '\n## Relevant source excerpts\n';
+            for (let n=0;n<ranges.length;n++) {
+              const r=ranges[n];
+              let excerpt=redact(text.slice(r.start,r.end));
+              // Keep artifact compact and text-friendly.
+              excerpt=excerpt.replace(/\u0000/g,'');
+              out += `\n### Excerpt ${n+1} (${r.start}-${r.end})\n\n\`\`\`js\n${excerpt}\n\`\`\`\n`;
+            }
+          }
+
+          fs.writeFileSync('.diagnostics/live-zip-worker-summary.md', out);
           NODE
 
           if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/live-zip-worker-summary.md; then
@@ -125,5 +136,9 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .diagnostics/live-zip-worker-summary.md
-          git commit -m 'Record live zip worker diagnostic'
+          if git diff --cached --quiet; then
+            echo 'No diagnostic changes'
+            exit 0
+          fi
+          git commit -m 'Record purple-resonance building worker diagnostic'
           git push origin HEAD:main

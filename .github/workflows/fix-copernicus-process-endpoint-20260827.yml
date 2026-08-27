@@ -1,0 +1,169 @@
+name: Fix Copernicus Process API endpoint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-copernicus-process-endpoint-20260827.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download exact live worker and settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-copernicus-fix .diagnostics
+          curl -fsS -D /tmp/cf-copernicus-fix/content.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-copernicus-fix/content.multipart
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
+            -o /tmp/cf-copernicus-fix/settings.json
+
+      - name: Patch Process API URL only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import re
+
+          headers = Path('/tmp/cf-copernicus-fix/content.headers').read_text(errors='ignore')
+          ctype = re.findall(r'(?im)^content-type:\s*([^\r\n]+)', headers)[-1].strip()
+          raw = Path('/tmp/cf-copernicus-fix/content.multipart').read_bytes()
+          msg = BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          source = None
+          for part in msg.iter_parts():
+              if part.get_param('name', header='content-disposition') == 'worker.js':
+                  source = (part.get_payload(decode=True) or b'').decode('utf-8')
+                  break
+          if source is None:
+              raise SystemExit('worker.js part not found')
+
+          old='https://sh.dataspace.copernicus.eu/process/v1'
+          new='https://sh.dataspace.copernicus.eu/api/v1/process'
+          old_count=source.count(old)
+          new_count=source.count(new)
+          if old_count == 0:
+              if new_count > 0:
+                  print('Correct endpoint already present')
+              else:
+                  raise SystemExit('Expected Copernicus Process URL not found')
+          elif old_count == 1:
+              source=source.replace(old,new,1)
+          else:
+              raise SystemExit(f'Unexpected old endpoint count: {old_count}')
+
+          if new not in source:
+              raise SystemExit('Correct Process API URL missing after patch')
+          if old in source:
+              raise SystemExit('Legacy Process API URL remains after patch')
+
+          Path('/tmp/cf-copernicus-fix/worker.js').write_text(source,encoding='utf-8')
+          PY
+
+      - name: Build metadata preserving all current bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          settings=json.loads(Path('/tmp/cf-copernicus-fix/settings.json').read_text()).get('result') or {}
+          metadata={'main_module':'worker.js'}
+          bindings=[]
+          for b in settings.get('bindings') or []:
+              if isinstance(b,dict) and b.get('name'):
+                  bindings.append({'type':'inherit','name':b['name'],'version_id':'latest'})
+          if bindings:
+              metadata['bindings']=bindings
+          for key in ('compatibility_date','compatibility_flags','placement'):
+              val=settings.get(key)
+              if val not in (None,[],{}): metadata[key]=val
+          metadata['annotations']={'workers/message':'Fix Copernicus CDSE Process API endpoint 2026-08-27'}
+          Path('/tmp/cf-copernicus-fix/metadata.json').write_text(json.dumps(metadata,separators=(',',':')),encoding='utf-8')
+          PY
+
+      - name: Deploy fixed live worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          code=$(curl -sS -o /tmp/cf-copernicus-fix/deploy.json -w '%{http_code}' \
+            -X PUT \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/cf-copernicus-fix/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/cf-copernicus-fix/worker.js;type=application/javascript+module' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "Cloudflare deploy failed HTTP $code" >&2
+            cat /tmp/cf-copernicus-fix/deploy.json >&2
+            exit 1
+          fi
+
+      - name: Verify production source and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          sleep 3
+          curl -fsS -D /tmp/cf-copernicus-fix/live.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-copernicus-fix/live.multipart
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
+            -o /tmp/cf-copernicus-fix/live-settings.json
+          grep -a -q 'https://sh.dataspace.copernicus.eu/api/v1/process' /tmp/cf-copernicus-fix/live.multipart
+          if grep -a -q 'https://sh.dataspace.copernicus.eu/process/v1' /tmp/cf-copernicus-fix/live.multipart; then
+            echo 'Legacy endpoint still present' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          before=json.loads(Path('/tmp/cf-copernicus-fix/settings.json').read_text()).get('result') or {}
+          after=json.loads(Path('/tmp/cf-copernicus-fix/live-settings.json').read_text()).get('result') or {}
+          names=lambda x: sorted(b.get('name') for b in x.get('bindings') or [] if isinstance(b,dict) and b.get('name'))
+          b1,b2=names(before),names(after)
+          if b1 != b2:
+              raise SystemExit(f'Binding names changed: before={b1} after={b2}')
+          required={'COPERNICUS_CLIENT_ID','COPERNICUS_CLIENT_SECRET'}
+          if not required.issubset(set(b2)):
+              raise SystemExit('Copernicus credential bindings missing after deploy')
+          report='''# Copernicus Process endpoint repair 2026-08-27\n\n- worker: purple-resonance-61ea\n- status: deployed and verified\n- old_endpoint: https://sh.dataspace.copernicus.eu/process/v1\n- new_endpoint: https://sh.dataspace.copernicus.eu/api/v1/process\n- credential_bindings_preserved: yes\n- all_binding_names_preserved: yes ({count})\n'''.format(count=len(b2))
+          Path('.diagnostics/copernicus-process-endpoint-fix-20260827.md').write_text(report,encoding='utf-8')
+          PY
+
+      - name: Commit deployment record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/copernicus-process-endpoint-fix-20260827.md
+          git commit -m 'Record Copernicus Process endpoint repair'
+          git pull --rebase origin main
+          git push origin HEAD:main

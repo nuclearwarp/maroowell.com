@@ -1,0 +1,140 @@
+name: Diagnose live Copernicus terrain auth
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/diag-copernicus-live-20260827.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Inspect production terrain code and bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/copernicus-diag .diagnostics
+
+          curl -sS -D /tmp/copernicus-diag/source.headers \
+            -o /tmp/copernicus-diag/source.bin \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2"
+
+          curl -sS \
+            -o /tmp/copernicus-diag/settings.json \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings"
+
+          node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const source = fs.readFileSync('/tmp/copernicus-diag/source.bin').toString('utf8');
+          const settingsText = fs.readFileSync('/tmp/copernicus-diag/settings.json','utf8');
+          let settings = {};
+          try { settings = JSON.parse(settingsText); } catch {}
+
+          function redact(s) {
+            return String(s)
+              .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, '$1[redacted]')
+              .replace(/((?:client[_-]?secret|secret|apikey|api[_-]?key|service[_-]?role)[^\r\n:=]{0,50}[:=]\s*["'`]?)[^\s"'`,;]{12,}/gi, '$1[redacted]')
+              .replace(/((?:client[_-]?id)[^\r\n:=]{0,50}[:=]\s*["'`]?)[^\s"'`,;]{12,}/gi, '$1[redacted]')
+              .replace(/eyJ[A-Za-z0-9._-]{40,}/g, '[jwt-redacted]');
+          }
+
+          const needles = [
+            'Copernicus Process API failed',
+            'sh.dataspace.copernicus.eu',
+            'identity.dataspace.copernicus.eu',
+            '/api/v1/process',
+            '/process',
+            'COPERNICUS',
+            'SENTINEL',
+            'CLIENT_ID',
+            'CLIENT_SECRET'
+          ];
+
+          const snippets = [];
+          const used = [];
+          for (const needle of needles) {
+            let from = 0;
+            while (true) {
+              const i = source.toLowerCase().indexOf(needle.toLowerCase(), from);
+              if (i < 0) break;
+              const a = Math.max(0, i - 1800);
+              const b = Math.min(source.length, i + 3200);
+              if (!used.some(([x,y]) => a >= x && b <= y)) {
+                used.push([a,b]);
+                snippets.push({needle, at:i, text:redact(source.slice(a,b))});
+              }
+              from = i + needle.length;
+              if (snippets.length >= 12) break;
+            }
+            if (snippets.length >= 12) break;
+          }
+
+          const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
+          const safeBindings = bindings.map(b => ({
+            name: b?.name || '',
+            type: b?.type || '',
+            namespace_id: b?.namespace_id || undefined,
+            bucket_name: b?.bucket_name || undefined,
+            service: b?.service || undefined,
+            environment: b?.environment || undefined,
+          })).filter(x => x.name);
+
+          const cfNames = safeBindings.map(x => x.name);
+          const authish = safeBindings.filter(x => /copern|sentinel|terrain|client|oauth|dem|elev/i.test(x.name));
+
+          let out = '# Live Copernicus terrain auth diagnostic\n\n';
+          out += `worker: ${process.env.CLOUDFLARE_SCRIPT_NAME}\n\n`;
+          out += '```text\n';
+          out += `source_bytes=${Buffer.byteLength(source)}\n`;
+          out += `source_sha256=${crypto.createHash('sha256').update(source).digest('hex')}\n`;
+          out += `settings_success=${settings?.success === true}\n`;
+          out += `binding_count=${safeBindings.length}\n`;
+          out += '```\n\n';
+          out += '## Relevant binding names/types\n\n';
+          if (!authish.length) out += '_none found by name_\n';
+          else for (const b of authish) out += `- ${b.name}: ${b.type}\n`;
+          out += '\n## All binding names\n\n';
+          out += cfNames.map(x => `- ${x}`).join('\n') + '\n';
+          out += '\n## Production source snippets (sanitized)\n\n';
+          if (!snippets.length) out += '_No matching source strings found._\n';
+          snippets.forEach((s, idx) => {
+            out += `\n### ${idx+1}. ${s.needle} @ ${s.at}\n\n\`\`\`js\n${s.text}\n\`\`\`\n`;
+          });
+
+          fs.writeFileSync('.diagnostics/copernicus-live-20260827.md', out);
+          NODE
+
+          if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/copernicus-live-20260827.md; then
+            echo 'Cloudflare token leakage guard failed' >&2
+            exit 1
+          fi
+
+      - name: Commit sanitized diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/copernicus-live-20260827.md
+          git diff --cached --check
+          git commit -m 'Record live Copernicus terrain auth diagnostic'
+          git push origin HEAD:main

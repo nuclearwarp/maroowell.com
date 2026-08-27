@@ -1,0 +1,163 @@
+name: Patch purple-resonance KAPT orphan dedupe V68
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-purple-resonance-v68.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download live worker and settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-v68 .diagnostics
+          curl -fsS -D /tmp/cf-v68/content.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v68/content.multipart
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
+            -o /tmp/cf-v68/settings.json
+
+      - name: Extract and patch worker source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import re
+
+          headers = Path('/tmp/cf-v68/content.headers').read_text(errors='ignore')
+          ctype = re.findall(r'(?im)^content-type:\s*([^\r\n]+)', headers)[-1].strip()
+          raw = Path('/tmp/cf-v68/content.multipart').read_bytes()
+          msg = BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          source = None
+          for part in msg.iter_parts():
+              if part.get_param('name', header='content-disposition') == 'worker.js':
+                  source = (part.get_payload(decode=True) or b'').decode('utf-8')
+                  break
+          if source is None:
+              raise SystemExit('worker.js part not found')
+
+          old_version='BUILDING_HUB_KAPT_V66_HSPMS_WELFARE_RESCUE_2026-08-15'
+          new_version='BUILDING_HUB_KAPT_V68_KAPT_ORPHAN_DEDUPE_2026-08-27'
+          if old_version not in source:
+              if new_version in source:
+                  raise SystemExit('V68 already deployed')
+              raise SystemExit('Expected V66 source version not found')
+          source=source.replace(old_version,new_version,1)
+
+          old='''  for (const item of orphanDetailUnits) {\n    if (item.classification.apartment && (kaptMatches || []).some((match) => match.parcelKey === item.parcelKey)) {\n      continue;\n    }\n    const bucket = v62ResolvedClassificationBucket(item.row, item.classification);\n'''
+          new='''  for (const item of orphanDetailUnits) {\n    const kaptParcelCovered = (kaptMatches || []).some((match) => match.parcelKey === item.parcelKey);\n    const bucket = v62ResolvedClassificationBucket(item.row, item.classification);\n    // V68: K-APT가 총세대수를 확정한 동일 필지에서 부모 연결 실패로 생긴\n    // 아파트/미분류 전유호는 같은 세대를 다시 세는 것이므로 제외한다.\n    // 명확한 상가 및 별도 비아파트 주거 전유호는 보존한다.\n    if (kaptParcelCovered && (item.classification.apartment || bucket === "unclassified")) {\n      continue;\n    }\n'''
+          if old not in source:
+              raise SystemExit('V66 orphan-detail anchor not found')
+          source=source.replace(old,new,1)
+
+          assert new_version in source
+          assert 'kaptParcelCovered && (item.classification.apartment || bucket === "unclassified")' in source
+          Path('/tmp/cf-v68/worker.js').write_text(source,encoding='utf-8')
+          PY
+
+      - name: Build upload metadata preserving bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          env=json.loads(Path('/tmp/cf-v68/settings.json').read_text())
+          s=env.get('result') or {}
+          metadata={'main_module':'worker.js'}
+          bindings=[]
+          for b in s.get('bindings') or []:
+              name=b.get('name') if isinstance(b,dict) else None
+              if name:
+                  bindings.append({'type':'inherit','name':name,'version_id':'latest'})
+          if bindings:
+              metadata['bindings']=bindings
+          for key in ('compatibility_date','compatibility_flags','placement'):
+              val=s.get(key)
+              if val not in (None,[],{}): metadata[key]=val
+          metadata['annotations']={'workers/message':'Fix KAPT orphan unit duplicate counting V68'}
+          Path('/tmp/cf-v68/metadata.json').write_text(json.dumps(metadata,separators=(',',':')),encoding='utf-8')
+          Path('/tmp/cf-v68/binding-shape.txt').write_text('\n'.join(f"{b['name']}:inherit" for b in bindings),encoding='utf-8')
+          PY
+
+      - name: Deploy V68 preserving current bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          code=$(curl -sS -o /tmp/cf-v68/deploy.json -w '%{http_code}' \
+            -X PUT \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/cf-v68/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/cf-v68/worker.js;type=application/javascript+module' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "Cloudflare deploy failed HTTP $code" >&2
+            cat /tmp/cf-v68/deploy.json >&2
+            exit 1
+          fi
+
+      - name: Verify live V68 source and binding names
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          sleep 3
+          curl -fsS -D /tmp/cf-v68/live.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v68/live.multipart
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
+            -o /tmp/cf-v68/live-settings.json
+          grep -a -q 'BUILDING_HUB_KAPT_V68_KAPT_ORPHAN_DEDUPE_2026-08-27' /tmp/cf-v68/live.multipart
+          grep -a -q 'kaptParcelCovered && (item.classification.apartment || bucket === "unclassified")' /tmp/cf-v68/live.multipart
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          before=json.loads(Path('/tmp/cf-v68/settings.json').read_text()).get('result') or {}
+          after=json.loads(Path('/tmp/cf-v68/live-settings.json').read_text()).get('result') or {}
+          b1=sorted(x.get('name') for x in before.get('bindings') or [] if isinstance(x,dict) and x.get('name'))
+          b2=sorted(x.get('name') for x in after.get('bindings') or [] if isinstance(x,dict) and x.get('name'))
+          if b1 != b2:
+              raise SystemExit(f'Binding names changed: before={b1} after={b2}')
+          report='''# purple-resonance-61ea V68 deployment\n\n- status: deployed and verified\n- source_version: BUILDING_HUB_KAPT_V68_KAPT_ORPHAN_DEDUPE_2026-08-27\n- fix: suppress apartment/unclassified orphan detail units on K-APT-covered parcels while retaining explicit commercial and separate non-apartment residential units.\n- bindings_preserved: yes ({count} names)\n'''.format(count=len(b2))
+          Path('.diagnostics/purple-resonance-v68.md').write_text(report,encoding='utf-8')
+          PY
+
+      - name: Commit deployment record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .diagnostics/purple-resonance-v68.md
+          git commit -m 'Record purple-resonance V68 deployment'
+          git pull --rebase origin main
+          git push origin HEAD:main

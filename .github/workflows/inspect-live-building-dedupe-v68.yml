@@ -1,0 +1,98 @@
+name: Inspect live building dedupe paths V68
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-live-building-dedupe-v68.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract dedupe-related live source snippets
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-v68-inspect .diagnostics
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v68-inspect/live.multipart
+
+          node <<'NODE'
+          const fs = require('fs');
+          const crypto = require('crypto');
+          const text = fs.readFileSync('/tmp/cf-v68-inspect/live.multipart','utf8');
+
+          function redact(s) {
+            return String(s)
+              .replace(/(Bearer\s+)[A-Za-z0-9._~+\/-]+/gi, '$1[redacted]')
+              .replace(/(service[_-]?role[^\r\n:=]{0,40}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/(apikey[^\r\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/(secret[^\r\n:=]{0,30}[:=]\s*["'`]?)[A-Za-z0-9._~+\/-]{18,}/gi, '$1[redacted]')
+              .replace(/eyJ[A-Za-z0-9._-]{40,}/g, '[jwt-redacted]');
+          }
+
+          const terms = [
+            'DETAIL_ORPHAN_EXACT_UNIT',
+            'TITLE_MIXED_hoCnt_REMAINDER',
+            'orphanDetailUnits',
+            'addOrphan',
+            'orphan',
+            'supplementTitleUnitEvidence',
+            'function addCount',
+            'const addCount',
+            'BUILDING_STATS_SOURCE_VERSION'
+          ];
+          let out = '# Live building dedupe snippets for V68\n\n';
+          out += `worker: ${process.env.CLOUDFLARE_SCRIPT_NAME}\n\n`;
+          out += `sha256: ${crypto.createHash('sha256').update(text).digest('hex')}\n\n`;
+          for (const term of terms) {
+            let from = 0;
+            let found = 0;
+            while (found < 6) {
+              const i = text.indexOf(term, from);
+              if (i < 0) break;
+              const a = Math.max(0, i - 2600);
+              const b = Math.min(text.length, i + term.length + 4200);
+              out += `## ${term} #${found + 1}\n\n\`\`\`js\n${redact(text.slice(a,b))}\n\`\`\`\n\n`;
+              from = i + term.length;
+              found++;
+            }
+            if (!found) out += `## ${term}\n\n_not found_\n\n`;
+          }
+          fs.writeFileSync('.diagnostics/live-building-dedupe-v68.md', out);
+          NODE
+
+          if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/live-building-dedupe-v68.md; then
+            echo 'Token leakage guard failed' >&2
+            exit 1
+          fi
+
+      - name: Commit sanitized diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add .diagnostics/live-building-dedupe-v68.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Record live building dedupe snippets for V68'
+          git push origin HEAD:main

@@ -14,104 +14,10 @@ jobs:
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
-      SCRIPT: purple-resonance-61ea
-      PROBE_URL: https://purple-resonance-61ea.brain-0f6.workers.dev/terrain
     steps:
-      - name: Download live worker
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Run Copernicus runtime probe
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/cop
-          curl -fsS -D /tmp/cop/h -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$SCRIPT/content/v2" -o /tmp/cop/multipart
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$SCRIPT/settings" -o /tmp/cop/settings.json
-
-      - name: Build temporary probe worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          from email.parser import BytesParser
-          from email.policy import default
-          import json,re,secrets
-          h=Path('/tmp/cop/h').read_text(errors='ignore')
-          ct=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)[-1]
-          raw=Path('/tmp/cop/multipart').read_bytes()
-          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
-          src=None
-          for p in msg.iter_parts():
-            if p.get_param('name',header='content-disposition')=='worker.js':
-              src=(p.get_payload(decode=True) or b'').decode(); break
-          if not src: raise SystemExit('worker.js not found')
-          Path('/tmp/cop/original.js').write_text(src)
-          s=json.loads(Path('/tmp/cop/settings.json').read_text()).get('result') or {}
-          md={'main_module':'worker.js'}
-          binds=[]
-          for x in s.get('bindings') or []:
-            if isinstance(x,dict) and x.get('name'): binds.append({'type':'inherit','name':x['name'],'version_id':'latest'})
-          if binds: md['bindings']=binds
-          for k in ('compatibility_date','compatibility_flags','placement'):
-            if s.get(k) not in (None,[],{}): md[k]=s[k]
-          Path('/tmp/cop/metadata.json').write_text(json.dumps(md,separators=(',',':')))
-          nonce=secrets.token_urlsafe(24); Path('/tmp/cop/nonce').write_text(nonce)
-          helper=r'''
-async function __mwCopProbe(env){
- const out={token:{},config:{},process:{}};
- try{
-  const f=new URLSearchParams(); f.set('grant_type','client_credentials'); f.set('client_id',String(env.COPERNICUS_CLIENT_ID||'')); f.set('client_secret',String(env.COPERNICUS_CLIENT_SECRET||''));
-  const tr=await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:f.toString()});
-  const txt=await tr.text(); let td=null; try{td=JSON.parse(txt)}catch{}
-  out.token={status:tr.status,ok:tr.ok,error:tr.ok?'':String(td?.error_description||td?.error||txt).slice(0,300)};
-  if(!tr.ok||!td?.access_token) return new Response(JSON.stringify(out),{headers:{'content-type':'application/json'}});
-  const tok=String(td.access_token);
-  try{const p=tok.split('.')[1]||'';const s=p.replace(/-/g,'+').replace(/_/g,'/');const c=JSON.parse(atob(s+'='.repeat((4-s.length%4)%4)));out.token.aud=c.aud||null;out.token.azp=c.azp||null;out.token.scope=c.scope||null;out.token.roles=c?.realm_access?.roles||null}catch(e){out.token.claimError=String(e)}
-  const cr=await fetch('https://sh.dataspace.copernicus.eu/configuration/v1/wms/instances',{headers:{authorization:`Bearer ${tok}`}}); const cb=await cr.text(); out.config={status:cr.status,ok:cr.ok,body:cr.ok?'':cb.slice(0,500)};
-  const payload={input:{bounds:{bbox:[126.97,37.55,126.98,37.56],properties:{crs:'http://www.opengis.net/def/crs/OGC/1.3/CRS84'}},data:[{type:'dem',dataFilter:{demInstance:'COPERNICUS_30'},processing:{upsampling:'BILINEAR',downsampling:'BILINEAR'}}]},output:{width:8,height:8,responses:[{identifier:'default',format:{type:'image/png'}}]},evalscript:'//VERSION=3\nfunction setup(){return {input:["DEM"],output:{bands:1}}}\nfunction evaluatePixel(s){return [s.DEM/1000]}'};
-  const pr=await fetch('https://sh.dataspace.copernicus.eu/process/v1',{method:'POST',headers:{authorization:`Bearer ${tok}`,'content-type':'application/json'},body:JSON.stringify(payload)});
-  if(pr.ok){const ab=await pr.arrayBuffer();out.process={status:pr.status,ok:true,bytes:ab.byteLength,contentType:pr.headers.get('content-type')}}else{const pb=await pr.text();out.process={status:pr.status,ok:false,body:pb.slice(0,800),contentType:pr.headers.get('content-type')}}
- }catch(e){out.runtimeError=String(e?.stack||e)}
- return new Response(JSON.stringify(out),{headers:{'content-type':'application/json','cache-control':'no-store'}});
-}
-'''
-          marker='async function handleTerrainRequest(request, env) {\n  await verifySupabaseUserByJwt(request, env);'
-          if marker not in src: raise SystemExit('terrain marker missing')
-          repl=f'async function handleTerrainRequest(request, env) {{\n  if(request.headers.get("x-mw-cop-probe")==={json.dumps(nonce)}) return __mwCopProbe(env);\n  await verifySupabaseUserByJwt(request, env);'
-          Path('/tmp/cop/worker.js').write_text(helper+'\n'+src.replace(marker,repl,1))
-          PY
-
-      - name: Deploy temporary probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          code=$(curl -sS -o /tmp/cop/deploy.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -F 'metadata=@/tmp/cop/metadata.json;type=application/json' -F 'worker.js=@/tmp/cop/worker.js;type=application/javascript+module' \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$SCRIPT?bindings_inherit=strict")
-          echo deploy_http=$code
-          test "$code" -ge 200 -a "$code" -lt 300
-
-      - name: Call workers.dev probe
-        shell: bash
-        run: |
-          set -euo pipefail
-          sleep 3
-          nonce=$(cat /tmp/cop/nonce)
-          code=$(curl -sS -o /tmp/cop/result.json -w '%{http_code}' -X POST -H "x-mw-cop-probe: $nonce" -H 'content-type: application/json' --data '{}' "$PROBE_URL")
-          echo probe_http=$code
-          cat /tmp/cop/result.json
-
-      - name: Restore exact original worker
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f /tmp/cop/original.js ] && [ -f /tmp/cop/metadata.json ]; then
-            cp /tmp/cop/original.js /tmp/cop/worker.js
-            code=$(curl -sS -o /tmp/cop/restore.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -F 'metadata=@/tmp/cop/metadata.json;type=application/json' -F 'worker.js=@/tmp/cop/worker.js;type=application/javascript+module' \
-              "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/workers/scripts/$SCRIPT?bindings_inherit=strict")
-            echo restore_http=$code
-            test "$code" -ge 200 -a "$code" -lt 300
-          fi
+        run: python3 .diagnostics/copernicus_probe_runtime.py

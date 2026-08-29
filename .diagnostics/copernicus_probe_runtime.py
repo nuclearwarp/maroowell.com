@@ -2,7 +2,6 @@ import json
 import os
 import re
 import secrets
-import sys
 import time
 from email.parser import BytesParser
 from email.policy import default
@@ -148,15 +147,16 @@ async function __mwCopProbe(env) {
 
 
 def build_probe(source, nonce):
-    marker = "async function handleTerrainRequest(request, env) {\n  await verifySupabaseUserByJwt(request, env);"
-    if marker not in source:
-        raise RuntimeError("handleTerrainRequest marker not found")
-    replacement = (
-        "async function handleTerrainRequest(request, env) {\n"
-        f"  if (request.headers.get(\"x-mw-cop-probe\") === {json.dumps(nonce)}) return await __mwCopProbe(env);\n"
-        "  await verifySupabaseUserByJwt(request, env);"
+    pattern = r"async\s+function\s+handleTerrainRequest\s*\(\s*request\s*,\s*env\s*\)\s*\{"
+    match = re.search(pattern, source)
+    if not match:
+        raise RuntimeError("handleTerrainRequest function not found")
+    injection = (
+        "\n  if (request.headers.get(\"x-mw-cop-probe\") === "
+        + json.dumps(nonce)
+        + ") return await __mwCopProbe(env);"
     )
-    return PROBE_HELPER + "\n" + source.replace(marker, replacement, 1)
+    return PROBE_HELPER + "\n" + source[:match.end()] + injection + source[match.end():]
 
 
 def main():

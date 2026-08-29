@@ -13,7 +13,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
@@ -25,20 +25,20 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Download exact live worker and settings
+      - name: Download live worker and settings
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          mkdir -p /tmp/cop-probe-v2 .diagnostics
-          curl -fsS -D /tmp/cop-probe-v2/content.headers \
+          mkdir -p /tmp/cop-probe .diagnostics
+          curl -fsS -D /tmp/cop-probe/headers \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
-            -o /tmp/cop-probe-v2/content.multipart
+            -o /tmp/cop-probe/content
           curl -fsS \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
-            -o /tmp/cop-probe-v2/settings.json
+            -o /tmp/cop-probe/settings.json
 
       - name: Build temporary probe worker
         shell: bash
@@ -48,206 +48,133 @@ jobs:
           from pathlib import Path
           from email.parser import BytesParser
           from email.policy import default
-          import json, re, secrets
+          import json,re,secrets
 
-          headers=Path('/tmp/cop-probe-v2/content.headers').read_text(errors='ignore')
-          ctype=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',headers)[-1].strip()
-          raw=Path('/tmp/cop-probe-v2/content.multipart').read_bytes()
-          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
-          source=None
+          h=Path('/tmp/cop-probe/headers').read_text(errors='ignore')
+          m=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)
+          if not m: raise SystemExit('content-type missing')
+          raw=Path('/tmp/cop-probe/content').read_bytes()
+          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {m[-1]}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          src=None
           for part in msg.iter_parts():
               if part.get_param('name',header='content-disposition')=='worker.js':
-                  source=(part.get_payload(decode=True) or b'').decode('utf-8')
+                  src=(part.get_payload(decode=True) or b'').decode('utf-8')
                   break
-          if source is None:
-              raise SystemExit('worker.js part not found')
-          Path('/tmp/cop-probe-v2/original-worker.js').write_text(source,encoding='utf-8')
+          if src is None: raise SystemExit('worker.js not found')
+          Path('/tmp/cop-probe/original.js').write_text(src,encoding='utf-8')
 
-          settings=json.loads(Path('/tmp/cop-probe-v2/settings.json').read_text()).get('result') or {}
-          metadata={'main_module':'worker.js'}
-          bindings=[]
+          settings=json.loads(Path('/tmp/cop-probe/settings.json').read_text()).get('result') or {}
+          md={'main_module':'worker.js'}
+          binds=[]
           for b in settings.get('bindings') or []:
               if isinstance(b,dict) and b.get('name'):
-                  bindings.append({'type':'inherit','name':b['name'],'version_id':'latest'})
-          if bindings: metadata['bindings']=bindings
-          for key in ('compatibility_date','compatibility_flags','placement'):
-              val=settings.get(key)
-              if val not in (None,[],{}): metadata[key]=val
-          Path('/tmp/cop-probe-v2/metadata.json').write_text(json.dumps(metadata,separators=(',',':')),encoding='utf-8')
+                  binds.append({'type':'inherit','name':b['name'],'version_id':'latest'})
+          if binds: md['bindings']=binds
+          for k in ('compatibility_date','compatibility_flags','placement'):
+              if settings.get(k) not in (None,[],{}): md[k]=settings[k]
+          Path('/tmp/cop-probe/metadata.json').write_text(json.dumps(md,separators=(',',':')),encoding='utf-8')
 
-          nonce=secrets.token_urlsafe(28)
-          Path('/tmp/cop-probe-v2/nonce.txt').write_text(nonce,encoding='utf-8')
-
+          nonce=secrets.token_urlsafe(24)
+          Path('/tmp/cop-probe/nonce').write_text(nonce)
           helper=r'''
-async function __mwCopernicusProbeV2(env) {
-  const out = {
-    token: {},
-    configuration: {},
-    process: {},
-    processEndpoint: String(COPERNICUS_PROCESS_URL || "")
-  };
+async function __mwProbeCopernicus(env) {
+  const out={token:{},process:{},config:{}};
   try {
-    const form = new URLSearchParams();
-    form.set("grant_type", "client_credentials");
-    form.set("client_id", String(env.COPERNICUS_CLIENT_ID || ""));
-    form.set("client_secret", String(env.COPERNICUS_CLIENT_SECRET || ""));
-    const tr = await fetch(COPERNICUS_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=utf-8" },
-      body: form.toString(),
-      cf: { cacheTtl: 0, cacheEverything: false }
-    });
-    const tt = await tr.text().catch(() => "");
-    let td = null;
-    try { td = tt ? JSON.parse(tt) : null; } catch {}
-    out.token.status = tr.status;
-    out.token.ok = tr.ok;
-    if (!tr.ok || !td?.access_token) {
-      out.token.error = String(td?.error_description || td?.error || tt || `HTTP ${tr.status}`).slice(0, 500);
-      return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
-    }
-
-    const token = String(td.access_token);
+    const body=new URLSearchParams();
+    body.set('grant_type','client_credentials');
+    body.set('client_id',String(env.COPERNICUS_CLIENT_ID||''));
+    body.set('client_secret',String(env.COPERNICUS_CLIENT_SECRET||''));
+    const tr=await fetch('https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=utf-8'},body:body.toString(),cf:{cacheTtl:0,cacheEverything:false}});
+    const tt=await tr.text().catch(()=> '');
+    let td=null; try{td=tt?JSON.parse(tt):null}catch{}
+    out.token.status=tr.status; out.token.ok=tr.ok;
+    if(!tr.ok || !td?.access_token){out.token.error=String(td?.error_description||td?.error||tt||'token failed').slice(0,500);return new Response(JSON.stringify(out),{headers:{'content-type':'application/json','cache-control':'no-store'}})}
+    const token=String(td.access_token);
     try {
-      const p = token.split(".")[1] || "";
-      const padded = p.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((p.length + 3) % 4);
-      const claims = JSON.parse(atob(padded));
-      out.token.scope = claims.scope || null;
-      out.token.aud = claims.aud || null;
-      out.token.roles = claims?.realm_access?.roles || null;
-      out.token.exp = claims.exp || null;
-    } catch (e) {
-      out.token.claimError = String(e?.message || e);
-    }
+      const p=token.split('.')[1]||'';
+      const s=p.replace(/-/g,'+').replace(/_/g,'/');
+      const pad=s+'='.repeat((4-s.length%4)%4);
+      const c=JSON.parse(atob(pad));
+      out.token.aud=c.aud||null; out.token.scope=c.scope||null; out.token.azp=c.azp||null; out.token.roles=c?.realm_access?.roles||null; out.token.exp=c.exp||null;
+    } catch(e){out.token.claimError=String(e?.message||e)}
 
-    const cr = await fetch("https://sh.dataspace.copernicus.eu/configuration/v1/wms/instances", {
-      method: "GET",
-      headers: { Authorization: `Bearer ${token}` },
-      cf: { cacheTtl: 0, cacheEverything: false }
-    });
-    const ct = await cr.text().catch(() => "");
-    out.configuration = {
-      status: cr.status,
-      ok: cr.ok,
-      contentType: cr.headers.get("content-type") || "",
-      body: cr.ok ? "" : ct.slice(0, 500)
-    };
+    const cr=await fetch('https://sh.dataspace.copernicus.eu/configuration/v1/wms/instances',{headers:{authorization:`Bearer ${token}`},cf:{cacheTtl:0,cacheEverything:false}});
+    const ct=await cr.text().catch(()=> '');
+    out.config={status:cr.status,ok:cr.ok,body:cr.ok?'':ct.slice(0,500)};
 
-    const payload = {
-      input: {
-        bounds: {
-          bbox: [126.97, 37.55, 126.98, 37.56],
-          properties: { crs: "http://www.opengis.net/def/crs/OGC/1.3/CRS84" }
-        },
-        data: [{
-          type: "dem",
-          dataFilter: { demInstance: "COPERNICUS_30" },
-          processing: { upsampling: "BILINEAR", downsampling: "BILINEAR" }
-        }]
-      },
-      output: {
-        width: 8,
-        height: 8,
-        responses: [{ identifier: "default", format: { type: "image/png" } }]
-      },
-      evalscript: "//VERSION=3\nfunction setup(){return {input:[\"DEM\"],output:{bands:1}}}\nfunction evaluatePixel(s){return [s.DEM/1000]}"
-    };
-
-    const pr = await fetch("https://sh.dataspace.copernicus.eu/process/v1", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      cf: { cacheTtl: 0, cacheEverything: false }
-    });
-    const pct = pr.headers.get("content-type") || "";
-    let pbody = "";
-    let pbytes = 0;
-    if (pr.ok) {
-      const ab = await pr.arrayBuffer();
-      pbytes = ab.byteLength;
-    } else {
-      pbody = (await pr.text().catch(() => "")).slice(0, 500);
-    }
-    out.process = { status: pr.status, ok: pr.ok, contentType: pct, bytes: pbytes, body: pbody };
-  } catch (e) {
-    out.runtimeError = String(e?.stack || e?.message || e).slice(0, 1000);
-  }
-  return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    const payload={input:{bounds:{bbox:[126.97,37.55,126.98,37.56],properties:{crs:'http://www.opengis.net/def/crs/OGC/1.3/CRS84'}},data:[{type:'dem',dataFilter:{demInstance:'COPERNICUS_30'},processing:{upsampling:'BILINEAR',downsampling:'BILINEAR'}}]},output:{width:8,height:8,responses:[{identifier:'default',format:{type:'image/png'}}]},evalscript:'//VERSION=3\nfunction setup(){return {input:["DEM"],output:{bands:1}}}\nfunction evaluatePixel(s){return [s.DEM/1000]}'};
+    const pr=await fetch('https://sh.dataspace.copernicus.eu/process/v1',{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(payload),cf:{cacheTtl:0,cacheEverything:false}});
+    const pct=pr.headers.get('content-type')||'';
+    if(pr.ok){const ab=await pr.arrayBuffer();out.process={status:pr.status,ok:true,contentType:pct,bytes:ab.byteLength}}
+    else{const pt=await pr.text().catch(()=> '');out.process={status:pr.status,ok:false,contentType:pct,body:pt.slice(0,800)}}
+  } catch(e){out.runtimeError=String(e?.stack||e?.message||e).slice(0,1000)}
+  return new Response(JSON.stringify(out),{headers:{'content-type':'application/json','cache-control':'no-store'}})
 }
 '''
           marker='async function handleTerrainRequest(request, env) {\n  await verifySupabaseUserByJwt(request, env);'
-          if marker not in source:
-              raise SystemExit('handleTerrainRequest marker not found')
-          replacement=f'''async function handleTerrainRequest(request, env) {{\n  if (request.headers.get("x-mw-cop-probe") === {json.dumps(nonce)}) return await __mwCopernicusProbeV2(env);\n  await verifySupabaseUserByJwt(request, env);'''
-          source=helper+'\n'+source.replace(marker,replacement,1)
-          Path('/tmp/cop-probe-v2/probe-worker.js').write_text(source,encoding='utf-8')
+          if marker not in src: raise SystemExit('terrain marker not found')
+          replacement=f'async function handleTerrainRequest(request, env) {{\n  if (request.headers.get("x-mw-cop-probe") === {json.dumps(nonce)}) return await __mwProbeCopernicus(env);\n  await verifySupabaseUserByJwt(request, env);'
+          Path('/tmp/cop-probe/worker.js').write_text(helper+'\n'+src.replace(marker,replacement,1),encoding='utf-8')
           PY
 
-      - name: Deploy temporary probe worker
+      - name: Deploy probe
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          cp /tmp/cop-probe-v2/probe-worker.js /tmp/cop-probe-v2/worker.js
-          code=$(curl -sS -o /tmp/cop-probe-v2/deploy.json -w '%{http_code}' \
-            -X PUT \
+          code=$(curl -sS -o /tmp/cop-probe/deploy.json -w '%{http_code}' -X PUT \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -F 'metadata=@/tmp/cop-probe-v2/metadata.json;type=application/json' \
-            -F 'worker.js=@/tmp/cop-probe-v2/worker.js;type=application/javascript+module' \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
+            -F 'metadata=@/tmp/cop-probe/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/cop-probe/worker.js;type=application/javascript+module' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict")
+          echo "deploy_http=$code"
           test "$code" -ge 200 -a "$code" -lt 300
 
-      - name: Call probe through live terrain endpoint
+      - name: Probe live endpoint
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          sleep 3
-          nonce=$(cat /tmp/cop-probe-v2/nonce.txt)
-          code=$(curl -sS -o /tmp/cop-probe-v2/result.json -w '%{http_code}' \
-            -X POST \
-            -H "x-mw-cop-probe: $nonce" \
-            -H 'content-type: application/json' \
-            --data '{}' \
-            "${PROBE_ORIGIN}/terrain" || true)
+          sleep 4
+          nonce=$(cat /tmp/cop-probe/nonce)
+          code=$(curl -sS -o /tmp/cop-probe/result.json -w '%{http_code}' -X POST \
+            -H "x-mw-cop-probe: $nonce" -H 'content-type: application/json' --data '{}' \
+            "${PROBE_ORIGIN}/terrain")
           echo "probe_http=$code"
-          test "$code" -ge 200 -a "$code" -lt 300
+          cat /tmp/cop-probe/result.json
 
-      - name: Restore exact original worker
+      - name: Restore original worker
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           set +x
-          if [ ! -f /tmp/cop-probe-v2/original-worker.js ] || [ ! -f /tmp/cop-probe-v2/metadata.json ]; then
-            echo 'Original worker unavailable; restore aborted' >&2
-            exit 1
+          if [ -f /tmp/cop-probe/original.js ] && [ -f /tmp/cop-probe/metadata.json ]; then
+            cp /tmp/cop-probe/original.js /tmp/cop-probe/worker.js
+            code=$(curl -sS -o /tmp/cop-probe/restore.json -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -F 'metadata=@/tmp/cop-probe/metadata.json;type=application/json' \
+              -F 'worker.js=@/tmp/cop-probe/worker.js;type=application/javascript+module' \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict")
+            echo "restore_http=$code"
+            test "$code" -ge 200 -a "$code" -lt 300
           fi
-          cp /tmp/cop-probe-v2/original-worker.js /tmp/cop-probe-v2/worker.js
-          code=$(curl -sS -o /tmp/cop-probe-v2/restore.json -w '%{http_code}' \
-            -X PUT \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -F 'metadata=@/tmp/cop-probe-v2/metadata.json;type=application/json' \
-            -F 'worker.js=@/tmp/cop-probe-v2/worker.js;type=application/javascript+module' \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
-          test "$code" -ge 200 -a "$code" -lt 300
 
-      - name: Save sanitized diagnostic
+      - name: Save diagnostic
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import json, re
-          p=Path('/tmp/cop-probe-v2/result.json')
-          raw=p.read_text(errors='ignore') if p.exists() else ''
-          try: data=json.loads(raw)
-          except Exception: data={'raw':raw[:1000] if raw else 'probe did not return a result'}
-          text=json.dumps(data,ensure_ascii=False,indent=2)
-          text=re.sub(r'eyJ[A-Za-z0-9._-]{40,}','[jwt-redacted]',text)
-          text=re.sub(r'(?i)(client_secret|access_token|refresh_token)\s*[=:]\s*[^\s,}\"]+',r'\1=[redacted]',text)
-          Path('.diagnostics/copernicus-runtime-probe-v2-20260829.md').write_text('# Copernicus runtime probe v2 2026-08-29\n\n```json\n'+text+'\n```\n',encoding='utf-8')
+          import json,re
+          p=Path('/tmp/cop-probe/result.json')
+          raw=p.read_text(errors='ignore') if p.exists() else '{"error":"probe result missing"}'
+          try:data=json.loads(raw)
+          except:data={'raw':raw[:1200]}
+          txt=json.dumps(data,ensure_ascii=False,indent=2)
+          txt=re.sub(r'eyJ[A-Za-z0-9._-]{30,}','[jwt-redacted]',txt)
+          Path('.diagnostics/copernicus-runtime-probe-v2-20260829.md').write_text('# Copernicus runtime probe v2\n\n```json\n'+txt+'\n```\n',encoding='utf-8')
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'

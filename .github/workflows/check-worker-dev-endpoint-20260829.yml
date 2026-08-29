@@ -1,0 +1,35 @@
+name: Check terrain worker dev endpoint
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/check-worker-dev-endpoint-20260829.yml
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - name: Check account and script workers.dev status
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" \
+            -o /tmp/account-subdomain.json
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/subdomain" \
+            -o /tmp/script-subdomain.json
+          python3 - <<'PY'
+          import json
+          a=json.load(open('/tmp/account-subdomain.json'))
+          s=json.load(open('/tmp/script-subdomain.json'))
+          print('ACCOUNT_SUBDOMAIN='+str((a.get('result') or {}).get('subdomain')))
+          print('SCRIPT_SUBDOMAIN_STATUS='+json.dumps(s.get('result') or {},ensure_ascii=False))
+          PY

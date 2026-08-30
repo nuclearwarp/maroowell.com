@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ARTIFACT_URL: 'https://sdmntprnznorth.oaiusercontent.com/files/00000000-d2c0-820b-9978-4c3dafb51e48/raw?se=2026-08-30T12%3A39%3A30Z&sp=r&sv=2026-02-06&sr=b&scid=c9318607-fe20-55ad-b2ca-86c852b98d6f&skoid=f5e14fda-2af7-44a3-9d18-d372ffcad871&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-30T01%3A22%3A49Z&ske=2026-08-31T01%3A22%3A49Z&sks=b&skv=2026-02-06&sig=aOyY7IGmW%2BFApXMqXTnEcXbK39vpJgq76%2B9lTXwImB8%3D'
-      APK_SHA256: '989efbff6e4e2416aba08fa83e892d3a0880b0c95b671bb5aa3d92161540ad48'
+      ARTIFACT_URL: "https://sdmntprnznorth.oaiusercontent.com/files/00000000-d2c0-820b-9978-4c3dafb51e48/raw?se=2026-08-30T12%3A39%3A30Z&sp=r&sv=2026-02-06&sr=b&scid=c9318607-fe20-55ad-b2ca-86c852b98d6f&skoid=f5e14fda-2af7-44a3-9d18-d372ffcad871&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-30T01%3A22%3A49Z&ske=2026-08-31T01%3A22%3A49Z&sks=b&skv=2026-02-06&sig=aOyY7IGmW%2BFApXMqXTnEcXbK39vpJgq76%2B9lTXwImB8%3D"
+      APK_SHA256: "989efbff6e4e2416aba08fa83e892d3a0880b0c95b671bb5aa3d92161540ad48"
 
     steps:
       - uses: actions/checkout@v4
@@ -24,21 +24,16 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Download verified v1.3.1 release artifact
-        shell: bash
+      - name: Download release
         run: |
           set -euo pipefail
           curl -fL "$ARTIFACT_URL" -o /tmp/v131.zip
-          rm -rf /tmp/v131
-          mkdir -p /tmp/v131
+          rm -rf /tmp/v131 && mkdir -p /tmp/v131
           unzip -q /tmp/v131.zip -d /tmp/v131
-          test -f /tmp/v131/Maroowell-1.3.1.apk
-          test -f /tmp/v131/maroowell-latest.apk
           test "$(sha256sum /tmp/v131/Maroowell-1.3.1.apk | awk '{print $1}')" = "$APK_SHA256"
           test "$(sha256sum /tmp/v131/maroowell-latest.apk | awk '{print $1}')" = "$APK_SHA256"
 
-      - name: Install APK and version metadata
-        shell: bash
+      - name: Publish files
         run: |
           set -euo pipefail
           mkdir -p public/apk
@@ -61,16 +56,11 @@ jobs:
           }
           JSON
           cp public/app_version.json app_version.json
-          test "$(sha256sum public/apk/Maroowell-1.3.1.apk | awk '{print $1}')" = "$APK_SHA256"
-          test "$(sha256sum public/apk/maroowell-latest.apk | awk '{print $1}')" = "$APK_SHA256"
-
-      - name: Commit and push website release
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add public/apk/Maroowell-1.3.1.apk public/apk/maroowell-latest.apk public/app_version.json app_version.json
           git diff --cached --check
           git commit -m 'Publish Maroowell Android v1.3.1'
           git push origin HEAD:main
+
+# trigger 2

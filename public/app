@@ -38,24 +38,45 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
+const FALLBACK_META={
+  versionCode:31,
+  versionName:'1.2.8',
+  updatedAt:'2026-08-30',
+  fileName:'Maroowell-1.2.8.apk',
+  downloadUrl:'https://maroowell.com/apk/Maroowell-1.2.8.apk',
+  changes:[
+    '개인정보처리방침을 웹뷰가 아닌 앱 내부 네이티브 화면으로 변경',
+    '로그인 화면의 권한·도구 안내 문구 제거 및 개인정보처리방침 URL 노출 제거',
+    '라우트 편집 메뉴명을 라우트 편집기로 변경',
+    '마루웰 라우트 단가에서 모든 캠프를 캠프명 - 라우트 형식으로 표시',
+    '라우트 단가 금액을 소수점 없이 원 단위로 표시',
+    '용차 및 용차 스케줄을 네이티브 앱 화면으로 제공'
+  ]
+};
 const META_SOURCES=[
-  'https://raw.githubusercontent.com/nuclearwarp/maroowell.com/main/public/app_version.json',
-  '/app_version.json'
+  '/app_version.json',
+  'https://raw.githubusercontent.com/nuclearwarp/maroowell.com/main/public/app_version.json'
 ];
 function escapeHtml(v){return String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function versionRank(meta){
+  const code=Number(meta&&meta.versionCode);
+  if(Number.isFinite(code)&&code>0)return code*1000000;
+  const parts=String(meta&&meta.versionName||'').split('.').map(v=>Number(v)||0);
+  return (parts[0]||0)*1000000000+(parts[1]||0)*1000000+(parts[2]||0)*1000;
+}
 async function fetchLatestMeta(){
-  let lastError;
-  for(const source of META_SOURCES){
+  const candidates=[FALLBACK_META];
+  await Promise.all(META_SOURCES.map(async source=>{
     try{
       const separator=source.includes('?')?'&':'?';
       const response=await fetch(source+separator+'t='+Date.now(),{cache:'no-store'});
       if(!response.ok)throw new Error('HTTP '+response.status);
       const meta=await response.json();
-      if(!meta||!meta.versionName)throw new Error('invalid metadata');
-      return meta;
-    }catch(error){lastError=error;}
-  }
-  throw lastError||new Error('버전 정보 없음');
+      if(meta&&meta.versionName)candidates.push(meta);
+    }catch(_){}
+  }));
+  candidates.sort((a,b)=>versionRank(b)-versionRank(a));
+  return candidates[0];
 }
 async function loadVersion(){
   const button=$('download'),status=$('status');

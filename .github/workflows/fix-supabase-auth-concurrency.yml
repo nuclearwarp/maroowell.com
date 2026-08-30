@@ -1,4 +1,4 @@
-name: Fix Supabase auth concurrency
+name: Publish Maroowell Android v1.3.1
 
 on:
   push:
@@ -10,200 +10,52 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Migrate auth storage and remove duplicate GoTrue client
+      - name: Download verified v1.3.1 artifact
+        shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          public = Path('public')
-          changed = []
-
-          for p in public.rglob('*'):
-              if not p.is_file():
-                  continue
-              try:
-                  s = p.read_text(encoding='utf-8')
-              except Exception:
-                  continue
-              if 'window.supabase.createClient' not in s:
-                  continue
-              ns = s.replace('return window.sessionStorage;', 'return window.localStorage;')
-              ns = ns.replace('try { return window.sessionStorage; } catch {}', 'try { return window.localStorage; } catch {}')
-              ns = ns.replace('try { return window.sessionStorage; } catch { return undefined; }', 'try { return window.localStorage; } catch { return undefined; }')
-              if p.as_posix() == 'public/index.html':
-                  ns = ns.replace('  clearLegacySupabaseLocalSession(SUPABASE_URL);\n', '')
-                  ns = ns.replace('  sessionBridge.start();\n  await sessionBridge.requestSessionCopy(1200);\n', '')
-              if ns != s:
-                  p.write_text(ns, encoding='utf-8')
-                  changed.append(p.as_posix())
-
-          board = Path('public/board-menu.js')
-          s = board.read_text(encoding='utf-8')
-          s = s.replace('    app_only: false\n  });', '    app_only: false,\n    auth_indeterminate: false\n  });', 1)
-          s = s.replace('  function canAccessPage(page, access) {\n', '  function canAccessPage(page, access) {\n    if (access?.auth_indeterminate === true) return true;\n', 1)
-
-          start = s.index('  async function loadAccess() {')
-          end = s.index('  function injectStyles()', start)
-          replacement = r'''  function authProjectRef(url) {
-    try { return new URL(url).hostname.split('.')[0] || ''; } catch { return ''; }
-  }
-
-  function readStoredAuthSession(url) {
-    const ref = authProjectRef(url);
-    if (!ref) return null;
-    const key = `sb-${ref}-auth-token`;
-    let raw = '';
-    try { raw = window.localStorage.getItem(key) || ''; } catch { return null; }
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed?.currentSession || parsed?.session || parsed || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function firstRestRow(value) {
-    if (Array.isArray(value)) return value[0] || null;
-    return value && typeof value === 'object' ? value : null;
-  }
-
-  async function authRest(url, anonKey, path, token, options = {}) {
-    const headers = new Headers(options.headers || {});
-    headers.set('apikey', anonKey);
-    headers.set('Authorization', `Bearer ${token}`);
-    if (options.body != null) headers.set('Content-Type', 'application/json');
-    const response = await fetch(url.replace(/\/$/, '') + path, {
-      method: options.method || 'GET',
-      body: options.body,
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-    if (!response.ok) {
-      const error = new Error(data?.message || data?.error || `HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    return data;
-  }
-
-  async function fillAccessFromSession(out, session, url, anonKey) {
-    const token = session?.access_token || '';
-    const uid = session?.user?.id || '';
-    if (!token || !uid) return out;
-    out.signed_in = true;
-    out.user_id = uid;
-    out.email = session?.user?.email || '';
-
-    const access = firstRestRow(await authRest(url, anonKey, '/rest/v1/rpc/mw_my_access', token, { method: 'POST', body: '{}' }));
-    if (access) {
-      out.is_maroowell = access.is_maroowell === true;
-      out.is_admin = access.is_admin === true;
-      out.max_role_level = Number(access.max_role_level || 0);
-      out.is_dragon_car_admin = access.is_dragon_car_admin === true;
-    }
-
-    const accountState = firstRestRow(await authRest(url, anonKey, '/rest/v1/rpc/mw_my_account_state', token, { method: 'POST', body: '{}' }));
-    if (accountState) {
-      out.approval_status = accountState.approval_status || 'pending';
-      out.app_only = accountState.app_only === true;
-    }
-
-    if (isSuper(out)) {
-      out.can_clhi = true;
-    } else {
-      const clhi = await authRest(url, anonKey, `/rest/v1/cleansing_history_access?select=can_select&user_id=eq.${encodeURIComponent(uid)}&limit=1`, token);
-      out.can_clhi = Array.isArray(clhi) && clhi[0]?.can_select === true;
-    }
-    return out;
-  }
-
-  async function loadAccess() {
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
-    const out = defaultAccess();
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return out;
-    const session = readStoredAuthSession(SUPABASE_URL);
-    if (!session?.access_token) return out;
-
-    try {
-      return await fillAccessFromSession(out, session, SUPABASE_URL, SUPABASE_ANON_KEY);
-    } catch {
-      await new Promise(resolve => setTimeout(resolve, 850));
-      const refreshed = readStoredAuthSession(SUPABASE_URL);
-      if (refreshed?.access_token && refreshed.access_token !== session.access_token) {
-        try { return await fillAccessFromSession(defaultAccess(), refreshed, SUPABASE_URL, SUPABASE_ANON_KEY); } catch {}
-      }
-      out.auth_indeterminate = true;
-      return out;
-    }
-  }
-
-'''
-          s = s[:start] + replacement + s[end:]
-          board.write_text(s, encoding='utf-8')
-          changed.append(board.as_posix())
-
-          cleansing = Path('public/cleansing_history')
-          s = cleansing.read_text(encoding='utf-8')
-          s = s.replace('    $("bar").classList.add("hide");\n    $("board").classList.add("hide");\n    $("main").innerHTML = `', '    $("bar")?.classList.add("hide");\n    $("board")?.classList.add("hide");\n    if (!$("main")) return;\n    $("main").innerHTML = `', 1)
-          cleansing.write_text(s, encoding='utf-8')
-          changed.append(cleansing.as_posix())
-
-          index = Path('public/index.html')
-          s = index.read_text(encoding='utf-8')
-          marker = '  async function signIn() {\n'
-          helper = r'''  function isRetryableAuthError(error) {
-    const status = Number(error?.status || 0);
-    const name = String(error?.name || '');
-    const message = String(error?.message || '').toLowerCase();
-    return [502, 503, 504].includes(status) || name === 'AuthRetryableFetchError' || message.includes('failed to fetch') || message.includes('network request failed') || message.includes('request timeout');
-  }
-
-  async function signInWithRetry(emailValue, passwordValue) {
-    let last = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await supabase.auth.signInWithPassword({ email: emailValue, password: passwordValue });
-      if (!result.error) return result;
-      last = result.error;
-      if (!isRetryableAuthError(last) || attempt === 1) return result;
-      await new Promise(resolve => setTimeout(resolve, 900));
-    }
-    return { error: last };
-  }
-
-'''
-          if helper not in s:
-              s = s.replace(marker, helper + marker, 1)
-          s = s.replace('      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });', '      const { error } = await signInWithRetry(em, pw);', 1)
-          index.write_text(s, encoding='utf-8')
-          if index.as_posix() not in changed:
-              changed.append(index.as_posix())
-
-          print('changed files:')
-          for item in changed:
-              print(item)
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public
-          if git diff --cached --quiet; then
-            echo "No changes"
-            exit 0
-          fi
-          git commit -m "Fix Supabase auth refresh concurrency"
-          git push origin main
-
-# trigger 2026-08-20T23:46+09:00
+          set -euo pipefail
+          URL='https://sdmntprnznorth.oaiusercontent.com/files/00000000-d2c0-820b-9978-4c3dafb51e48/raw?se=2026-08-30T12%3A39%3A30Z&sp=r&sv=2026-02-06&sr=b&scid=c9318607-fe20-55ad-b2ca-86c852b98d6f&skoid=f5e14fda-2af7-44a3-9d18-d372ffcad871&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-30T01%3A22%3A49Z&ske=2026-08-31T01%3A22%3A49Z&sks=b&skv=2026-02-06&sig=aOyY7IGmW%2BFApXMqXTnEcXbK39vpJgq76%2B9lTXwImB8%3D'
+          curl -fL --retry 3 --retry-all-errors "$URL" -o /tmp/v131.zip
+          rm -rf /tmp/v131 && mkdir -p /tmp/v131
+          unzip -q /tmp/v131.zip -d /tmp/v131
+          EXPECTED='989efbff6e4e2416aba08fa83e892d3a0880b0c95b671bb5aa3d92161540ad48'
+          test "$(sha256sum /tmp/v131/Maroowell-1.3.1.apk | awk '{print $1}')" = "$EXPECTED"
+          test "$(sha256sum /tmp/v131/maroowell-latest.apk | awk '{print $1}')" = "$EXPECTED"
+      - name: Publish APK and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/apk
+          cp /tmp/v131/Maroowell-1.3.1.apk public/apk/Maroowell-1.3.1.apk
+          cp /tmp/v131/maroowell-latest.apk public/apk/maroowell-latest.apk
+          cat > public/app_version.json <<'JSON'
+          {
+            "versionCode": 34,
+            "versionName": "1.3.1",
+            "updatedAt": "2026-08-30",
+            "fileName": "Maroowell-1.3.1.apk",
+            "downloadUrl": "https://maroowell.com/apk/Maroowell-1.3.1.apk",
+            "changes": [
+              "마루웰 라우트 정보 검색을 서브·서서브까지 확장하고 서서브까지 합친 라우트 코드로 표시",
+              "쿠팡 캠프 카카오지도 핀 표시와 캠프 마커 디자인 개선",
+              "용차 정산기간 표시 개선 및 용차 스케줄 열 정렬 수정",
+              "입차 스케줄 상위 배정 삭제 시 서서브 편집을 즉시 복원",
+              "홈 달력에서 오늘 날짜를 진한 테두리와 원형 날짜 표시로 강조"
+            ]
+          }
+          JSON
+          cp public/app_version.json app_version.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/apk/Maroowell-1.3.1.apk public/apk/maroowell-latest.apk public/app_version.json app_version.json
+          git diff --cached --check
+          git commit -m 'Publish Maroowell Android v1.3.1'
+          git push origin HEAD:main

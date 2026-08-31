@@ -1,0 +1,52 @@
+name: Patch building detail continuation budget 20260831
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-building-detail-continuation-20260831.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Increase detail continuation rounds
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('public/zipcode_search')
+          s=p.read_text(encoding='utf-8')
+          old='const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;'
+          new='const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256;'
+          if new in s:
+              print('already patched')
+          elif old in s:
+              s=s.replace(old,new,1)
+          else:
+              raise SystemExit('detail continuation constant not found')
+          p.write_text(s,encoding='utf-8')
+          PY
+          grep -q 'BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256' public/zipcode_search
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add public/zipcode_search
+          git commit -m 'Allow dense building detail analysis to finish' || true
+          git push origin HEAD:main

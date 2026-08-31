@@ -2147,9 +2147,8 @@
       const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;
       const BUILDING_REVERSE_RETRY_COUNT = 3;
       const BUILDING_GEOCODE_MAX_ROUNDS = 5;
-      const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
-      const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
-      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256;
+      // Continuation is driven by server progress, not an arbitrary round cap.
+      const BUILDING_CONTINUATION_MAX_STALL_ROUNDS = 5;
 
       // V62 dense parcel discovery: 작은 일반 지번/다가구/빌라를 누락하지 않도록
       // coupangRouteMap과 동일한 900-point / 7~16m 격자를 사용한다.
@@ -4349,15 +4348,23 @@
           let scopeTitleEvidence = Array.isArray(data?.scopeTitleContinuation?.evidence)
             ? data.scopeTitleContinuation.evidence
             : [];
+          let scopeTitleProgressSignature = null;
+          let scopeTitleStallRounds = 0;
           for (
             let titleRound = 0;
-            data?.requiresScopeTitleContinuation === true &&
-              titleRound < BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS;
+            data?.requiresScopeTitleContinuation === true;
             titleRound++
           ) {
             const progress = data?.progress || data?.scopeTitleContinuation || {};
             const processed = Number(progress.processedParcelCount || scopeTitleEvidence.length || 0);
             const remaining = Number(progress.remainingParcelCount || 0);
+            const progressSignature = `${processed}:${remaining}`;
+            if (scopeTitleProgressSignature === progressSignature) scopeTitleStallRounds += 1;
+            else scopeTitleStallRounds = 0;
+            scopeTitleProgressSignature = progressSignature;
+            if (scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`건축물대장 표제부 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }
             const total = Number(progress.totalDirectParcelCount || processed + remaining || 0);
             state.buildingStatusByZip.set(zip, {
               state: "loading",
@@ -4463,15 +4470,23 @@
           let kaptInfoEvidence = Array.isArray(data?.kaptInfoContinuation?.evidence)
             ? data.kaptInfoContinuation.evidence
             : [];
+          let kaptInfoProgressSignature = null;
+          let kaptInfoStallRounds = 0;
           for (
             let kaptRound = 0;
-            data?.requiresKaptInfoContinuation === true &&
-              kaptRound < BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS;
+            data?.requiresKaptInfoContinuation === true;
             kaptRound++
           ) {
             const progress = data?.progress || data?.kaptInfoContinuation || {};
             const processed = Number(progress.processedComplexCount || kaptInfoEvidence.length || 0);
             const remaining = Number(progress.remainingComplexCount || 0);
+            const progressSignature = `${processed}:${remaining}`;
+            if (kaptInfoProgressSignature === progressSignature) kaptInfoStallRounds += 1;
+            else kaptInfoStallRounds = 0;
+            kaptInfoProgressSignature = progressSignature;
+            if (kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`K-APT 상세조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }
             const total = Number(progress.totalComplexCount || processed + remaining || 0);
             state.buildingStatusByZip.set(zip, {
               state: "loading",
@@ -4510,14 +4525,23 @@
           let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)
             ? data.detailContinuation.evidence
             : [];
+          let detailProgressSignature = null;
+          let detailStallRounds = 0;
           for (
             let detailRound = 0;
-            data?.requiresDetailContinuation === true && detailRound < BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS;
+            data?.requiresDetailContinuation === true;
             detailRound++
           ) {
             const progress = data?.progress || data?.detailContinuation || {};
             const processed = Number(progress.processedParcelCount || detailEvidence.length || 0);
             const remaining = Number(progress.remainingParcelCount || 0);
+            const progressSignature = `${processed}:${remaining}`;
+            if (detailProgressSignature === progressSignature) detailStallRounds += 1;
+            else detailStallRounds = 0;
+            detailProgressSignature = progressSignature;
+            if (detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`상세 필지 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }
             const total = Number(progress.totalDetailParcelCount || processed + remaining || 0);
             state.buildingStatusByZip.set(zip, {
               state: "loading",

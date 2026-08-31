@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/inspect-building-detail-stall-20260831.yml'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,92 +12,61 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
-      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Extract live detail continuation logic
+      - name: Make continuation progress driven
         shell: bash
         run: |
           set -euo pipefail
-          set +x
-          mkdir -p /tmp/mw-detail .diagnostics
-          curl -fsS -D /tmp/mw-detail/headers \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
-            -o /tmp/mw-detail/content
-
           python3 - <<'PY'
           from pathlib import Path
-          from email.parser import BytesParser
-          from email.policy import default
-          import re, hashlib
-
-          h=Path('/tmp/mw-detail/headers').read_text(errors='ignore')
-          cts=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)
-          if not cts: raise SystemExit('content-type missing')
-          raw=Path('/tmp/mw-detail/content').read_bytes()
-          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {cts[-1]}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
-          src=None
-          for part in msg.iter_parts():
-              if part.get_param('name',header='content-disposition')=='worker.js':
-                  src=(part.get_payload(decode=True) or b'').decode('utf-8')
-                  break
-          if src is None: raise SystemExit('worker.js not found')
-
-          terms=[
-            'requiresDetailContinuation',
-            'detailContinuation',
-            'remainingParcelCount',
-            'processedParcelCount',
-            'detailParcel',
-            'pendingDetail',
-            'building_v60_detail_cache',
-            'loadV60Detail',
-            'fetchV60Detail',
-            'V65_DETAIL_CACHE_VERSION',
-            'nonCollectiveDetailLookupDisabled'
+          p = Path('public/zipcode_search')
+          s = p.read_text(encoding='utf-8')
+          old = "      const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;\n      const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;\n      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256;"
+          new = "      // Continuation is driven by server progress, not an arbitrary round cap.\n      const BUILDING_CONTINUATION_MAX_STALL_ROUNDS = 5;"
+          if old in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('continuation constants not found')
+          stages = [
+              ('title', '          let scopeTitleEvidence = Array.isArray(data?.scopeTitleContinuation?.evidence)\n            ? data.scopeTitleContinuation.evidence\n            : [];', '\n          let scopeTitleProgressSignature = null;\n          let scopeTitleStallRounds = 0;', '          for (\n            let titleRound = 0;\n            data?.requiresScopeTitleContinuation === true &&\n              titleRound < BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS;\n            titleRound++\n          ) {', '          for (\n            let titleRound = 0;\n            data?.requiresScopeTitleContinuation === true;\n            titleRound++\n          ) {', '            const remaining = Number(progress.remainingParcelCount || 0);', '\n            const progressSignature = `${processed}:${remaining}`;\n            if (scopeTitleProgressSignature === progressSignature) scopeTitleStallRounds += 1;\n            else scopeTitleStallRounds = 0;\n            scopeTitleProgressSignature = progressSignature;\n            if (scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {\n              throw new Error(`건축물대장 표제부 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);\n            }', 'scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS'),
+              ('kapt', '          let kaptInfoEvidence = Array.isArray(data?.kaptInfoContinuation?.evidence)\n            ? data.kaptInfoContinuation.evidence\n            : [];', '\n          let kaptInfoProgressSignature = null;\n          let kaptInfoStallRounds = 0;', '          for (\n            let kaptRound = 0;\n            data?.requiresKaptInfoContinuation === true &&\n              kaptRound < BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS;\n            kaptRound++\n          ) {', '          for (\n            let kaptRound = 0;\n            data?.requiresKaptInfoContinuation === true;\n            kaptRound++\n          ) {', '            const remaining = Number(progress.remainingComplexCount || 0);', '\n            const progressSignature = `${processed}:${remaining}`;\n            if (kaptInfoProgressSignature === progressSignature) kaptInfoStallRounds += 1;\n            else kaptInfoStallRounds = 0;\n            kaptInfoProgressSignature = progressSignature;\n            if (kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {\n              throw new Error(`K-APT 상세조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);\n            }', 'kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS'),
+              ('detail', '          let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)\n            ? data.detailContinuation.evidence\n            : [];', '\n          let detailProgressSignature = null;\n          let detailStallRounds = 0;', '          for (\n            let detailRound = 0;\n            data?.requiresDetailContinuation === true && detailRound < BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS;\n            detailRound++\n          ) {', '          for (\n            let detailRound = 0;\n            data?.requiresDetailContinuation === true;\n            detailRound++\n          ) {', '            const remaining = Number(progress.remainingParcelCount || 0);', '\n            const progressSignature = `${processed}:${remaining}`;\n            if (detailProgressSignature === progressSignature) detailStallRounds += 1;\n            else detailStallRounds = 0;\n            detailProgressSignature = progressSignature;\n            if (detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {\n              throw new Error(`상세 필지 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);\n            }', 'detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS'),
           ]
-          def redact(s):
-              s=re.sub(r'eyJ[A-Za-z0-9._-]{40,}','[jwt-redacted]',s)
-              s=re.sub(r'(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+',r'\1[redacted]',s)
-              return s
-
-          out=['# Live building detail stall snippets 2026-08-31','',f'sha256: {hashlib.sha256(src.encode()).hexdigest()}','']
-          seen=[]
-          for term in terms:
-              start=0; n=0
-              while n<8:
-                  i=src.find(term,start)
-                  if i<0: break
-                  a=max(0,i-5000); b=min(len(src),i+7000)
-                  if not any(a>=x and b<=y for x,y in seen):
-                      seen.append((a,b))
-                      out += [f'## {term} #{n+1}','', '```js', redact(src[a:b]), '```','']
-                  start=i+len(term); n+=1
-              if n==0: out += [f'## {term}','', '_not found_','']
-          Path('.diagnostics/live-building-detail-stall-20260831.md').write_text('\n'.join(out),encoding='utf-8')
+          for name, init, vars_, loop_old, loop_new, anchor, guard, marker in stages:
+              if marker in s:
+                  continue
+              if init not in s or loop_old not in s:
+                  raise SystemExit(name + ' continuation block not found')
+              s = s.replace(init, init + vars_, 1)
+              s = s.replace(loop_old, loop_new, 1)
+              pos = s.find(init)
+              anchor_pos = s.find(anchor, pos)
+              if anchor_pos < 0:
+                  raise SystemExit(name + ' progress anchor not found')
+              end = anchor_pos + len(anchor)
+              s = s[:end] + guard + s[end:]
+          for bad in ('BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS', 'BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS', 'BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS'):
+              if bad in s:
+                  raise SystemExit('old fixed cap remains: ' + bad)
+          p.write_text(s, encoding='utf-8')
           PY
+          grep -q 'BUILDING_CONTINUATION_MAX_STALL_ROUNDS = 5' public/zipcode_search
+          grep -q 'scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
+          grep -q 'kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
+          grep -q 'detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
 
-          if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/live-building-detail-stall-20260831.md; then
-            echo 'token leak guard failed' >&2
-            exit 1
-          fi
-
-      - name: Commit sanitized diagnostic
+      - name: Commit structural fix
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/zipcode_search
+          git commit -m 'Make building continuation progress driven'
           git pull --rebase origin main
-          git add .diagnostics/live-building-detail-stall-20260831.md
-          git commit -m 'Record live building detail stall snippets' || true
           git push origin HEAD:main

@@ -1,0 +1,160 @@
+name: Patch purple-resonance detail error terminal V69
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-purple-resonance-v69-detail-error-terminal.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download live worker and settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/cf-v69 .diagnostics
+          curl -fsS -D /tmp/cf-v69/content.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v69/content.multipart
+          curl -fsS \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" \
+            -o /tmp/cf-v69/settings.json
+
+      - name: Patch detail cache terminal error semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import re
+
+          headers = Path('/tmp/cf-v69/content.headers').read_text(errors='ignore')
+          ctype = re.findall(r'(?im)^content-type:\s*([^\r\n]+)', headers)[-1].strip()
+          raw = Path('/tmp/cf-v69/content.multipart').read_bytes()
+          msg = BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          source = None
+          for part in msg.iter_parts():
+              if part.get_param('name', header='content-disposition') == 'worker.js':
+                  source = (part.get_payload(decode=True) or b'').decode('utf-8')
+                  break
+          if source is None:
+              raise SystemExit('worker.js part not found')
+
+          old = 'cacheMap = new Map([...cacheMap.entries()].filter(([, row]) => v65DetailCacheIsCurrent(row)));'
+          new = '''cacheMap = new Map([...cacheMap.entries()].filter(([, row]) =>
+    v65DetailCacheIsCurrent(row) || row?.status === "error"
+  ));'''
+          count = source.count(old)
+          if count != 2:
+              if source.count('v65DetailCacheIsCurrent(row) || row?.status === "error"') >= 2:
+                  raise SystemExit('V69 already deployed')
+              raise SystemExit(f'Expected two detail cache filters, found {count}')
+          source = source.replace(old, new)
+
+          # Preserve error rows as completed attempts. They remain visible in errorRows so
+          # sourceComplete is false, but they no longer stay in `missing` forever.
+          marker = 'BUILDING_HUB_KAPT_V69_DETAIL_ERROR_TERMINAL_2026-08-31'
+          version_pat = re.compile(r'BUILDING_HUB_KAPT_V\d+_[A-Z0-9_]+_2026-\d\d-\d\d')
+          m = version_pat.search(source)
+          if m:
+              source = source[:m.start()] + marker + source[m.end():]
+          else:
+              source = f'// {marker}\n' + source
+
+          assert source.count('v65DetailCacheIsCurrent(row) || row?.status === "error"') >= 2
+          assert 'sourceComplete: missing.length === 0 && errorRows.length === 0' in source
+          Path('/tmp/cf-v69/worker.js').write_text(source, encoding='utf-8')
+          PY
+
+      - name: Build upload metadata preserving bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          env=json.loads(Path('/tmp/cf-v69/settings.json').read_text())
+          s=env.get('result') or {}
+          metadata={'main_module':'worker.js'}
+          bindings=[]
+          for b in s.get('bindings') or []:
+              name=b.get('name') if isinstance(b,dict) else None
+              if name:
+                  bindings.append({'type':'inherit','name':name,'version_id':'latest'})
+          if bindings:
+              metadata['bindings']=bindings
+          for key in ('compatibility_date','compatibility_flags','placement'):
+              val=s.get(key)
+              if val not in (None,[],{}): metadata[key]=val
+          metadata['annotations']={'workers/message':'V69 terminal degraded detail errors'}
+          Path('/tmp/cf-v69/metadata.json').write_text(json.dumps(metadata,separators=(',',':')),encoding='utf-8')
+          PY
+
+      - name: Deploy V69
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          code=$(curl -sS -o /tmp/cf-v69/deploy.json -w '%{http_code}' \
+            -X PUT \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -F 'metadata=@/tmp/cf-v69/metadata.json;type=application/json' \
+            -F 'worker.js=@/tmp/cf-v69/worker.js;type=application/javascript+module' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "Cloudflare deploy failed HTTP $code" >&2
+            cat /tmp/cf-v69/deploy.json >&2
+            exit 1
+          fi
+
+      - name: Verify live V69
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          sleep 3
+          curl -fsS -D /tmp/cf-v69/live.headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/cf-v69/live.multipart
+          grep -a -q 'BUILDING_HUB_KAPT_V69_DETAIL_ERROR_TERMINAL_2026-08-31' /tmp/cf-v69/live.multipart
+          test "$(grep -a -o 'v65DetailCacheIsCurrent(row) || row?.status === \"error\"' /tmp/cf-v69/live.multipart | wc -l)" -ge 2
+          cat > .diagnostics/purple-resonance-v69.md <<'EOF'
+          # purple-resonance-61ea V69 deployment
+
+          - status: deployed and verified
+          - fix: detail cache rows with status=error are terminal degraded results until their short error-cache expiry instead of remaining forever in the continuation missing set.
+          - effect: one permanently failing Building HUB parcel can no longer trap an entire zipcode in repeated continuation; aggregation falls back to title evidence and sourceComplete remains false for diagnostics.
+          EOF
+
+      - name: Commit deployment record
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add .diagnostics/purple-resonance-v69.md
+          git commit -m 'Record purple-resonance V69 deployment' || true
+          git push origin HEAD:main

@@ -1,4 +1,4 @@
-name: Fix app latest version resolution
+name: Publish Maroowell Android v1.3.4
 
 on:
   push:
@@ -11,97 +11,67 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Prefer highest app version across metadata sources
-        shell: python
+      - name: Download verified v1.3.4 release artifact
+        shell: bash
         run: |
-          from pathlib import Path
+          set -euo pipefail
+          URL='https://sdmntprindiasocentral.oaiusercontent.com/files/00000000-a184-8211-abd7-005639214305/raw?se=2026-08-31T13%3A50%3A36Z&sp=r&sv=2026-02-06&sr=b&scid=0798645f-97e5-514d-b7c7-46190fc5f03c&skoid=bb372dd6-3b2a-4af2-b355-c26497ba23cd&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-08-30T18%3A46%3A52Z&ske=2026-08-31T18%3A46%3A52Z&sks=b&skv=2026-02-06&sig=4ssrCGXdtcX1Ge69sAjIKOnHpxQDJ9HD7t35zRpgAkM%3D'
+          curl -fL --retry 3 --retry-all-errors "$URL" -o /tmp/v134.zip
+          rm -rf /tmp/v134
+          mkdir -p /tmp/v134
+          unzip -q /tmp/v134.zip -d /tmp/v134
+          test -f /tmp/v134/Maroowell-1.3.4.apk
+          test -f /tmp/v134/maroowell-latest.apk
+          EXPECTED_SHA='9ecd06dcbc7a4e4235562ed7f1edde00e04f0325715de573cf5fdb757e400d12'
+          for APK in /tmp/v134/Maroowell-1.3.4.apk /tmp/v134/maroowell-latest.apk; do
+            test "$(sha256sum "$APK" | awk '{print $1}')" = "$EXPECTED_SHA"
+          done
 
-          old = '''const META_SOURCES=[
-            'https://raw.githubusercontent.com/nuclearwarp/maroowell.com/main/public/app_version.json',
-            '/app_version.json'
-          ];
-          function escapeHtml(v){return String(v).replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
-          async function fetchLatestMeta(){
-            let lastError;
-            for(const source of META_SOURCES){
-              try{
-                const separator=source.includes('?')?'&':'?';
-                const response=await fetch(source+separator+'t='+Date.now(),{cache:'no-store'});
-                if(!response.ok)throw new Error('HTTP '+response.status);
-                const meta=await response.json();
-                if(!meta||!meta.versionName)throw new Error('invalid metadata');
-                return meta;
-              }catch(error){lastError=error;}
-            }
-            throw lastError||new Error('버전 정보 없음');
-          }
-          '''
-
-          new = '''const FALLBACK_META={
-            versionCode:31,
-            versionName:'1.2.8',
-            updatedAt:'2026-08-30',
-            fileName:'Maroowell-1.2.8.apk',
-            downloadUrl:'https://maroowell.com/apk/Maroowell-1.2.8.apk',
-            changes:[
-              '개인정보처리방침을 웹뷰가 아닌 앱 내부 네이티브 화면으로 변경',
-              '로그인 화면의 권한·도구 안내 문구 제거 및 개인정보처리방침 URL 노출 제거',
-              '라우트 편집 메뉴명을 라우트 편집기로 변경',
-              '마루웰 라우트 단가에서 모든 캠프를 캠프명 - 라우트 형식으로 표시',
-              '라우트 단가 금액을 소수점 없이 원 단위로 표시',
-              '용차 및 용차 스케줄을 네이티브 앱 화면으로 제공'
+      - name: Install APK and v1.3.4 metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public/apk
+          cp /tmp/v134/Maroowell-1.3.4.apk public/apk/Maroowell-1.3.4.apk
+          cp /tmp/v134/maroowell-latest.apk public/apk/maroowell-latest.apk
+          cat > public/app_version.json <<'JSON'
+          {
+            "versionCode": 37,
+            "versionName": "1.3.4",
+            "updatedAt": "2026-08-31",
+            "fileName": "Maroowell-1.3.4.apk",
+            "downloadUrl": "https://maroowell.com/apk/Maroowell-1.3.4.apk",
+            "changes": [
+              "야간 실시간 배송 현황에서 앱 스케줄 기준일과 META workDate를 분리",
+              "8/31 20:00~9/1 07:59 앱 스케줄은 8/31, META 조회는 9/1로 유지",
+              "META 401/403 발생 시 META 로그인 화면으로 자동 복귀",
+              "앱 비교 데이터 401/403 발생 시 Supabase 토큰 갱신 후 자동 재시도",
+              "앱 세션까지 만료된 경우 마루웰 로그인 화면으로 자동 이동"
             ]
-          };
-          const META_SOURCES=[
-            '/app_version.json',
-            'https://raw.githubusercontent.com/nuclearwarp/maroowell.com/main/public/app_version.json'
-          ];
-          function escapeHtml(v){return String(v).replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));}
-          function versionRank(meta){
-            const code=Number(meta&&meta.versionCode);
-            if(Number.isFinite(code)&&code>0)return code*1000000;
-            const parts=String(meta&&meta.versionName||'').split('.').map(v=>Number(v)||0);
-            return (parts[0]||0)*1000000000+(parts[1]||0)*1000000+(parts[2]||0)*1000;
           }
-          async function fetchLatestMeta(){
-            const candidates=[FALLBACK_META];
-            await Promise.all(META_SOURCES.map(async source=>{
-              try{
-                const separator=source.includes('?')?'&':'?';
-                const response=await fetch(source+separator+'t='+Date.now(),{cache:'no-store'});
-                if(!response.ok)throw new Error('HTTP '+response.status);
-                const meta=await response.json();
-                if(meta&&meta.versionName)candidates.push(meta);
-              }catch(_){}
-            }));
-            candidates.sort((a,b)=>versionRank(b)-versionRank(a));
-            return candidates[0];
-          }
-          '''
+          JSON
+          cp public/app_version.json app_version.json
 
-          for name in ['app','public/app']:
-              p=Path(name)
-              text=p.read_text(encoding='utf-8')
-              if old not in text:
-                  raise SystemExit(f'expected metadata loader not found in {name}')
-              p.write_text(text.replace(old,new),encoding='utf-8')
-
-      - name: Commit app page fix
+      - name: Commit public v1.3.4
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add app public/app
+          git add public/apk/Maroowell-1.3.4.apk public/apk/maroowell-latest.apk public/app_version.json app_version.json
           git diff --cached --check
-          git commit -m 'Fix app page to select newest APK metadata'
+          if git diff --cached --quiet; then
+            echo 'v1.3.4 is already published'
+            exit 0
+          fi
+          git commit -m 'Publish Maroowell Android v1.3.4'
           git push origin HEAD:main

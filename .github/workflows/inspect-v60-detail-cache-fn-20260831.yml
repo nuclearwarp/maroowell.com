@@ -1,0 +1,60 @@
+name: Inspect v60 detail cache function 20260831
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-v60-detail-cache-fn-20260831.yml'
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Extract function
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/d .diagnostics
+          curl -fsS -D /tmp/d/h -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" -o /tmp/d/c
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import re
+          h=Path('/tmp/d/h').read_text(errors='ignore')
+          ct=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)[-1]
+          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode()+Path('/tmp/d/c').read_bytes())
+          src=''
+          for p in msg.iter_parts():
+            if p.get_param('name',header='content-disposition')=='worker.js': src=(p.get_payload(decode=True) or b'').decode(); break
+          terms=['v60EnsureDetailCaches','v60DetailCacheFresh','v60FetchDetailForParcel','building_v60_detail_cache','sourceComplete','missing =','missing:']
+          out=['# v60 detail cache function']
+          for term in terms:
+            pos=0; n=0
+            while n<8:
+              i=src.find(term,pos)
+              if i<0: break
+              out += ['',f'## {term} #{n+1}','```js',src[max(0,i-7000):min(len(src),i+10000)],'```']
+              pos=i+len(term); n+=1
+          Path('.diagnostics/v60-detail-cache-fn-20260831.md').write_text('\n'.join(out))
+          PY
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add .diagnostics/v60-detail-cache-fn-20260831.md
+          git commit -m 'Record v60 detail cache function' || true
+          git push origin HEAD:main

@@ -1,4 +1,4 @@
-name: Patch building detail continuation budget 20260831
+name: Patch building continuation orchestration 20260831
 
 on:
   push:
@@ -20,33 +20,203 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Increase detail continuation rounds
+      - name: Replace fixed continuation round caps
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('public/zipcode_search')
-          s=p.read_text(encoding='utf-8')
-          old='const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 64;'
-          new='const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256;'
-          if new in s:
-              print('already patched')
-          elif old in s:
-              s=s.replace(old,new,1)
-          else:
-              raise SystemExit('detail continuation constant not found')
-          p.write_text(s,encoding='utf-8')
-          PY
-          grep -q 'BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256' public/zipcode_search
 
-      - name: Commit patch
+          p = Path('public/zipcode_search')
+          s = p.read_text(encoding='utf-8')
+
+          old_constants = '''      const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
+      const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
+      const BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS = 256;'''
+          new_constants = '''      // Continuation은 임의 횟수로 끊지 않고 실제 진행 여부로 종료한다.
+      // 동일 processed/remaining 상태가 연속될 때만 upstream stall로 판단한다.
+      const BUILDING_CONTINUATION_MAX_STALL_ROUNDS = 5;'''
+          if old_constants in s:
+              s = s.replace(old_constants, new_constants, 1)
+          elif new_constants not in s:
+              raise SystemExit('continuation constants block not found')
+
+          def patch_stage(text, *, start_marker, end_marker, init_block, loop_old, loop_new,
+                          progress_anchor, vars_block, guard_block, guard_marker):
+              a = text.find(start_marker)
+              if a < 0:
+                  raise SystemExit(f'stage start not found: {start_marker}')
+              b = text.find(end_marker, a)
+              if b < 0:
+                  raise SystemExit(f'stage end not found: {end_marker}')
+              seg = text[a:b]
+              if guard_marker in seg:
+                  return text
+              if init_block not in seg:
+                  raise SystemExit(f'init block not found: {start_marker}')
+              if loop_old not in seg:
+                  raise SystemExit(f'loop block not found: {start_marker}')
+              if progress_anchor not in seg:
+                  raise SystemExit(f'progress anchor not found: {start_marker}')
+              seg = seg.replace(init_block, init_block + vars_block, 1)
+              seg = seg.replace(loop_old, loop_new, 1)
+              seg = seg.replace(progress_anchor, progress_anchor + guard_block, 1)
+              return text[:a] + seg + text[b:]
+
+          title_init = '''          let scopeTitleEvidence = Array.isArray(data?.scopeTitleContinuation?.evidence)
+            ? data.scopeTitleContinuation.evidence
+            : [];'''
+          title_loop_old = '''          for (
+            let titleRound = 0;
+            data?.requiresScopeTitleContinuation === true &&
+              titleRound < BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS;
+            titleRound++
+          ) {'''
+          title_loop_new = '''          for (
+            let titleRound = 0;
+            data?.requiresScopeTitleContinuation === true;
+            titleRound++
+          ) {'''
+          title_vars = '''
+          let scopeTitleProgressSignature = null;
+          let scopeTitleStallRounds = 0;'''
+          title_anchor = '''            const remaining = Number(progress.remainingParcelCount || 0);'''
+          title_guard = '''
+            const progressSignature = `${processed}:${remaining}`;
+            if (scopeTitleProgressSignature === progressSignature) {
+              scopeTitleStallRounds += 1;
+            } else {
+              scopeTitleStallRounds = 0;
+            }
+            scopeTitleProgressSignature = progressSignature;
+            if (scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`건축물대장 표제부 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }'''
+          s = patch_stage(
+              s,
+              start_marker='let scopeTitleEvidence =',
+              end_marker='if (data?.requiresScopeTitleContinuation === true)',
+              init_block=title_init,
+              loop_old=title_loop_old,
+              loop_new=title_loop_new,
+              progress_anchor=title_anchor,
+              vars_block=title_vars,
+              guard_block=title_guard,
+              guard_marker='scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS',
+          )
+
+          kapt_init = '''          let kaptInfoEvidence = Array.isArray(data?.kaptInfoContinuation?.evidence)
+            ? data.kaptInfoContinuation.evidence
+            : [];'''
+          kapt_loop_old = '''          for (
+            let kaptRound = 0;
+            data?.requiresKaptInfoContinuation === true &&
+              kaptRound < BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS;
+            kaptRound++
+          ) {'''
+          kapt_loop_new = '''          for (
+            let kaptRound = 0;
+            data?.requiresKaptInfoContinuation === true;
+            kaptRound++
+          ) {'''
+          kapt_vars = '''
+          let kaptInfoProgressSignature = null;
+          let kaptInfoStallRounds = 0;'''
+          kapt_anchor = '''            const remaining = Number(progress.remainingComplexCount || 0);'''
+          kapt_guard = '''
+            const progressSignature = `${processed}:${remaining}`;
+            if (kaptInfoProgressSignature === progressSignature) {
+              kaptInfoStallRounds += 1;
+            } else {
+              kaptInfoStallRounds = 0;
+            }
+            kaptInfoProgressSignature = progressSignature;
+            if (kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`K-APT 상세조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }'''
+          s = patch_stage(
+              s,
+              start_marker='let kaptInfoEvidence =',
+              end_marker='if (data?.requiresKaptInfoContinuation === true)',
+              init_block=kapt_init,
+              loop_old=kapt_loop_old,
+              loop_new=kapt_loop_new,
+              progress_anchor=kapt_anchor,
+              vars_block=kapt_vars,
+              guard_block=kapt_guard,
+              guard_marker='kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS',
+          )
+
+          detail_init = '''          let detailEvidence = Array.isArray(data?.detailContinuation?.evidence)
+            ? data.detailContinuation.evidence
+            : [];'''
+          detail_loop_old = '''          for (
+            let detailRound = 0;
+            data?.requiresDetailContinuation === true && detailRound < BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS;
+            detailRound++
+          ) {'''
+          detail_loop_new = '''          for (
+            let detailRound = 0;
+            data?.requiresDetailContinuation === true;
+            detailRound++
+          ) {'''
+          detail_vars = '''
+          let detailProgressSignature = null;
+          let detailStallRounds = 0;'''
+          detail_anchor = '''            const remaining = Number(progress.remainingParcelCount || 0);'''
+          detail_guard = '''
+            const progressSignature = `${processed}:${remaining}`;
+            if (detailProgressSignature === progressSignature) {
+              detailStallRounds += 1;
+            } else {
+              detailStallRounds = 0;
+            }
+            detailProgressSignature = progressSignature;
+            if (detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+              throw new Error(`상세 필지 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }'''
+          s = patch_stage(
+              s,
+              start_marker='let detailEvidence =',
+              end_marker='if (data?.requiresDetailContinuation === true)',
+              init_block=detail_init,
+              loop_old=detail_loop_old,
+              loop_new=detail_loop_new,
+              progress_anchor=detail_anchor,
+              vars_block=detail_vars,
+              guard_block=detail_guard,
+              guard_marker='detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS',
+          )
+
+          forbidden = [
+              'BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS',
+              'BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS',
+              'BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS',
+          ]
+          leftovers = [name for name in forbidden if name in s]
+          if leftovers:
+              raise SystemExit('fixed round constants still referenced: ' + ', '.join(leftovers))
+          if s.count('BUILDING_CONTINUATION_MAX_STALL_ROUNDS') < 4:
+              raise SystemExit('stall guards were not installed for all continuation stages')
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          grep -q 'const BUILDING_CONTINUATION_MAX_STALL_ROUNDS = 5;' public/zipcode_search
+          ! grep -q 'BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS' public/zipcode_search
+          ! grep -q 'BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS' public/zipcode_search
+          ! grep -q 'BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS' public/zipcode_search
+          grep -q 'detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
+          grep -q 'scopeTitleStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
+          grep -q 'kaptInfoStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS' public/zipcode_search
+
+      - name: Commit structural continuation patch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add public/zipcode_search
-          git commit -m 'Allow dense building detail analysis to finish' || true
+          git commit -m 'Make building continuation progress driven'
           git pull --rebase origin main
           git push origin HEAD:main

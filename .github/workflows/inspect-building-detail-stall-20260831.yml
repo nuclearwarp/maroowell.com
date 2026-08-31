@@ -1,0 +1,104 @@
+name: Inspect building detail stall 20260831
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-building-detail-stall-20260831.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Extract live detail continuation logic
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+          mkdir -p /tmp/mw-detail .diagnostics
+          curl -fsS -D /tmp/mw-detail/headers \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" \
+            -o /tmp/mw-detail/content
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from email.parser import BytesParser
+          from email.policy import default
+          import re, hashlib
+
+          h=Path('/tmp/mw-detail/headers').read_text(errors='ignore')
+          cts=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)
+          if not cts: raise SystemExit('content-type missing')
+          raw=Path('/tmp/mw-detail/content').read_bytes()
+          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {cts[-1]}\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw)
+          src=None
+          for part in msg.iter_parts():
+              if part.get_param('name',header='content-disposition')=='worker.js':
+                  src=(part.get_payload(decode=True) or b'').decode('utf-8')
+                  break
+          if src is None: raise SystemExit('worker.js not found')
+
+          terms=[
+            'requiresDetailContinuation',
+            'detailContinuation',
+            'remainingParcelCount',
+            'processedParcelCount',
+            'detailParcel',
+            'pendingDetail',
+            'building_v60_detail_cache',
+            'loadV60Detail',
+            'fetchV60Detail',
+            'V65_DETAIL_CACHE_VERSION',
+            'nonCollectiveDetailLookupDisabled'
+          ]
+          def redact(s):
+              s=re.sub(r'eyJ[A-Za-z0-9._-]{40,}','[jwt-redacted]',s)
+              s=re.sub(r'(?i)(Bearer\s+)[A-Za-z0-9._~+/=-]+',r'\1[redacted]',s)
+              return s
+
+          out=['# Live building detail stall snippets 2026-08-31','',f'sha256: {hashlib.sha256(src.encode()).hexdigest()}','']
+          seen=[]
+          for term in terms:
+              start=0; n=0
+              while n<8:
+                  i=src.find(term,start)
+                  if i<0: break
+                  a=max(0,i-5000); b=min(len(src),i+7000)
+                  if not any(a>=x and b<=y for x,y in seen):
+                      seen.append((a,b))
+                      out += [f'## {term} #{n+1}','', '```js', redact(src[a:b]), '```','']
+                  start=i+len(term); n+=1
+              if n==0: out += [f'## {term}','', '_not found_','']
+          Path('.diagnostics/live-building-detail-stall-20260831.md').write_text('\n'.join(out),encoding='utf-8')
+          PY
+
+          if grep -Fq "$CLOUDFLARE_API_TOKEN" .diagnostics/live-building-detail-stall-20260831.md; then
+            echo 'token leak guard failed' >&2
+            exit 1
+          fi
+
+      - name: Commit sanitized diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin main
+          git add .diagnostics/live-building-detail-stall-20260831.md
+          git commit -m 'Record live building detail stall snippets' || true
+          git push origin HEAD:main

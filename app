@@ -39,18 +39,15 @@
 <script>
 const $=id=>document.getElementById(id);
 const FALLBACK_META={
-  versionCode:31,
-  versionName:'1.2.8',
-  updatedAt:'2026-08-30',
-  fileName:'Maroowell-1.2.8.apk',
-  downloadUrl:'https://maroowell.com/apk/Maroowell-1.2.8.apk',
+  versionCode:49,
+  versionName:'1.4.5',
+  updatedAt:'2026-09-03',
+  fileName:'Maroowell-1.4.5.apk',
+  downloadUrl:'https://maroowell-app-download.brain-0f6.workers.dev/downloads/Maroowell-1.4.5.apk',
   changes:[
-    '개인정보처리방침을 웹뷰가 아닌 앱 내부 네이티브 화면으로 변경',
-    '로그인 화면의 권한·도구 안내 문구 제거 및 개인정보처리방침 URL 노출 제거',
-    '라우트 편집 메뉴명을 라우트 편집기로 변경',
-    '마루웰 라우트 단가에서 모든 캠프를 캠프명 - 라우트 형식으로 표시',
-    '라우트 단가 금액을 소수점 없이 원 단위로 표시',
-    '용차 및 용차 스케줄을 네이티브 앱 화면으로 제공'
+    '메뉴 아이콘 순환 교체',
+    '클렌징 히스토리 카드와 우편번호 전체 조회 이동 개선',
+    '마루웰 회수율을 정산월·월누적·주차별 일자·이미지 복사를 갖춘 네이티브 화면으로 변경'
   ]
 };
 const META_SOURCES=[

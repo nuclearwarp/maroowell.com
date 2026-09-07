@@ -1,0 +1,130 @@
+name: Switch route runtime direct v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/switch-route-runtime-direct-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Switch active callers away from challenged hostname
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          old = 'https://route.maroowell.com'
+          new = 'https://purple-river-0717.brain-0f6.workers.dev'
+          targets = [
+              Path('coupangRouteMap.html'),
+              Path('public/coupangRouteMap.html'),
+              Path('public/zipcode_search'),
+              Path('public/dragon_car_index'),
+              Path('public/cleansing_history'),
+              Path('public/share.html'),
+          ]
+
+          changed = []
+          for path in targets:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count:
+                  text = text.replace(old, new)
+                  path.write_text(text, encoding='utf-8')
+                  changed.append((str(path), count))
+              elif new not in text:
+                  raise SystemExit(f'{path}: neither old nor new route endpoint found')
+
+          print('changed:', changed)
+          PY
+
+      - name: Align canonical Wrangler service name
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('wrangler.toml')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('name = "route-api"', 'name = "purple-river-0717"', 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Verify runtime endpoint and auth callers
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIRECT='https://purple-river-0717.brain-0f6.workers.dev'
+          for f in \
+            coupangRouteMap.html \
+            public/coupangRouteMap.html \
+            public/zipcode_search \
+            public/dragon_car_index \
+            public/cleansing_history \
+            public/share.html; do
+            grep -Fq "$DIRECT" "$f"
+            if grep -Fq 'https://route.maroowell.com' "$f"; then
+              echo "stale challenged endpoint remains in $f"
+              exit 1
+            fi
+          done
+          grep -Fq 'Authorization' public/coupangRouteMap.html
+          grep -Fq 'routeWriteSession.access_token' public/zipcode_search
+          grep -Fq 'session.access_token' public/dragon_car_index
+          grep -Fq 'routeVendorSession.access_token' public/cleansing_history
+          grep -Fq 'name = "purple-river-0717"' wrangler.toml
+          git diff --check
+
+      - name: Commit runtime switch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            coupangRouteMap.html \
+            public/coupangRouteMap.html \
+            public/zipcode_search \
+            public/dragon_car_index \
+            public/cleansing_history \
+            public/share.html \
+            wrangler.toml
+          if git diff --cached --quiet; then
+            echo 'No runtime endpoint changes required'
+          else
+            git commit -m 'Use secured route worker endpoint for runtime API calls'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Verify secured worker rejects unauthenticated writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://purple-river-0717.brain-0f6.workers.dev'
+          health=$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/health")
+          test "$health" = '200'
+
+          route=$(curl -sS -o /tmp/route -w '%{http_code}' -X POST "$BASE/route" \
+            -H 'Content-Type: application/json' --data '{}')
+          cat /tmp/route
+          test "$route" = '401'
+
+          vendor=$(curl -sS -o /tmp/vendor -w '%{http_code}' -X POST "$BASE/vendors" \
+            -H 'Content-Type: application/json' --data '{}')
+          cat /tmp/vendor
+          test "$vendor" = '401'

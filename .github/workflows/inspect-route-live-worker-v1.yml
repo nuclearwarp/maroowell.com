@@ -1,0 +1,40 @@
+name: Inspect live route worker v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-route-live-worker-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Inspect live route worker bindings and zone rulesets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: 0f644373a9db40f2b36e4ffece348c46
+          CF_ZONE: 0de85def1885085077d0510050785041
+        shell: bash
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $CF_TOKEN")
+
+          echo '=== purple-river-0717 production binding names ==='
+          curl -fsS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/workers/services/purple-river-0717/environments/production/settings" \
+            | jq '{success, errors, bindings: [.result.bindings[]? | {name, type, service, environment, namespace_id}]}'
+
+          echo
+          echo '=== zone rulesets summary ==='
+          curl -fsS "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$CF_ZONE/rulesets" \
+            | jq '{success, errors, result: [.result[]? | {id, name, kind, phase, version}]}'
+
+          echo
+          echo '=== account rulesets summary ==='
+          curl -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/rulesets" \
+            | jq '{success, errors, result: [.result[]? | {id, name, kind, phase, version}]}' || true

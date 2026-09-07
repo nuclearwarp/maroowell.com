@@ -6,22 +6,76 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: deploy-login-worker-main
   cancel-in-progress: true
 
 jobs:
   deploy:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
-      - name: Deploy to Cloudflare Workers
+      - name: Apply route API write authentication hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/secure_route_api_writes_v1.py
+          node --check worker.js
+          grep -q 'MW_ROUTE_WRITE_AUTH_V1' worker.js
+          grep -q 'requireRouteWriteAccess(request, env)' worker.js
+          grep -q '__MW_ROUTE_ACCESS_TOKEN' public/coupangRouteMap.html
+          grep -q 'routeWriteSession.access_token' public/zipcode_search
+          grep -q 'routeVendorSession.access_token' public/cleansing_history
+          git diff --check
+
+      - name: Commit hardened sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js wrangler.toml coupangRouteMap.html public/coupangRouteMap.html public/mw_route_popups.js public/zipcode_search public/dragon_car_index public/cleansing_history
+          if ! git diff --cached --quiet; then
+            git commit -m 'Require authenticated admin access for route API writes'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Deploy route API worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4"
+          command: deploy --config wrangler.toml
+
+      - name: Deploy login worker and public web assets
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           wranglerVersion: "4"
           command: deploy --config login-wrangler.toml
+
+      - name: Verify unauthenticated mutations are blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -fsS https://route.maroowell.com/health >/dev/null
+          route_code=$(curl -sS -o /tmp/route-write.txt -w '%{http_code}' -X POST 'https://route.maroowell.com/route' -H 'Content-Type: application/json' --data '{"camp":"__security_probe__","code":"__probe__","polygon_wgs84":[]}')
+          cat /tmp/route-write.txt
+          test "$route_code" = '401'
+          vendor_code=$(curl -sS -o /tmp/vendor-write.txt -w '%{http_code}' -X POST 'https://route.maroowell.com/vendors' -H 'Content-Type: application/json' -H 'Authorization: Bearer invalid-security-probe' --data '{"name":"__security_probe__","business_number":"0000000000"}')
+          cat /tmp/vendor-write.txt
+          test "$vendor_code" = '401'
+          echo 'Route API mutation auth verification passed.'

@@ -30,8 +30,14 @@ export default {
 
       if (path === "/route") {
         if (request.method === "GET") return cors(await handleRouteGet(url, env));
-        if (request.method === "POST") return cors(await handleRoutePost(request, env));
-        if (request.method === "DELETE") return cors(await handleRouteDelete(request, env));
+        if (request.method === "POST") {
+          await requireRouteWriteAccess(request, env);
+          return cors(await handleRoutePost(request, env));
+        }
+        if (request.method === "DELETE") {
+          await requireRouteWriteAccess(request, env);
+          return cors(await handleRouteDelete(request, env));
+        }
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
@@ -46,13 +52,19 @@ export default {
 
       if (path === "/camps") {
         if (request.method === "GET") return cors(await handleCampsGet(url, env));
-        if (request.method === "POST") return cors(await handleCampsPost(request, env));
+        if (request.method === "POST") {
+          await requireRouteWriteAccess(request, env);
+          return cors(await handleCampsPost(request, env));
+        }
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
       if (path === "/vendors") {
         if (request.method === "GET") return cors(await handleVendorsGet(url, env));
-        if (request.method === "POST") return cors(await handleVendorCreate(request, env));
+        if (request.method === "POST") {
+          await requireRouteWriteAccess(request, env);
+          return cors(await handleVendorCreate(request, env));
+        }
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
@@ -69,7 +81,9 @@ export default {
 
       return cors(json({ error: "Not Found" }, 404));
     } catch (e) {
-      return cors(json({ error: e?.message || String(e) }, 500));
+      const rawStatus = Number(e?.status || e?.statusCode || 500);
+      const status = Number.isInteger(rawStatus) && rawStatus >= 400 && rawStatus <= 599 ? rawStatus : 500;
+      return cors(json({ error: e?.message || String(e) }, status));
     }
   },
 };
@@ -137,6 +151,104 @@ async function supabaseFetch(env, pathWithQuery, init = {}) {
   } catch {
     return text;
   }
+}
+
+
+// MW_ROUTE_WRITE_AUTH_V1
+const ROUTE_WRITE_MIN_LEVEL = 60;
+const MAROOWELL_VENDOR_CODE = "bn_2591501828";
+
+function routeHttpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function routeBearerToken(request) {
+  const raw = request.headers.get("Authorization") || "";
+  const match = raw.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+async function routeAuthUser(request, env) {
+  const token = routeBearerToken(request);
+  if (!token) throw routeHttpError(401, "로그인 세션이 필요합니다.");
+
+  const base = mustEnv(env, "SUPABASE_URL").replace(/\/$/, "");
+  const key = mustEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
+  const res = await fetch(`${base}/auth/v1/user`, {
+    method: "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json"
+    }
+  });
+
+  if (!res.ok) throw routeHttpError(401, "유효하지 않거나 만료된 로그인 세션입니다.");
+  const user = await res.json().catch(() => null);
+  if (!user?.id) throw routeHttpError(401, "로그인 사용자를 확인할 수 없습니다.");
+  return user;
+}
+
+async function routeFirstRow(env, table, params) {
+  const query = new URLSearchParams(params || {});
+  if (!query.has("limit")) query.set("limit", "1");
+  const rows = await supabaseFetch(env, `/rest/v1/${table}?${query.toString()}`, { method: "GET" });
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function routeMaroowellVendor(env) {
+  let row = await routeFirstRow(env, VENDORS_TABLE, {
+    select: "id,name,vendor_code",
+    vendor_code: `eq.${MAROOWELL_VENDOR_CODE}`,
+    limit: "1"
+  });
+  if (row) return row;
+  return routeFirstRow(env, VENDORS_TABLE, {
+    select: "id,name,vendor_code",
+    name: "eq.마루웰",
+    limit: "1"
+  });
+}
+
+async function requireRouteWriteAccess(request, env) {
+  const user = await routeAuthUser(request, env);
+  const [access, profile, vendor] = await Promise.all([
+    routeFirstRow(env, "user_access", {
+      select: "user_id,is_maroowell,is_admin",
+      user_id: `eq.${user.id}`,
+      limit: "1"
+    }),
+    routeFirstRow(env, "profiles", {
+      select: "user_id,approval_status,app_only",
+      user_id: `eq.${user.id}`,
+      limit: "1"
+    }),
+    routeMaroowellVendor(env)
+  ]);
+
+  if (!vendor?.id) throw routeHttpError(503, "마루웰 권한 기준 정보를 확인할 수 없습니다.");
+
+  const member = await routeFirstRow(env, "vendor_members", {
+    select: "user_id,vendor_id,role_level,is_active",
+    user_id: `eq.${user.id}`,
+    vendor_id: `eq.${vendor.id}`,
+    is_active: "eq.true",
+    order: "role_level.desc",
+    limit: "1"
+  });
+
+  const roleLevel = Number(member?.role_level || 0);
+  const approved = profile?.approval_status === "approved";
+  const webEnabled = profile?.app_only !== true;
+  const isMaroowell = access?.is_maroowell === true || roleLevel > 0;
+  const isPrivileged = access?.is_admin === true || roleLevel >= ROUTE_WRITE_MIN_LEVEL;
+
+  if (!approved || !webEnabled || !isMaroowell || !isPrivileged) {
+    throw routeHttpError(403, "라우트 수정 권한이 없습니다.");
+  }
+  return { userId: user.id, roleLevel, isAdmin: access?.is_admin === true };
 }
 
 function safeTrim(v) {

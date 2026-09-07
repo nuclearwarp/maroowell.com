@@ -2545,10 +2545,23 @@
     if (!r.ok) throw new Error(j?.error || j?.message || t || `HTTP ${r.status}`);
     return j;
   }
+  async function getRouteWriteAccessToken(){
+    if (!mwSupabase?.auth) return "";
+    const { data: { session } } = await mwSupabase.auth.getSession();
+    return session?.access_token || "";
+  }
+  window.__MW_ROUTE_ACCESS_TOKEN = getRouteWriteAccessToken;
+
   async function apiJson(method, url, body){
+    const headers = {"Content-Type":"application/json"};
+    if (String(method || "GET").toUpperCase() !== "GET" && String(url || "").startsWith(API_BASE)) {
+      const token = await getRouteWriteAccessToken();
+      if (!token) throw new Error("로그인 세션이 필요합니다.");
+      headers.Authorization = `Bearer ${token}`;
+    }
     const r = await fetch(url, {
       method,
-      headers: {"Content-Type":"application/json"},
+      headers,
       body: body ? JSON.stringify(body) : undefined
     });
     const t = await r.text();

@@ -71,9 +71,15 @@ export default function initMwRoutePopups(MW_ROUTE) {
     return json;
   }
   async function apiJson(method, url, body) {
+    const headers = { "Content-Type": "application/json" };
+    if (String(method || "GET").toUpperCase() !== "GET") {
+      const token = await window.__MW_ROUTE_ACCESS_TOKEN?.();
+      if (!token) throw new Error("로그인 세션이 필요합니다.");
+      headers.Authorization = `Bearer ${token}`;
+    }
     const res = await fetch(url, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();

@@ -1,0 +1,60 @@
+name: Deploy route worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker.js'
+      - 'wrangler.toml'
+      - '.github/workflows/deploy-route-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-route-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify secured source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          grep -Fq 'MW_ROUTE_WRITE_AUTH_V1' worker.js
+          grep -Fq 'requireRouteWriteAccess(request, env)' worker.js
+          grep -Fq 'ROUTE_WRITE_MIN_LEVEL = 60' worker.js
+          grep -Fq 'name = "purple-river-0717"' wrangler.toml
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config wrangler.toml
+
+      - name: Verify live auth gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://purple-river-0717.brain-0f6.workers.dev'
+          sleep 3
+          health=$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/health")
+          test "$health" = '200'
+
+          route=$(curl -sS -o /tmp/route -w '%{http_code}' -X POST "$BASE/route" \
+            -H 'Content-Type: application/json' --data '{}')
+          cat /tmp/route
+          test "$route" = '401'
+
+          vendor=$(curl -sS -o /tmp/vendor -w '%{http_code}' -X POST "$BASE/vendors" \
+            -H 'Content-Type: application/json' --data '{}')
+          cat /tmp/vendor
+          test "$vendor" = '401'

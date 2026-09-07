@@ -1,0 +1,89 @@
+name: Run secure route API writes v1
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: run-secure-route-api-writes-v1
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply route API security patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/secure_route_api_writes_v1.py
+
+      - name: Verify patched sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          grep -q 'MW_ROUTE_WRITE_AUTH_V1' worker.js
+          grep -q 'requireRouteWriteAccess(request, env)' worker.js
+          grep -q 'ROUTE_WRITE_MIN_LEVEL = 60' worker.js
+          grep -q '__MW_ROUTE_ACCESS_TOKEN' public/coupangRouteMap.html
+          grep -q 'routeWriteSession.access_token' public/zipcode_search
+          grep -q 'headers.Authorization = `Bearer ${session.access_token}`' public/dragon_car_index
+          grep -q 'routeVendorSession.access_token' public/cleansing_history
+          grep -q 'keep_vars = true' wrangler.toml
+          git diff --check
+
+      - name: Commit patched sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js wrangler.toml coupangRouteMap.html public/coupangRouteMap.html public/mw_route_popups.js public/zipcode_search public/dragon_car_index public/cleansing_history
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+          else
+            git commit -m 'Require authenticated admin access for route API writes'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Deploy route API worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config wrangler.toml
+
+      - name: Deploy Maroowell web assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config login-wrangler.toml
+
+      - name: Verify unauthenticated mutations are blocked
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl -fsS https://route.maroowell.com/health >/dev/null
+          code=$(curl -sS -o /tmp/route-body.txt -w '%{http_code}' -X POST 'https://route.maroowell.com/route' -H 'Content-Type: application/json' --data '{"camp":"__security_probe__","code":"__probe__","polygon_wgs84":[]}')
+          cat /tmp/route-body.txt
+          test "$code" = '401'
+          bad=$(curl -sS -o /tmp/route-bad.txt -w '%{http_code}' -X POST 'https://route.maroowell.com/vendors' -H 'Content-Type: application/json' -H 'Authorization: Bearer invalid-security-probe' --data '{"name":"__security_probe__","business_number":"0000000000"}')
+          cat /tmp/route-bad.txt
+          test "$bad" = '401'
+          echo 'Route API write auth is live.'

@@ -75,15 +75,34 @@ window.MARUWELL_CONFIG = {
     const period = payload.period || {};
     const auth = bearer(headers);
     if (!/^Bearer\s+\S+/i.test(auth)) return jsonResponse({ok:false,error:"로그인 세션이 필요합니다."},401);
+    if (payload.statisticsVersion === 1) {
+      const res = await nativeFetch(`${supabaseBase}/rest/v1/rpc/mw_account_statistics`, {
+        method: "POST",
+        headers: {apikey:publishableKey, Authorization:auth, "Content-Type":"application/json", Accept:"application/json"},
+        body: JSON.stringify({
+          p_year: period.year ?? null,
+          p_start_month: period.startMonth ?? null,
+          p_end_month: period.endMonth ?? null
+        }),
+        cache: "no-store",
+        signal: init?.signal
+      });
+      const text = await res.text();
+      if (!res.ok) return jsonResponse({ok:false,error:errorText(text,`통계 조회 실패 (HTTP ${res.status})`)},res.status);
+      let data; try { data = JSON.parse(text); } catch {}
+      if (!data?.ok || !Array.isArray(data.rows)) return jsonResponse({ok:false,error:"통계 조회 응답 형식이 올바르지 않습니다."},502);
+      return jsonResponse(data);
+    }
+    // Compatibility for an already-open page that predates statisticsVersion.
     const rows=[]; const pageSize=1000; const maxRows=50000;
     for (let offset=0; offset<maxRows; offset+=pageSize) {
       const url = new URL(`${supabaseBase}/rest/v1/maroowell_account`);
-      url.searchParams.set("select","*");
+      url.searchParams.set("select","row_id,classify,id,route,delivery_date,camp,wave,parcel,return,source_sheet,date_year,date_month");
       const year=Number(period.year||0), start=Number(period.startMonth||0), end=Number(period.endMonth||0);
       if (Number.isInteger(year)&&year>0) url.searchParams.set("date_year",`eq.${year}`);
-      if (start>=1&&start<=12) url.searchParams.set("date_month",`gte.${start}`);
-      if (end>=1&&end<=12) url.searchParams.set("date_month",`lte.${end}`);
-      url.searchParams.set("order","delivery_date.asc.nullslast,camp.asc.nullslast,route.asc.nullslast");
+      if (start>=1&&start<=12) url.searchParams.append("date_month",`gte.${start}`);
+      if (end>=1&&end<=12) url.searchParams.append("date_month",`lte.${end}`);
+      url.searchParams.set("order","delivery_date.asc.nullslast,camp.asc.nullslast,route.asc.nullslast,row_id.asc");
       url.searchParams.set("limit",String(pageSize)); url.searchParams.set("offset",String(offset));
       const res=await nativeFetch(url.href,{headers:{apikey:publishableKey,Authorization:auth,Accept:"application/json"},cache:"no-store"});
       const text=await res.text();

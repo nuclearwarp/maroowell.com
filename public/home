@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <style>html{visibility:hidden}</style>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="referrer" content="origin" />
+  <title>실시간 배송 현황 | 마루웰</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/board-menu.js" defer></script>
+  <style>
+    @font-face{
+      font-family:"문경감홍사과체";
+      src:url("/assets/fonts/MungyeongGamhong.woff2") format("woff2"),url("/assets/fonts/MungyeongGamhong.woff") format("woff"),url("/assets/fonts/MungyeongGamhong.ttf") format("truetype");
+      font-weight:400 1000;font-style:normal;font-display:swap
+    }
+    :root{
+      --bg:#f4f7f8;--card:#fff;--soft:#f8fafc;--line:#dce4e8;--line2:#cbd5e1;
+      --text:#17252e;--muted:#667881;--navy:#17364a;--yellow:#ffc400;--day:#2563eb;--night:#6d28d9;
+      --green:#15803d;--teal:#167f76;--red:#c5221f;--orange:#c2410c;--purple:#7c3aed;--olive:#71823f;
+      --shadow:0 12px 34px rgba(23,54,74,.09);--font:"문경감홍사과체","Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif
+    }
+    *{box-sizing:border-box} html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+    body{background:radial-gradient(circle at 12% 0%,rgba(37,99,235,.07),transparent 28%),radial-gradient(circle at 88% 0%,rgba(109,40,217,.06),transparent 26%),var(--bg)}
+    button,input,select{font:inherit} button{cursor:pointer}
+    .wrap{width:min(1500px,100%);margin:0 auto;padding:16px 16px 42px}
+    .topbar{display:flex;align-items:center;gap:12px;padding:13px 15px;margin-bottom:14px;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);position:sticky;top:8px;z-index:20;backdrop-filter:blur(14px)}
+    .brand{display:flex;align-items:center;gap:11px;min-width:0}.brandLogo{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#fff;text-decoration:none;flex:0 0 auto}.brandLogo img{width:34px;height:34px;object-fit:contain}
+    .brandText{min-width:0}.brandText h1{margin:0;font-size:21px;line-height:1.15;letter-spacing:-.04em}.brandText p{margin:3px 0 0;color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .topSpacer{flex:1}.pill{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:999px;border:1px solid var(--line2);background:#fff;color:#475569;font-size:11.5px;font-weight:700;white-space:nowrap}.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:#94a3b8}.pill.ok{color:#166534;border-color:#bbf7d0;background:#f0fdf4}.pill.ok::before{background:#22c55e}.pill.warn{color:#92400e;border-color:#fde68a;background:#fffbeb}.pill.warn::before{background:#f59e0b}.pill.err{color:#991b1b;border-color:#fecaca;background:#fff1f2}.pill.err::before{background:#ef4444}
+    .btn{min-height:38px;padding:0 14px;border-radius:999px;border:1px solid var(--line2);background:#fff;color:#334155;font-size:12.5px;font-weight:800;box-shadow:0 2px 8px rgba(15,23,42,.04)}.btn:hover{background:#f8fafc;border-color:#94a3b8}.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}.btn.primary:hover{background:#0f2a3d}.btn:disabled{opacity:.5;cursor:not-allowed}
+    .card{background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:16px;margin-bottom:14px}
+    .controlGrid{display:grid;grid-template-columns:minmax(230px,1.4fr) 160px minmax(220px,.9fr) auto;gap:12px;align-items:end}.field{display:flex;flex-direction:column;gap:6px;min-width:0}.field label{font-size:11.5px;color:var(--muted);font-weight:800}.select,.input{height:43px;width:100%;border:1px solid var(--line2);border-radius:12px;background:#f8fafc;color:var(--text);padding:0 12px;outline:none;font-weight:750}.select:focus,.input:focus{background:#fff;border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.10)}
+    .waveToggle{height:43px;display:grid;grid-template-columns:1fr 1fr;border-radius:12px;border:1px solid var(--line2);overflow:hidden;background:#f8fafc}.waveBtn{border:0;background:transparent;color:#64748b;font-size:13px;font-weight:900}.waveBtn.active.day{background:#eff6ff;color:#1d4ed8}.waveBtn.active.night{background:#f5f3ff;color:#6d28d9}.actionRow{display:flex;gap:7px;align-items:center}.actionRow .btn{height:43px}
+    .helper{margin-top:11px;padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #edf1f3;color:#64748b;font-size:12px;line-height:1.55}.helper strong{color:#334155}
+    .statusLine{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;min-height:24px}.statusText{color:#64748b;font-size:12px;font-weight:700}.statusText.err{color:#b42318}
+    .summaryGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.summaryBox{border:1px solid var(--line);border-radius:16px;background:#fff;padding:13px 14px;min-width:0}.summaryBox .label{font-size:11px;color:#64748b;font-weight:800}.summaryBox .value{margin-top:5px;font-size:25px;line-height:1;font-weight:950;letter-spacing:-.04em}.summaryBox .sub{margin-top:6px;color:#78909a;font-size:10.5px;line-height:1.4}
+    .sectionHead{display:flex;align-items:center;gap:10px;margin:2px 0 11px}.sectionHead h2{margin:0;font-size:17px;letter-spacing:-.03em}.sectionHead .count{color:#64748b;font-size:11.5px;font-weight:800}.sectionHead .spacer{flex:1}.legend{font-size:10.5px;color:#78909a;text-align:right}
+    .overall{display:grid;gap:8px}.overallLine{display:grid;grid-template-columns:80px 1fr auto;gap:10px;align-items:center;padding:10px 12px;border-radius:13px;background:#fafcfd;border:1px solid #edf1f3}.overallTitle{font-size:13px;font-weight:950}.overallMetrics{font-size:12px;color:#475569;word-spacing:4px}.overallRatio{font-size:13px;font-weight:950;min-width:58px;text-align:right}.teal{color:var(--teal)}.purple{color:var(--purple)}.olive{color:var(--olive)}
+    .progressTrack{height:5px;border-radius:99px;background:#e8eef1;overflow:hidden;margin-top:6px}.progressBar{height:100%;border-radius:99px;background:currentColor;min-width:0}
+    .attendanceGrid,.driverGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.attendanceCard,.driverCard{border:1px solid var(--line);border-radius:15px;background:#fff;padding:12px 13px}.attendanceTop,.driverTop{display:flex;align-items:flex-start;gap:8px}.driverName{font-size:16px;font-weight:950;letter-spacing:-.03em}.routeLabel{margin-top:4px;font-size:11.5px;color:#64748b;line-height:1.45;word-break:break-all}.accountBadge,.statusBadge{margin-left:auto;flex:0 0 auto;padding:4px 7px;border-radius:999px;font-size:9.5px;font-weight:900;background:#f1f5f9;color:#64748b}.driverCard.mismatch{border:2px solid #f9ab00}.driverCard.external{border:2px solid #d93025}.driverCard.mismatch .driverName{color:#b45f06}.driverCard.external .driverName{color:#c5221f}.statusBadge.mismatch{background:#fff1d6;color:#b45f06}.statusBadge.external{background:#fde8e7;color:#c5221f}
+    .metricHead{display:flex;align-items:center;margin-top:10px;font-size:11.5px;font-weight:900}.metricHead span:last-child{margin-left:auto}.metricGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:5px}.metric{padding:7px 3px;border-radius:9px;text-align:center;background:#f1f5f7}.metric .mLabel{font-size:9px;color:#667881}.metric .mValue{margin-top:2px;font-size:17px;font-weight:950}.metric.misscan{background:#fdecea;color:#b42318}.metric.remaining{background:#fff3e8;color:#c2410c}.metric.completed{background:#eaf7ee;color:#15803d}.collectionLine{display:grid;grid-template-columns:45px 1fr auto;align-items:center;gap:8px;margin-top:7px;font-size:11px;color:#475569}.collectionLabel{height:30px;display:grid;place-items:center;border-radius:8px;font-weight:950}.collectionLabel.return{background:#f4efff;color:var(--purple)}.collectionLabel.freshbag{background:#f3f5ea;color:var(--olive)}.collectionRatio{font-weight:950}.warningBox{margin-top:8px;padding:8px 9px;border-radius:9px;background:#fff8e7;color:#a15c06;font-size:10.5px;line-height:1.45;white-space:pre-line}.warningBox.external{background:#fff0ef;color:#b42318}
+    .empty{padding:26px 16px;text-align:center;color:#78909a;font-size:12.5px;border:1px dashed #cbd5e1;border-radius:14px;background:#fafcfd}.loading{opacity:.58;pointer-events:none}.hidden{display:none!important}
+    .metaNotice{display:flex;align-items:flex-start;gap:10px;border:1px solid #fde68a;background:#fffbeb;color:#854d0e;border-radius:13px;padding:11px 12px;font-size:11.5px;line-height:1.55}.metaNotice.ok{border-color:#bbf7d0;background:#f0fdf4;color:#166534}.metaNotice strong{display:block;margin-bottom:2px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px}
+    @media(max-width:980px){.controlGrid{grid-template-columns:1fr 150px 220px}.actionRow{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:720px){.wrap{padding:10px 9px 32px}.topbar{top:4px;border-radius:16px;padding:10px}.brandText h1{font-size:18px}.brandText p{display:none}.topbar .pill.user{display:none}.controlGrid{grid-template-columns:1fr}.actionRow{grid-column:auto}.actionRow .btn{flex:1}.summaryGrid{gap:7px}.summaryBox{padding:11px}.summaryBox .value{font-size:22px}.attendanceGrid,.driverGrid{grid-template-columns:1fr}.card{border-radius:16px;padding:12px}.legend{display:none}.overallLine{grid-template-columns:62px 1fr auto;padding:9px}.overallMetrics{font-size:10.5px}.metricGrid{gap:3px}.topbar .btn{padding:0 10px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <a class="brandLogo" href="/zipcode_search" aria-label="마루웰 홈"><img src="/favicon.ico?v=2" alt="M" /></a>
+        <div class="brandText"><h1>실시간 배송 현황</h1><p>META 실시간 데이터 × 마루웰 일자별 출근 스케줄</p></div>
+      </div>
+      <div class="topSpacer"></div>
+      <span id="userPill" class="pill user">로그인 확인 중</span>
+      <span id="bridgePill" class="pill warn">META 연결 확인 중</span>
+      <button id="metaLoginBtn" class="btn primary" type="button">META 로그인</button>
+    </header>
+
+    <section class="card" id="controlCard">
+      <div class="controlGrid">
+        <div class="field"><label for="campSelect">캠프</label><select id="campSelect" class="select" disabled><option value="">META 로그인 후 캠프를 불러옵니다</option></select></div>
+        <div class="field"><label for="scheduleDate">스케줄 일자</label><input id="scheduleDate" class="input" type="date" /></div>
+        <div class="field"><label>배송 구분</label><div class="waveToggle"><button class="waveBtn active day" data-wave="WAVE2" type="button">주간</button><button class="waveBtn night" data-wave="WAVE1" type="button">야간</button></div></div>
+        <div class="actionRow"><button id="queryBtn" class="btn primary" type="button">현황 조회</button><button id="bridgeRefreshBtn" class="btn" type="button">연결 확인</button></div>
+      </div>
+      <div class="helper"><strong>앱과 동일한 날짜 규칙</strong> · 야간은 오전 8시 이전이면 전날 스케줄을 기준으로 하며, META 조회 일자는 선택한 야간 스케줄 일자 + 1일입니다. 일자를 직접 바꿔 과거/현재 출근 인원도 확인할 수 있습니다.</div>
+      <div class="statusLine"><span id="queryStatus" class="statusText">초기화 중입니다.</span></div>
+    </section>
+
+    <section id="bridgeNotice" class="card hidden"><div id="bridgeNoticeInner" class="metaNotice"><div><strong>META 브리지가 연결되지 않았습니다.</strong>브라우저에서는 보안 정책상 maroowell.com이 fly.coupang.com 팝업의 요청을 직접 읽을 수 없습니다. 함께 추가한 META Bridge 확장을 켠 뒤 META 로그인을 완료하면 실시간 데이터가 이 화면으로 전달됩니다.</div></div></section>
+
+    <section class="card">
+      <div class="sectionHead"><h2>조회 요약</h2><span id="summaryCaption" class="count">캠프와 일자를 선택해 주세요</span></div>
+      <div class="summaryGrid">
+        <div class="summaryBox"><div class="label">출근 예정</div><div id="attendanceCount" class="value">-</div><div class="sub">스케줄 기준 고유 기사 수</div></div>
+        <div class="summaryBox"><div class="label">배정 라우트</div><div id="routeCount" class="value">-</div><div class="sub">스케줄 등록 라우트 수</div></div>
+        <div class="summaryBox"><div class="label">META 기사</div><div id="metaWorkerCount" class="value">-</div><div class="sub">실시간 응답 기사 수</div></div>
+        <div class="summaryBox"><div class="label">배송 완료율</div><div id="deliveryRatio" class="value">-</div><div id="fetchedAt" class="sub">조회 전</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="sectionHead"><h2>캠프 전체</h2><span id="overallCaption" class="count">실시간 조회 전</span></div>
+      <div id="overallBody" class="empty">META 실시간 데이터를 조회하면 배송 · 반품 · 프레시백 현황이 표시됩니다.</div>
+    </section>
+
+    <section class="card">
+      <div class="sectionHead"><h2>일자별 출근 인원</h2><span id="attendanceCaption" class="count">스케줄 조회 전</span></div>
+      <div id="attendanceBody" class="empty">캠프와 일자를 선택하고 현황 조회를 눌러 주세요.</div>
+    </section>
+
+    <section class="card">
+      <div class="sectionHead"><h2>기사별 실시간 현황</h2><span id="driverCaption" class="count">조회 전</span><span class="spacer"></span><span class="legend">미스캔=위탁 · 배송중=스캔 · 주황=담당 서서브 확인 · 빨강=외부 라우트</span></div>
+      <div id="driverBody" class="empty">META 실시간 데이터를 조회하면 기사별 현황이 표시됩니다.</div>
+    </section>
+  </main>
+
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const cfg = window.MARUWELL_CONFIG || {};
+    const LOGIN_PATH = cfg.PATHS?.login || "/";
+    const FLY_REALTIME = "https://fly.coupang.com/ui/dashboard/realtime";
+    const NIGHT_CUTOFF = 8;
+    const state = {
+      sb:null, session:null, access:null, account:null, wave:"WAVE2", localCamps:new Map(),
+      bridgeConnected:false, bridgeContext:{vendorCodes:[],camps:[]}, schedule:null, meta:null, lastModel:null, busy:false
+    };
+
+    const html = value => String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+    const number = value => new Intl.NumberFormat("ko-KR").format(Number(value || 0));
+    const percent = value => `${Number(value || 0).toFixed(1)}%`;
+    const normalizeRoute = value => String(value || "").trim().replace(/[^0-9A-Za-z]/g,"").toUpperCase();
+    const toSubRoute = value => { const n=normalizeRoute(value); const m=n.match(/^(.+?[A-Z])\d{2}$/); return (m?.[1] || n); };
+    const unique = values => [...new Set(values.filter(Boolean))];
+    const ratio = (done,total) => Number(total||0)>0 ? Number(done||0)*100/Number(total) : 0;
+    const isoDate = date => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+    const addDays = (dateText,days) => { const [y,m,d]=String(dateText).split("-").map(Number); const dt=new Date(y,m-1,d,12,0,0); dt.setDate(dt.getDate()+days); return isoDate(dt); };
+    const isNight = wave => String(wave).toUpperCase()==="WAVE1";
+    const defaultScheduleDate = wave => { const now=new Date(); if(isNight(wave) && now.getHours()<NIGHT_CUTOFF) now.setDate(now.getDate()-1); return isoDate(now); };
+    const metaWorkDate = (wave,scheduleDate) => isNight(wave) ? addDays(scheduleDate,1) : scheduleDate;
+
+    function setStatus(text,error=false){ $("queryStatus").textContent=text; $("queryStatus").classList.toggle("err",!!error); }
+    function setBusy(value){ state.busy=!!value; $("controlCard").classList.toggle("loading",state.busy); $("queryBtn").disabled=state.busy; }
+    function setBridgeUi(connected,message){
+      state.bridgeConnected=!!connected;
+      const pill=$("bridgePill"); pill.className=`pill ${connected?"ok":"warn"}`; pill.textContent=connected?"META 연결됨":"META 연결 필요";
+      $("bridgeNotice").classList.toggle("hidden",connected);
+      if(message && !connected) $("bridgeNoticeInner").querySelector("div").lastChild.textContent=message;
+    }
+    function loginUrl(){ const next=`${location.pathname}${location.search}`; return `${LOGIN_PATH}?next=${encodeURIComponent(next)}`; }
+
+    async function initAuth(){
+      if(!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase?.createClient) throw new Error("Supabase 설정을 불러오지 못했습니다.");
+      state.sb=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{storage:window.sessionStorage,persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      let {data:{session},error}=await state.sb.auth.getSession();
+      if(error) throw error;
+      if(!session?.access_token){ location.replace(loginUrl()); return false; }
+      state.session=session;
+      const [{data:access,error:accessError},{data:account,error:accountError}] = await Promise.all([
+        state.sb.rpc("mw_my_access").maybeSingle(), state.sb.rpc("mw_my_account_state").maybeSingle()
+      ]);
+      if(accessError) throw accessError; if(accountError) throw accountError;
+      state.access=access||{}; state.account=account||{};
+      const allowed=state.access.is_maroowell===true && Number(state.access.max_role_level||0)>=30 && state.account.approval_status==="approved" && state.account.app_only!==true;
+      if(!allowed) throw new Error("마루웰 팀장 권한 이상만 이용할 수 있습니다.");
+      $("userPill").textContent=state.access.email || session.user?.email || "마루웰"; $("userPill").className="pill ok user";
+      return true;
+    }
+
+    async function loadLocalCampCatalog(){
+      const {data,error}=await state.sb.from("camps").select("camp,code").not("code","is",null);
+      if(error) throw error;
+      state.localCamps.clear();
+      for(const row of data||[]){ const code=String(row.code||"").trim().toUpperCase(); const camp=String(row.camp||"").trim(); if(code && camp && !state.localCamps.has(code)) state.localCamps.set(code,camp); }
+    }
+
+    let bridgeSeq=0;
+    function bridgeRequest(action,payload={},timeoutMs=6000){
+      const id=`mw-${Date.now().toString(36)}-${(++bridgeSeq).toString(36)}`;
+      return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>{ window.removeEventListener("message",onMessage); reject(new Error("META 브리지 응답 시간 초과")); },timeoutMs);
+        function onMessage(event){
+          if(event.source!==window) return; const msg=event.data||{};
+          if(msg.source!=="maroowell-meta-extension" || msg.id!==id) return;
+          clearTimeout(timer); window.removeEventListener("message",onMessage);
+          if(msg.ok===false) reject(new Error(String(msg.error||"META 브리지 오류"))); else resolve(msg.result||{});
+        }
+        window.addEventListener("message",onMessage);
+        window.postMessage({source:"maroowell-home-page",version:1,id,action,payload},location.origin);
+      });
+    }
+
+    function updateCampOptions(){
+      const select=$("campSelect"); const previous=select.value; const ctx=state.bridgeContext||{};
+      const vendorCodes=unique((ctx.vendorCodes||[]).map(v=>String(v||"").trim().toUpperCase()));
+      const catalog=new Map((ctx.camps||[]).map(row=>[String(row.code||"").trim().toUpperCase(),row]));
+      const options=[];
+      for(const code of vendorCodes){
+        const localCamp=state.localCamps.get(code)||""; const meta=catalog.get(code)||{}; const name=String(meta.name||localCamp||code).trim();
+        if(!localCamp) continue;
+        options.push({code,localCamp,label:`${name}${name!==localCamp?` · ${localCamp}`:""} · ${code}`});
+      }
+      options.sort((a,b)=>a.label.localeCompare(b.label,"ko"));
+      select.innerHTML="";
+      if(!options.length){
+        select.append(new Option(state.bridgeConnected?"계약 캠프 정보를 기다리는 중입니다":"META 연결 후 캠프를 불러옵니다","")); select.disabled=true; return;
+      }
+      for(const item of options){ const opt=new Option(item.label,item.code); opt.dataset.camp=item.localCamp; select.append(opt); }
+      select.disabled=false;
+      if(previous && options.some(x=>x.code===previous)) select.value=previous;
+    }
+
+    async function refreshBridge(silent=false){
+      try{
+        const result=await bridgeRequest("status",{},2500);
+        const connected=result.connected===true && result.hookReady===true;
+        state.bridgeContext=result.context||{vendorCodes:[],camps:[]};
+        setBridgeUi(connected);
+        updateCampOptions();
+        if(!silent) setStatus(connected?"META 브리지가 연결되었습니다. 캠프와 일자를 선택해 조회하세요.":"META 팝업에서 로그인 후 실시간 배송 현황 화면을 열어 주세요.");
+        return connected;
+      }catch(error){
+        state.bridgeContext={vendorCodes:[],camps:[]}; setBridgeUi(false,"함께 추가한 META Bridge 확장을 켠 뒤 META 로그인을 완료하면 실시간 데이터가 이 화면으로 전달됩니다."); updateCampOptions();
+        if(!silent) setStatus("META 브리지가 아직 연결되지 않았습니다. 스케줄 데이터는 로그인 연결 후 함께 조회됩니다.");
+        return false;
+      }
+    }
+
+    function selectedCamp(){
+      const select=$("campSelect"); const opt=select.options[select.selectedIndex];
+      return {code:String(select.value||"").trim().toUpperCase(),camp:String(opt?.dataset?.camp||"").trim(),label:String(opt?.textContent||"").trim()};
+    }
+
+    function groupAttendance(schedule){
+      const map=new Map();
+      for(const row of schedule?.assignments||[]){
+        const driver=String(row.driver||"").trim(); const route=normalizeRoute(row.route); if(!driver) continue;
+        if(!map.has(driver)) map.set(driver,{driver,routes:[],accountTypes:[]});
+        const item=map.get(driver); const shown=toSubRoute(route); if(shown && !item.routes.includes(shown)) item.routes.push(shown);
+        const type=String(row.account_type||"").trim(); if(type && !item.accountTypes.includes(type)) item.accountTypes.push(type);
+      }
+      return [...map.values()].sort((a,b)=>a.driver.localeCompare(b.driver,"ko"));
+    }
+
+    function renderSchedule(schedule){
+      state.schedule=schedule;
+      const people=groupAttendance(schedule); const routeRows=(schedule?.assignments||[]).filter(r=>normalizeRoute(r.route));
+      $("attendanceCount").textContent=number(people.length); $("routeCount").textContent=number(routeRows.length);
+      $("attendanceCaption").textContent=`${schedule?.schedule_date||$("scheduleDate").value} · ${people.length}명`;
+      if(!people.length){ $("attendanceBody").className="empty"; $("attendanceBody").textContent="해당 일자의 출근 스케줄이 없습니다."; return; }
+      $("attendanceBody").className="attendanceGrid";
+      $("attendanceBody").innerHTML=people.map(item=>`<article class="attendanceCard"><div class="attendanceTop"><div><div class="driverName">${html(item.driver)}</div><div class="routeLabel">${html(item.routes.join(", ")||"라우트 미등록")}</div></div>${item.accountTypes.length?`<span class="accountBadge">${html(item.accountTypes.join(" / "))}</span>`:""}</div></article>`).join("");
+    }
+
+    function deliveryMetrics(summary={}){
+      const assigned=Number(summary.assignedCount||0), scanned=Number(summary.scannedCount||0), completed=Number(summary.completedCount||0), impossible=Number(summary.impossibleCount||0), pddMiss=Number(summary.pddMissCount||0), total=assigned+scanned+completed+impossible+pddMiss;
+      return {total,misscan:assigned,remaining:scanned,completed,impossible,pdd_miss:pddMiss,ratio:ratio(completed,total)};
+    }
+    function collectionMetrics(summary={},includeAbsent=false){
+      const assigned=Number(summary.assignedCount||0), collected=Number(summary.collectedCount||0), uncollected=Number(summary.uncollectedCount||0), absent=includeAbsent?Number(summary.absentCount||0):0, total=assigned+collected+uncollected+absent;
+      return {total,completed:collected,remaining:Math.max(0,total-collected),ratio:ratio(collected,total)};
+    }
+
+    function analyze(meta,schedule,camp,wave,scheduleDate){
+      const assignments=schedule?.assignments||[], ownRoutes=schedule?.routes||[];
+      const exactOwners=new Map(), scheduledRoutesByDriver=new Map();
+      for(const row of assignments){
+        const route=normalizeRoute(row.route), driver=String(row.driver||"").trim(); if(!route||!driver) continue;
+        exactOwners.set(route,driver); if(!scheduledRoutesByDriver.has(driver)) scheduledRoutesByDriver.set(driver,[]);
+        const shown=toSubRoute(route); if(shown && !scheduledRoutesByDriver.get(driver).includes(shown)) scheduledRoutesByDriver.get(driver).push(shown);
+      }
+      const own=new Set((ownRoutes||[]).map(normalizeRoute).filter(Boolean));
+      const ownerOf=route=>{
+        if(exactOwners.has(route)) return exactOwners.get(route);
+        let best="",owner=""; for(const [assigned,driver] of exactOwners){ if(route.startsWith(assigned)&&assigned.length>best.length){best=assigned;owner=driver;} } return owner;
+      };
+      const isOwnRoute=route=>own.has(route)||[...exactOwners.keys()].some(assigned=>assigned.length===4&&route.startsWith(assigned));
+      const totals={delivery:{total:0,misscan:0,remaining:0,completed:0,impossible:0,pdd_miss:0},return:{total:0,completed:0,remaining:0},freshbag:{total:0,completed:0,remaining:0}};
+      const rows=[]; const content=meta?.data?.content||[];
+      for(const source of content){
+        const worker=source?.workerInfo||{}, delivery=deliveryMetrics(source?.deliverySummary||{}), returns=collectionMetrics(source?.returnSummary||{},true), freshbag=collectionMetrics(source?.freshbagSummary||{},false);
+        for(const k of ["total","misscan","remaining","completed","impossible","pdd_miss"]) totals.delivery[k]+=Number(delivery[k]||0);
+        for(const k of ["total","completed","remaining"]){ totals.return[k]+=Number(returns[k]||0); totals.freshbag[k]+=Number(freshbag[k]||0); }
+        const routes=unique((worker.workSubRoutes||[]).map(normalizeRoute).filter(Boolean));
+        const routeOwners=new Map(routes.map(route=>[route,ownerOf(route)])); const counts=new Map();
+        for(const owner of routeOwners.values()){ if(owner) counts.set(owner,(counts.get(owner)||0)+1); }
+        let majorityDriver="", majorityCount=-1; for(const [driver,count] of counts){ if(count>majorityCount || (count===majorityCount && driver.localeCompare(majorityDriver,"ko")>0)){majorityDriver=driver;majorityCount=count;} }
+        const apiDriver=[worker.workerName,worker.name,worker.workerDisplayName].map(v=>String(v||"").trim()).find(Boolean)||"";
+        let hasExternal=false,hasMismatch=false;
+        const routeModels=routes.map(route=>{ const owner=routeOwners.get(route)||""; const status=!isOwnRoute(route)?"external":(majorityDriver&&owner&&owner!==majorityDriver?"mismatch":"ok"); if(status==="external")hasExternal=true;if(status==="mismatch")hasMismatch=true;return{route,owner,status}; });
+        const driver=majorityDriver||apiDriver||"담당 확인";
+        rows.push({driver,schedule_route:(scheduledRoutesByDriver.get(driver)||[]).join(", "),status:hasExternal?"external":(hasMismatch?"mismatch":"ok"),routes:routeModels,delivery,return:returns,freshbag});
+      }
+      totals.delivery.ratio=ratio(totals.delivery.completed,totals.delivery.total); totals.return.ratio=ratio(totals.return.completed,totals.return.total); totals.freshbag.ratio=ratio(totals.freshbag.completed,totals.freshbag.total);
+      rows.sort((a,b)=>a.delivery.ratio-b.delivery.ratio || a.driver.localeCompare(b.driver,"ko"));
+      return {camp:camp.camp||camp.label,camp_code:camp.code,wave,schedule_date:scheduleDate,fetched_at:new Date().toLocaleString("ko-KR",{hour12:false}),summary:totals,rows};
+    }
+
+    function overallLine(title,m,cls,extra=""){
+      return `<div class="overallLine"><div class="overallTitle ${cls}">${html(title)}</div><div><div class="overallMetrics">총 ${number(m.total)} · 남음 ${number(m.remaining)} · 완료 ${number(m.completed)}${extra?` · ${html(extra)}`:""}</div><div class="progressTrack ${cls}"><div class="progressBar" style="width:${Math.min(100,Math.max(0,Number(m.ratio||0)))}%"></div></div></div><div class="overallRatio ${cls}">${percent(m.ratio)}</div></div>`;
+    }
+    function renderModel(model){
+      state.lastModel=model; const s=model.summary;
+      $("metaWorkerCount").textContent=number(model.rows.length); $("deliveryRatio").textContent=percent(s.delivery.ratio); $("fetchedAt").textContent=`META ${model.fetched_at}`;
+      $("overallCaption").textContent=`${model.camp} · ${isNight(model.wave)?"야간":"주간"}`;
+      $("overallBody").className="overall"; $("overallBody").innerHTML=overallLine("배송",s.delivery,"teal",`미스캔 ${number(s.delivery.misscan)}`)+(isNight(model.wave)?"":overallLine("반품",s.return,"purple"))+overallLine("프백",s.freshbag,"olive");
+      $("driverCaption").textContent=`${model.rows.length}명 · ${model.fetched_at}`;
+      if(!model.rows.length){ $("driverBody").className="empty"; $("driverBody").textContent="META 조회 결과가 없습니다."; return; }
+      $("driverBody").className="driverGrid";
+      $("driverBody").innerHTML=model.rows.map(row=>{
+        const warnings=(row.routes||[]).filter(r=>r.status!=="ok").map(r=>r.status==="external"?`${r.route} → 마루웰 관리 라우트 아님`:`${r.route} → 등록 ${r.owner||"다른 담당"}`);
+        const badge=row.status==="external"?'<span class="statusBadge external">외부</span>':row.status==="mismatch"?'<span class="statusBadge mismatch">서서브 확인</span>':"";
+        return `<article class="driverCard ${row.status}"><div class="driverTop"><div><div class="driverName">${html(row.driver)}</div><div class="routeLabel">등록 ${html(row.schedule_route||"-")}<br>실제 ${html((row.routes||[]).map(r=>r.route).join(", ")||"-")}</div></div>${badge}</div><div class="metricHead teal"><span>배송</span><span>완료율 ${percent(row.delivery.ratio)}</span></div><div class="metricGrid"><div class="metric"><div class="mLabel">총</div><div class="mValue">${number(row.delivery.total)}</div></div><div class="metric misscan"><div class="mLabel">미스캔</div><div class="mValue">${number(row.delivery.misscan)}</div></div><div class="metric remaining"><div class="mLabel">배송중</div><div class="mValue">${number(row.delivery.remaining)}</div></div><div class="metric completed"><div class="mLabel">완료</div><div class="mValue">${number(row.delivery.completed)}</div></div></div>${isNight(model.wave)?"":`<div class="collectionLine"><div class="collectionLabel return">반품</div><div>총 ${number(row.return.total)} · 남음 ${number(row.return.remaining)} · 회수 ${number(row.return.completed)}</div><div class="collectionRatio purple">${percent(row.return.ratio)}</div></div>`}<div class="collectionLine"><div class="collectionLabel freshbag">프백</div><div>총 ${number(row.freshbag.total)} · 남음 ${number(row.freshbag.remaining)} · 회수 ${number(row.freshbag.completed)}</div><div class="collectionRatio olive">${percent(row.freshbag.ratio)}</div></div>${warnings.length?`<div class="warningBox ${row.status==="external"?"external":""}">서서브 확인\n${html(warnings.join("\n"))}</div>`:""}</article>`;
+      }).join("");
+    }
+
+    async function loadSchedule(camp,wave,scheduleDate){
+      const {data,error}=await state.sb.rpc("mw_meta_realtime_schedule",{p_camp_code:camp.code,p_wave:wave,p_schedule_date:scheduleDate});
+      if(error) throw error; return data||{};
+    }
+
+    async function queryAll(){
+      if(state.busy) return; const camp=selectedCamp(), scheduleDate=$("scheduleDate").value, wave=state.wave;
+      if(!camp.code){ setStatus("META 로그인 후 조회할 캠프를 선택해 주세요.",true); return; }
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(scheduleDate)){ setStatus("조회할 스케줄 일자를 선택해 주세요.",true); return; }
+      setBusy(true); state.meta=null; state.lastModel=null; $("metaWorkerCount").textContent="-"; $("deliveryRatio").textContent="-"; $("fetchedAt").textContent="조회 중";
+      $("summaryCaption").textContent=`${camp.camp||camp.label} · ${scheduleDate} · ${isNight(wave)?"야간":"주간"}`;
+      try{
+        setStatus(`스케줄 ${scheduleDate} 조회 중...`); const schedule=await loadSchedule(camp,wave,scheduleDate); renderSchedule(schedule);
+        const connected=await refreshBridge(true);
+        if(!connected){ setStatus("출근 스케줄은 조회했습니다. META 로그인/브리지를 연결하면 실시간 배송 현황까지 이어서 조회됩니다."); return; }
+        const workDate=metaWorkDate(wave,scheduleDate); setStatus(`출근 ${groupAttendance(schedule).length}명 확인 · META ${workDate} 실시간 조회 중...`);
+        const meta=await bridgeRequest("search",{campCodes:[camp.code],waveCode:wave,sortType:"DELIVERY_COMPLETED_RATIO",sortDirection:"ASC",workDate,page:0,size:50},40000);
+        if(!meta?.data || !Array.isArray(meta.data.content)) throw new Error("META 응답 형식이 올바르지 않습니다.");
+        state.meta=meta; const model=analyze(meta,schedule,camp,wave,scheduleDate); renderModel(model); setStatus(`${model.camp} · ${isNight(wave)?"야간":"주간"} · 출근 ${groupAttendance(schedule).length}명 · META ${model.rows.length}명 조회 완료`);
+      }catch(error){ console.error(error); setStatus(error?.message||"조회 중 오류가 발생했습니다.",true); }
+      finally{ setBusy(false); }
+    }
+
+    function openMeta(){
+      const width=Math.min(1180,Math.max(860,screen.availWidth-160)),height=Math.min(900,Math.max(680,screen.availHeight-120)),left=Math.max(0,Math.round((screen.availWidth-width)/2)),top=Math.max(0,Math.round((screen.availHeight-height)/2));
+      const popup=window.open(FLY_REALTIME,"maroowellMetaLogin",`popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+      if(!popup) setStatus("팝업이 차단되었습니다. 이 사이트의 팝업을 허용해 주세요.",true); else setStatus("META 팝업을 열었습니다. 로그인 후 실시간 배송 현황 화면이 뜨면 연결 확인을 눌러 주세요.");
+    }
+
+    function bind(){
+      $("scheduleDate").value=defaultScheduleDate(state.wave);
+      document.querySelectorAll(".waveBtn").forEach(btn=>btn.addEventListener("click",()=>{
+        state.wave=btn.dataset.wave; document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===btn)); $("scheduleDate").value=defaultScheduleDate(state.wave);
+      }));
+      $("metaLoginBtn").addEventListener("click",openMeta); $("bridgeRefreshBtn").addEventListener("click",()=>refreshBridge(false)); $("queryBtn").addEventListener("click",queryAll);
+    }
+
+    async function boot(){
+      bind();
+      try{
+        const ok=await initAuth(); if(!ok) return; await loadLocalCampCatalog(); document.documentElement.style.visibility="visible"; setStatus("META 연결 상태를 확인하는 중입니다."); await refreshBridge(true);
+        if(state.bridgeConnected) setStatus("META 연결이 확인되었습니다. 캠프와 일자를 선택해 조회하세요."); else setStatus("META 로그인을 눌러 팝업에서 로그인해 주세요.");
+        setInterval(()=>refreshBridge(true).catch(()=>{}),5000);
+      }catch(error){ document.documentElement.style.visibility="visible"; $("userPill").className="pill err user"; $("userPill").textContent="접근 불가"; setStatus(error?.message||"초기화에 실패했습니다.",true); $("queryBtn").disabled=true; $("metaLoginBtn").disabled=true; }
+    }
+    boot();
+  })();
+  </script>
+</body>
+</html>

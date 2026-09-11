@@ -1,55 +1,32 @@
 // login-worker.js
-var login_worker_default = {
-  async fetch(request, env) {
-    try {
-      const url = new URL(request.url);
-      if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") {
-        return new Response("ASSETS binding missing", { status: 500 });
-      }
+var login_worker_default={
+async fetch(request,env){try{
+const url=new URL(request.url);
+if(!env.ASSETS||typeof env.ASSETS.fetch!=="function")return new Response("ASSETS binding missing",{status:500});
+const response=await env.ASSETS.fetch(new Request(url.toString(),request));
+const path=url.pathname.replace(/\/+$/,'')||'/';
+const htmlResponse=(body,res=response)=>{const h=new Headers(res.headers);h.set('Content-Type','text/html; charset=utf-8');h.set('Cache-Control','no-store, no-cache, must-revalidate');h.set('Pragma','no-cache');h.delete('Content-Length');return new Response(body,{status:res.status,headers:h})};
 
-      const response = await env.ASSETS.fetch(new Request(url.toString(), request));
-      const path = url.pathname.replace(/\/+$/, "") || "/";
+if((path==='/config.js'||path.endsWith('/config.js'))&&response.ok){let js=await response.text();js=js.replace('index: "/zipcode_search"','index: "/post_login"');const h=new Headers(response.headers);h.set('Content-Type','application/javascript; charset=utf-8');h.set('Cache-Control','no-store, no-cache, must-revalidate');h.delete('Content-Length');return new Response(js,{status:response.status,headers:h})}
 
-      if ((path === "/config.js" || path.endsWith("/config.js")) && response.ok) {
-        let js = await response.text();
-        js = js.replace('index: "/zipcode_search"', 'index: "/post_login"');
-        const headers = new Headers(response.headers);
-        headers.set("Content-Type", "application/javascript; charset=utf-8");
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.delete("Content-Length");
-        return new Response(js, { status: response.status, headers });
-      }
+if(path==='/'&&response.ok){let html=await response.text();html=html.replace('const DEFAULT_NEXT = (PATHS?.index || "/zipcode_search");','const DEFAULT_NEXT = (PATHS?.index || "/post_login");');return htmlResponse(html)}
 
-      if (path === "/" && response.ok) {
-        let html = await response.text();
-        html = html.replace('const DEFAULT_NEXT = (PATHS?.index || "/zipcode_search");', 'const DEFAULT_NEXT = (PATHS?.index || "/post_login");');
-        const headers = new Headers(response.headers);
-        headers.set("Content-Type", "text/html; charset=utf-8");
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.set("Pragma", "no-cache");
-        headers.delete("Content-Length");
-        return new Response(html, { status: response.status, headers });
-      }
-
-      const isHome = path === "/home" || path === "/home.html" || path === "/public/home";
-      if (isHome && response.ok) {
-        let html = await response.text();
-        html = html
-          .replaceAll("storage:localStorage", "storage:sessionStorage")
-          .replaceAll("storage: localStorage", "storage: sessionStorage");
-        const headers = new Headers(response.headers);
-        headers.set("Content-Type", "text/html; charset=utf-8");
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.set("Pragma", "no-cache");
-        headers.delete("Content-Length");
-        return new Response(html, { status: response.status, headers });
-      }
-
-      return response;
-    } catch (e) {
-      console.error(e);
-      return new Response("Worker exception", { status: 500 });
-    }
-  }
+const isHome=path==='/home'||path==='/home.html'||path==='/public/home';
+if(isHome&&response.ok){let html=await response.text();
+html=html.replaceAll('storage:localStorage','storage:sessionStorage').replaceAll('storage: localStorage','storage: sessionStorage');
+html=html.replace('function collection(s={},includeAbsent=false){const assigned=+s.assignedCount||0,done=+s.collectedCount||0,uncollected=+s.uncollectedCount||0,absent=includeAbsent?(+s.absentCount||0):0,total=assigned+done+uncollected+absent;return{total,completed:done,remaining:Math.max(0,total-done),rate:ratio(done,total)}}','function collection(s={},includeAbsent=false){const assigned=+s.assignedCount||0,collected=+s.collectedCount||0,uncollected=+s.uncollectedCount||0,absent=includeAbsent?(+s.absentCount||0):0,total=assigned+collected+uncollected+absent;return{total,completed:collected,collected,uncollected,assigned,absent,remaining:assigned,completionRate:ratio(collected+uncollected,total),collectionRate:ratio(collected,total),rate:ratio(collected,total)}}');
+html=html.replace('totals={delivery:{total:0,misscan:0,remaining:0,completed:0},returns:{total:0,completed:0,remaining:0},fresh:{total:0,completed:0,remaining:0}}','totals={delivery:{total:0,misscan:0,remaining:0,completed:0},returns:{total:0,completed:0,remaining:0,uncollected:0,assigned:0,absent:0},fresh:{total:0,completed:0,remaining:0,uncollected:0,assigned:0,absent:0}}');
+html=html.replace('for(const k of["total","completed","remaining"]){totals.returns[k]+=ret[k]||0;totals.fresh[k]+=fresh[k]||0}','for(const k of["total","completed","remaining","uncollected","assigned","absent"]){totals.returns[k]+=ret[k]||0;totals.fresh[k]+=fresh[k]||0}');
+html=html.replace('totals.returns.rate=ratio(totals.returns.completed,totals.returns.total);totals.fresh.rate=ratio(totals.fresh.completed,totals.fresh.total);','totals.returns.completionRate=ratio(totals.returns.completed+totals.returns.uncollected,totals.returns.total);totals.returns.collectionRate=ratio(totals.returns.completed,totals.returns.total);totals.returns.rate=totals.returns.collectionRate;totals.fresh.completionRate=ratio(totals.fresh.completed+totals.fresh.uncollected,totals.fresh.total);totals.fresh.collectionRate=ratio(totals.fresh.completed,totals.fresh.total);totals.fresh.rate=totals.fresh.collectionRate;');
+html=html.replace('for(const group of["returns","fresh"])for(const k of["total","completed","remaining"])x.totals[group][k]+=c.totals[group][k]||0;x.totals.delivery.rate=ratio(x.totals.delivery.completed,x.totals.delivery.total);x.totals.returns.rate=ratio(x.totals.returns.completed,x.totals.returns.total);x.totals.fresh.rate=ratio(x.totals.fresh.completed,x.totals.fresh.total)','for(const group of["returns","fresh"])for(const k of["total","completed","remaining","uncollected","assigned","absent"])x.totals[group][k]+=c.totals[group][k]||0;x.totals.delivery.rate=ratio(x.totals.delivery.completed,x.totals.delivery.total);x.totals.returns.completionRate=ratio(x.totals.returns.completed+x.totals.returns.uncollected,x.totals.returns.total);x.totals.returns.collectionRate=ratio(x.totals.returns.completed,x.totals.returns.total);x.totals.returns.rate=x.totals.returns.collectionRate;x.totals.fresh.completionRate=ratio(x.totals.fresh.completed+x.totals.fresh.uncollected,x.totals.fresh.total);x.totals.fresh.collectionRate=ratio(x.totals.fresh.completed,x.totals.fresh.total);x.totals.fresh.rate=x.totals.fresh.collectionRate');
+html=html.replace('returns:{total:0,completed:0,remaining:0},fresh:{total:0,completed:0,remaining:0}','returns:{total:0,completed:0,remaining:0,uncollected:0,assigned:0,absent:0},fresh:{total:0,completed:0,remaining:0,uncollected:0,assigned:0,absent:0}');
+html=html.replace('for(const g of["returns","fresh"])for(const k of["total","completed","remaining"])a[g][k]+=c.totals[g][k]||0}a.delivery.rate=ratio(a.delivery.completed,a.delivery.total);a.returns.rate=ratio(a.returns.completed,a.returns.total);a.fresh.rate=ratio(a.fresh.completed,a.fresh.total);','for(const g of["returns","fresh"])for(const k of["total","completed","remaining","uncollected","assigned","absent"])a[g][k]+=c.totals[g][k]||0}a.delivery.rate=ratio(a.delivery.completed,a.delivery.total);a.returns.completionRate=ratio(a.returns.completed+a.returns.uncollected,a.returns.total);a.returns.collectionRate=ratio(a.returns.completed,a.returns.total);a.returns.rate=a.returns.collectionRate;a.fresh.completionRate=ratio(a.fresh.completed+a.fresh.uncollected,a.fresh.total);a.fresh.collectionRate=ratio(a.fresh.completed,a.fresh.total);a.fresh.rate=a.fresh.collectionRate;');
+html=html.replace('function metricPanel(cls,label,m){return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="rate">${pct(m.rate)}</div><div class="detail">${num(m.completed)} / ${num(m.total)} · 남음 ${num(m.remaining)}</div></div>`}','function metricPanel(cls,label,m){return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="rate">${pct(m.rate)}</div><div class="detail">${num(m.completed)} / ${num(m.total)} · 남음 ${num(m.remaining)}</div></div>`}function collectionPanel(cls,label,m){return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="rate">완료 ${pct(m.completionRate)} · 회수 ${pct(m.collectionRate)}</div><div class="detail">회수 ${num(m.completed)} · 미회수 ${num(m.uncollected)} · 위탁 ${num(m.assigned)}${m.absent?` · 부재 ${num(m.absent)}`:""}</div></div>`}');
+html=html.replaceAll('${metricPanel("return","반품 완료율",c.totals.returns)}${metricPanel("fresh","프백 회수율",c.totals.fresh)}','${collectionPanel("return","반품",c.totals.returns)}${collectionPanel("fresh","프백",c.totals.fresh)}');
+html=html.replaceAll('${metricPanel("return","반품 완료율",r.returns)}${metricPanel("fresh","프백 회수율",r.fresh)}','${collectionPanel("return","반품",r.returns)}${collectionPanel("fresh","프백",r.fresh)}');
+html=html.replace('$("returnRate").textContent=pct(a.returns.rate);$("returnSub").textContent=`완료 ${num(a.returns.completed)} / ${num(a.returns.total)}`;$("freshRate").textContent=pct(a.fresh.rate);$("freshSub").textContent=`회수 ${num(a.fresh.completed)} / ${num(a.fresh.total)}`;','$("returnRate").textContent=`완료 ${pct(a.returns.completionRate)} · 회수 ${pct(a.returns.collectionRate)}`;$("returnSub").textContent=`회수 ${num(a.returns.completed)} · 미회수 ${num(a.returns.uncollected)} · 위탁 ${num(a.returns.assigned)}`;$("freshRate").textContent=`완료 ${pct(a.fresh.completionRate)} · 회수 ${pct(a.fresh.collectionRate)}`;$("freshSub").textContent=`회수 ${num(a.fresh.completed)} · 미회수 ${num(a.fresh.uncollected)} · 위탁 ${num(a.fresh.assigned)}`;');
+return htmlResponse(html)}
+return response
+}catch(e){console.error(e);return new Response('Worker exception',{status:500})}}
 };
-export { login_worker_default as default };
+export{login_worker_default as default};

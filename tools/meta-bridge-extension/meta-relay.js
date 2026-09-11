@@ -1,7 +1,7 @@
 (() => {
   "use strict";
-  if (window.__MW_META_RELAY_V1__) return;
-  window.__MW_META_RELAY_V1__ = true;
+  if (window.__MW_META_RELAY_V2__) return;
+  window.__MW_META_RELAY_V2__ = true;
 
   let seq = 0;
   function callMain(action, payload, timeoutMs = 45000) {
@@ -21,20 +21,33 @@
         else resolve(msg.result || {});
       }
       window.addEventListener("message", onMessage);
-      window.postMessage({ source: "maroowell-meta-relay", version: 1, id, action, payload }, location.origin);
+      window.postMessage({ source: "maroowell-meta-relay", version: 2, id, action, payload }, location.origin);
     });
+  }
+
+  async function publishSnapshot() {
+    try {
+      const snapshot = await callMain("snapshot", {}, 3500);
+      await chrome.runtime.sendMessage({ type: "META_CAPTURE_SNAPSHOT", snapshot });
+    } catch (_) {}
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== "META_BRIDGE_COMMAND") return false;
     const action = String(message.action || "");
-    if (!["status", "search"].includes(action)) {
+    if (!["status", "search", "snapshot"].includes(action)) {
       sendResponse({ ok: false, error: "지원하지 않는 META 브리지 요청입니다." });
       return false;
     }
-    callMain(action, message.payload || {}, action === "status" ? 3000 : 45000)
-      .then(result => sendResponse({ ok: true, result }))
+    callMain(action, message.payload || {}, action === "status" || action === "snapshot" ? 3500 : 45000)
+      .then(result => {
+        if (action === "snapshot") chrome.runtime.sendMessage({ type: "META_CAPTURE_SNAPSHOT", snapshot: result }).catch(() => {});
+        sendResponse({ ok: true, result });
+      })
       .catch(error => sendResponse({ ok: false, error: String(error?.message || error) }));
     return true;
   });
+
+  [250, 1200, 3000, 6000, 10000].forEach(ms => setTimeout(publishSnapshot, ms));
+  setInterval(publishSnapshot, 2000);
 })();

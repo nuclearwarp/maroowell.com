@@ -20,6 +20,17 @@ var login_worker_default = {
         return new Response(js, { status: response.status, headers });
       }
 
+      if (path === "/" && response.ok) {
+        let html = await response.text();
+        html = html.replace('const DEFAULT_NEXT = (PATHS?.index || "/zipcode_search");', 'const DEFAULT_NEXT = (PATHS?.index || "/post_login");');
+        const headers = new Headers(response.headers);
+        headers.set("Content-Type", "text/html; charset=utf-8");
+        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+        headers.set("Pragma", "no-cache");
+        headers.delete("Content-Length");
+        return new Response(html, { status: response.status, headers });
+      }
+
       const isHome = path === "/home" || path === "/home.html" || path === "/public/home";
       if (isHome && response.ok) {
         let html = await response.text();

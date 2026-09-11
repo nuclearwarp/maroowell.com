@@ -3,8 +3,8 @@ var login_worker_default = {
   async fetch(request, env) {
     try {
       const url = new URL(request.url);
-      if (url.pathname === "/")
-        url.pathname = "/";
+      if (url.pathname === "/") url.pathname = "/";
+
       if (url.pathname === "/config.js" || url.pathname.endsWith("/config.js")) {
         if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) {
           return new Response("Missing SUPABASE_URL / SUPABASE_ANON_KEY", { status: 500 });
@@ -18,20 +18,23 @@ var login_worker_default = {
           headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" }
         });
       }
+
       if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") {
-        return new Response("ASSETS binding missing (deploy with Wrangler assets).", {
-          status: 500,
-          headers: { "Content-Type": "text/plain; charset=utf-8" }
-        });
+        return new Response("ASSETS binding missing (deploy with Wrangler assets).", { status: 500 });
       }
-      return env.ASSETS.fetch(new Request(url.toString(), request));
+
+      const response = await env.ASSETS.fetch(new Request(url.toString(), request));
+      if (url.pathname === "/home" && response.ok) {
+        const html = (await response.text()).replace("storage:localStorage", "storage:sessionStorage");
+        const headers = new Headers(response.headers);
+        headers.set("Cache-Control", "no-store");
+        return new Response(html, { status: response.status, headers });
+      }
+      return response;
     } catch (e) {
       console.error(e);
       return new Response("Worker exception", { status: 500 });
     }
   }
 };
-export {
-  login_worker_default as default
-};
-//# sourceMappingURL=login-worker.js.map
+export { login_worker_default as default };

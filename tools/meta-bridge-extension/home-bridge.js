@@ -1,14 +1,14 @@
 (() => {
   "use strict";
-  if (window.__MW_HOME_META_BRIDGE_V24__) return;
-  window.__MW_HOME_META_BRIDGE_V24__ = true;
+  if (window.__MW_HOME_META_BRIDGE_V26__) return;
+  window.__MW_HOME_META_BRIDGE_V26__ = true;
 
   const ALLOWED = new Set(["status", "search", "login"]);
 
   function reply(id, ok, value) {
     window.postMessage(ok
-      ? { source:"maroowell-meta-extension", version:24, id, ok:true, result:value || {} }
-      : { source:"maroowell-meta-extension", version:24, id, ok:false, error:String(value?.message || value || "META 브리지 오류") },
+      ? { source:"maroowell-meta-extension", version:26, id, ok:true, result:value || {} }
+      : { source:"maroowell-meta-extension", version:26, id, ok:false, error:String(value?.message || value || "META 브리지 오류") },
       location.origin);
   }
 

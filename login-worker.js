@@ -24,12 +24,22 @@ var login_worker_default = {
       }
 
       const response = await env.ASSETS.fetch(new Request(url.toString(), request));
-      if (url.pathname === "/home" && response.ok) {
-        const html = (await response.text()).replace("storage:localStorage", "storage:sessionStorage");
+      const p = url.pathname.replace(/\/+$/, "") || "/";
+      const isHome = p === "/home" || p === "/home.html" || p === "/public/home";
+
+      if (isHome && response.ok) {
+        let html = await response.text();
+        html = html
+          .replaceAll("storage:localStorage", "storage:sessionStorage")
+          .replaceAll("storage: localStorage", "storage: sessionStorage");
         const headers = new Headers(response.headers);
-        headers.set("Cache-Control", "no-store");
+        headers.set("Content-Type", "text/html; charset=utf-8");
+        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+        headers.set("Pragma", "no-cache");
+        headers.delete("Content-Length");
         return new Response(html, { status: response.status, headers });
       }
+
       return response;
     } catch (e) {
       console.error(e);

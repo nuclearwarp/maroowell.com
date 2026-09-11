@@ -1,4 +1,5 @@
 // login-worker.js
+// 2026-09-11: redeploy assets after Home sessionStorage source fix.
 var login_worker_default = {
   async fetch(request, env) {
     try {

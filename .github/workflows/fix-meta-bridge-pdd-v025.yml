@@ -1,0 +1,57 @@
+name: Fix META Bridge PDD removal v0.2.5
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-meta-bridge-pdd-v025.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch META bridge and build zip
+        shell: python
+        run: |
+          from pathlib import Path
+          hook = Path('tools/meta-bridge-extension/meta-hook.js')
+          s = hook.read_text(encoding='utf-8')
+          old = '''  function requestBody(templateBody, payload, page) {
+    const base = JSON.parse(JSON.stringify(templateBody || {}));
+    const wanted = JSON.parse(JSON.stringify(payload || {}));
+    Object.assign(base, wanted);
+    base.page = page;
+    return base;
+  }'''
+          new = '''  function requestBody(templateBody, payload, page) {
+    const base = JSON.parse(JSON.stringify(templateBody || {}));
+    const wanted = JSON.parse(JSON.stringify(payload || {}));
+    for (const [key, value] of Object.entries(wanted)) {
+      if (value === null) delete base[key];
+      else base[key] = value;
+    }
+    base.page = page;
+    return base;
+  }'''
+          if old not in s:
+              raise SystemExit('requestBody pattern not found')
+          hook.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          manifest = Path('tools/meta-bridge-extension/manifest.json')
+          m = manifest.read_text(encoding='utf-8')
+          if '"version": "0.2.4"' not in m:
+              raise SystemExit('manifest 0.2.4 not found')
+          manifest.write_text(m.replace('"version": "0.2.4"', '"version": "0.2.5"', 1), encoding='utf-8')
+      - name: Build extension zip
+        run: |
+          mkdir -p public/downloads
+          cd tools/meta-bridge-extension
+          zip -r ../../public/downloads/maroowell-meta-bridge-v0.2.5.zip .
+      - name: Commit extension fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tools/meta-bridge-extension/meta-hook.js tools/meta-bridge-extension/manifest.json public/downloads/maroowell-meta-bridge-v0.2.5.zip
+          git commit -m "Fix META daytime query PDD inheritance v0.2.5"
+          git push

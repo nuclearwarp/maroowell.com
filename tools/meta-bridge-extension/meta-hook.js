@@ -134,7 +134,10 @@
   function requestBody(templateBody, payload, page) {
     const base = JSON.parse(JSON.stringify(templateBody || {}));
     const wanted = JSON.parse(JSON.stringify(payload || {}));
-    Object.assign(base, wanted);
+    for (const [key, value] of Object.entries(wanted)) {
+      if (value === null) delete base[key];
+      else base[key] = value;
+    }
     base.page = page;
     return base;
   }

@@ -70,7 +70,20 @@ var login_worker_v2_default = {
         return new Response(body, { status: response.status, headers });
       }
 
-      if (["/home", "/home.html", "/public/home", "/post_login"].includes(path) && response.ok) {
+      if (["/home", "/home.html", "/public/home"].includes(path) && response.ok) {
+        let body = await response.text();
+        if (!body.includes("/home-meta-session-guard.js")) {
+          body = body.replace("</head>", '<script src="/home-meta-session-guard.js?v=20260912-1"></script></head>');
+        }
+        const headers = new Headers(response.headers);
+        headers.set("Content-Type", "text/html; charset=utf-8");
+        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+        headers.set("Pragma", "no-cache");
+        headers.delete("Content-Length");
+        return new Response(body, { status: response.status, headers });
+      }
+
+      if (path === "/post_login" && response.ok) {
         return withNoStore(response, "text/html; charset=utf-8");
       }
 

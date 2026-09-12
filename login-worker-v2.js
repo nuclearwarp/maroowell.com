@@ -39,8 +39,29 @@ var login_worker_v2_default = {
         );
         body = body.replace(
           'const rawNext = params.get("next") || DEFAULT_NEXT;',
-          'const requestedNext = params.get("next"); const rawNext = (!requestedNext || requestedNext === "/zipcode_search" || requestedNext === "/zipcode_search/") ? DEFAULT_NEXT : requestedNext;'
+          'const requestedNext = params.get("next"); const rawNext = (!requestedNext || requestedNext === "/zipcode_search" || requestedNext === "/zipcode_search/" || requestedNext === "/post_login" || requestedNext === "/post_login/") ? DEFAULT_NEXT : requestedNext;'
         );
+
+        const landingHelper = `  async function resolveLandingPath() {
+    try {
+      const { data: access, error } = await supabase.rpc("mw_my_access").maybeSingle();
+      if (!error && access?.is_maroowell === true && Number(access?.max_role_level || 0) >= 90) return "/home";
+    } catch (_) {}
+    return "/zipcode_search";
+  }
+
+  async function resolvePostLoginTarget() {
+    const requested = params.get("next");
+    if (requested && !["/zipcode_search", "/zipcode_search/", "/post_login", "/post_login/"].includes(requested)) return safeNextUrl(requested);
+    return resolveLandingPath();
+  }
+
+`;
+        if (!body.includes("async function resolveLandingPath()")) {
+          body = body.replace("  function clearFlowFromUrl() {", landingHelper + "  function clearFlowFromUrl() {");
+        }
+        body = body.replace(/location\.replace\(next\);/g, "location.replace(await resolvePostLoginTarget());");
+
         const headers = new Headers(response.headers);
         headers.set("Content-Type", "text/html; charset=utf-8");
         headers.set("Cache-Control", "no-store, no-cache, must-revalidate");

@@ -1,0 +1,347 @@
+import authWorker from "./auth-v12-base.js";
+
+const SUPABASE_URL = "https://rgqerimdxkthkcewqbbe.supabase.co";
+const FLY_REALTIME = "https://fly.coupang.com/ui/dashboard/realtime";
+const META_WORKER_URL = "https://fly.coupang.com/realtime-dashboard/workers/work-status/search";
+const META_CAMP_URL = "https://fly.coupang.com/realtime-dashboard/camps/work-status/search";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
+
+const json = (data, status = 200) => new Response(JSON.stringify(data, null, 2), {
+  status,
+  headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
+});
+const nowIso = () => new Date().toISOString();
+const uniq = xs => [...new Set((xs || []).map(v => String(v || "").trim()).filter(Boolean))];
+const normRoute = v => String(v || "").trim().toUpperCase().replace(/[^0-9A-Z가-힣]/g, "");
+const pct = (a, b) => b > 0 ? Math.round(a / b * 10000) / 100 : 100;
+
+function kstParts(d = new Date()) {
+  const x = new Date(d.getTime() + 9 * 3600000);
+  return { date: x.toISOString().slice(0, 10), hour: x.getUTCHours(), minute: x.getUTCMinutes() };
+}
+function addDate(date, days) {
+  const d = new Date(date + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function metaContent(x) {
+  if (Array.isArray(x?.data?.content)) return x.data.content;
+  if (Array.isArray(x?.content)) return x.content;
+  if (Array.isArray(x?.data?.data?.content)) return x.data.data.content;
+  return [];
+}
+function workerName(src) {
+  const w = src?.workerInfo || {};
+  return String(w.workerName || w.name || w.workerDisplayName || w.displayName || "").trim();
+}
+function coupangId(src) {
+  const w = src?.workerInfo || {};
+  for (const k of ["coupangId", "loginId", "coupangLoginId", "workerLoginId"]) {
+    const v = w?.[k] ?? src?.[k];
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return null;
+}
+function workerKey(src) {
+  const w = src?.workerInfo || {};
+  for (const k of ["workerSrl", "workerId", "id", "userId", "memberSrl", "memberId"]) {
+    const v = w?.[k] ?? src?.[k];
+    if (v != null && String(v).trim()) return `${k}:${String(v).trim()}`;
+  }
+  const cid = coupangId(src);
+  if (cid) return `coupang:${cid.toLowerCase()}`;
+  const routes = uniq((w.workSubRoutes || []).map(normRoute)).sort().join(",");
+  return `fallback:${workerName(src) || "unknown"}:${routes || "no-route"}`;
+}
+function sourceCampCode(src) {
+  const w = src?.workerInfo || {};
+  for (const k of ["campCode", "sourceCampCode", "workCampCode"]) {
+    const v = src?.[k] ?? w?.[k];
+    if (v != null && String(v).trim()) return String(v).trim().toUpperCase();
+  }
+  return null;
+}
+function deliveryMetric(s = {}) {
+  const assigned = +s.assignedCount || 0;
+  const scanned = +s.scannedCount || 0;
+  const completed = +s.completedCount || 0;
+  const impossible = +s.impossibleCount || 0;
+  const pdd = +s.pddMissCount || 0;
+  const total = assigned + scanned + completed + impossible + pdd;
+  return { assigned, scanned, completed, impossible, pdd, total, rate: pct(completed, total) };
+}
+function collectionMetric(s = {}, includeAbsent = false) {
+  const pending = +s.assignedCount || 0;
+  const collected = +s.collectedCount || 0;
+  const rawUn = +s.uncollectedCount || 0;
+  const rawAbsent = includeAbsent ? (+s.absentCount || 0) : 0;
+  const uncollected = Math.max(rawUn, rawAbsent);
+  const total = pending + collected + uncollected;
+  const attempted = collected + uncollected;
+  return { pending, collected, rawUn, rawAbsent, uncollected, total, attemptRate: pct(attempted, total), collectionRate: pct(collected, total) };
+}
+function metaCampCandidates(codes) {
+  const out = [];
+  for (const raw of codes || []) {
+    const c = String(raw || "").trim().toUpperCase();
+    if (!c) continue;
+    out.push(c);
+    if (/^SG\d{2}$/.test(c)) out.push(`S6${c.slice(2)}`);
+    if (/^MO\d{2}$/.test(c)) out.push(`M0${c.slice(2)}`);
+  }
+  return uniq(out);
+}
+
+async function sb(env, path, init = {}) {
+  if (!env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY 없음");
+  const headers = new Headers(init.headers || {});
+  headers.set("apikey", env.SUPABASE_SERVICE_ROLE_KEY);
+  headers.set("authorization", `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`);
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...init, headers });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Supabase ${r.status} ${path}: ${text.slice(0, 500)}`);
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return text; }
+}
+const sbGet = (env, path) => sb(env, path);
+const sbPatch = (env, path, body) => sb(env, path, { method: "PATCH", headers: { prefer: "return=representation" }, body: JSON.stringify(body) });
+const sbPost = (env, path, body, prefer = "return=representation") => sb(env, path, { method: "POST", headers: { prefer }, body: JSON.stringify(body) });
+const sbUpsert = (env, path, body, conflict) => sb(env, `${path}?on_conflict=${encodeURIComponent(conflict)}`, {
+  method: "POST", headers: { prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(body)
+});
+
+function parseCookieBundle(bundle) {
+  const map = new Map();
+  for (const part of String(bundle || "").split(/;\s*/)) {
+    const i = part.indexOf("=");
+    if (i > 0) map.set(part.slice(0, i), part.slice(i + 1));
+  }
+  return map;
+}
+function cookieHeader(map) { return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; "); }
+function splitSetCookie(raw) {
+  if (!raw) return [];
+  return String(raw).split(/,(?=[^;,]+=)/g);
+}
+function absorbSetCookies(map, response) {
+  const lines = typeof response.headers.getSetCookie === "function"
+    ? response.headers.getSetCookie()
+    : splitSetCookie(response.headers.get("set-cookie"));
+  for (const line of lines) {
+    const first = String(line || "").split(";", 1)[0];
+    const i = first.indexOf("=");
+    if (i <= 0) continue;
+    const name = first.slice(0, i), value = first.slice(i + 1);
+    const expired = /(?:^|;)\s*Max-Age=0(?:;|$)/i.test(line) || value === "";
+    if (expired) map.delete(name); else map.set(name, value);
+  }
+}
+async function metaPost(cookies, url, payload) {
+  const r = await fetch(url, {
+    method: "POST", redirect: "manual",
+    headers: {
+      accept: "application/json", "accept-language": "ko-KR",
+      "content-type": "application/json;charset=UTF-8", origin: "https://fly.coupang.com",
+      referer: FLY_REALTIME, "user-agent": UA, "x-coupang-accept-language": "ko-KR",
+      "x-requested-with": "XMLHttpRequest", cookie: cookieHeader(cookies)
+    },
+    body: JSON.stringify(payload)
+  });
+  absorbSetCookies(cookies, r);
+  const text = await r.text(); let body = null;
+  try { body = JSON.parse(text); } catch {}
+  return { status: r.status, text, body, success: r.status === 200 && (body?.message === "SUCCESS" || Array.isArray(body?.data?.content) || Array.isArray(body?.content) || Array.isArray(body?.data?.data?.content)) };
+}
+function workerPayload(campCodes, wave, workDate, pddTime = null) {
+  return { campCodes, page: 0, size: 100, sortDirection: "ASC", sortType: "DELIVERY_COMPLETED_RATIO", waveCode: wave, workDate, ...(pddTime ? { pddTime } : {}) };
+}
+
+async function sessionState(env) {
+  const rows = await sbGet(env, "meta_backend_state?id=eq.1&select=*");
+  return rows?.[0] || null;
+}
+async function saveSession(env, cookies, status = "active", http = 200, error = null) {
+  const patch = { cookie_bundle: cookieHeader(cookies), status, last_http_status: http, last_error: error, updated_at: nowIso() };
+  if (!error) patch.last_success_at = nowIso();
+  await sbPatch(env, "meta_backend_state?id=eq.1", patch);
+}
+async function loadCampCodes(env, camp) {
+  const rows = await sbGet(env, `camps?select=code&camp=eq.${encodeURIComponent(camp)}&code=not.is.null`);
+  return uniq((rows || []).map(r => String(r.code || "").toUpperCase())).sort();
+}
+async function loadSchedule(env, date, wave, camp) {
+  return await sbGet(env, `maroowell_schedule?select=route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,driver_account_type,row_order&schedule_date=eq.${date}&wave=eq.${wave}&camp=eq.${encodeURIComponent(camp)}&is_active=eq.true&order=row_order.asc`) || [];
+}
+function scheduleMatch(rows, cid, name) {
+  const id = String(cid || "").trim().toLowerCase();
+  const dn = String(name || "").trim();
+  let hit = rows.filter(r => id && String(r.driver_coupang_id || "").trim().toLowerCase() === id);
+  if (!hit.length && dn) hit = rows.filter(r => [r.driver_display_name, r.driver_name, r.driver_owner_name].some(x => String(x || "").trim() === dn));
+  return hit;
+}
+
+async function ensureBatches(env) {
+  const kp = kstParts();
+  const targets = [];
+  if (kp.hour >= 8) targets.push({ date: kp.date, wave: "WAVE2" });
+  if (kp.hour >= 20) targets.push({ date: kp.date, wave: "WAVE1" });
+  else if (kp.hour < 12) targets.push({ date: addDate(kp.date, -1), wave: "WAVE1" });
+  for (const t of targets) {
+    const schedules = await sbGet(env, `maroowell_schedule?select=camp&schedule_date=eq.${t.date}&wave=eq.${t.wave}&is_active=eq.true`);
+    for (const camp of uniq((schedules || []).map(r => r.camp))) {
+      const dbCodes = await loadCampCodes(env, camp), codes = metaCampCandidates(dbCodes);
+      if (!codes.length) continue;
+      const campCode = dbCodes[0] || codes[0];
+      const found = await sbGet(env, `meta_realtime_batch?select=id,meta_camp_codes&schedule_date=eq.${t.date}&camp_code=eq.${encodeURIComponent(campCode)}&wave=eq.${t.wave}&limit=1`);
+      if (found?.length) {
+        await sbPatch(env, `meta_realtime_batch?id=eq.${found[0].id}`, { meta_camp_codes: codes, updated_at: nowIso() });
+        continue;
+      }
+      await sbPost(env, "meta_realtime_batch", {
+        schedule_date: t.date, meta_work_date: t.wave === "WAVE1" ? addDate(t.date, 1) : t.date,
+        camp_code: campCode, camp_name: camp, wave: t.wave, meta_camp_codes: codes,
+        status: "collecting", poll_interval_seconds: 60, next_poll_at: nowIso(), updated_at: nowIso()
+      });
+    }
+  }
+}
+async function dueBatches(env) {
+  const now = encodeURIComponent(nowIso());
+  return await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
+}
+function freshMap(body) {
+  const byKey = new Map(), byName = new Map();
+  for (const row of metaContent(body)) {
+    const m = deliveryMetric(row?.deliverySummary || {}), k = workerKey(row), n = workerName(row);
+    byKey.set(k, m); if (n) byName.set(n, m);
+  }
+  return { byKey, byName };
+}
+
+async function processBatch(env, cookies, batch) {
+  const dbCodes = await loadCampCodes(env, batch.camp_name);
+  const codes = uniq(batch.meta_camp_codes?.length ? batch.meta_camp_codes : metaCampCandidates(dbCodes));
+  if (!codes.length) throw new Error(`캠프 코드 없음: ${batch.camp_name}`);
+  const main = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date));
+  if (!main.success) throw new Error(`META ${main.status}: ${main.text.slice(0, 240)}`);
+  let fresh = null;
+  if (batch.wave === "WAVE2") fresh = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date, "20:00"));
+
+  const schedule = await loadSchedule(env, batch.schedule_date, batch.wave, batch.camp_name);
+  const prevRows = await sbGet(env, `meta_realtime_current?select=*&batch_id=eq.${batch.id}`) || [];
+  const prevMap = new Map(prevRows.map(r => [r.meta_worker_key, r]));
+  const fm = freshMap(fresh?.body), byKey = new Map(), now = nowIso();
+
+  for (const src of metaContent(main.body)) {
+    const w = src?.workerInfo || {}, key = workerKey(src), name = workerName(src), prev = prevMap.get(key);
+    const metaCid = coupangId(src), matched = scheduleMatch(schedule, metaCid, name);
+    const actualRoutes = uniq((w.workSubRoutes || []).map(normRoute));
+    const scheduledRoutes = uniq(matched.map(r => normRoute(r.route_label)).filter(r => r && r !== "휴무자"));
+    const realCid = String(matched[0]?.driver_coupang_id || metaCid || "").trim() || null;
+    const accountType = String(matched[0]?.driver_account_type || w.workerAccountType || w.accountType || "").trim() || null;
+    const d = deliveryMetric(src?.deliverySummary || {}), ret = collectionMetric(src?.returnSummary || {}, true), fb = collectionMetric(src?.freshbagSummary || {}, false);
+    const fd = fm.byKey.get(key) || fm.byName.get(name) || deliveryMetric({});
+    const deliveryDone = d.total > 0 && d.completed === d.total;
+    const returnDone = batch.wave === "WAVE1" ? true : (ret.total === 0 || (ret.pending === 0 && ret.collected + ret.uncollected >= ret.total));
+    const freshbagDone = fb.total === 0 || (fb.pending === 0 && fb.collected + fb.uncollected >= fb.total);
+    const allDone = deliveryDone && returnDone && freshbagDone;
+    const rec = {
+      batch_id: batch.id, schedule_date: batch.schedule_date, meta_work_date: batch.meta_work_date,
+      camp_code: batch.camp_code, camp_name: batch.camp_name, wave: batch.wave,
+      meta_worker_key: key, source_camp_code: sourceCampCode(src), coupang_id: realCid,
+      driver_name: name || null, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
+      delivery_assigned: d.assigned, delivery_scanned: d.scanned, delivery_completed: d.completed, delivery_impossible: d.impossible,
+      delivery_pdd_miss: d.pdd, delivery_total: d.total, delivery_complete_rate: d.rate,
+      fresh_delivery_assigned: fd.assigned, fresh_delivery_scanned: fd.scanned, fresh_delivery_completed: fd.completed,
+      fresh_delivery_impossible: fd.impossible, fresh_delivery_pdd_miss: fd.pdd, fresh_delivery_total: fd.total, fresh_delivery_complete_rate: fd.rate,
+      return_pending: ret.pending, return_collected: ret.collected, return_uncollected_raw: ret.rawUn, return_absent_raw: ret.rawAbsent,
+      return_total: ret.total, return_attempt_rate: ret.attemptRate, return_collection_rate: ret.collectionRate,
+      freshbag_pending: fb.pending, freshbag_collected: fb.collected, freshbag_uncollected: fb.uncollected,
+      freshbag_total: fb.total, freshbag_attempt_rate: fb.attemptRate, freshbag_collection_rate: fb.collectionRate,
+      scan_started_at: prev?.scan_started_at || ((d.scanned + d.completed + d.impossible + d.pdd) > 0 ? now : null),
+      delivery_started_at: prev?.delivery_started_at || ((d.completed + ret.collected + ret.uncollected + fb.collected + fb.uncollected) > 0 ? now : null),
+      delivery_completed_at: prev?.delivery_completed_at || (deliveryDone && returnDone ? now : null),
+      all_completed_at: prev?.all_completed_at || (allDone ? now : null), first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
+      delivery_done: deliveryDone, return_done: returnDone, freshbag_done: freshbagDone,
+      raw_payload: { main: src, fresh_delivery: fd.total ? { metric: fd } : null, collected_at: now }, updated_at: now
+    };
+    const old = byKey.get(key);
+    if (!old || rec.delivery_total > old.delivery_total) byKey.set(key, rec);
+    else old.actual_routes = uniq([...(old.actual_routes || []), ...actualRoutes]);
+  }
+
+  const rows = [...byKey.values()];
+  if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
+  const complete = rows.length > 0 && rows.every(r => r.delivery_done && r.return_done && r.freshbag_done);
+  const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
+  const kp = kstParts(), lateNight = batch.wave === "WAVE1" && kp.hour >= 12 && kp.hour < 20;
+  const interval = lateNight ? 300 : 60;
+  const patch = {
+    meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
+    completed_worker_count: rows.filter(r => r.delivery_done && r.return_done && r.freshbag_done).length,
+    stable_complete_poll_count: stable, status: complete ? "completion_candidate" : (lateNight ? "overdue" : "collecting"),
+    poll_interval_seconds: interval, next_poll_at: new Date(Date.now() + interval * 1000).toISOString(), last_error: null, updated_at: now
+  };
+  if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
+  await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
+  if (complete && stable >= 2) {
+    const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
+    return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes };
+  }
+  return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, codes };
+}
+
+async function heartbeat(env, cookies) {
+  const rows = await sbGet(env, "camps?select=code&code=not.is.null&limit=30");
+  const codes = metaCampCandidates((rows || []).map(r => r.code));
+  const kp = kstParts();
+  const r = await metaPost(cookies, META_CAMP_URL, workerPayload(codes, "WAVE2", kp.date));
+  await saveSession(env, cookies, r.success ? "active" : "expired", r.status, r.success ? null : `heartbeat ${r.status}`);
+  return { ok: r.success, status: r.status };
+}
+async function runCollector(env, force = false) {
+  const state = await sessionState(env);
+  if (!state?.cookie_bundle) return { ok: false, error: "META DB session 없음" };
+  const cookies = parseCookieBundle(state.cookie_bundle);
+  await ensureBatches(env);
+  const due = await dueBatches(env), results = [];
+  for (const batch of due) {
+    try {
+      results.push(await processBatch(env, cookies, batch));
+    } catch (e) {
+      const msg = String(e?.message || e);
+      results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
+      await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
+        status: "error", last_error: msg.slice(0, 500), next_poll_at: new Date(Date.now() + 300000).toISOString(), updated_at: nowIso()
+      });
+      if (/META (401|403|302)/.test(msg)) { await saveSession(env, cookies, "expired", Number(msg.match(/META (\d+)/)?.[1] || 401), msg.slice(0, 250)); break; }
+    }
+  }
+  const kp = kstParts();
+  if (!due.length && (force || kp.minute % 5 === 0)) results.push({ heartbeat: await heartbeat(env, cookies) });
+  else if (due.length) await saveSession(env, cookies, "active", 200, null);
+  return { ok: true, at: nowIso(), due: due.length, results };
+}
+
+export default {
+  async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    try {
+      if (path === "/collector/run") return json(await runCollector(env, true));
+      if (path === "/collector/status") {
+        const batches = await sbGet(env, "meta_realtime_batch?select=*&order=schedule_date.desc,started_at.desc&limit=50");
+        return json({ ok: true, batches });
+      }
+      if (path.startsWith("/login-") || path === "/test-db") return authWorker.fetch(request, env);
+      return json({ ok: true, message: "Maroowell META collector", endpoints: ["/collector/run", "/collector/status", "/login-send-code", "/test-db"] });
+    } catch (e) { return json({ ok: false, error: String(e?.message || e) }, 500); }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runCollector(env).catch(async e => {
+      try {
+        await sbPatch(env, "meta_backend_state?id=eq.1", { status: "error", last_error: `collector cron: ${String(e?.message || e).slice(0, 300)}`, updated_at: nowIso() });
+      } catch {}
+    }));
+  }
+};

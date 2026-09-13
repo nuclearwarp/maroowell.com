@@ -1,0 +1,28 @@
+name: Deploy META collector worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/meta-collector/**'
+      - '.github/workflows/deploy-meta-collector.yml'
+
+concurrency:
+  group: deploy-meta-collector-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: node --check workers/meta-collector/entry.js && node --check workers/meta-collector/auth-v12-base.js
+      - name: Deploy META collector
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config workers/meta-collector/wrangler.toml --keep-vars

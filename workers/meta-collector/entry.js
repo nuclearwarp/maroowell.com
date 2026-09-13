@@ -261,6 +261,7 @@ async function processBatch(env, cookies, batch) {
     if (!matched.length) matched = scheduleMatchByRoutes(schedule, actualRoutes);
     const scheduledRoutes = uniq(matched.map(r => normRoute(r.route_label)).filter(r => r && r !== "휴무자"));
     const realCid = String(matched[0]?.driver_coupang_id || metaCid || "").trim() || null;
+    const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;
     const accountType = String(matched[0]?.driver_account_type || w.workerAccountType || w.accountType || "").trim() || null;
     const d = deliveryMetric(src?.deliverySummary || {}), ret = collectionMetric(src?.returnSummary || {}, true), fb = collectionMetric(src?.freshbagSummary || {}, false);
     const fd = fm.byKey.get(key) || fm.byName.get(name) || deliveryMetric({});
@@ -272,7 +273,7 @@ async function processBatch(env, cookies, batch) {
       batch_id: batch.id, schedule_date: batch.schedule_date, meta_work_date: batch.meta_work_date,
       camp_code: batch.camp_code, camp_name: batch.camp_name, wave: batch.wave,
       meta_worker_key: key, source_camp_code: sourceCampCode(src), coupang_id: realCid,
-      driver_name: name || null, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
+      driver_name: mappedName, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
       delivery_assigned: d.assigned, delivery_scanned: d.scanned, delivery_completed: d.completed, delivery_impossible: d.impossible,
       delivery_pdd_miss: d.pdd, delivery_total: d.total, delivery_complete_rate: d.rate,
       fresh_delivery_assigned: fd.assigned, fresh_delivery_scanned: fd.scanned, fresh_delivery_completed: fd.completed,

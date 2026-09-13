@@ -1,0 +1,28 @@
+name: Run Home live patch
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/patch-home-live.py
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Home
+        run: python tools/patch-home-live.py
+      - name: Verify Home
+        run: |
+          grep -q 'data-wave="ALL"' public/home
+          grep -q 'meta_realtime_current' public/home
+          grep -q 'driverGrid{display:grid;grid-template-columns:repeat(3' public/home
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/home
+          git diff --cached --quiet && exit 0
+          git commit -m "Use backend live data on Home and show three drivers per row"
+          git push

@@ -180,6 +180,26 @@ function scheduleMatch(rows, cid, name) {
   if (!hit.length && dn) hit = rows.filter(r => [r.driver_display_name, r.driver_name, r.driver_owner_name].some(x => String(x || "").trim() === dn));
   return hit;
 }
+function scheduledRouteMatches(actual, scheduled) {
+  const a = normRoute(actual), b = normRoute(scheduled);
+  return !!a && !!b && (a === b || a.startsWith(b));
+}
+function scheduleMatchByRoutes(rows, actualRoutes) {
+  const owned = new Map();
+  for (const actual of actualRoutes || []) {
+    const candidates = rows.filter(r => r.route_label && r.route_label !== "휴무자" && scheduledRouteMatches(actual, r.route_label));
+    candidates.sort((a, b) => normRoute(b.route_label).length - normRoute(a.route_label).length);
+    const best = candidates[0];
+    if (!best) continue;
+    const key = String(best.driver_coupang_id || best.driver_display_name || best.driver_name || best.driver_owner_name || "").trim();
+    if (!key) continue;
+    owned.set(key, (owned.get(key) || 0) + 1);
+  }
+  const ranked = [...owned.entries()].sort((a,b) => b[1]-a[1]);
+  if (!ranked.length || (ranked[1] && ranked[1][1] === ranked[0][1])) return [];
+  const winner = ranked[0][0];
+  return rows.filter(r => String(r.driver_coupang_id || r.driver_display_name || r.driver_name || r.driver_owner_name || "").trim() === winner);
+}
 
 async function ensureBatches(env) {
   const kp = kstParts();
@@ -235,8 +255,10 @@ async function processBatch(env, cookies, batch) {
 
   for (const src of metaContent(main.body)) {
     const w = src?.workerInfo || {}, key = workerKey(src), name = workerName(src), prev = prevMap.get(key);
-    const metaCid = coupangId(src), matched = scheduleMatch(schedule, metaCid, name);
+    const metaCid = coupangId(src);
     const actualRoutes = uniq((w.workSubRoutes || []).map(normRoute));
+    let matched = scheduleMatch(schedule, metaCid, name);
+    if (!matched.length) matched = scheduleMatchByRoutes(schedule, actualRoutes);
     const scheduledRoutes = uniq(matched.map(r => normRoute(r.route_label)).filter(r => r && r !== "휴무자"));
     const realCid = String(matched[0]?.driver_coupang_id || metaCid || "").trim() || null;
     const accountType = String(matched[0]?.driver_account_type || w.workerAccountType || w.accountType || "").trim() || null;

@@ -10,7 +10,8 @@ const json = (data, status = 200) => new Response(JSON.stringify(data, null, 2),
   status,
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
 });
-const nowIso = () => { const d = new Date(Date.now() + 9 * 3600000); return d.toISOString().slice(0, -1); };
+const kstIsoAt = (ms) => { const d = new Date(ms + 9 * 3600000); return d.toISOString().slice(0, -1); };
+const nowIso = () => kstIsoAt(Date.now());
 const uniq = xs => [...new Set((xs || []).map(v => String(v || "").trim()).filter(Boolean))];
 const normRoute = v => String(v || "").trim().toUpperCase().replace(/[^0-9A-Z가-힣]/g, "");
 const pct = (a, b) => b > 0 ? Math.round(a / b * 10000) / 100 : 100;
@@ -303,9 +304,9 @@ async function processBatch(env, cookies, batch) {
   const interval = lateNight ? 300 : 60;
   const patch = {
     meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
-    completed_worker_count: rows.filter(r => r.delivery_done && r.return_done && r.freshbag_done).length,
+    completed_worker_count: rows.filter(r => r.delivery_done && (batch.wave === "WAVE1" || r.return_done) && r.freshbag_done).length,
     stable_complete_poll_count: stable, status: complete ? "completion_candidate" : (lateNight ? "overdue" : "collecting"),
-    poll_interval_seconds: interval, next_poll_at: new Date(Date.now() + interval * 1000).toISOString(), last_error: null, updated_at: now
+    poll_interval_seconds: interval, next_poll_at: kstIsoAt(Date.now() + interval * 1000), last_error: null, updated_at: now
   };
   if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
@@ -337,7 +338,7 @@ async function runCollector(env, force = false) {
       const msg = String(e?.message || e);
       results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
       await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
-        status: "error", last_error: msg.slice(0, 500), next_poll_at: new Date(Date.now() + 300000).toISOString(), updated_at: nowIso()
+        status: "error", last_error: msg.slice(0, 500), next_poll_at: kstIsoAt(Date.now() + 300000), updated_at: nowIso()
       });
       if (/META (401|403|302)/.test(msg)) { await saveSession(env, cookies, "expired", Number(msg.match(/META (\d+)/)?.[1] || 401), msg.slice(0, 250)); break; }
     }

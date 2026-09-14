@@ -1898,6 +1898,12 @@
           return keys.includes(k);
         });
         if(found)return found;
+
+        // maroowell_info에서 같은 기사 계정을 찾으면 master 정보를 최우선으로 사용한다.
+        const master=resolveMetaInfoAccount(raw);
+        if(master && clean(master.exportId)) return master;
+
+        // master에도 없는 경우에만 실제 직접입력으로 취급한다.
         return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};
       }
 
@@ -2994,8 +3000,33 @@
 
       function makeDirtyRecord({date,routeLabel,value,rowOrder,source}){
         const cleanValue=clean(value);
-        const account=cleanValue?resolveAccount(cleanValue):null;
         const keepAssignmentFields=!!cleanValue;
+
+        let account=null;
+        if(cleanValue){
+          account=resolveMetaInfoAccount(cleanValue)
+            || resolvePddAccount(cleanValue,source||{})
+            || resolveAccount(cleanValue);
+        }
+
+        const parsedAccountId=parseAccountToken(
+          account?.exportId,
+          clean(account?.exportName || account?.displayName || cleanValue)
+        );
+        const masterId=clean(parsedAccountId.id);
+
+        const parsedSourceId=parseAccountToken(
+          clean(source?.driver_coupang_id),
+          clean(source?.driver_export_name || source?.driver_name || cleanValue)
+        );
+        const sourceId=clean(parsedSourceId.id);
+
+        const accountType=clean(account?.accountType);
+        const sourceAccountType=clean(source?.driver_account_type);
+        const authoritativeAccountType=masterId
+          ? (accountType || "본계정")
+          : (sourceAccountType || accountType || null);
+
         return {
           schedule_date:date,
           camp:state.camp,
@@ -3003,10 +3034,24 @@
           route_label:normalizeRouteLabel(routeLabel),
           driver_name:cleanValue||null,
           driver_display_name:cleanValue||null,
-          driver_owner_name:keepAssignmentFields?(clean(source?.driver_owner_name)||account?.ownerName||cleanValue||null):null,
-          driver_export_name:keepAssignmentFields?(clean(source?.driver_export_name)||account?.exportName||cleanValue||null):null,
-          driver_coupang_id:keepAssignmentFields?(clean(source?.driver_coupang_id)||account?.exportId||null):null,
-          driver_account_type:keepAssignmentFields?(clean(source?.driver_account_type)||account?.accountType||null):null,
+          driver_owner_name:keepAssignmentFields?(
+            clean(account?.ownerName)
+            || clean(source?.driver_owner_name)
+            || cleanValue
+            || null
+          ):null,
+          driver_export_name:keepAssignmentFields?(
+            clean(account?.exportName)
+            || clean(source?.driver_export_name)
+            || cleanValue
+            || null
+          ):null,
+          driver_coupang_id:keepAssignmentFields?(
+            masterId
+            || sourceId
+            || null
+          ):null,
+          driver_account_type:keepAssignmentFields?authoritativeAccountType:null,
           memo:keepAssignmentFields?(clean(source?.memo)||null):null,
           row_order:Number(rowOrder||source?.row_order||0),
           cell_color:cleanValue?colorForValue(cleanValue):null,
@@ -3436,6 +3481,13 @@
 
       async function saveAll(){
         if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
+
+        try{
+          const added=await loadAllMaroowellInfoRowsForAccountLookup();
+          if(added>0) buildDriverAccounts();
+        }catch(e){
+          console.warn("[schedule save] maroowell_info account refresh failed",e);
+        }
 
         normalizeUniformChildrenBeforeSave();
 

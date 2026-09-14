@@ -1,118 +1,307 @@
-<!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="referrer" content="origin">
-<title>실시간 현황 | 마루웰</title>
-<link rel="icon" href="/favicon.ico?v=2">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
-<script src="/board-menu.js?v=20260914-realtime1" defer></script>
-<style>
-:root{--bg:#f3f6f8;--card:#fff;--line:#dce5e8;--line2:#cbd5e1;--text:#152732;--muted:#667984;--navy:#17364a;--day:#f59e0b;--night:#7c3aed;--teal:#137f75;--blue:#4169a1;--green:#16833e;--red:#c52824;--orange:#c65a11;--olive:#71823f;--fresh:#b7791f;--shadow:0 10px 28px rgba(23,54,74,.08);--font:system-ui,-apple-system,"Noto Sans KR","Segoe UI",Roboto,Arial,sans-serif}
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}body{background:radial-gradient(circle at 8% 0%,rgba(245,158,11,.055),transparent 26%),radial-gradient(circle at 92% 0%,rgba(124,58,237,.055),transparent 26%),var(--bg)}button,input{font:inherit}.wrap{width:min(1540px,100%);margin:auto;padding:10px 14px 40px}.card{background:rgba(255,255,255,.99);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:14px;margin-bottom:12px}.topbar{display:flex;align-items:center;gap:8px;padding:7px 10px;position:sticky;top:5px;z-index:20}.brandLogo{width:34px;height:34px;border:0;border-radius:10px;background:#fff;padding:0;display:grid;place-items:center;cursor:pointer}.brandLogo img{width:31px;height:31px;object-fit:contain}.brandTitle{font-size:20px;font-weight:900;line-height:1;margin:0;letter-spacing:-.03em}.grow{flex:1}.pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 12px;border-radius:11px;border:1px solid var(--line2);background:#fff;color:#475569;font-size:10.5px;font-weight:850;line-height:1;white-space:nowrap}.pill:before{content:"";width:6px;height:6px;border-radius:50%;background:#94a3b8}.pill.ok{background:#fff;border-color:#86efac;color:#166534}.pill.ok:before{background:#22c55e}.pill.err{background:#fff;border-color:#fecaca;color:#991b1b}.pill.err:before{background:#ef4444}.btn{height:38px;min-height:38px;padding:0 14px;border-radius:11px;border:1px solid var(--line2);background:#fff;color:#334155;font-weight:900;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;align-self:center;transition:border-color .15s ease,color .15s ease,background .15s ease,transform .08s ease}.btn:active{transform:translateY(1px)}.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}.btn.metaConnected{min-width:106px;background:#fff;border:1.5px solid #22c55e;color:#15803d;box-shadow:none}.btn.metaConnected:hover{background:#f8fff9;border-color:#16a34a;color:#166534}.btn.danger{min-width:90px;background:#fff;border:1.5px solid #ef4444;color:#dc2626;box-shadow:none}.btn.danger:hover{background:#fffafa;border-color:#dc2626;color:#b91c1c}.btn.hidden{display:none}.btn:disabled{opacity:.58;cursor:not-allowed;transform:none}
-.controls{display:grid;grid-template-columns:minmax(240px,1.15fr) minmax(220px,.9fr) minmax(330px,1.25fr) auto;gap:9px;align-items:end}.field{display:flex;flex-direction:column;gap:5px}.field label{font-size:10.5px;color:var(--muted);font-weight:900}.dateInput{height:46px;width:100%;border:1px solid var(--line2);border-radius:11px;background:#f8fafc;padding:0 13px;outline:none;color:var(--text);font-size:17px;font-weight:900}.liveMode{height:46px;display:flex;align-items:center;padding:0 13px;border:1px solid var(--line2);border-radius:11px;background:#f8fafc;color:#17364a;font-size:12px;font-weight:950}.waveToggle{height:46px;display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line2);border-radius:11px;overflow:hidden;background:#f8fafc}.waveBtn{border:0;background:transparent;color:#64748b;font-size:13px;font-weight:950;cursor:pointer}.waveBtn.all.active{background:var(--navy);color:#fff}.waveBtn.day.active{background:var(--day);color:#fff}.waveBtn.night.active{background:var(--night);color:#fff}.autoRow{height:46px;display:flex;align-items:center;gap:4px;overflow-x:auto}.autoBtn{height:34px;min-width:44px;padding:0 8px;border-radius:999px;border:1px solid var(--line2);background:#fff;color:#64748b;font-size:10.5px;font-weight:900;cursor:pointer}.autoBtn.active{background:#e9f0f3;border-color:#94a7b2;color:#17364a}.actions .btn{height:46px;min-width:72px;padding:0 14px;white-space:nowrap}.status{margin-top:9px;min-height:18px;color:#60737e;font-size:11.5px;font-weight:850}.status.err{color:#b42318}.status strong{color:#334155}
-.sectionHead{display:flex;align-items:center;gap:8px;margin-bottom:10px}.sectionHead h2{font-size:17px;margin:0;letter-spacing:-.03em}.caption{font-size:10.5px;color:#71818a;font-weight:850}.headActions{margin-left:auto;display:flex;gap:6px}.copyBtn{height:32px;padding:0 11px;border-radius:9px;border:1px solid #67e8f9;background:#ecfeff;color:#0e7490;font-size:10.5px;font-weight:950;cursor:pointer;box-shadow:0 4px 10px rgba(14,116,144,.08);transition:background .15s ease,border-color .15s ease,color .15s ease}.copyBtn:hover{background:#cffafe;border-color:#22d3ee}.copyBtn.copied{background:#dcfce7;border-color:#86efac;color:#166534}.summaryGrid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:7px}.summaryBox{border:1px solid var(--line);border-radius:13px;padding:10px 11px;background:#fff;min-width:0}.summaryBox .label{font-size:9.8px;color:#687a84;font-weight:900}.summaryBox .value{margin-top:4px;font-size:20px;font-weight:1000;line-height:1.05;letter-spacing:-.035em}.summaryBox .sub{margin-top:6px;font-size:10.5px;line-height:1.35;color:#647680;font-weight:800}.summaryBox.delivery .value{color:var(--teal);font-size:17px}.summaryBox.freshDelivery .value{color:var(--fresh);font-size:17px}.summaryBox.return .value{color:var(--blue);font-size:15px}.summaryBox.fresh .value{color:var(--olive);font-size:15px}.summaryBox.bad .value{color:var(--red)}
-.campGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.driverGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.campCard,.driverCard{border:1px solid var(--line);border-radius:14px;background:#fff;padding:11px 12px}.campCard{cursor:pointer;transition:transform .08s ease,border-color .08s ease,box-shadow .08s ease}.campCard:hover{border-color:#aebcc4}.campCard.selected{border:2px solid var(--navy);box-shadow:0 0 0 3px rgba(23,54,74,.08)}.campCard.selected:after{content:"선택됨";display:inline-flex;margin-top:8px;padding:3px 7px;border-radius:999px;background:#17364a;color:#fff;font-size:9px;font-weight:900}.campTop,.driverTop{display:flex;align-items:flex-start;gap:8px}.campName,.driverName{font-size:15px;font-weight:950}.campMeta,.routeLabel{margin-top:4px;color:#71818a;font-size:10px;line-height:1.45;word-break:break-all}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}.driverCard .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metricPanel{border-radius:10px;background:#f4f7f8;padding:9px;min-width:0}.metricPanel.delivery{background:#edf7f6}.metricPanel.freshDelivery{background:#fff8e8}.metricPanel.return{background:#eef3fa}.metricPanel.fresh{background:#f4f6ec}.metricPanel .k{font-size:9.5px;color:#667984;font-weight:900}.metricPanel .rate{margin-top:3px;font-size:12.5px;font-weight:1000;line-height:1.25}.metricPanel .detail{margin-top:5px;font-size:11.5px;line-height:1.45;color:#52666f;font-weight:850;white-space:normal}.metricPanel.delivery .rate{color:var(--teal)}.metricPanel.freshDelivery .rate{color:var(--fresh)}.metricPanel.return .rate{color:var(--blue)}.metricPanel.fresh .rate{color:var(--olive)}.metricPanel .dual{display:grid;gap:2px;margin-top:3px;font-size:11.5px;font-weight:1000}.metricPanel .dual span{display:block;white-space:nowrap}.metricPanel .dual b{font-size:12.5px}.summaryBox .stackRate{display:grid;gap:2px;line-height:1.18}.summaryBox .stackRate div{white-space:nowrap}.missLine{margin-top:7px;padding:6px 8px;border-radius:8px;background:#fff3f2;color:#b42318;font-size:10.5px;font-weight:900}.driverCard.mismatch{border:2px solid var(--day)}.driverCard.external{border:2px solid var(--red)}.driverCamp{display:inline-flex;margin-right:5px;padding:3px 7px;border-radius:999px;background:#eef3f5;color:#435b68;font-size:9px;font-weight:900;vertical-align:2px}.waveBadge{display:inline-flex;margin-right:5px;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:950;vertical-align:2px}.waveBadge.day{background:#fff6df;color:#9a5b00}.waveBadge.night{background:#f2ecff;color:#6d28d9}.driverScore{margin-left:auto;text-align:right}.driverScore b{display:block;font-size:13px;color:var(--teal)}.driverScore small{color:#73848e;font-size:9.5px;font-weight:800}.warn{margin-top:7px;padding:7px 8px;border-radius:9px;background:#fff7e7;color:#9c5b08;font-size:9.5px;line-height:1.45;white-space:pre-line}.warn.red{background:#fff0ef;color:#b42318}.empty{padding:24px 14px;text-align:center;border:1px dashed #cad5da;border-radius:13px;background:#fafcfd;color:#7a8a93;font-size:11.5px}.loading{opacity:.58;pointer-events:none}.hidden{display:none!important}.selectionHint{margin-left:auto;font-size:9.5px;color:#7b8b94}.copying{outline:2px solid rgba(23,54,74,.2);outline-offset:4px}.captureMeta{margin:0 0 10px;padding:7px 10px;border-radius:9px;background:#f4f7f8;color:#52666f;font-size:11px;font-weight:900;line-height:1.35}
-@media(max-width:1320px){.summaryGrid{grid-template-columns:repeat(5,1fr)}.campCard .metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:1120px){.driverGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:980px){.controls{grid-template-columns:1fr 1fr}.actions{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:760px){.wrap{padding:7px}.topbar{top:2px}.pill.user{display:none}.controls{grid-template-columns:1fr}.actions{grid-column:auto}.actions .btn{width:100%}.summaryGrid{grid-template-columns:repeat(2,1fr)}.campGrid,.driverGrid{grid-template-columns:1fr}.metrics,.driverCard .metrics{grid-template-columns:1fr}.card{padding:11px;border-radius:15px}.copyBtn{padding:0 8px}.selectionHint{display:none}}
-/* ChatGPT-like UI typography: system sans, cleaner weights and contrast */
-html,body,button,input{font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",Arial,sans-serif;font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
-body{font-weight:400;color:#172b36;letter-spacing:-.012em}.brandTitle{font-weight:650;letter-spacing:-.02em}.field label,.caption,.status,.campMeta,.routeLabel,.metricPanel .k,.driverScore small,.selectionHint{font-weight:500;color:#60727c}.btn,.pill,.waveBtn,.autoBtn,.copyBtn,.liveMode{font-weight:600}.sectionHead h2,.campName,.driverName,.summaryBox .value,.metricPanel .rate,.metricPanel .dual,.missLine,.driverScore b{font-weight:650}.summaryBox .label,.summaryBox .sub,.metricPanel .detail,.driverCamp,.waveBadge,.warn{font-weight:600}
-</style>
-<meta name="mw-realtime-live-v3" content="3">
-</head>
-<body>
-<main class="wrap">
-<header class="card topbar">
-  <button id="mwBoardMenuToggle" class="brandLogo" type="button" aria-label="마루웰 메뉴 열기"><img src="/favicon.ico?v=2" alt="M"></button>
-  <h1 class="brandTitle">실시간 현황</h1><div class="grow"></div>
-  <span id="userPill" class="pill user">권한 확인 중</span>
-  <button id="metaLoginBtn" class="btn primary" type="button">META 로그인</button>
-  <button id="logoutBtn" class="btn danger" type="button">로그아웃</button>
-</header>
-<section id="controlCard" class="card">
-  <div class="controls">
-    <div class="field"><label>조회 기준</label><div class="liveMode">현재 배송중 · 백엔드 자동 수집</div><input id="scheduleDate" type="hidden"></div>
-    <div class="field"><label>표시 필터</label><div class="waveToggle"><button class="waveBtn all active" data-wave="ALL" type="button">전체</button><button class="waveBtn day" data-wave="WAVE2" type="button">주간</button><button class="waveBtn night" data-wave="WAVE1" type="button">야간</button></div></div>
-    <div class="field"><label>자동 새로고침</label><div class="autoRow"><button class="autoBtn" data-min="0" type="button">끔</button><button class="autoBtn active" data-min="1" type="button">1분</button><button class="autoBtn" data-min="3" type="button">3분</button><button class="autoBtn" data-min="5" type="button">5분</button><button class="autoBtn" data-min="10" type="button">10분</button><button class="autoBtn" data-min="15" type="button">15분</button><button class="autoBtn" data-min="30" type="button">30분</button></div></div>
-    <div class="actions"><button id="queryBtn" class="btn primary" type="button">새로고침</button></div>
-  </div>
-  <div id="queryStatus" class="status">초기화 중입니다.</div>
-</section>
-<section id="summarySection" class="card">
-  <div class="sectionHead"><h2 id="summaryTitle">전체 실시간 현황</h2><span id="summaryCaption" class="caption">조회 전</span><div class="headActions"><button class="copyBtn" data-copy-section="summarySection" data-copy-name="전체 현황" type="button">이미지 복사</button></div></div>
-  <div class="summaryGrid">
-    <div class="summaryBox"><div class="label">조회 캠프</div><div id="campCount" class="value">-</div><div class="sub">실제 데이터 기준</div></div>
-    <div class="summaryBox"><div class="label">배송중 기사</div><div id="attendanceCount" class="value">-</div><div class="sub">진행중만 표시</div></div>
-    <div class="summaryBox"><div class="label">주간 / 야간</div><div id="workerCount" class="value">-</div><div class="sub">자동 수집 기준</div></div>
-    <div class="summaryBox"><div class="label">배송 수량</div><div id="deliveryTotal" class="value">-</div><div class="sub">전체 배송</div></div>
-    <div class="summaryBox delivery"><div class="label">배송 완료율</div><div id="deliveryRate" class="value">-</div><div id="deliverySub" class="sub">완료 -</div></div>
-    <div class="summaryBox freshDelivery"><div class="label">신선 완료율</div><div id="freshDeliveryRate" class="value">-</div><div id="freshDeliverySub" class="sub">20시 PDD</div></div>
-    <div class="summaryBox return"><div class="label">반품</div><div id="returnRate" class="value">-</div><div id="returnSub" class="sub">완료/회수</div></div>
-    <div class="summaryBox fresh"><div class="label">프백</div><div id="freshRate" class="value">-</div><div id="freshSub" class="sub">완료/회수</div></div>
-    <div class="summaryBox bad"><div class="label">미스캔</div><div id="misscanTotal" class="value">-</div><div class="sub">배송 위탁/미스캔</div></div>
-  </div>
-</section>
-<section id="campSection" class="card">
-  <div class="sectionHead"><h2>캠프별 현황</h2><span id="campCaption" class="caption">조회 전</span><span class="selectionHint">여러 캠프 선택 가능 · ESC 전체 해제</span><div class="headActions"><button class="copyBtn" data-copy-section="campSection" data-copy-name="캠프별 현황" type="button">이미지 복사</button></div></div>
-  <div id="campBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
-</section>
-<section id="driverSection" class="card">
-  <div class="sectionHead"><h2>기사별 현황</h2><span id="driverCaption" class="caption">완료율 낮은 순</span><div class="headActions"><button class="copyBtn" data-copy-section="driverSection" data-copy-name="기사별 현황" type="button">이미지 복사</button></div></div>
-  <div id="driverBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
-</section>
-</main>
-<script>
-(()=>{"use strict";
-const SUPA="https://rgqerimdxkthkcewqbbe.supabase.co",KEY=["sb_publishable_","FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H"].join(""),$=id=>document.getElementById(id);
-const S={sb:null,wave:"ALL",ctx:{vendorCodes:[],camps:[]},campMap:new Map(),busy:false,auto:Number(localStorage.getItem("mwRealtimeAuto")||1),timer:null,metaTimer:null,metaConnected:false,camps:[],batches:[],sourceRows:[],selected:new Set(),lastMetaStart:0,lastQueryAt:0};
-const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
-const num=v=>new Intl.NumberFormat("ko-KR").format(Number(v||0)),pct=v=>Number(v||0).toFixed(1)+"%",ratio=(a,b)=>Number(b||0)>0?Number(a||0)*100/Number(b):0,uniq=a=>[...new Set((a||[]).filter(Boolean))];
-const norm=v=>String(v||"").trim().replace(/[^0-9A-Za-z]/g,"").toUpperCase(),subRoute=v=>{const n=norm(v),m=n.match(/^(.+?[A-Z])\d{2}$/);return m?.[1]||n};
-const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`,addDays=(s,n)=>{const[y,m,d]=s.split("-").map(Number),x=new Date(y,m-1,d,12);x.setDate(x.getDate()+n);return iso(x)};
-const night=(wave=S.wave)=>wave==="WAVE1",waveLabel=wave=>wave==="WAVE1"?"야간":wave==="WAVE2"?"주간":"전체",workDate=()=>night()?addDays($("scheduleDate").value,1):$("scheduleDate").value,defaultDate=()=>iso(new Date()),sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function setStatus(t,e=false){$("queryStatus").innerHTML=t;$("queryStatus").classList.toggle("err",e)}function setBusy(v){S.busy=!!v;$("controlCard").classList.toggle("loading",S.busy);$("queryBtn").disabled=S.busy}
-let seq=0;function bridge(action,payload={},timeout=65000){const id=`mw-${Date.now()}-${++seq}`;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{window.removeEventListener("message",on);reject(new Error("META Bridge 응답 시간 초과"))},timeout);function on(e){if(e.source!==window)return;const m=e.data||{};if(m.source!=="maroowell-meta-extension"||m.id!==id)return;clearTimeout(timer);window.removeEventListener("message",on);m.ok===false?reject(new Error(String(m.error||"META 오류"))):resolve(m.result||{})}window.addEventListener("message",on);window.postMessage({source:"maroowell-home-page",version:25,id,action,payload},location.origin)})}
-async function metaSearch(payload){const gap=180-(Date.now()-S.lastMetaStart);if(gap>0)await sleep(gap);S.lastMetaStart=Date.now();return bridge("search",payload,65000)}
-function contentOf(x){if(Array.isArray(x?.data?.content))return x.data.content;if(Array.isArray(x?.content))return x.content;if(Array.isArray(x?.data?.data?.content))return x.data.data.content;return[]}
-function workerName(src){const w=src?.workerInfo||{};return String(w.workerName||w.name||w.workerDisplayName||"").trim()}
-function workerKey(src){const w=src?.workerInfo||{};for(const k of["workerSrl","workerId","id","userId","memberSrl"]){if(w[k]!=null&&String(w[k]))return`${k}:${w[k]}`}return`${workerName(src)}|${uniq((w.workSubRoutes||[]).map(norm)).sort().join(",")}`}
-function metaUI(ok,detail=""){S.metaConnected=!!ok;const b=$("metaLoginBtn");b.title=detail||"";b.disabled=false;if(ok){b.className="btn metaConnected";b.textContent="자동 수집 정상"}else{b.className="btn danger";b.textContent="수집 확인 필요"}}
-async function auth(){S.sb=window.supabase.createClient(SUPA,KEY,{auth:{persistSession:true,storage:sessionStorage,autoRefreshToken:true,detectSessionInUrl:true}});const{data:{session},error}=await S.sb.auth.getSession();if(error)throw error;if(!session){location.replace("/?next=%2Frealtime");return false}const[{data:a,error:ae},{data:b,error:be}]=await Promise.all([S.sb.rpc("mw_my_access").maybeSingle(),S.sb.rpc("mw_my_account_state").maybeSingle()]);if(ae)throw ae;if(be)throw be;if(!(a?.is_maroowell===true&&Number(a?.max_role_level||0)>=30&&b?.approval_status==="approved"&&b?.app_only!==true))throw new Error("실시간 현황은 마루웰 팀장 이상 이용할 수 있습니다.");$("userPill").className="pill ok user";$("userPill").textContent=a.email||session.user?.email||"마루웰";return true}
-async function logout(){try{$("logoutBtn").disabled=true;await S.sb?.auth?.signOut()}finally{location.replace("/")}}
-async function loadCampMap(){const{data,error}=await S.sb.from("camps").select("camp,code").not("code","is",null);if(error)throw error;S.campMap.clear();for(const r of data||[]){const c=String(r.code||"").trim().toUpperCase();if(c&&!S.campMap.has(c))S.campMap.set(c,String(r.camp||"").trim())}}
-async function refreshMeta(silent=false){try{const r=await bridge("status",{},4000);S.ctx=r.context||{vendorCodes:[],camps:[]};const ok=r.connected===true&&Array.isArray(S.ctx.vendorCodes)&&S.ctx.vendorCodes.length>0;metaUI(ok);if(!silent)setStatus(ok?"META 연결됨":"META 로그인이 필요합니다.");return ok}catch(e){metaUI(false);if(!silent)setStatus("Maroowell META Bridge를 확인해 주세요.",true);return false}}
-function startMetaMonitor(){clearInterval(S.metaTimer);S.metaTimer=setInterval(()=>refreshMeta(true).catch(()=>{}),2000)}
-function cleanCampName(name,code){let n=String(name||"").trim().replace(/^M_/i,"M");if(/익산\s*1/i.test(n))return"M익산1";return n||code}function campName(code){let n=S.campMap.get(code)||"";if(!n){const m=(S.ctx.camps||[]).find(x=>String(x.code||"").trim().toUpperCase()===code);n=String(m?.name||"").trim()}return cleanCampName(n,code)}
-function delivery(s={}){const miss=+s.assignedCount||0,scan=+s.scannedCount||0,done=+s.completedCount||0,imp=+s.impossibleCount||0,pdd=+s.pddMissCount||0,total=miss+scan+done+imp+pdd;return{total,misscan:miss,remaining:scan,completed:done,impossible:imp,pddMiss:pdd,rate:ratio(done,total)}}
-function collection(s={},includeAbsent=false){const assigned=+s.assignedCount||0,collected=+s.collectedCount||0,uncollected=+s.uncollectedCount||0,absent=includeAbsent?(+s.absentCount||0):0,total=assigned+collected+uncollected+absent,finished=collected+uncollected;return{total,completed:collected,collected,uncollected,assigned,absent,remaining:assigned,finished,completionRate:ratio(finished,total),collectionRate:ratio(collected,total),rate:ratio(collected,total)}}
-async function scheduleFor(code,date){try{const{data,error}=await S.sb.rpc("mw_meta_realtime_schedule",{p_camp_code:code,p_wave:S.wave,p_schedule_date:date});if(error)throw error;return data||{assignments:[],routes:[]}}catch(e){console.warn("schedule",code,e);return{assignments:[],routes:[]}}}
-function freshDeliveryMaps(meta){const byKey=new Map(),byName=new Map();for(const src of contentOf(meta)){const d=delivery(src?.deliverySummary||{});byKey.set(workerKey(src),d);const n=workerName(src);if(n)byName.set(n,d)}return{byKey,byName}}
-function blankDelivery(){return{total:0,misscan:0,remaining:0,completed:0,impossible:0,pddMiss:0,rate:0}}
-function addDelivery(a,b){for(const k of["total","misscan","remaining","completed","impossible","pddMiss"])a[k]=(a[k]||0)+(b[k]||0);a.rate=ratio(a.completed,a.total)}
-function addCollection(a,b){for(const k of["total","completed","collected","uncollected","assigned","absent","remaining","finished"])a[k]=(a[k]||0)+(b[k]||0);a.completionRate=ratio((a.completed||0)+(a.uncollected||0),a.total);a.collectionRate=ratio(a.completed,a.total);a.rate=a.collectionRate}
-function backendDelivery(r,p="delivery"){const rawTotal=r[`${p}_total`],total=+rawTotal||0,miss=+r[`${p}_assigned`]||0,scan=+r[`${p}_scanned`]||0,done=+r[`${p}_completed`]||0,imp=+r[`${p}_impossible`]||0,pdd=+r[`${p}_pdd_miss`]||0,rate=Number(r[`${p}_complete_rate`]??ratio(done,total)),hasData=p!=="fresh_delivery"||rawTotal!=null&&total>0;return{total,misscan:miss,remaining:scan,completed:done,impossible:imp,pddMiss:pdd,rate,hasData}}
-function backendCollection(r,p,includeAbsent=false){const assigned=+r[`${p}_pending`]||0,collected=+r[`${p}_collected`]||0,uncollected=+(r[`${p}_uncollected`]??r[`${p}_uncollected_raw`]??0)||0,absent=includeAbsent?(+r[`${p}_absent_raw`]||0):0,total=+r[`${p}_total`]||(assigned+collected+uncollected),finished=collected+uncollected,completionRate=Number(r[`${p}_attempt_rate`]??ratio(finished,total)),collectionRate=Number(r[`${p}_collection_rate`]??ratio(collected,total));return{total,completed:collected,collected,uncollected,assigned,absent,remaining:assigned,finished,completionRate,collectionRate,rate:collectionRate}}
-function buildBackendCamps(rows,batches){const bm=new Map((batches||[]).map(b=>[b.id,b])),groups=new Map();for(const src of rows||[]){const b=bm.get(src.batch_id)||{},wave=String(src.wave||b.wave||"").toUpperCase();if(S.wave!=="ALL"&&wave!==S.wave)continue;const activity=(+src.delivery_scanned||0)+(+src.delivery_completed||0)+(+src.delivery_impossible||0)+(+src.delivery_pdd_miss||0);if((+src.delivery_total||0)<=0||src.all_done===true||activity<=0)continue;const name=cleanCampName(src.camp_name||b.camp_name||"",src.camp_code||b.camp_code||""),key=`${name}|${wave}`;let g=groups.get(key);if(!g){g={key,code:src.camp_code||b.camp_code||"",name,wave,totals:{delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collection(),fresh:collection()},rows:[],workers:0,attendance:0,status:b.status||"collecting",lastPolledAt:b.last_polled_at||null};groups.set(key,g)}const d=backendDelivery(src,"delivery"),fd=backendDelivery(src,"fresh_delivery"),ret=backendCollection(src,"return",true),fb=backendCollection(src,"freshbag",false),rawRoutes=(Array.isArray(src.scheduled_routes)&&src.scheduled_routes.length?src.scheduled_routes:src.actual_routes)||[],routes=uniq(rawRoutes.map(subRoute).filter(Boolean)),extra=uniq((src.extra_routes||[]).map(subRoute).filter(Boolean)),warns=extra.length?[`미계약 라우트 ${extra.join(", ")}`]:[];addDelivery(g.totals.delivery,d);addDelivery(g.totals.freshDelivery,fd);addCollection(g.totals.returns,ret);addCollection(g.totals.fresh,fb);g.rows.push({campKey:key,camp:name,wave,driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),routes,delivery:d,freshDelivery:fd,returns:ret,fresh:fb,status:extra.length?"external":"ok",warns});g.workers++;g.attendance++}return[...groups.values()]}
-function analyzeCamp(code,name,mainMeta,freshMeta,schedule){const assignments=schedule?.assignments||[],owners=new Map(),own=new Set((schedule?.routes||[]).map(norm));for(const a of assignments){const r=norm(a.route),d=String(a.driver||a.display_name||a.owner||"").trim();if(r&&d)owners.set(r,d)}const ownerOf=r=>{if(owners.has(r))return owners.get(r);let best="",o="";for(const[a,d]of owners){if(r.startsWith(a)&&a.length>best.length){best=a;o=d}}return o},isOwn=r=>own.has(r)||[...owners.keys()].some(a=>a.length===4&&r.startsWith(a));const fdm=freshDeliveryMaps(freshMeta),rows=[],totals={delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collection(),fresh:collection()};for(const src of contentOf(mainMeta)){const w=src?.workerInfo||{},d=delivery(src?.deliverySummary||{}),ret=collection(src?.returnSummary||{},true),fb=collection(src?.freshbagSummary||{},false),fd=fdm.byKey.get(workerKey(src))||fdm.byName.get(workerName(src))||blankDelivery();addDelivery(totals.delivery,d);addDelivery(totals.freshDelivery,fd);addCollection(totals.returns,ret);addCollection(totals.fresh,fb);const routes=uniq((w.workSubRoutes||[]).map(norm).filter(Boolean)),counts=new Map();for(const r of routes){const o=ownerOf(r);if(o)counts.set(o,(counts.get(o)||0)+1)}let driver="",best=-1;for(const[x,c]of counts){if(c>best){driver=x;best=c}}if(!driver)driver=workerName(src)||"담당 확인";let external=false,mismatch=false;const warns=[];for(const r of routes){const o=ownerOf(r);if(!isOwn(r)){external=true;warns.push(`${r} → 관리 라우트 아님`)}else if(o&&o!==driver){mismatch=true;warns.push(`${r} → 등록 ${o}`)}}rows.push({campKey:name,camp:name,driver,routes:uniq(routes.map(subRoute)),delivery:d,freshDelivery:fd,returns:ret,fresh:fb,status:external?"external":mismatch?"mismatch":"ok",warns})}const attendance=new Set(assignments.map(a=>String(a.driver||a.display_name||a.owner||"").trim()).filter(Boolean)).size;return{key:name,code,name,totals,rows,workers:rows.length,attendance}}
-function mergeCamps(list){const map=new Map();for(const c of list){if(!map.has(c.name))map.set(c.name,{...c,rows:[...c.rows],totals:JSON.parse(JSON.stringify(c.totals))});else{const x=map.get(c.name);x.rows.push(...c.rows);x.workers+=c.workers;x.attendance+=c.attendance;x.code+=`,`+c.code;addDelivery(x.totals.delivery,c.totals.delivery);addDelivery(x.totals.freshDelivery,c.totals.freshDelivery);addCollection(x.totals.returns,c.totals.returns);addCollection(x.totals.fresh,c.totals.fresh)}}return[...map.values()]}
-function aggregate(camps){const a={attendance:0,workers:0,delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collection(),fresh:collection()};for(const c of camps){a.attendance+=c.attendance||0;a.workers+=c.workers||0;addDelivery(a.delivery,c.totals.delivery);addDelivery(a.freshDelivery,c.totals.freshDelivery);addCollection(a.returns,c.totals.returns);addCollection(a.fresh,c.totals.fresh)}return a}
-function deliveryPanel(cls,label,m){if(cls==="freshDelivery")return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="rate">${m?.hasData?pct(m.rate):"-"}</div><div class="detail">20시 PDD</div></div>`;return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="rate">${pct(m.rate)}</div><div class="detail">완료 ${num(m.completed)} / ${num(m.total)} · 남음 ${num(m.remaining)}</div></div>`}
-function collectionPanel(cls,label,m,wave){if(cls==="return"&&night(wave))return"";return`<div class="metricPanel ${cls}"><div class="k">${label}</div><div class="dual"><span>완료율 <b>${pct(m.completionRate)}</b></span><span>회수율 <b>${pct(m.collectionRate)}</b></span></div><div class="detail">회수 ${num(m.collected)} · 미회수 ${num(m.uncollected)} · 남음 ${num(m.assigned)}${m.absent?` · 부재 ${num(m.absent)}`:""}</div></div>`}
-function metricsHtml(x){const w=x.wave||S.wave;return`${deliveryPanel("delivery","배송",x.delivery)}${night(w)?"":deliveryPanel("freshDelivery","신선 20시",x.freshDelivery)}${collectionPanel("return","반품",x.returns,w)}${collectionPanel("fresh","프백",x.fresh,w)}`}
-function renderSummary(){const a=aggregate(S.camps),rows=S.camps.flatMap(c=>c.rows),dayCount=rows.filter(r=>r.wave==="WAVE2").length,nightCount=rows.filter(r=>r.wave==="WAVE1").length,onlyNight=S.wave==="WAVE1",returnBox=document.querySelector(".summaryBox.return"),freshDeliveryBox=document.querySelector(".summaryBox.freshDelivery");if(returnBox)returnBox.classList.toggle("hidden",onlyNight);if(freshDeliveryBox)freshDeliveryBox.classList.toggle("hidden",onlyNight);$("summaryTitle").textContent=S.wave==="ALL"?"전체 실시간 현황":`전체 ${waveLabel(S.wave)} 현황`;$("campCount").textContent=num(new Set(S.camps.map(c=>c.name)).size);$("attendanceCount").textContent=num(a.workers);$("workerCount").textContent=S.wave==="ALL"?`${dayCount} / ${nightCount}`:num(a.workers);$("deliveryTotal").textContent=num(a.delivery.total);$("deliveryRate").textContent=pct(a.delivery.rate);$("deliverySub").textContent=`완료 ${num(a.delivery.completed)} / ${num(a.delivery.total)} · 남음 ${num(a.delivery.remaining)}`;$("freshDeliveryRate").textContent=onlyNight||a.freshDelivery.total<=0?"-":pct(a.freshDelivery.rate);$("freshDeliverySub").textContent=onlyNight?"야간 미조회":"20시 PDD";$("returnRate").innerHTML=`<div class="stackRate"><div>완료율 ${pct(a.returns.completionRate)}</div><div>회수율 ${pct(a.returns.collectionRate)}</div></div>`;$("returnSub").textContent=`회수 ${num(a.returns.collected)} · 미회수 ${num(a.returns.uncollected)} · 남음 ${num(a.returns.assigned)}${a.returns.absent?` · 부재 ${num(a.returns.absent)}`:""}`;$("freshRate").innerHTML=`<div class="stackRate"><div>완료율 ${pct(a.fresh.completionRate)}</div><div>회수율 ${pct(a.fresh.collectionRate)}</div></div>`;$("freshSub").textContent=`회수 ${num(a.fresh.collected)} · 미회수 ${num(a.fresh.uncollected)} · 남음 ${num(a.fresh.assigned)}`;$("misscanTotal").textContent=num(a.delivery.misscan);const q=S.lastQueryAt?new Date(S.lastQueryAt):null;$("summaryCaption").textContent=q?`${waveLabel(S.wave)} · ${q.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"조회 전"}
-function renderCamps(){const body=$("campBody");$("campCaption").textContent=`${S.camps.length}개 운행 단위 · 클릭해 기사 필터`;if(!S.camps.length){body.className="empty";body.textContent="현재 배송중인 캠프가 없습니다.";return}body.className="campGrid";body.innerHTML=S.camps.slice().sort((a,b)=>a.totals.delivery.rate-b.totals.delivery.rate||a.name.localeCompare(b.name,"ko")||a.wave.localeCompare(b.wave)).map(c=>`<article class="campCard ${S.selected.has(c.key)?"selected":""}" data-camp-key="${esc(c.key)}"><div class="campTop"><div><div class="campName">${esc(c.name)} <span class="waveBadge ${night(c.wave)?"night":"day"}">${waveLabel(c.wave)}</span></div><div class="campMeta">배송중 ${num(c.workers)}명 · 배송 ${num(c.totals.delivery.total)}건</div></div></div><div class="metrics">${metricsHtml({...c.totals,wave:c.wave})}</div>${c.totals.delivery.misscan?`<div class="missLine">미스캔 ${num(c.totals.delivery.misscan)}건</div>`:""}</article>`).join("");body.querySelectorAll(".campCard").forEach(el=>el.addEventListener("click",()=>{const k=el.dataset.campKey;S.selected.has(k)?S.selected.delete(k):S.selected.add(k);renderCamps();renderDrivers()}))}
-function renderDrivers(){const rows=S.camps.flatMap(c=>c.rows).filter(r=>!S.selected.size||S.selected.has(r.campKey)).sort((a,b)=>a.delivery.rate-b.delivery.rate||b.delivery.misscan-a.delivery.misscan||a.camp.localeCompare(b.camp,"ko")||a.driver.localeCompare(b.driver,"ko"));const mode=S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave);$("driverCaption").textContent=S.selected.size?`${rows.length}명 · ${[...S.selected].map(x=>x.split("|")[0]).join(", ")} · ${mode} · 완료율 낮은 순`:`${rows.length}명 · 전체 캠프 · ${mode} · 완료율 낮은 순`;const body=$("driverBody");if(!rows.length){body.className="empty";body.textContent="현재 배송중인 기사가 없습니다.";return}body.className="driverGrid";body.innerHTML=rows.map(r=>`<article class="driverCard ${r.status}"><div class="driverTop"><div><div class="driverName"><span class="driverCamp">${esc(r.camp)}</span><span class="waveBadge ${night(r.wave)?"night":"day"}">${waveLabel(r.wave)}</span>${esc(r.driver)}</div><div class="routeLabel">${esc(r.routes.join(", ")||"라우트 없음")}</div></div><div class="driverScore"><b>${pct(r.delivery.rate)}</b><small>배송 완료율</small></div></div><div class="metrics">${metricsHtml(r)}</div>${r.delivery.misscan?`<div class="missLine">미스캔 ${num(r.delivery.misscan)}건</div>`:""}${r.warns.length?`<div class="warn ${r.status==="external"?"red":""}">${esc(r.warns.join("\n"))}</div>`:""}</article>`).join("")}
-function renderAll(){renderSummary();renderCamps();renderDrivers()}
+realtime 프론트 수정본 패치 메모
+대상: public/realtime
+작성일: 2026-09-14
+
+아래 순서대로 현재 public/realtime 에 반영하면 됩니다.
+
+[1] 색상 변경
+기존:
+.summaryBox.delivery .value{color:var(--teal);font-size:17px}.summaryBox.freshDelivery .value{color:var(--fresh);font-size:17px}
+변경:
+.summaryBox.delivery .value{color:#2563eb;font-size:17px}.summaryBox.freshDelivery .value{color:#16a34a;font-size:17px}
+
+기존:
+.metricPanel.delivery{background:#edf7f6}.metricPanel.freshDelivery{background:#fff8e8}
+변경:
+.metricPanel.delivery{background:#eff6ff}.metricPanel.freshDelivery{background:#ecfdf5}
+
+기존:
+.metricPanel.delivery .rate{color:var(--teal)}.metricPanel.freshDelivery .rate{color:var(--fresh)}
+변경:
+.metricPanel.delivery .rate{color:#2563eb}.metricPanel.freshDelivery .rate{color:#16a34a}
+
+기존:
+.driverScore b{display:block;font-size:13px;color:var(--teal)}
+변경:
+.driverScore b{display:block;font-size:13px;color:#2563eb}
+
+[2] 보조 CSS 추가
+.captureMeta 뒤에 추가:
+.timeMeta{margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;color:#64748b;font-size:10px;font-weight:600}
+.campOps{margin-top:6px;display:flex;gap:7px;flex-wrap:wrap;font-size:10px;font-weight:600}
+.campOps .absent{color:#b42318}
+.campOps .done{color:#15803d}
+.collectorPaused{background:#fff7ed!important;border-color:#fb923c!important;color:#c2410c!important}
+
+[3] S state 수정
+기존:
+metaConnected:false,camps:[],batches:[],sourceRows:[],scheduleRows:[],selected:new Set()
+
+변경:
+metaConnected:false,isAdmin:false,collectorPaused:false,camps:[],batches:[],sourceRows:[],scheduleRows:[],selected:new Set()
+
+[4] 시간 포맷 함수 추가
+night / waveLabel 선언 바로 아래 추가:
+const fmtTime=v=>{if(!v)return"-";const x=String(v);const m=x.match(/[T\s](\d{2}):(\d{2})/);if(!m)return"-";return `${Number(m[1])}시 ${m[2]}분`};
+const nameKey=v=>String(v||"").trim().replace(/\s+/g,"").toLowerCase();
+
+[5] auth() 에 최고관리자 판정 저장
+기존 auth() 마지막 부분:
+$("userPill").className="pill ok user";
+$("userPill").textContent=a.email||session.user?.email||"마루웰";
+return true
+
+변경:
+S.isAdmin=a?.is_admin===true&&Number(a?.max_role_level||0)>=90;
+$("userPill").className="pill ok user";
+$("userPill").textContent=a.email||session.user?.email||"마루웰";
+return true
+
+[6] 자동수집 상태 버튼 함수 교체/추가
+기존 metaUI() 를 아래로 교체:
+
+function metaUI(ok,detail=""){
+  S.metaConnected=!!ok;
+  const b=$("metaLoginBtn");
+  b.title=detail||"";
+  b.disabled=!S.isAdmin;
+  if(S.collectorPaused){
+    b.className="btn collectorPaused";
+    b.textContent="자동 수집 정지됨";
+  }else if(ok){
+    b.className="btn metaConnected";
+    b.textContent="자동 수집 정상";
+  }else{
+    b.className="btn danger";
+    b.textContent="수집 확인 필요";
+  }
+}
+
+async function loadCollectorState(){
+  try{
+    const{data,error}=await S.sb.rpc("mw_meta_collector_state");
+    if(error)throw error;
+    const x=Array.isArray(data)?data[0]:data;
+    S.collectorPaused=x?.paused===true;
+    metaUI(!S.collectorPaused,x?.last_error||"");
+  }catch(e){
+    console.warn("collector state",e);
+  }
+}
+
+async function toggleCollector(){
+  if(!S.isAdmin)return;
+  const next=!S.collectorPaused;
+  if(!confirm(next?"자동 수집을 잠시 정지할까요?":"자동 수집을 다시 시작할까요?"))return;
+  const{error}=await S.sb.rpc("mw_set_meta_collector_paused",{p_paused:next});
+  if(error){
+    setStatus(esc(error.message||String(error)),true);
+    return;
+  }
+  S.collectorPaused=next;
+  metaUI(!next);
+  setStatus(next?"자동 수집을 정지했습니다.":"자동 수집을 재개했습니다.");
+  await queryAll();
+}
+
+※ Supabase에는 mw_set_meta_collector_paused(boolean), mw_meta_collector_state() RPC가 이미 반영되어 있음.
+
+[7] 반품 상세 2줄 + 회수대기
+기존 collectionPanel() 전체를 아래로 교체:
+
+function collectionPanel(cls,label,m,wave){
+  if(cls==="return"&&night(wave))return"";
+  const detail=cls==="return"
+    ? `<div class="detail">회수 ${num(m.collected)} · 회수대기 ${num(m.assigned)}<br>미회수 ${num(m.uncollected)} · 부재 ${num(m.absent)}</div>`
+    : `<div class="detail">회수 ${num(m.collected)} · 미회수 ${num(m.uncollected)} · 회수대기 ${num(m.assigned)}</div>`;
+  return `<div class="metricPanel ${cls}">
+    <div class="k">${label}</div>
+    <div class="dual">
+      <span>완료율 <b>${pct(m.completionRate)}</b></span>
+      <span>회수율 <b>${pct(m.collectionRate)}</b></span>
+    </div>
+    ${detail}
+  </div>`;
+}
+
+[8] 기사별 시간 데이터 포함
+buildBackendCamps() 안의 g.rows.push(...) 객체에 아래 필드 추가:
+coupangId:String(src.coupang_id||"").trim(),
+scanStartedAt:src.scan_started_at||null,
+allCompletedAt:src.all_completed_at||null,
+
+[9] 기사 카드에 시간 표시
+기사 이름/라우트 영역에서 routeLabel 바로 아래 추가:
+<div class="timeMeta">
+  <span>스캔 시작: ${fmtTime(r.scanStartedAt)}</span>
+  <span>전체 완료: ${fmtTime(r.allCompletedAt)}</span>
+</div>
+
+[10] 캠프별 미출근 / 완료 시각 계산 함수 추가
+renderSummary() 앞에 아래 함수 추가:
+
+function decorateCampOps(){
+  const today=$("scheduleDate").value||defaultDate();
+
+  for(const c of S.camps){
+    const sch=(S.scheduleRows||[]).filter(x=>
+      x.schedule_date===today &&
+      String(x.camp||"").trim()===c.name &&
+      String(x.wave||"").toUpperCase()===c.wave &&
+      x.is_active!==false &&
+      norm(x.route_label)!=="휴무자"
+    );
+
+    const people=new Map();
+    for(const x of sch){
+      const n=String(
+        x.driver_display_name||
+        x.driver_name||
+        x.driver_owner_name||
+        x.driver_coupang_id||
+        ""
+      ).trim();
+      if(n)people.set(nameKey(n),n);
+    }
+
+    const present=new Set(c.rows.map(r=>nameKey(r.driver)).filter(Boolean));
+    c.absentNames=[...people.entries()]
+      .filter(([k])=>!present.has(k))
+      .map(([,v])=>v);
+
+    c.scheduledCount=people.size;
+
+    const completed=c.rows.filter(r=>r.allCompletedAt);
+    c.allScheduledDone=
+      people.size>0 &&
+      c.absentNames.length===0 &&
+      c.rows.length>=people.size &&
+      completed.length>=people.size;
+
+    c.campCompletedAt=c.allScheduledDone
+      ? completed.map(r=>r.allCompletedAt).sort().at(-1)
+      : null;
+  }
+}
+
+[11] applyWaveFilter() 수정
+기존:
 function applyWaveFilter(){S.camps=buildBackendCamps(S.sourceRows||[],S.batches||[]);S.selected.clear();renderAll()}
-async function queryAll(){if(S.busy)return;setBusy(true);try{const today=iso(new Date()),activeStatuses=["collecting","completion_candidate","overdue","error"],{data:batches,error:be}=await S.sb.from("meta_realtime_batch").select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,updated_at").in("status",activeStatuses).eq("schedule_date",today).order("updated_at",{ascending:false});if(be)throw be;S.batches=batches||[];if(!S.batches.length){S.camps=[];S.selected.clear();S.lastQueryAt=Date.now();renderAll();metaUI(true,"진행중 배치 없음");setStatus("현재 진행중인 배송 배치가 없습니다.");restartAuto();return}const ids=S.batches.map(b=>b.id),[{data:rows,error:re},{data:freshRows,error:fe}]=await Promise.all([S.sb.from("meta_realtime_current").select("batch_id,meta_worker_key,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,last_seen_at,all_done").in("batch_id",ids).gt("delivery_total",0),S.sb.from("meta_realtime_fresh_current").select("batch_id,meta_worker_key,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate").in("batch_id",ids)]);if(re)throw re;if(fe)throw fe;const fm=new Map((freshRows||[]).map(r=>[`${r.batch_id}|${String(r.meta_worker_key||r.coupang_id||r.driver_name||"").toLowerCase()}`,r]));const merged=(rows||[]).map(r=>{const k=`${r.batch_id}|${String(r.meta_worker_key||r.coupang_id||r.driver_name||"").toLowerCase()}`,f=fm.get(k);return f?{...r,fresh_delivery_assigned:f.delivery_assigned,fresh_delivery_scanned:f.delivery_scanned,fresh_delivery_completed:f.delivery_completed,fresh_delivery_impossible:f.delivery_impossible,fresh_delivery_pdd_miss:f.delivery_pdd_miss,fresh_delivery_total:f.delivery_total,fresh_delivery_complete_rate:f.delivery_complete_rate}:{...r,fresh_delivery_total:null,fresh_delivery_complete_rate:null}});S.sourceRows=merged;S.lastQueryAt=Date.now();applyWaveFilter();const visible=S.camps.reduce((n,c)=>n+c.rows.length,0),errors=S.batches.filter(b=>b.status==="error"),polls=S.batches.map(b=>String(b.last_polled_at||"")).filter(Boolean).sort(),lastPoll=polls.at(-1)||"",pollText=lastPoll?lastPoll.replace("T"," ").slice(11,19):"-";metaUI(errors.length===0,errors.length?errors.map(b=>`${b.camp_name} ${waveLabel(b.wave)}: ${b.last_error||"error"}`).join("\n"):`최근 수집 ${pollText}`);setStatus(`${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 현재 배송중 <strong>${num(visible)}명</strong> · 백엔드 ${errors.length?`오류 ${errors.length}건`:"정상"} · 최근 수집 ${pollText}`,errors.length===S.batches.length)}catch(e){console.error(e);metaUI(false,String(e?.message||e));setStatus(`백엔드 조회 실패: ${esc(e?.message||String(e))}`,true)}finally{setBusy(false)}}function restartAuto(){clearInterval(S.timer);S.timer=null;localStorage.setItem("mwRealtimeAuto",String(S.auto));if(S.auto>0)S.timer=setInterval(()=>{if(!S.busy)queryAll()},S.auto*60000)}
-async function metaLogin(){if(S.metaConnected)return refreshMeta(false);const b=$("metaLoginBtn");setBusy(true);b.disabled=true;b.textContent="META 로그인 중...";setStatus("META 로그인 창을 여는 중입니다.");const loginRequest=bridge("login",{},130000).catch(e=>{console.warn(e);return null});try{for(let i=0;i<120;i++){await sleep(i===0?500:1000);if(await refreshMeta(true)){setStatus("META 로그인 완료");setBusy(false);await queryAll();return}}const r=await loginRequest;if(r?.context)S.ctx=r.context;if(await refreshMeta(true)){setStatus("META 로그인 완료");setBusy(false);await queryAll();return}throw new Error("META 로그인 상태를 확인하지 못했습니다.")}catch(e){setStatus(esc(e?.message||String(e)),true);metaUI(false)}finally{setBusy(false);b.disabled=false;metaUI(S.metaConnected)}}
-async function copySection(id,name,trigger){const el=$(id);if(!el||!window.htmlToImage)return setStatus("이미지 캡처 모듈을 불러오지 못했습니다.",true);const buttons=[...el.querySelectorAll(".copyBtn")],original=trigger?.textContent||"이미지 복사",stamp=document.createElement("div"),q=S.lastQueryAt?new Date(S.lastQueryAt):null,queryTime=q?q.toLocaleString("ko-KR",{hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"}):"조회 전";stamp.className="captureMeta";stamp.textContent=`데이터 조회 기준 · 현재 배송중 · ${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 조회시각 ${queryTime}`;el.insertBefore(stamp,el.firstChild);buttons.forEach(b=>b.style.visibility="hidden");el.classList.add("copying");let copied=false;try{const pixel=Math.max(1,Math.min(2,15000/Math.max(1,el.scrollHeight))),blob=await window.htmlToImage.toBlob(el,{backgroundColor:"#f3f6f8",pixelRatio:pixel,cacheBust:true});if(!blob)throw new Error("이미지 생성 실패");if(!navigator.clipboard?.write||typeof ClipboardItem==="undefined")throw new Error("이미지 클립보드 복사를 지원하지 않습니다.");await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);copied=true;setStatus(`${esc(name)} 이미지를 클립보드에 복사했습니다.`)}catch(e){setStatus(`이미지 복사 실패: ${esc(e?.message||String(e))}`,true)}finally{buttons.forEach(b=>b.style.visibility="");el.classList.remove("copying");stamp.remove()}if(copied&&trigger){trigger.textContent="복사됨!";trigger.classList.add("copied");setTimeout(()=>{trigger.textContent=original;trigger.classList.remove("copied")},1400)}}
-function bind(){$("scheduleDate").value=defaultDate();document.querySelectorAll(".waveBtn").forEach(b=>b.addEventListener("click",()=>{S.wave=b.dataset.wave;document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===b));applyWaveFilter()}));document.querySelectorAll(".autoBtn").forEach(b=>{const m=Number(b.dataset.min);b.classList.toggle("active",m===S.auto);b.addEventListener("click",()=>{S.auto=m;document.querySelectorAll(".autoBtn").forEach(x=>x.classList.toggle("active",x===b));restartAuto();setStatus(m?`자동 새로고침 ${m}분 간격으로 설정했습니다.`:"자동 새로고침을 껐습니다.")})});$("queryBtn").addEventListener("click",queryAll);$("metaLoginBtn").addEventListener("click",queryAll);$("logoutBtn").addEventListener("click",logout);document.querySelectorAll("[data-copy-section]").forEach(b=>b.addEventListener("click",e=>{e.stopPropagation();copySection(b.dataset.copySection,b.dataset.copyName,b)}));document.addEventListener("keydown",e=>{if(e.key==="Escape"&&S.selected.size){S.selected.clear();renderCamps();renderDrivers();setStatus("캠프 선택을 모두 해제했습니다.")}})}
-async function boot(){bind();try{if(!(await auth()))return;await loadCampMap();document.documentElement.style.visibility="visible";metaUI(true,"백엔드 연결 확인 중");await queryAll();restartAuto()}catch(e){document.documentElement.style.visibility="visible";$("userPill").className="pill err user";$("userPill").textContent="접근 불가";metaUI(false,String(e?.message||e));setStatus(esc(e?.message||String(e)),true);$("queryBtn").disabled=true}}
-boot();
-})();
-</script>
-</body>
-</html>
+
+변경:
+function applyWaveFilter(){
+  S.camps=buildBackendCamps(S.sourceRows||[],S.batches||[]);
+  decorateCampOps();
+  S.selected.clear();
+  renderAll();
+}
+
+[12] 캠프 카드 상단 표시
+기존 캠프 메타:
+<div class="campMeta">배송중 ${num(c.workers)}명 · 배송 ${num(c.totals.delivery.total)}건</div>
+
+변경:
+<div class="campMeta">
+  배송중 ${num(c.workers)}명${c.scheduledCount?` / 스케줄 ${num(c.scheduledCount)}명`:""} · 배송 ${num(c.totals.delivery.total)}건
+</div>
+<div class="campOps">
+  ${c.absentNames?.length?`<span class="absent">미출근 ${num(c.absentNames.length)}명 · ${esc(c.absentNames.join(", "))}</span>`:""}
+  ${c.campCompletedAt?`<span class="done">전원 완료 · ${fmtTime(c.campCompletedAt)}</span>`:""}
+</div>
+
+[13] queryAll() activeStatuses 수정
+기존:
+["collecting","completion_candidate","overdue","error"]
+
+변경:
+["collecting","completion_candidate","overdue","error","paused"]
+
+[14] meta_realtime_current select 필드에 추가
+scan_started_at,
+all_completed_at,
+dawn_miss,
+fresh_miss
+
+[15] meta_realtime_fresh_current select 필드에 추가
+fresh_miss
+
+[16] 신선 데이터 조인 방식 변경
+기존처럼 meta_worker_key 하나만 쓰지 말고 다음 우선순위로 매칭:
+1. batch_id + meta_worker_key
+2. batch_id + coupang_id
+3. batch_id + driver_name
+
+사용 예시:
+const fmKey=new Map(),fmCid=new Map(),fmName=new Map();
+for(const f of freshRows||[]){
+  if(f.meta_worker_key)fmKey.set(`${f.batch_id}|${String(f.meta_worker_key).toLowerCase()}`,f);
+  if(f.coupang_id)fmCid.set(`${f.batch_id}|${String(f.coupang_id).trim().toLowerCase()}`,f);
+  if(f.driver_name)fmName.set(`${f.batch_id}|${nameKey(f.driver_name)}`,f);
+}
+
+const merged=(rows||[]).map(r=>{
+  const f=
+    fmKey.get(`${r.batch_id}|${String(r.meta_worker_key||"").toLowerCase()}`) ||
+    fmCid.get(`${r.batch_id}|${String(r.coupang_id||"").trim().toLowerCase()}`) ||
+    fmName.get(`${r.batch_id}|${nameKey(r.driver_name)}`);
+
+  return f
+    ? {
+        ...r,
+        fresh_delivery_assigned:f.delivery_assigned,
+        fresh_delivery_scanned:f.delivery_scanned,
+        fresh_delivery_completed:f.delivery_completed,
+        fresh_delivery_impossible:f.delivery_impossible,
+        fresh_delivery_pdd_miss:f.delivery_pdd_miss,
+        fresh_delivery_total:f.delivery_total,
+        fresh_delivery_complete_rate:f.delivery_complete_rate,
+        fresh_miss:f.fresh_miss
+      }
+    : {
+        ...r,
+        fresh_delivery_total:null,
+        fresh_delivery_complete_rate:null
+      };
+});
+
+[17] 오늘 스케줄 원본 조회
+queryAll() 에서 오늘 날짜 기준으로 추가:
+
+const{data:scheduleRows,error:se}=await S.sb
+  .from("maroowell_schedule")
+  .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
+  .eq("schedule_date",today)
+  .eq("is_active",true);
+
+if(se)throw se;
+S.scheduleRows=scheduleRows||[];
+
+[18] 자동수집 버튼 클릭
+기존:
+$("metaLoginBtn").addEventListener("click",queryAll);
+
+변경:
+$("metaLoginBtn").addEventListener("click",()=>S.isAdmin?toggleCollector():queryAll());
+
+[19] boot() 변경
+기존:
+metaUI(true,"백엔드 연결 확인 중");
+await queryAll();
+restartAuto();
+
+변경:
+await loadCollectorState();
+await queryAll();
+restartAuto();
+
+[20] 의미
+- 스캔 시작: meta_realtime_current.scan_started_at
+- 기사 전체 완료: meta_realtime_current.all_completed_at
+- 캠프 완료: 해당 캠프 전체 기사 all_completed_at 중 가장 늦은 시각
+- 미출근: maroowell_schedule 에는 있으나 현재 realtime 기사 목록에는 없는 사람
+- 기사 전체 완료는 배송 + 반품(주간) + 프백까지 완료된 현재 all_completed_at 기준
+- 배송 완료율: 파란색
+- 신선 완료율: 밝은 초록색
+- 반품: 2줄 표기
+  회수 27 · 회수대기 13
+  미회수 1 · 부재 1

@@ -1,91 +1,169 @@
-name: Patch realtime driver PK identity v2
+name: Build corrected schedule frontend delivery copy
 on:
   push:
-    branches: [main]
+    branches:
+      - deliver/maroowell-schedule-account-fix-20260915
     paths:
       - .github/workflows/patch-realtime-driver-pk-v2.yml
 permissions:
   contents: write
 jobs:
-  patch:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch backend and frontend
+        with:
+          ref: deliver/maroowell-schedule-account-fix-20260915
+      - name: Patch schedule account resolution
         shell: python
         run: |
           from pathlib import Path
+          import re
 
-          def rep(s, old, new, label):
-              if old not in s:
-                  raise SystemExit(f'missing target: {label}')
-              return s.replace(old, new, 1)
-
-          p=Path('workers/meta-collector/entry.js')
+          p=Path('public/maroowell_schedule')
           s=p.read_text(encoding='utf-8')
-          s=rep(s,'function rowIdentity(r) { return canonicalIdentity(r?.coupang_id, r?.driver_name, r?.meta_worker_key); }','''function rowIdentity(r) { return r?.driver_pk != null ? `pk:${Number(r.driver_pk)}` : canonicalIdentity(r?.coupang_id, r?.driver_name, r?.meta_worker_key); }
-function driverIdentity(driverPk, cid, name, fallback) { return driverPk != null ? `pk:${Number(driverPk)}` : canonicalIdentity(cid, name, fallback); }
-function infoWave(wave) { return String(wave || '').toUpperCase() === 'WAVE1' ? '야간' : String(wave || '').toUpperCase() === 'WAVE2' ? '주간' : String(wave || '').trim(); }
-async function loadDriverDirectory(env) { return await sbGet(env, 'maroowell_info?select=pk_id,person_name,coupang_id,camp_code,wave,position_title') || []; }
-function resolveDriverPk(directory, cid, name, camp, wave) {
-  const id=String(cid||'').trim().toLowerCase(), dn=String(name||'').trim(), campName=String(camp||'').trim(), iw=infoWave(wave);
-  const active=r=>String(r?.position_title||'').trim().toLowerCase()!=='퇴사';
-  if(id){
-    const byId=(directory||[]).filter(r=>String(r?.coupang_id||'').trim().toLowerCase()===id);
-    if(byId.length===1)return Number(byId[0].pk_id);
-    const scopedActive=byId.filter(r=>(!campName||String(r?.camp_code||'').trim()===campName)&&(!iw||String(r?.wave||'').trim()===iw)&&active(r));
-    if(scopedActive.length===1)return Number(scopedActive[0].pk_id);
-    const scoped=byId.filter(r=>(!campName||String(r?.camp_code||'').trim()===campName)&&(!iw||String(r?.wave||'').trim()===iw));
-    if(scoped.length===1)return Number(scoped[0].pk_id);
-  }
-  if(dn){
-    const scopedActive=(directory||[]).filter(r=>String(r?.person_name||'').trim()===dn&&(!campName||String(r?.camp_code||'').trim()===campName)&&(!iw||String(r?.wave||'').trim()===iw)&&active(r));
-    if(scopedActive.length===1)return Number(scopedActive[0].pk_id);
-    const byName=(directory||[]).filter(r=>String(r?.person_name||'').trim()===dn);
-    if(byName.length===1)return Number(byName[0].pk_id);
-  }
-  return null;
-}''','identity helpers')
-          s=rep(s,'return { assigned, scanned, completed, impossible, pdd, total, rate: pct(completed, total) };','const settled = completed + impossible + assigned + pdd;\n  return { assigned, scanned, completed, impossible, pdd, total, rate: pct(settled, total) };','delivery rate')
-          s=rep(s,'async function storeFreshRows(env, batch, schedule, fresh, now) {','async function storeFreshRows(env, batch, schedule, directory, fresh, now) {','fresh signature')
-          s=rep(s,'const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;\n    const key = canonicalIdentity(realCid, mappedName, workerKey(src));','const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;\n    const driverPk = resolveDriverPk(directory, realCid, mappedName, batch.camp_name, batch.wave);\n    const key = driverIdentity(driverPk, realCid, mappedName, workerKey(src));','fresh pk resolve')
-          s=rep(s,'meta_worker_key:key, coupang_id:realCid, driver_name:mappedName,','meta_worker_key:key, driver_pk:driverPk, coupang_id:realCid, driver_name:mappedName,','fresh pk field')
-          s=rep(s,'const schedule = await loadSchedule(env, batch.schedule_date, batch.wave, batch.camp_name);\n  const prevRows','const schedule = await loadSchedule(env, batch.schedule_date, batch.wave, batch.camp_name);\n  const directory = await loadDriverDirectory(env);\n  const prevRows','directory load')
-          s=rep(s,'const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;\n    const key = canonicalIdentity(realCid, mappedName, workerKey(src)), prev = prevMap.get(key);','const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;\n    const driverPk = resolveDriverPk(directory, realCid, mappedName, batch.camp_name, batch.wave);\n    const key = driverIdentity(driverPk, realCid, mappedName, workerKey(src)), prev = prevMap.get(key);','main pk resolve')
-          s=rep(s,'meta_worker_key: key, source_camp_code: sourceCampCode(src), coupang_id: realCid,','meta_worker_key: key, source_camp_code: sourceCampCode(src), driver_pk: driverPk, coupang_id: realCid,','main pk field')
-          s=rep(s,'const deliveryDone = d.total > 0 && d.completed === d.total;','const deliveryDone = d.total > 0 && d.scanned === 0 && (d.completed + d.impossible + d.assigned + d.pdd) >= d.total;','delivery done')
-          s=rep(s,'await storeFreshRows(env, batch, schedule, fresh, now);','await storeFreshRows(env, batch, schedule, directory, fresh, now);','fresh call')
-          p.write_text(s,encoding='utf-8')
 
-          p=Path('public/realtime')
-          s=p.read_text(encoding='utf-8')
-          s=rep(s,'driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),\n      coupangId:String(src.coupang_id||"").trim().toLowerCase(),','driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),\n      driverPk:src.driver_pk==null?null:Number(src.driver_pk),\n      coupangId:String(src.coupang_id||"").trim().toLowerCase(),','frontend driver pk')
-          s=rep(s,'const byKey=new Map(),byCid=new Map(),byName=new Map();','const byPk=new Map(),byKey=new Map(),byCid=new Map(),byName=new Map();','fresh maps')
-          s=rep(s,'for(const f of freshRows||[]){\n    if(f.meta_worker_key)','for(const f of freshRows||[]){\n    if(f.driver_pk!=null)byPk.set(`${f.batch_id}|${Number(f.driver_pk)}`,f);\n    if(f.meta_worker_key)','fresh map pk')
-          s=rep(s,'return{byKey,byCid,byName};','return{byPk,byKey,byCid,byName};','fresh map return')
-          s=rep(s,'const f=\n      (r.meta_worker_key&&fm.byKey.get','const f=\n      (r.driver_pk!=null&&fm.byPk.get(`${r.batch_id}|${Number(r.driver_pk)}`))||\n      (r.meta_worker_key&&fm.byKey.get','fresh join pk')
-          s=rep(s,'batch_id,meta_worker_key,camp_code,camp_name,wave,coupang_id,driver_name,','batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,','current select pk')
-          s=rep(s,'batch_id,meta_worker_key,coupang_id,driver_name,delivery_assigned','batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned','fresh select pk')
-          s=s.replace('mw-realtime-live-v10','mw-realtime-live-v11').replace('content="10"','content="11"').replace('20260915-realtime10','20260915-realtime11')
+          old='''        if(found)return found;
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          new='''        if(found)return found;
+
+          // maroowell_info 전체 인덱스에서 동일 이름/ID가 있으면 master 정보를 우선한다.
+          const master=resolveMetaInfoAccount(raw);
+          if(master && clean(master.exportId)) return master;
+
+          // master에도 없는 경우에만 실제 직접입력으로 취급한다.
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          if old not in s:
+              raise SystemExit('resolveAccount fallback anchor not found')
+          s=s.replace(old,new,1)
+
+          pattern=r'''      function makeDirtyRecord\(\{date,routeLabel,value,rowOrder,source\}\)\{[\s\S]*?\n      \}\n\n      function applyInputVisual'''
+          replacement='''      function makeDirtyRecord({date,routeLabel,value,rowOrder,source}){
+        const cleanValue=clean(value);
+        const keepAssignmentFields=!!cleanValue;
+
+        // 저장 시 화면의 이름을 maroowell_info 기준으로 다시 해석한다.
+        // master 정보가 있으면 과거 source의 직접입력/빈 ID보다 우선한다.
+        let account=null;
+        if(cleanValue){
+          account=resolveMetaInfoAccount(cleanValue)
+            || resolvePddAccount(cleanValue,source||{})
+            || resolveAccount(cleanValue);
+        }
+
+        const parsedAccountId=parseAccountToken(
+          account?.exportId,
+          clean(account?.exportName || account?.displayName || cleanValue)
+        );
+        const masterId=clean(parsedAccountId.id);
+
+        const parsedSourceId=parseAccountToken(
+          clean(source?.driver_coupang_id),
+          clean(source?.driver_export_name || source?.driver_name || cleanValue)
+        );
+        const sourceId=clean(parsedSourceId.id);
+
+        const accountType=clean(account?.accountType);
+        const sourceAccountType=clean(source?.driver_account_type);
+        const authoritativeAccountType=masterId
+          ? (accountType || "본계정")
+          : (sourceAccountType || accountType || null);
+
+        return {
+          schedule_date:date,
+          camp:state.camp,
+          wave:state.wave,
+          route_label:normalizeRouteLabel(routeLabel),
+          driver_name:cleanValue||null,
+          driver_display_name:cleanValue||null,
+          driver_owner_name:keepAssignmentFields?(
+            clean(account?.ownerName)
+            || clean(source?.driver_owner_name)
+            || cleanValue
+            || null
+          ):null,
+          driver_export_name:keepAssignmentFields?(
+            clean(account?.exportName)
+            || clean(source?.driver_export_name)
+            || cleanValue
+            || null
+          ):null,
+          driver_coupang_id:keepAssignmentFields?(
+            masterId
+            || sourceId
+            || null
+          ):null,
+          driver_account_type:keepAssignmentFields?authoritativeAccountType:null,
+          memo:keepAssignmentFields?(clean(source?.memo)||null):null,
+          row_order:Number(rowOrder||source?.row_order||0),
+          cell_color:cleanValue?colorForValue(cleanValue):null,
+          is_active:!!cleanValue
+        };
+      }
+
+      function applyInputVisual'''
+          s,n=re.subn(pattern,replacement,s,count=1)
+          if n!=1:
+              raise SystemExit(f'makeDirtyRecord replacement count={n}')
+
+          old='''      async function saveAll(){
+        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
+
+        normalizeUniformChildrenBeforeSave();'''
+          new='''      async function saveAll(){
+        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
+
+        // 저장 직전에 maroowell_info 전체 인덱스를 확인한다.
+        // 과거 row에 직접입력/NULL ID가 남아 있어도 master 계정이 있으면 저장 payload에서 교정된다.
+        try{
+          const added=await loadAllMaroowellInfoRowsForAccountLookup();
+          if(added>0) buildDriverAccounts();
+        }catch(e){
+          console.warn("[schedule save] maroowell_info account refresh failed",e);
+        }
+
+        normalizeUniformChildrenBeforeSave();'''
+          if old not in s:
+              raise SystemExit('saveAll anchor not found')
+          s=s.replace(old,new,1)
+
+          for needle in [
+              'const master=resolveMetaInfoAccount(raw);',
+              'const masterId=clean(parsedAccountId.id);',
+              'driver_coupang_id:keepAssignmentFields?(',
+              '[schedule save] maroowell_info account refresh failed'
+          ]:
+              if needle not in s:
+                  raise SystemExit('validation failed: '+needle)
+
           p.write_text(s,encoding='utf-8')
-      - name: Syntax check
-        run: node --check workers/meta-collector/entry.js
-      - name: Commit
+          Path('maroowell_schedule_front_fixed.txt').write_text(s,encoding='utf-8')
+
+      - name: Validate inline JavaScript syntax
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, subprocess, tempfile, os
+          s=Path('public/maroowell_schedule').read_text(encoding='utf-8')
+          blocks=re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>',s,re.I)
+          inline=[b for b in blocks if b.strip()]
+          if not inline:
+              raise SystemExit('no inline scripts found')
+          js=max(inline,key=len)
+          f=tempfile.NamedTemporaryFile('w',suffix='.js',encoding='utf-8',delete=False)
+          try:
+              f.write(js); f.close()
+              r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
+              if r.returncode:
+                  print(r.stderr)
+                  raise SystemExit(r.returncode)
+          finally:
+              try: os.unlink(f.name)
+              except: pass
+      - name: Commit corrected copy on delivery branch
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add workers/meta-collector/entry.js public/realtime
-          git commit -m "Use Maroowell PK for realtime identity"
+          git add public/maroowell_schedule maroowell_schedule_front_fixed.txt
+          git commit -m "Fix schedule account resolution from Maroowell info"
           git push
-      - name: Deploy collector
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          wranglerVersion: '4'
-          command: deploy --config workers/meta-collector/wrangler.toml --keep-vars
-      - name: Deploy frontend
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          wranglerVersion: '4'
-          command: deploy --config login-wrangler.toml --keep-vars

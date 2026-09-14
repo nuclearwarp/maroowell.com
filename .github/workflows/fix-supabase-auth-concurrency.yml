@@ -1,209 +1,141 @@
-name: Fix Supabase auth concurrency
-
+name: Build Maroowell schedule frontend fixed copy
 on:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/fix-supabase-auth-concurrency.yml'
-
+    branches:
+      - deliver/maroowell-schedule-account-fix-20260915
 permissions:
   contents: write
-
 jobs:
-  patch:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: deliver/maroowell-schedule-account-fix-20260915
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Migrate auth storage and remove duplicate GoTrue client
+      - name: Patch schedule account resolution
+        shell: python
         run: |
-          python - <<'PY'
           from pathlib import Path
+          import re
+          p=Path('public/maroowell_schedule')
+          s=p.read_text(encoding='utf-8')
 
-          public = Path('public')
-          changed = []
+          old='''        if(found)return found;
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          new='''        if(found)return found;
 
-          for p in public.rglob('*'):
-              if not p.is_file():
-                  continue
-              try:
-                  s = p.read_text(encoding='utf-8')
-              except Exception:
-                  continue
-              if 'window.supabase.createClient' not in s:
-                  continue
-              ns = s.replace('return window.sessionStorage;', 'return window.localStorage;')
-              ns = ns.replace('try { return window.sessionStorage; } catch {}', 'try { return window.localStorage; } catch {}')
-              ns = ns.replace('try { return window.sessionStorage; } catch { return undefined; }', 'try { return window.localStorage; } catch { return undefined; }')
-              if p.as_posix() == 'public/index.html':
-                  ns = ns.replace('  clearLegacySupabaseLocalSession(SUPABASE_URL);\n', '')
-                  ns = ns.replace('  sessionBridge.start();\n  await sessionBridge.requestSessionCopy(1200);\n', '')
-              if ns != s:
-                  p.write_text(ns, encoding='utf-8')
-                  changed.append(p.as_posix())
+          // maroowell_info 전체 인덱스에서 동일 이름/ID가 있으면 master 정보를 우선한다.
+          const master=resolveMetaInfoAccount(raw);
+          if(master && clean(master.exportId)) return master;
 
-          board = Path('public/board-menu.js')
-          s = board.read_text(encoding='utf-8')
-          s = s.replace('    app_only: false\n  });', '    app_only: false,\n    auth_indeterminate: false\n  });', 1)
-          s = s.replace('  function canAccessPage(page, access) {\n', '  function canAccessPage(page, access) {\n    if (access?.auth_indeterminate === true) return true;\n', 1)
+          // master에도 없는 경우에만 실제 직접입력으로 취급한다.
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          if old not in s:
+              raise SystemExit('resolveAccount fallback anchor not found')
+          s=s.replace(old,new,1)
 
-          start = s.index('  async function loadAccess() {')
-          end = s.index('  function injectStyles()', start)
-          replacement = r'''  function authProjectRef(url) {
-    try { return new URL(url).hostname.split('.')[0] || ''; } catch { return ''; }
-  }
+          pattern=r'''      function makeDirtyRecord\(\{date,routeLabel,value,rowOrder,source\}\)\{[\s\S]*?\n      \}\n\n      function applyInputVisual'''
+          replacement='''      function makeDirtyRecord({date,routeLabel,value,rowOrder,source}){
+        const cleanValue=clean(value);
+        const keepAssignmentFields=!!cleanValue;
 
-  function readStoredAuthSession(url) {
-    const ref = authProjectRef(url);
-    if (!ref) return null;
-    const key = `sb-${ref}-auth-token`;
-    let raw = '';
-    try { raw = window.localStorage.getItem(key) || ''; } catch { return null; }
-    if (!raw) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed?.currentSession || parsed?.session || parsed || null;
-    } catch {
-      return null;
-    }
-  }
+        let account=null;
+        if(cleanValue){
+          account=resolveMetaInfoAccount(cleanValue)
+            || resolvePddAccount(cleanValue,source||{})
+            || resolveAccount(cleanValue);
+        }
 
-  function firstRestRow(value) {
-    if (Array.isArray(value)) return value[0] || null;
-    return value && typeof value === 'object' ? value : null;
-  }
+        const parsedAccountId=parseAccountToken(
+          account?.exportId,
+          clean(account?.exportName || account?.displayName || cleanValue)
+        );
+        const masterId=clean(parsedAccountId.id);
 
-  async function authRest(url, anonKey, path, token, options = {}) {
-    const headers = new Headers(options.headers || {});
-    headers.set('apikey', anonKey);
-    headers.set('Authorization', `Bearer ${token}`);
-    if (options.body != null) headers.set('Content-Type', 'application/json');
-    const response = await fetch(url.replace(/\/$/, '') + path, {
-      method: options.method || 'GET',
-      body: options.body,
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-    if (!response.ok) {
-      const error = new Error(data?.message || data?.error || `HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    return data;
-  }
+        const parsedSourceId=parseAccountToken(
+          clean(source?.driver_coupang_id),
+          clean(source?.driver_export_name || source?.driver_name || cleanValue)
+        );
+        const sourceId=clean(parsedSourceId.id);
 
-  async function fillAccessFromSession(out, session, url, anonKey) {
-    const token = session?.access_token || '';
-    const uid = session?.user?.id || '';
-    if (!token || !uid) return out;
-    out.signed_in = true;
-    out.user_id = uid;
-    out.email = session?.user?.email || '';
+        const accountType=clean(account?.accountType);
+        const sourceAccountType=clean(source?.driver_account_type);
+        const authoritativeAccountType=masterId
+          ? (accountType || "본계정")
+          : (sourceAccountType || accountType || null);
 
-    const access = firstRestRow(await authRest(url, anonKey, '/rest/v1/rpc/mw_my_access', token, { method: 'POST', body: '{}' }));
-    if (access) {
-      out.is_maroowell = access.is_maroowell === true;
-      out.is_admin = access.is_admin === true;
-      out.max_role_level = Number(access.max_role_level || 0);
-      out.is_dragon_car_admin = access.is_dragon_car_admin === true;
-    }
-
-    const accountState = firstRestRow(await authRest(url, anonKey, '/rest/v1/rpc/mw_my_account_state', token, { method: 'POST', body: '{}' }));
-    if (accountState) {
-      out.approval_status = accountState.approval_status || 'pending';
-      out.app_only = accountState.app_only === true;
-    }
-
-    if (isSuper(out)) {
-      out.can_clhi = true;
-    } else {
-      const clhi = await authRest(url, anonKey, `/rest/v1/cleansing_history_access?select=can_select&user_id=eq.${encodeURIComponent(uid)}&limit=1`, token);
-      out.can_clhi = Array.isArray(clhi) && clhi[0]?.can_select === true;
-    }
-    return out;
-  }
-
-  async function loadAccess() {
-    const { SUPABASE_URL, SUPABASE_ANON_KEY } = window.MARUWELL_CONFIG || {};
-    const out = defaultAccess();
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return out;
-    const session = readStoredAuthSession(SUPABASE_URL);
-    if (!session?.access_token) return out;
-
-    try {
-      return await fillAccessFromSession(out, session, SUPABASE_URL, SUPABASE_ANON_KEY);
-    } catch {
-      await new Promise(resolve => setTimeout(resolve, 850));
-      const refreshed = readStoredAuthSession(SUPABASE_URL);
-      if (refreshed?.access_token && refreshed.access_token !== session.access_token) {
-        try { return await fillAccessFromSession(defaultAccess(), refreshed, SUPABASE_URL, SUPABASE_ANON_KEY); } catch {}
+        return {
+          schedule_date:date,
+          camp:state.camp,
+          wave:state.wave,
+          route_label:normalizeRouteLabel(routeLabel),
+          driver_name:cleanValue||null,
+          driver_display_name:cleanValue||null,
+          driver_owner_name:keepAssignmentFields?(
+            clean(account?.ownerName) || clean(source?.driver_owner_name) || cleanValue || null
+          ):null,
+          driver_export_name:keepAssignmentFields?(
+            clean(account?.exportName) || clean(source?.driver_export_name) || cleanValue || null
+          ):null,
+          driver_coupang_id:keepAssignmentFields?(masterId || sourceId || null):null,
+          driver_account_type:keepAssignmentFields?authoritativeAccountType:null,
+          memo:keepAssignmentFields?(clean(source?.memo)||null):null,
+          row_order:Number(rowOrder||source?.row_order||0),
+          cell_color:cleanValue?colorForValue(cleanValue):null,
+          is_active:!!cleanValue
+        };
       }
-      out.auth_indeterminate = true;
-      return out;
-    }
-  }
 
-'''
-          s = s[:start] + replacement + s[end:]
-          board.write_text(s, encoding='utf-8')
-          changed.append(board.as_posix())
+      function applyInputVisual'''
+          s,n=re.subn(pattern,replacement,s,count=1)
+          if n!=1:
+              raise SystemExit(f'makeDirtyRecord replacement count={n}')
 
-          cleansing = Path('public/cleansing_history')
-          s = cleansing.read_text(encoding='utf-8')
-          s = s.replace('    $("bar").classList.add("hide");\n    $("board").classList.add("hide");\n    $("main").innerHTML = `', '    $("bar")?.classList.add("hide");\n    $("board")?.classList.add("hide");\n    if (!$("main")) return;\n    $("main").innerHTML = `', 1)
-          cleansing.write_text(s, encoding='utf-8')
-          changed.append(cleansing.as_posix())
+          old='''      async function saveAll(){
+        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
 
-          index = Path('public/index.html')
-          s = index.read_text(encoding='utf-8')
-          marker = '  async function signIn() {\n'
-          helper = r'''  function isRetryableAuthError(error) {
-    const status = Number(error?.status || 0);
-    const name = String(error?.name || '');
-    const message = String(error?.message || '').toLowerCase();
-    return [502, 503, 504].includes(status) || name === 'AuthRetryableFetchError' || message.includes('failed to fetch') || message.includes('network request failed') || message.includes('request timeout');
-  }
+        normalizeUniformChildrenBeforeSave();'''
+          new='''      async function saveAll(){
+        if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
 
-  async function signInWithRetry(emailValue, passwordValue) {
-    let last = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await supabase.auth.signInWithPassword({ email: emailValue, password: passwordValue });
-      if (!result.error) return result;
-      last = result.error;
-      if (!isRetryableAuthError(last) || attempt === 1) return result;
-      await new Promise(resolve => setTimeout(resolve, 900));
-    }
-    return { error: last };
-  }
+        // 저장 직전에 maroowell_info 전체 계정 인덱스를 확인한다.
+        try{
+          const added=await loadAllMaroowellInfoRowsForAccountLookup();
+          if(added>0) buildDriverAccounts();
+        }catch(e){
+          console.warn("[schedule save] maroowell_info account refresh failed",e);
+        }
 
-'''
-          if helper not in s:
-              s = s.replace(marker, helper + marker, 1)
-          s = s.replace('      const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });', '      const { error } = await signInWithRetry(em, pw);', 1)
-          index.write_text(s, encoding='utf-8')
-          if index.as_posix() not in changed:
-              changed.append(index.as_posix())
+        normalizeUniformChildrenBeforeSave();'''
+          if old not in s:
+              raise SystemExit('saveAll anchor not found')
+          s=s.replace(old,new,1)
 
-          print('changed files:')
-          for item in changed:
-              print(item)
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public
-          if git diff --cached --quiet; then
-            echo "No changes"
-            exit 0
-          fi
-          git commit -m "Fix Supabase auth refresh concurrency"
-          git push origin main
-
-# trigger 2026-08-20T23:46+09:00
+          p.write_text(s,encoding='utf-8')
+          Path('maroowell_schedule_front_fixed.txt').write_text(s,encoding='utf-8')
+      - name: Validate fixed file
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, subprocess, tempfile, os
+          s=Path('public/maroowell_schedule').read_text(encoding='utf-8')
+          blocks=re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>',s,re.I)
+          js=max([b for b in blocks if b.strip()],key=len)
+          f=tempfile.NamedTemporaryFile('w',suffix='.js',encoding='utf-8',delete=False)
+          try:
+              f.write(js); f.close()
+              r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
+              if r.returncode:
+                  print(r.stderr)
+                  raise SystemExit(r.returncode)
+          finally:
+              try: os.unlink(f.name)
+              except: pass
+      - name: Commit fixed copy
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/maroowell_schedule maroowell_schedule_front_fixed.txt
+          git commit -m "Fix schedule master account resolution"
+          git push

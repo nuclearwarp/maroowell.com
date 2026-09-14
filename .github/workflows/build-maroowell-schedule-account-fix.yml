@@ -1,0 +1,112 @@
+name: Build corrected Maroowell schedule frontend copy
+on:
+  push:
+    branches:
+      - deliver/maroowell-schedule-account-fix-20260915
+    paths:
+      - .github/workflows/build-maroowell-schedule-account-fix.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deliver/maroowell-schedule-account-fix-20260915
+      - name: Patch schedule account resolution
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p=Path('public/maroowell_schedule')
+          s=p.read_text(encoding='utf-8')
+
+          old='''        if(found)return found;
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          new='''        if(found)return found;
+
+          // 이름이 maroowell_info에 있으면 직접입력으로 떨어뜨리지 않고
+          // master 계정정보를 최우선으로 사용한다.
+          const master=resolveMetaInfoAccount(raw);
+          if(master && clean(master.exportId)) return master;
+
+          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+          if old not in s:
+            raise SystemExit('resolveAccount fallback anchor not found')
+          s=s.replace(old,new,1)
+
+          old='''          driver_coupang_id:keepAssignmentFields?(clean(source?.driver_coupang_id)||account?.exportId||null):null,
+            driver_account_type:keepAssignmentFields?(clean(source?.driver_account_type)||account?.accountType||null):null,'''
+          new='''          // master에서 계정을 찾았으면 과거 source의 직접입력/빈 ID보다 master를 우선한다.
+            driver_coupang_id:keepAssignmentFields?(
+              clean(parseAccountToken(account?.exportId,clean(account?.exportName||raw)).id)
+              || clean(source?.driver_coupang_id)
+              || null
+            ):null,
+            driver_account_type:keepAssignmentFields?(
+              clean(parseAccountToken(account?.exportId,clean(account?.exportName||raw)).id)
+                ? (clean(account?.accountType)||"본계정")
+                : (clean(source?.driver_account_type)||clean(account?.accountType)||null)
+            ):null,'''
+          if old not in s:
+            raise SystemExit('save payload account precedence anchor not found')
+          s=s.replace(old,new,1)
+
+          old='''        normalizeUniformChildrenBeforeSave();'''
+          new='''        // 저장 직전에 maroowell_info 전체를 다시 읽어 이름 -> 쿠팡ID를 최신화한다.
+          // 과거 row에 driver_account_type=직접입력이 남아 있어도 master가 있으면 본계정/서브계정으로 교정된다.
+          try{
+            const added=await loadAllMaroowellInfoRowsForAccountLookup();
+            if(added>0) buildDriverAccounts();
+          }catch(e){
+            console.warn("[schedule save] maroowell_info account refresh failed",e);
+          }
+
+          normalizeUniformChildrenBeforeSave();'''
+          if old not in s:
+            raise SystemExit('saveAll normalize anchor not found')
+          s=s.replace(old,new,1)
+
+          # validation
+          for needle in [
+            'const master=resolveMetaInfoAccount(raw);',
+            'parseAccountToken(account?.exportId,clean(account?.exportName||raw)).id',
+            '[schedule save] maroowell_info account refresh failed'
+          ]:
+            if needle not in s:
+              raise SystemExit('validation failed: '+needle)
+
+          p.write_text(s,encoding='utf-8')
+          Path('maroowell_schedule_front_fixed.txt').write_text(s,encoding='utf-8')
+
+      - name: Validate inline JavaScript syntax
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, subprocess, tempfile, os
+          s=Path('public/maroowell_schedule').read_text(encoding='utf-8')
+          blocks=re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>',s,re.I)
+          inline=[b for b in blocks if b.strip()]
+          if not inline:
+            raise SystemExit('no inline scripts found')
+          # Check the largest inline script, which contains the schedule app logic.
+          js=max(inline,key=len)
+          f=tempfile.NamedTemporaryFile('w',suffix='.js',encoding='utf-8',delete=False)
+          try:
+            f.write(js); f.close()
+            r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
+            if r.returncode:
+              print(r.stderr)
+              raise SystemExit(r.returncode)
+          finally:
+            try: os.unlink(f.name)
+            except: pass
+      - name: Commit corrected copy on delivery branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/maroowell_schedule maroowell_schedule_front_fixed.txt
+          git commit -m "Fix schedule account resolution from Maroowell info"
+          git push

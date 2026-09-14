@@ -8,7 +8,7 @@
 <link rel="icon" href="/favicon.ico?v=2">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
-<script src="/board-menu.js?v=20260914-realtime3" defer></script>
+<script src="/board-menu.js?v=20260915-realtime10" defer></script>
 <style>
 :root{
   --bg:#f3f6f8;--card:#fff;--line:#dce5e8;--line2:#cbd5e1;--text:#172b36;--muted:#60727c;
@@ -111,7 +111,7 @@ button,input{font:inherit}
 @media(max-width:980px){.controls{grid-template-columns:1fr 1fr}.actions{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.wrap{padding:7px}.topbar{top:2px}.pill.user{display:none}.controls{grid-template-columns:1fr}.actions{grid-column:auto}.actions .btn{width:100%}.summaryGrid{grid-template-columns:repeat(2,1fr)}.campGrid,.driverGrid{grid-template-columns:1fr}.metrics,.driverCard .metrics{grid-template-columns:1fr}.card{padding:11px;border-radius:15px}.selectionHint{display:none}}
 </style>
-<meta name="mw-realtime-live-v9" content="9">
+<meta name="mw-realtime-live-v10" content="10">
 </head>
 <body>
 <main class="wrap">
@@ -226,7 +226,11 @@ const norm=v=>String(v||"").trim().replace(/[^0-9A-Za-z가-힣]/g,"").toUpperCas
 const subRoute=v=>{const n=norm(v),m=n.match(/^(.+?[A-Z])\d{2}$/);return m?.[1]||n};
 const nameKey=v=>String(v||"").trim().replace(/\s+/g,"").toLowerCase();
 const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const defaultDate=()=>iso(new Date());
+const addIsoDate=(date,days)=>{const d=new Date(date+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};
+const kstNow=()=>{const d=new Date(Date.now()+9*3600000);return{date:d.toISOString().slice(0,10),hour:d.getUTCHours()}};
+const defaultDate=()=>kstNow().date;
+const activeScheduleDateForWave=wave=>{const k=kstNow();return wave==="WAVE1"&&k.hour<12?addIsoDate(k.date,-1):k.date};
+const batchIsCurrentShift=b=>String(b?.schedule_date||"")===activeScheduleDateForWave(String(b?.wave||"").toUpperCase());
 const waveLabel=w=>w==="WAVE1"?"야간":w==="WAVE2"?"주간":"전체";
 const isNight=w=>w==="WAVE1";
 const firstRow=data=>Array.isArray(data)?(data[0]||null):(data||null);
@@ -303,13 +307,13 @@ function isStarted(r){
 
 function makeScheduleIndex(){
   const byCampWave=new Map();
-  const today=$("scheduleDate").value||defaultDate();
   for(const x of S.scheduleRows||[]){
-    if(String(x.schedule_date)!==today || x.is_active===false || norm(x.route_label)==="휴무자")continue;
+    if(x.is_active===false || norm(x.route_label)==="휴무자")continue;
     const camp=cleanCampName(x.camp);
     const wave=String(x.wave||"").toUpperCase();
-    if(!camp||!wave)continue;
-    const key=`${camp}|${wave}`;
+    const scheduleDate=String(x.schedule_date||"");
+    if(!camp||!wave||!scheduleDate)continue;
+    const key=`${scheduleDate}|${camp}|${wave}`;
     if(!byCampWave.has(key))byCampWave.set(key,new Map());
     const display=String(x.driver_display_name||x.driver_name||x.driver_owner_name||x.driver_coupang_id||"").trim();
     const cid=String(x.driver_coupang_id||"").trim().toLowerCase();
@@ -335,7 +339,7 @@ function buildCamps(){
     let g=groups.get(key);
     if(!g){
       g={
-        key,name,wave,code:src.camp_code||b.camp_code||"",
+        key,name,wave,code:src.camp_code||b.camp_code||"",scheduleDate:String(b.schedule_date||""),
         status:b.status||"collecting",lastPolledAt:b.last_polled_at||null,
         rows:[],workers:0,
         totals:{delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collectionBlank(),fresh:collectionBlank()},
@@ -375,7 +379,7 @@ function buildCamps(){
 
   const scheduleIndex=makeScheduleIndex();
   for(const g of groups.values()){
-    const scheduled=scheduleIndex.get(g.key)||new Map();
+    const scheduled=scheduleIndex.get(`${g.scheduleDate}|${g.name}|${g.wave}`)||new Map();
     g.scheduledCount=scheduled.size;
 
     const presentIds=new Set(g.rows.map(r=>r.coupangId).filter(Boolean));
@@ -695,23 +699,14 @@ async function queryAll(){
     const {data:batches,error:be}=await S.sb
       .from("meta_realtime_batch")
       .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,updated_at")
-      .eq("schedule_date",today)
       .in("status",activeStatuses)
       .order("updated_at",{ascending:false});
     if(be)throw be;
 
-    S.batches=batches||[];
-
-    const schedulePromise=S.sb
-      .from("maroowell_schedule")
-      .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
-      .eq("schedule_date",today)
-      .eq("is_active",true);
+    S.batches=(batches||[]).filter(batchIsCurrentShift);
 
     if(!S.batches.length){
-      const{data:scheduleRows,error:se}=await schedulePromise;
-      if(se)throw se;
-      S.scheduleRows=scheduleRows||[];
+      S.scheduleRows=[];
       S.sourceRows=[];
       S.camps=[];
       S.selected.clear();
@@ -723,6 +718,7 @@ async function queryAll(){
     }
 
     const ids=S.batches.map(b=>b.id);
+    const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
     const [currentRes,freshRes,scheduleRes]=await Promise.all([
       S.sb.from("meta_realtime_current")
         .select("batch_id,meta_worker_key,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss")
@@ -730,7 +726,10 @@ async function queryAll(){
       S.sb.from("meta_realtime_fresh_current")
         .select("batch_id,meta_worker_key,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
         .in("batch_id",ids),
-      schedulePromise
+      S.sb.from("maroowell_schedule")
+        .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
+        .in("schedule_date",scheduleDates)
+        .eq("is_active",true)
     ]);
 
     if(currentRes.error)throw currentRes.error;

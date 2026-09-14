@@ -1,10 +1,10 @@
-name: Build corrected schedule frontend delivery copy
+name: Build corrected Maroowell schedule frontend copy
 on:
   push:
     branches:
       - deliver/maroowell-schedule-account-fix-20260915
     paths:
-      - .github/workflows/patch-realtime-driver-pk-v2.yml
+      - .github/workflows/build-maroowell-schedule-account-fix.yml
 permissions:
   contents: write
 jobs:
@@ -34,7 +34,7 @@ jobs:
           // master에도 없는 경우에만 실제 직접입력으로 취급한다.
           return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
           if old not in s:
-              raise SystemExit('resolveAccount fallback anchor not found')
+            raise SystemExit('resolveAccount fallback anchor not found')
           s=s.replace(old,new,1)
 
           pattern=r'''      function makeDirtyRecord\(\{date,routeLabel,value,rowOrder,source\}\)\{[\s\S]*?\n      \}\n\n      function applyInputVisual'''
@@ -43,7 +43,7 @@ jobs:
         const keepAssignmentFields=!!cleanValue;
 
         // 저장 시 화면의 이름을 maroowell_info 기준으로 다시 해석한다.
-        // master 정보가 있으면 과거 source의 직접입력/빈 ID보다 우선한다.
+        // master 정보가 있으면 과거 source에 남아 있던 직접입력/빈 ID보다 우선한다.
         let account=null;
         if(cleanValue){
           account=resolveMetaInfoAccount(cleanValue)
@@ -104,7 +104,7 @@ jobs:
       function applyInputVisual'''
           s,n=re.subn(pattern,replacement,s,count=1)
           if n!=1:
-              raise SystemExit(f'makeDirtyRecord replacement count={n}')
+            raise SystemExit(f'makeDirtyRecord replacement count={n}')
 
           old='''      async function saveAll(){
         if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
@@ -124,17 +124,17 @@ jobs:
 
         normalizeUniformChildrenBeforeSave();'''
           if old not in s:
-              raise SystemExit('saveAll anchor not found')
+            raise SystemExit('saveAll anchor not found')
           s=s.replace(old,new,1)
 
           for needle in [
-              'const master=resolveMetaInfoAccount(raw);',
-              'const masterId=clean(parsedAccountId.id);',
-              'driver_coupang_id:keepAssignmentFields?(',
-              '[schedule save] maroowell_info account refresh failed'
+            'const master=resolveMetaInfoAccount(raw);',
+            'const masterId=clean(parsedAccountId.id);',
+            'driver_coupang_id:keepAssignmentFields?(',
+            '[schedule save] maroowell_info account refresh failed'
           ]:
-              if needle not in s:
-                  raise SystemExit('validation failed: '+needle)
+            if needle not in s:
+              raise SystemExit('validation failed: '+needle)
 
           p.write_text(s,encoding='utf-8')
           Path('maroowell_schedule_front_fixed.txt').write_text(s,encoding='utf-8')
@@ -148,18 +148,18 @@ jobs:
           blocks=re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>',s,re.I)
           inline=[b for b in blocks if b.strip()]
           if not inline:
-              raise SystemExit('no inline scripts found')
+            raise SystemExit('no inline scripts found')
           js=max(inline,key=len)
           f=tempfile.NamedTemporaryFile('w',suffix='.js',encoding='utf-8',delete=False)
           try:
-              f.write(js); f.close()
-              r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
-              if r.returncode:
-                  print(r.stderr)
-                  raise SystemExit(r.returncode)
+            f.write(js); f.close()
+            r=subprocess.run(['node','--check',f.name],capture_output=True,text=True)
+            if r.returncode:
+              print(r.stderr)
+              raise SystemExit(r.returncode)
           finally:
-              try: os.unlink(f.name)
-              except: pass
+            try: os.unlink(f.name)
+            except: pass
       - name: Commit corrected copy on delivery branch
         run: |
           git config user.name github-actions[bot]

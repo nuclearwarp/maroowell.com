@@ -10,15 +10,15 @@ OUTPUT = Path("maroowell_schedule_front_full_fixed_20260915.txt")
 s = SOURCE.read_text(encoding="utf-8")
 
 old = '''        if(found)return found;
-          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+        return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
 new = '''        if(found)return found;
 
-          // maroowell_info에서 같은 기사 계정을 찾으면 master 정보를 최우선으로 사용한다.
-          const master=resolveMetaInfoAccount(raw);
-          if(master && clean(master.exportId)) return master;
+        // maroowell_info에서 같은 기사 계정을 찾으면 master 정보를 최우선으로 사용한다.
+        const master=resolveMetaInfoAccount(raw);
+        if(master && clean(master.exportId)) return master;
 
-          // master에도 없는 경우에만 실제 직접입력으로 취급한다.
-          return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
+        // master에도 없는 경우에만 실제 직접입력으로 취급한다.
+        return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
 if old not in s:
     raise SystemExit("resolveAccount fallback anchor not found")
 s = s.replace(old, new, 1)

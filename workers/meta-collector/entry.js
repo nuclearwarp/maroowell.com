@@ -347,9 +347,6 @@ async function processBatch(env, cookies, batch) {
   if (complete && stable >= 2) {
     const freshFinal = await sbGet(env, `meta_realtime_fresh_current?select=*&batch_id=eq.${batch.id}`) || [];
     const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
-    for (const r of rows) {
-      if (r.raw_payload?.share_candidate === true) await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(r.meta_worker_key)}`, { share: true });
-    }
     for (const f of freshFinal) {
       await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(f.meta_worker_key)}`, {
         fresh_delivery_assigned:f.delivery_assigned, fresh_delivery_scanned:f.delivery_scanned, fresh_delivery_completed:f.delivery_completed,

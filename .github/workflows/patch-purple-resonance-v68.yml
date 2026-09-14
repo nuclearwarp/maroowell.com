@@ -1,101 +1,29 @@
-name: Patch purple-resonance detail terminal V69
+name: Export schedule full TXT
 
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/patch-purple-resonance-v68.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  patch:
+  export:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
-      CLOUDFLARE_SCRIPT_NAME: purple-resonance-61ea
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - name: Download and patch live worker
-        shell: bash
+      - name: Build full corrected TXT
+        run: python scripts/export_schedule_account_fix.py
+      - name: Commit generated TXT
         run: |
-          set -euo pipefail
-          set +x
-          mkdir -p /tmp/cf-v69 .diagnostics
-          curl -fsS -D /tmp/cf-v69/h -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" -o /tmp/cf-v69/c
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/settings" -o /tmp/cf-v69/settings.json
-          python3 - <<'PY'
-          from pathlib import Path
-          from email.parser import BytesParser
-          from email.policy import default
-          import re, json
-          h=Path('/tmp/cf-v69/h').read_text(errors='ignore')
-          ct=re.findall(r'(?im)^content-type:\s*([^\r\n]+)',h)[-1].strip()
-          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ct}\r\nMIME-Version: 1.0\r\n\r\n').encode()+Path('/tmp/cf-v69/c').read_bytes())
-          src=''
-          for p in msg.iter_parts():
-              if p.get_param('name',header='content-disposition')=='worker.js':
-                  src=(p.get_payload(decode=True) or b'').decode('utf-8'); break
-          if not src: raise SystemExit('worker.js not found')
-          old='cacheMap = new Map([...cacheMap.entries()].filter(([, row]) => v65DetailCacheIsCurrent(row)));'
-          new='''cacheMap = new Map([...cacheMap.entries()].filter(([, row]) =>
-    v65DetailCacheIsCurrent(row) || row?.status === "error"
-  ));'''
-          if src.count(old)==2:
-              src=src.replace(old,new)
-          elif src.count('v65DetailCacheIsCurrent(row) || row?.status === "error"') < 2:
-              raise SystemExit(f'unexpected cache filter count {src.count(old)}')
-          marker='BUILDING_HUB_KAPT_V69_DETAIL_ERROR_TERMINAL_2026-08-31'
-          pat=re.compile(r'BUILDING_HUB_KAPT_V\d+_[A-Z0-9_]+_2026-\d\d-\d\d')
-          m=pat.search(src)
-          if m: src=src[:m.start()]+marker+src[m.end():]
-          elif marker not in src: src='// '+marker+'\n'+src
-          assert src.count('v65DetailCacheIsCurrent(row) || row?.status === "error"') >= 2
-          Path('/tmp/cf-v69/worker.js').write_text(src,encoding='utf-8')
-          settings=json.loads(Path('/tmp/cf-v69/settings.json').read_text()).get('result') or {}
-          meta={'main_module':'worker.js'}
-          bindings=[]
-          for b in settings.get('bindings') or []:
-              if isinstance(b,dict) and b.get('name'):
-                  bindings.append({'type':'inherit','name':b['name'],'version_id':'latest'})
-          if bindings: meta['bindings']=bindings
-          for k in ('compatibility_date','compatibility_flags','placement'):
-              v=settings.get(k)
-              if v not in (None,[],{}): meta[k]=v
-          meta['annotations']={'workers/message':'V69 terminal degraded detail errors'}
-          Path('/tmp/cf-v69/metadata.json').write_text(json.dumps(meta,separators=(',',':')),encoding='utf-8')
-          PY
-      - name: Deploy V69
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +x
-          code=$(curl -sS -o /tmp/cf-v69/deploy.json -w '%{http_code}' -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -F 'metadata=@/tmp/cf-v69/metadata.json;type=application/json' -F 'worker.js=@/tmp/cf-v69/worker.js;type=application/javascript+module' "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}?bindings_inherit=strict" || true)
-          test "$code" -ge 200 -a "$code" -lt 300 || { cat /tmp/cf-v69/deploy.json; exit 1; }
-      - name: Verify live V69
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +x
-          sleep 3
-          curl -fsS -D /tmp/cf-v69/lh -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${CLOUDFLARE_SCRIPT_NAME}/content/v2" -o /tmp/cf-v69/live
-          grep -a -q 'BUILDING_HUB_KAPT_V69_DETAIL_ERROR_TERMINAL_2026-08-31' /tmp/cf-v69/live
-          test "$(grep -a -o 'v65DetailCacheIsCurrent(row) || row?.status === \"error\"' /tmp/cf-v69/live | wc -l)" -ge 2
-          printf '%s\n' '# purple-resonance-61ea V69' '' '- status: deployed and verified' '- detail status=error rows are terminal degraded attempts during their cache lifetime, so one failing parcel cannot trap zipcode continuation forever.' > .diagnostics/purple-resonance-v69.md
-      - name: Commit record
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git pull --rebase origin main
-          git add .diagnostics/purple-resonance-v69.md
-          git commit -m 'Record purple-resonance V69 deployment' || true
+          git add maroowell_schedule_front_full_fixed_20260915.txt
+          git commit -m 'Add full corrected schedule TXT' || true
           git push origin HEAD:main

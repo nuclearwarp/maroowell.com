@@ -12,13 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build corrected full txt
+        shell: python
         run: |
-          python - <<'PY'
           from pathlib import Path
           import re
 
-          src = Path('public/maroowell_schedule').read_text(encoding='utf-8')
-          s = src
+          s = Path('public/maroowell_schedule').read_text(encoding='utf-8')
 
           old = '''        if(found)return found;
           return {displayName:raw,ownerName:raw,exportName:raw,exportId:"",accountType:"직접입력",colorKey:raw,search:raw};'''
@@ -39,7 +38,6 @@ jobs:
         const cleanValue=clean(value);
         const keepAssignmentFields=!!cleanValue;
 
-        // 화면의 기사명을 저장 시점에 maroowell_info 기준으로 다시 해석한다.
         let account=null;
         if(cleanValue){
           account=resolveMetaInfoAccount(cleanValue)
@@ -47,7 +45,6 @@ jobs:
             || resolveAccount(cleanValue);
         }
 
-        // "kgogo1118 / 김배석" 같은 값도 실제 쿠팡 ID만 저장한다.
         const parsedAccountId=parseAccountToken(
           account?.exportId,
           clean(account?.exportName || account?.displayName || cleanValue)
@@ -110,8 +107,6 @@ jobs:
           new = '''      async function saveAll(){
         if(!state.camp||!state.weekDates.length){alert("먼저 불러오기를 해주세요.");return}
 
-        // 저장 직전에 maroowell_info 전체 계정 인덱스를 다시 읽는다.
-        // 과거 row가 직접입력/NULL ID여도 master 계정이 있으면 올바른 ID/계정유형으로 교정된다.
         try{
           const added=await loadAllMaroowellInfoRowsForAccountLookup();
           if(added>0) buildDriverAccounts();
@@ -124,16 +119,19 @@ jobs:
               raise SystemExit('saveAll anchor not found')
           s = s.replace(old, new, 1)
 
-          assert s.startswith('<!doctype html>')
-          assert s.rstrip().endswith('</html>')
-          assert 'const master=resolveMetaInfoAccount(raw);' in s
-          assert 'const masterId=clean(parsedAccountId.id);' in s
-          assert '[schedule save] maroowell_info account refresh failed' in s
+          if not s.startswith('<!doctype html>') or not s.rstrip().endswith('</html>'):
+              raise SystemExit('full file boundary validation failed')
+          if 'const master=resolveMetaInfoAccount(raw);' not in s:
+              raise SystemExit('master resolver validation failed')
+          if 'const masterId=clean(parsedAccountId.id);' not in s:
+              raise SystemExit('account ID parser validation failed')
+          if '[schedule save] maroowell_info account refresh failed' not in s:
+              raise SystemExit('save refresh validation failed')
+
           Path('maroowell_schedule_front_full_fixed_20260915.txt').write_text(s, encoding='utf-8')
-          PY
       - name: Validate JavaScript
+        shell: python
         run: |
-          python - <<'PY'
           from pathlib import Path
           import re, subprocess, tempfile, os
           s=Path('maroowell_schedule_front_full_fixed_20260915.txt').read_text(encoding='utf-8')
@@ -149,18 +147,10 @@ jobs:
           finally:
               try: os.unlink(f.name)
               except: pass
-          PY
-      - name: Publish full txt to delivery branch
+      - name: Commit full corrected txt
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git checkout --orphan deliver-schedule-full-txt
-          git rm -rf .
-          cp ../maroowell_schedule_front_full_fixed_20260915.txt . 2>/dev/null || true
-          if [ ! -f maroowell_schedule_front_full_fixed_20260915.txt ]; then
-            git show HEAD@{1}:maroowell_schedule_front_full_fixed_20260915.txt > maroowell_schedule_front_full_fixed_20260915.txt 2>/dev/null || true
-          fi
-          test -f maroowell_schedule_front_full_fixed_20260915.txt
           git add maroowell_schedule_front_full_fixed_20260915.txt
-          git commit -m "Full corrected Maroowell schedule frontend txt"
-          git push --force origin HEAD:deliver-schedule-full-txt
+          git commit -m "Add full corrected Maroowell schedule TXT"
+          git push

@@ -8,7 +8,7 @@
 <link rel="icon" href="/favicon.ico?v=2">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
-<script src="/board-menu.js?v=20260915-realtime10" defer></script>
+<script src="/board-menu.js?v=20260915-realtime11" defer></script>
 <style>
 :root{
   --bg:#f3f6f8;--card:#fff;--line:#dce5e8;--line2:#cbd5e1;--text:#172b36;--muted:#60727c;
@@ -111,7 +111,7 @@ button,input{font:inherit}
 @media(max-width:980px){.controls{grid-template-columns:1fr 1fr}.actions{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.wrap{padding:7px}.topbar{top:2px}.pill.user{display:none}.controls{grid-template-columns:1fr}.actions{grid-column:auto}.actions .btn{width:100%}.summaryGrid{grid-template-columns:repeat(2,1fr)}.campGrid,.driverGrid{grid-template-columns:1fr}.metrics,.driverCard .metrics{grid-template-columns:1fr}.card{padding:11px;border-radius:15px}.selectionHint{display:none}}
 </style>
-<meta name="mw-realtime-live-v10" content="10">
+<meta name="mw-realtime-live-v11" content="11">
 </head>
 <body>
 <main class="wrap">
@@ -365,6 +365,7 @@ function buildCamps(){
     g.rows.push({
       campKey:key,camp:name,wave,
       driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),
+      driverPk:src.driver_pk==null?null:Number(src.driver_pk),
       coupangId:String(src.coupang_id||"").trim().toLowerCase(),
       routes,delivery,freshDelivery,returns,fresh,
       scanStartedAt:src.scan_started_at||null,
@@ -655,18 +656,20 @@ async function toggleCollector(){
 }
 
 function buildFreshMaps(freshRows){
-  const byKey=new Map(),byCid=new Map(),byName=new Map();
+  const byPk=new Map(),byKey=new Map(),byCid=new Map(),byName=new Map();
   for(const f of freshRows||[]){
+    if(f.driver_pk!=null)byPk.set(`${f.batch_id}|${Number(f.driver_pk)}`,f);
     if(f.meta_worker_key)byKey.set(`${f.batch_id}|${String(f.meta_worker_key).toLowerCase()}`,f);
     if(f.coupang_id)byCid.set(`${f.batch_id}|${String(f.coupang_id).trim().toLowerCase()}`,f);
     if(f.driver_name)byName.set(`${f.batch_id}|${nameKey(f.driver_name)}`,f);
   }
-  return{byKey,byCid,byName};
+  return{byPk,byKey,byCid,byName};
 }
 function mergeFresh(rows,freshRows){
   const fm=buildFreshMaps(freshRows);
   return (rows||[]).map(r=>{
     const f=
+      (r.driver_pk!=null&&fm.byPk.get(`${r.batch_id}|${Number(r.driver_pk)}`))||
       (r.meta_worker_key&&fm.byKey.get(`${r.batch_id}|${String(r.meta_worker_key).toLowerCase()}`))||
       (r.coupang_id&&fm.byCid.get(`${r.batch_id}|${String(r.coupang_id).trim().toLowerCase()}`))||
       (r.driver_name&&fm.byName.get(`${r.batch_id}|${nameKey(r.driver_name)}`));
@@ -721,10 +724,10 @@ async function queryAll(){
     const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
     const [currentRes,freshRes,scheduleRes]=await Promise.all([
       S.sb.from("meta_realtime_current")
-        .select("batch_id,meta_worker_key,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss")
+        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss")
         .in("batch_id",ids),
       S.sb.from("meta_realtime_fresh_current")
-        .select("batch_id,meta_worker_key,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
+        .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
         .in("batch_id",ids),
       S.sb.from("maroowell_schedule")
         .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")

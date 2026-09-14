@@ -8,7 +8,7 @@
 <link rel="icon" href="/favicon.ico?v=2">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
-<script src="/board-menu.js?v=20260914-realtime2" defer></script>
+<script src="/board-menu.js?v=20260914-realtime3" defer></script>
 <style>
 :root{
   --bg:#f3f6f8;--card:#fff;--line:#dce5e8;--line2:#cbd5e1;--text:#172b36;--muted:#60727c;
@@ -111,7 +111,7 @@ button,input{font:inherit}
 @media(max-width:980px){.controls{grid-template-columns:1fr 1fr}.actions{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:760px){.wrap{padding:7px}.topbar{top:2px}.pill.user{display:none}.controls{grid-template-columns:1fr}.actions{grid-column:auto}.actions .btn{width:100%}.summaryGrid{grid-template-columns:repeat(2,1fr)}.campGrid,.driverGrid{grid-template-columns:1fr}.metrics,.driverCard .metrics{grid-template-columns:1fr}.card{padding:11px;border-radius:15px}.selectionHint{display:none}}
 </style>
-<meta name="mw-realtime-live-v5" content="5">
+<meta name="mw-realtime-live-v6" content="6">
 </head>
 <body>
 <main class="wrap">
@@ -257,7 +257,7 @@ function blankDelivery(){
 function addDelivery(a,b){
   for(const k of["total","misscan","remaining","completed","impossible","pddMiss"])a[k]=(a[k]||0)+(b[k]||0);
   a.hasData=!!(a.hasData||b?.hasData);
-  a.rate=ratio(a.completed,a.total);
+  a.rate=ratio((a.completed||0)+(a.impossible||0),a.total);
 }
 function collectionBlank(){
   return{total:0,collected:0,uncollected:0,assigned:0,absent:0,completionRate:0,collectionRate:0};
@@ -275,7 +275,7 @@ function backendDelivery(r,p="delivery"){
   const completed=Number(r[`${p}_completed`]||0);
   const impossible=Number(r[`${p}_impossible`]||0);
   const pddMiss=Number(r[`${p}_pdd_miss`]||0);
-  const rate=Number(r[`${p}_complete_rate`]??ratio(completed,total));
+  const rate=ratio(completed+impossible,total);
   return{
     total,misscan,remaining,completed,impossible,pddMiss,rate,
     hasData:p==="fresh_delivery" ? rawTotal!=null&&total>0 : total>0
@@ -424,7 +424,7 @@ function deliveryPanel(cls,label,m){
   return `<div class="metricPanel ${cls}">
     <div class="k">${label}</div>
     <div class="rate">${pct(m.rate)}</div>
-    <div class="detail">완료 ${num(m.completed)} / ${num(m.total)} · 남음 ${num(m.remaining)}</div>
+    <div class="detail">완료 ${num(m.completed)} / ${num(m.total)} · 미배송 ${num(m.impossible)} · 남음 ${num(m.remaining)}</div>
   </div>`;
 }
 function collectionPanel(cls,label,m,wave){
@@ -465,7 +465,7 @@ function renderSummary(){
   $("workerCount").textContent=S.wave==="ALL"?`${dayCount} / ${nightCount}`:num(a.workers);
   $("deliveryTotal").textContent=num(a.delivery.total);
   $("deliveryRate").textContent=pct(a.delivery.rate);
-  $("deliverySub").textContent=`완료 ${num(a.delivery.completed)} / ${num(a.delivery.total)} · 남음 ${num(a.delivery.remaining)}`;
+  $("deliverySub").textContent=`완료 ${num(a.delivery.completed)} / ${num(a.delivery.total)} · 미배송 ${num(a.delivery.impossible)} · 남음 ${num(a.delivery.remaining)}`;
   $("freshDeliveryRate").textContent=onlyNight||!a.freshDelivery.hasData?"-":pct(a.freshDelivery.rate);
   $("freshDeliverySub").textContent=onlyNight?"야간 미조회":"20시 PDD";
   $("returnRate").innerHTML=`<div class="stackRate"><div>완료율 ${pct(a.returns.completionRate)}</div><div>회수율 ${pct(a.returns.collectionRate)}</div></div>`;

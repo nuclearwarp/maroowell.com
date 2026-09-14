@@ -45,15 +45,25 @@ function coupangId(src) {
 }
 function workerKey(src) {
   const w = src?.workerInfo || {};
+  const cid = coupangId(src);
+  if (cid) return `coupang:${cid.toLowerCase()}`;
+  const name = workerName(src);
+  if (name) return `name:${name.toLowerCase()}`;
   for (const k of ["workerSrl", "workerId", "id", "userId", "memberSrl", "memberId"]) {
     const v = w?.[k] ?? src?.[k];
     if (v != null && String(v).trim()) return `${k}:${String(v).trim()}`;
   }
-  const cid = coupangId(src);
-  if (cid) return `coupang:${cid.toLowerCase()}`;
   const routes = uniq((w.workSubRoutes || []).map(normRoute)).sort().join(",");
-  return `fallback:${workerName(src) || "unknown"}:${routes || "no-route"}`;
+  return `fallback:${routes || "no-route"}`;
 }
+function canonicalIdentity(cid, name, fallback) {
+  const id = String(cid || "").trim().toLowerCase();
+  if (id) return `coupang:${id}`;
+  const dn = String(name || "").trim().toLowerCase();
+  if (dn) return `name:${dn}`;
+  return String(fallback || "unknown");
+}
+function rowIdentity(r) { return canonicalIdentity(r?.coupang_id, r?.driver_name, r?.meta_worker_key); }
 function sourceCampCode(src) {
   const w = src?.workerInfo || {};
   for (const k of ["campCode", "sourceCampCode", "workCampCode"]) {
@@ -107,6 +117,7 @@ async function sb(env, path, init = {}) {
 }
 const sbGet = (env, path) => sb(env, path);
 const sbPatch = (env, path, body) => sb(env, path, { method: "PATCH", headers: { prefer: "return=representation" }, body: JSON.stringify(body) });
+const sbDelete = (env, path) => sb(env, path, { method: "DELETE", headers: { prefer: "return=minimal" } });
 const sbPost = (env, path, body, prefer = "return=representation") => sb(env, path, { method: "POST", headers: { prefer }, body: JSON.stringify(body) });
 const sbUpsert = (env, path, body, conflict) => sb(env, `${path}?on_conflict=${encodeURIComponent(conflict)}`, {
   method: "POST", headers: { prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(body)
@@ -231,13 +242,27 @@ async function dueBatches(env) {
   const now = encodeURIComponent(nowIso());
   return await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
 }
-function freshMap(body) {
-  const byKey = new Map(), byName = new Map();
-  for (const row of metaContent(body)) {
-    const m = deliveryMetric(row?.deliverySummary || {}), k = workerKey(row), n = workerName(row);
-    byKey.set(k, m); if (n) byName.set(n, m);
+async function storeFreshRows(env, batch, schedule, fresh, now) {
+  if (batch.wave !== "WAVE2" || !fresh?.success) return 0;
+  const map = new Map();
+  for (const src of metaContent(fresh.body)) {
+    const w = src?.workerInfo || {}, name = workerName(src), metaCid = coupangId(src);
+    const actualRoutes = uniq((w.workSubRoutes || []).map(normRoute));
+    let matched = scheduleMatch(schedule, metaCid, name);
+    if (!matched.length) matched = scheduleMatchByRoutes(schedule, actualRoutes);
+    const realCid = String(matched[0]?.driver_coupang_id || metaCid || "").trim() || null;
+    const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;
+    const key = canonicalIdentity(realCid, mappedName, workerKey(src));
+    const d = deliveryMetric(src?.deliverySummary || {});
+    if (d.total <= 0) continue;
+    const rec = { batch_id:batch.id, schedule_date:batch.schedule_date, meta_work_date:batch.meta_work_date, camp_code:batch.camp_code, camp_name:batch.camp_name, wave:batch.wave, meta_worker_key:key, coupang_id:realCid, driver_name:mappedName, delivery_assigned:d.assigned, delivery_scanned:d.scanned, delivery_completed:d.completed, delivery_impossible:d.impossible, delivery_pdd_miss:d.pdd, delivery_total:d.total, delivery_complete_rate:d.rate, last_seen_at:now, raw_payload:{ fresh:src, collected_at:now }, updated_at:now };
+    const old = map.get(key);
+    if (!old || rec.delivery_total > old.delivery_total) map.set(key, rec);
   }
-  return { byKey, byName };
+  await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
+  const rows = [...map.values()];
+  if (rows.length) await sbUpsert(env, "meta_realtime_fresh_current", rows, "batch_id,meta_worker_key");
+  return rows.length;
 }
 
 async function processBatch(env, cookies, batch) {
@@ -251,11 +276,11 @@ async function processBatch(env, cookies, batch) {
 
   const schedule = await loadSchedule(env, batch.schedule_date, batch.wave, batch.camp_name);
   const prevRows = await sbGet(env, `meta_realtime_current?select=*&batch_id=eq.${batch.id}`) || [];
-  const prevMap = new Map(prevRows.map(r => [r.meta_worker_key, r]));
-  const fm = freshMap(fresh?.body), byKey = new Map(), now = nowIso();
+  const prevMap = new Map(prevRows.map(r => [rowIdentity(r), r]));
+  const byKey = new Map(), now = nowIso();
 
   for (const src of metaContent(main.body)) {
-    const w = src?.workerInfo || {}, key = workerKey(src), name = workerName(src), prev = prevMap.get(key);
+    const w = src?.workerInfo || {}, name = workerName(src);
     const metaCid = coupangId(src);
     const actualRoutes = uniq((w.workSubRoutes || []).map(normRoute));
     let matched = scheduleMatch(schedule, metaCid, name);
@@ -263,10 +288,17 @@ async function processBatch(env, cookies, batch) {
     const scheduledRoutes = uniq(matched.map(r => normRoute(r.route_label)).filter(r => r && r !== "휴무자"));
     const realCid = String(matched[0]?.driver_coupang_id || metaCid || "").trim() || null;
     const mappedName = String(matched[0]?.driver_display_name || matched[0]?.driver_name || matched[0]?.driver_owner_name || name || "").trim() || null;
+    const key = canonicalIdentity(realCid, mappedName, workerKey(src)), prev = prevMap.get(key);
     const accountType = String(matched[0]?.driver_account_type || w.workerAccountType || w.accountType || "").trim() || null;
     const d = deliveryMetric(src?.deliverySummary || {}), fb = collectionMetric(src?.freshbagSummary || {}, false);
     const ret = batch.wave === "WAVE1" ? null : collectionMetric(src?.returnSummary || {}, true);
-    const fd = fm.byKey.get(key) || fm.byName.get(name) || deliveryMetric({});
+    const routeAlerts = actualRoutes.filter(a => !scheduledRoutes.some(sr => scheduledRouteMatches(a, sr))).map(route => {
+      const owners = schedule.filter(r => r.route_label && r.route_label !== "휴무자" && scheduledRouteMatches(route, r.route_label)).sort((a,b) => normRoute(b.route_label).length - normRoute(a.route_label).length);
+      const owner = owners[0];
+      if (!owner) return { route, type: "uncontracted" };
+      const ownerName = String(owner.driver_display_name || owner.driver_name || owner.driver_owner_name || owner.driver_coupang_id || "원주인").trim();
+      return { route, type: "borrowed", owner: ownerName };
+    });
     const deliveryDone = d.total > 0 && d.completed === d.total;
     const returnDone = batch.wave === "WAVE1" ? null : (ret.total === 0 || (ret.pending === 0 && ret.collected + ret.uncollected >= ret.total));
     const freshbagDone = fb.total === 0 || (fb.pending === 0 && fb.collected + fb.uncollected >= fb.total);
@@ -278,8 +310,8 @@ async function processBatch(env, cookies, batch) {
       driver_name: mappedName, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
       delivery_assigned: d.assigned, delivery_scanned: d.scanned, delivery_completed: d.completed, delivery_impossible: d.impossible,
       delivery_pdd_miss: d.pdd, delivery_total: d.total, delivery_complete_rate: d.rate,
-      fresh_delivery_assigned: fd.assigned, fresh_delivery_scanned: fd.scanned, fresh_delivery_completed: fd.completed,
-      fresh_delivery_impossible: fd.impossible, fresh_delivery_pdd_miss: fd.pdd, fresh_delivery_total: fd.total, fresh_delivery_complete_rate: fd.rate,
+      fresh_delivery_assigned: 0, fresh_delivery_scanned: 0, fresh_delivery_completed: 0,
+      fresh_delivery_impossible: 0, fresh_delivery_pdd_miss: 0, fresh_delivery_total: 0, fresh_delivery_complete_rate: 0,
       return_pending: ret?.pending ?? null, return_collected: ret?.collected ?? null, return_uncollected_raw: ret?.rawUn ?? null, return_absent_raw: ret?.rawAbsent ?? null,
       return_total: ret?.total ?? null, return_attempt_rate: ret?.attemptRate ?? null, return_collection_rate: ret?.collectionRate ?? null,
       freshbag_pending: fb.pending, freshbag_collected: fb.collected, freshbag_uncollected: fb.uncollected,
@@ -289,7 +321,7 @@ async function processBatch(env, cookies, batch) {
       delivery_completed_at: prev?.delivery_completed_at || (deliveryDone && (batch.wave === "WAVE1" || returnDone) ? now : null),
       all_completed_at: prev?.all_completed_at || (allDone ? now : null), first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
       delivery_done: deliveryDone, return_done: returnDone, freshbag_done: freshbagDone,
-      raw_payload: { main: src, fresh_delivery: fd.total ? { metric: fd } : null, collected_at: now }, updated_at: now
+      raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now }, updated_at: now
     };
     const old = byKey.get(key);
     if (!old || rec.delivery_total > old.delivery_total) byKey.set(key, rec);
@@ -297,7 +329,9 @@ async function processBatch(env, cookies, batch) {
   }
 
   const rows = [...byKey.values()];
+  await sbDelete(env, `meta_realtime_current?batch_id=eq.${batch.id}`);
   if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
+  await storeFreshRows(env, batch, schedule, fresh, now);
   const complete = rows.length > 0 && rows.every(r => r.delivery_done && (batch.wave === "WAVE1" || r.return_done) && r.freshbag_done);
   const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
   const kp = kstParts(), lateNight = batch.wave === "WAVE1" && kp.hour >= 12 && kp.hour < 20;
@@ -311,7 +345,18 @@ async function processBatch(env, cookies, batch) {
   if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
   if (complete && stable >= 2) {
+    const freshFinal = await sbGet(env, `meta_realtime_fresh_current?select=*&batch_id=eq.${batch.id}`) || [];
     const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
+    for (const r of rows) {
+      if (r.raw_payload?.share_candidate === true) await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(r.meta_worker_key)}`, { share: true });
+    }
+    for (const f of freshFinal) {
+      await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(f.meta_worker_key)}`, {
+        fresh_delivery_assigned:f.delivery_assigned, fresh_delivery_scanned:f.delivery_scanned, fresh_delivery_completed:f.delivery_completed,
+        fresh_delivery_impossible:f.delivery_impossible, fresh_delivery_pdd_miss:f.delivery_pdd_miss, fresh_delivery_total:f.delivery_total, fresh_delivery_complete_rate:f.delivery_complete_rate
+      });
+    }
+    await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
     return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes };
   }
   return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, codes };

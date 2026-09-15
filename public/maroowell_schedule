@@ -1046,7 +1046,51 @@
 
     /* ===== SCHEDULE WEEK PICKER PORTAL FINAL END ===== */
 
-  </style>
+  
+    /* ===== SCHEDULE DESKTOP TOOLBAR COMPACT V2 - 2026-09-15 ===== */
+    @media(min-width:1181px){
+      .toolbar{
+        display:grid!important;
+        grid-template-columns:160px 92px minmax(255px,300px) 150px minmax(340px,390px)!important;
+        gap:10px!important;
+        align-items:end!important;
+        overflow:visible!important;
+      }
+      .toolbar > .field,.toolbar > .updateEditor{min-width:0!important;width:auto!important;}
+      .toolbar > .field:nth-of-type(2){max-width:92px!important;}
+      .toolbar > .field:nth-of-type(4){max-width:150px!important;}
+      .weekButton{min-width:255px!important;}
+      .weekButton span:first-child{overflow:visible!important;text-overflow:clip!important;white-space:nowrap!important;}
+      .updateEditor{min-width:340px!important;}
+      .dateMini{grid-template-columns:38px minmax(82px,1fr)!important;}
+      .dateMini b{font-size:13px!important;font-weight:600!important;}
+      .dateMini::after{left:41px!important;font-size:12px!important;font-weight:500!important;}
+      .toolbarActions{
+        grid-column:1 / -1!important;
+        display:flex!important;
+        align-items:center!important;
+        gap:8px!important;
+        flex-wrap:wrap!important;
+        width:100%!important;
+        padding-top:2px!important;
+      }
+      .toolbarActions .weekBtns{display:flex!important;gap:8px!important;width:auto!important;}
+      .toolbarActions .btn{width:auto!important;min-width:78px!important;}
+      .toolbarActions #btnMetaUpload{min-width:138px!important;}
+      .toolbarActions #btnExportMeta{min-width:105px!important;}
+      .metaLine{grid-column:1 / -1!important;}
+    }
+    @media(max-width:1180px){
+      .toolbarActions{grid-column:1 / -1!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;width:100%!important;}
+      .toolbarActions .weekBtns{grid-column:1 / -1!important;}
+      .toolbarActions .btn{width:100%!important;}
+    }
+    @media(max-width:720px){
+      .toolbarActions{grid-template-columns:1fr!important;}
+      .toolbarActions .weekBtns{grid-column:auto!important;}
+    }
+    /* ===== SCHEDULE DESKTOP TOOLBAR COMPACT V2 END ===== */
+</style>
 </head>
 
 <body>
@@ -1125,17 +1169,18 @@
         <button id="btnUpdateStatusSave" class="btnMini" type="button">등록</button>
       </div>
 
-      <div class="weekBtns">
-        <button id="btnPrevWeek" class="btn" type="button">이전주</button>
-        <button id="btnNextWeek" class="btn" type="button">다음주</button>
+      <div class="toolbarActions">
+        <div class="weekBtns">
+          <button id="btnPrevWeek" class="btn" type="button">이전주</button>
+          <button id="btnNextWeek" class="btn" type="button">다음주</button>
+        </div>
+        <button id="btnLoad" class="btn primary" type="button">불러오기</button>
+        <button id="btnSave" class="btn ok" type="button">저장</button>
+        <button id="btnExportMeta" class="btn excel" type="button">📊 엑셀 생성</button>
+        <button id="btnMetaUpload" class="btn ok" type="button">🚀 메타어드민 전송</button>
+        <button id="btnCopyImage" class="btn warn" type="button">이미지 복사</button>
+        <button id="btnReset" class="btn" type="button">초기화</button>
       </div>
-
-      <button id="btnLoad" class="btn primary" type="button">불러오기</button>
-      <button id="btnSave" class="btn ok" type="button">저장</button>
-      <button id="btnExportMeta" class="btn excel" type="button">📊 엑셀 생성</button>
-      <button id="btnMetaUpload" class="btn ok" type="button">🚀 메타어드민 전송</button>
-      <button id="btnCopyImage" class="btn warn" type="button">이미지 복사</button>
-      <button id="btnReset" class="btn" type="button">초기화</button>
 
       <div class="metaLine">
         <span id="statePill" class="pill ok">READY</span>
@@ -1926,8 +1971,9 @@
 
       function accountCampAllowed(acc){
         if(!state.camp)return true;
-        if(acc?.globalSub)return true;
-        return !!clean(acc?.camp) && campMatches(acc.camp,state.camp);
+        const camp=clean(acc?.camp);
+        if(!camp)return false;
+        return campMatches(camp,state.camp);
       }
 
       function resolveAccount(value){
@@ -3013,13 +3059,7 @@
         });
 
         els.tableHost.querySelectorAll(".cellEdit").forEach(input=>{
-          if(input.disabled)return;
-          input.addEventListener("input",onCellInput);
-          input.addEventListener("focus",e=>{e.currentTarget.select();showSuggest(e.currentTarget)});
-          input.addEventListener("keyup",e=>{
-            if(e.key==="Escape"){hideSuggest();e.currentTarget.blur();return}
-            showSuggest(e.currentTarget);
-          });
+          bindCellInputEvents(input);
         });
 
         els.tableHost.querySelectorAll("[data-day-action]").forEach(btn=>{
@@ -3170,6 +3210,7 @@
           parentInput.classList.toggle("dirty",dirty);
           parentInput.value=val;
           applyInputVisual(parentInput,val);
+          bindCellInputEvents(parentInput);
         }
 
         updatePills();
@@ -3203,10 +3244,22 @@
             childInput.classList.toggle("dirty",dirty);
             childInput.value=val;
             applyInputVisual(childInput,val);
+            bindCellInputEvents(childInput);
           }
         }
 
         updatePills();
+      }
+
+      function bindCellInputEvents(input){
+        if(!input || input.disabled || input.dataset.mwCellBound==="1")return;
+        input.dataset.mwCellBound="1";
+        input.addEventListener("input",onCellInput);
+        input.addEventListener("focus",e=>{e.currentTarget.select();showSuggest(e.currentTarget)});
+        input.addEventListener("keyup",e=>{
+          if(e.key==="Escape"){hideSuggest();e.currentTarget.blur();return}
+          showSuggest(e.currentTarget);
+        });
       }
 
       function onCellInput(e){

@@ -4110,7 +4110,7 @@
         }
         if(state.metaUploadBusy)return;
 
-        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 메타어드민으로 전송할 일자를 하나 선택하세요. 기존 메타 스케줄이 있으면 먼저 해당 캠프·주야·일자의 전 인원을 휴무 처리한 뒤 현재 스케줄을 전송합니다.`;
+        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 메타어드민으로 전송할 일자를 하나 선택하세요. 전송 전 해당 캠프·주야·일자의 메타어드민 실제 등록 스케줄을 조회하고, 현재 근무로 등록된 사람만 먼저 휴무 처리한 뒤 마루웰 스케줄을 전송합니다.`;
         els.metaUploadDateList.innerHTML=state.weekDates.map(date=>{
           const metaDate=normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
           const count=countMetaRowsForScheduleDate(date);
@@ -4144,24 +4144,14 @@
         return normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
       }
 
-      function isMetaResetCandidate(acc){
-        if(!acc||!state.camp)return false;
-        const camp=clean(acc.camp);
-        const wave=clean(acc.wave);
-        const position=clean(acc.position);
-        if(!camp||!campMatches(camp,state.camp))return false;
-        if(!wave||!explicitWaveMatches(wave,state.wave))return false;
-        if(isRetiredPosition(position))return false;
-        return true;
-      }
-
-      function metaResetRows(metaDate){
+      function metaResetRowsFromCurrent(current,metaDate){
+        // reset 대상은 maroowell_info 캠프 소속자가 아니라 MetaAdmin 실제 등록자만 사용한다.
+        const source=Array.isArray(current?.registered_people)?current.registered_people:[];
         const out=[];
         const seen=new Set();
-        for(const acc of state.driverAccounts||[]){
-          if(!isMetaResetCandidate(acc))continue;
-          const name=clean(acc.exportName||acc.displayName||acc.ownerName);
-          const id=clean(acc.exportId);
+        for(const person of source){
+          const name=clean(person?.name || person?.driver_name || person?.display_name);
+          const id=clean(person?.id || person?.coupang_id || person?.login_id);
           if(!name||!id)continue;
           const key=keyOf(id)||keyOf(name);
           if(!key||seen.has(key))continue;
@@ -4287,15 +4277,17 @@
             date:metaDate
           }).toString());
 
-          const resetNeeded=current?.has_existing!==false;
+          const resetRows=metaResetRowsFromCurrent(current,metaDate);
+          const resetNeeded=current?.has_existing===true;
           if(resetNeeded){
-            const resetRows=metaResetRows(metaDate);
-            if(!resetRows.length)throw new Error("전체 휴무 처리에 사용할 현재 캠프 기사 계정을 찾지 못했습니다.");
+            if(!resetRows.length){
+              throw new Error("메타어드민에 기존 스케줄이 존재하지만 실제 등록자의 이름/아이디를 해석하지 못했습니다. 기존 스케줄은 건드리지 않았습니다.");
+            }
 
-            const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)} 스케줄을 메타어드민에 전송합니다.\n\n기존 메타 스케줄이 확인되어 먼저 ${resetRows.length}명을 전체 휴무 처리한 뒤 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n계속할까요?`);
+            const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)} 스케줄을 메타어드민에 전송합니다.\n\n메타어드민 조회 결과 이 날짜에 실제 근무 스케줄이 등록된 ${resetRows.length}명만 먼저 휴무 처리한 뒤 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n\n※ maroowell_info의 캠프 소속 인원 전체를 휴무 처리하지 않습니다.\n계속할까요?`);
             if(!ok){setStatus("메타어드민 전송 취소");return;}
 
-            setStatus(`기존 메타 스케줄 초기화 중: ${resetRows.length}명 전체 휴무`);
+            setStatus(`기존 메타 스케줄 초기화 중: 실제 등록 ${resetRows.length}명만 휴무 처리`);
             const resetWb=buildMetaUploadWorkbook(resetRows,"휴무");
             const resetUpload=await uploadMetaWorkbook({
               wb:resetWb,
@@ -4304,7 +4296,7 @@
             });
             const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
             if(clean(resetResult?.status).toUpperCase()!=="SUCCESS"){
-              throw new Error("기존 스케줄 전체 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
+              throw new Error("기존 메타 스케줄 등록자 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
             }
             resetCompleted=true;
           }else{
@@ -4321,7 +4313,7 @@
           });
           const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
           if(clean(actualResult?.status).toUpperCase()!=="SUCCESS"){
-            const prefix=resetCompleted?"※ 기존 스케줄은 이미 전체 휴무 처리된 상태입니다. 즉시 오류를 확인해주세요.\n\n":"";
+            const prefix=resetCompleted?"※ 기존 MetaAdmin 조회에서 확인된 실제 등록자들은 이미 휴무 처리된 상태입니다. 즉시 오류를 확인해주세요.\n\n":"";
             throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
           }
 

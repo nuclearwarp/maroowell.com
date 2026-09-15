@@ -337,6 +337,7 @@ async function processBatch(env, cookies, batch) {
       camp_code: batch.camp_code, camp_name: batch.camp_name, wave: batch.wave,
       meta_worker_key: key, source_camp_code: sourceCampCode(src), driver_pk: driverPk, coupang_id: realCid,
       driver_name: mappedName, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
+      extra_routes: routeAlerts.map(x => x.route),
       delivery_assigned: d.assigned, delivery_scanned: d.scanned, delivery_completed: d.completed, delivery_impossible: d.impossible,
       delivery_pdd_miss: d.pdd, delivery_total: d.total, delivery_complete_rate: d.rate,
       fresh_delivery_assigned: 0, fresh_delivery_scanned: 0, fresh_delivery_completed: 0,
@@ -354,7 +355,12 @@ async function processBatch(env, cookies, batch) {
     };
     const old = byKey.get(key);
     if (!old || rec.delivery_total > old.delivery_total) byKey.set(key, rec);
-    else old.actual_routes = uniq([...(old.actual_routes || []), ...actualRoutes]);
+    else {
+      old.actual_routes = uniq([...(old.actual_routes || []), ...actualRoutes]);
+      old.extra_routes = uniq([...(old.extra_routes || []), ...routeAlerts.map(x => x.route)]);
+      const priorAlerts = Array.isArray(old.raw_payload?.route_alerts) ? old.raw_payload.route_alerts : [];
+      old.raw_payload = { ...old.raw_payload, route_alerts: [...priorAlerts, ...routeAlerts] };
+    }
   }
 
   const rows = [...byKey.values()];

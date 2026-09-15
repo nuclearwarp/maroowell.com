@@ -98,7 +98,10 @@ button,input{font:inherit}
 .waveBadge.day{background:#fff6df;color:#9a5b00}.waveBadge.night{background:#f2ecff;color:#6d28d9}
 .driverScore{margin-left:auto;text-align:right}.driverScore b{display:block;font-size:13px;color:var(--blue);font-weight:650}.driverScore small{color:#73848e;font-size:9.5px;font-weight:500}
 .timeMeta{margin-top:5px;display:flex;gap:9px;flex-wrap:wrap;font-size:10px}
-.missLine{margin-top:7px;padding:6px 8px;border-radius:8px;background:#fff3f2;color:#b42318;font-size:10.5px;font-weight:600}
+.missLine{margin-top:7px;padding:7px 9px;border-radius:9px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:10.5px;font-weight:700}
+.missLine.red{background:#fff0ef;color:#b42318;border-color:#fecaca}
+.routeChips{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
+.routeChip{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#f1f5f9;border:1px solid #dbe4ea;color:#435667;font-size:11px;font-weight:700;line-height:1}
 .flagLine{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}.flag{padding:4px 7px;border-radius:999px;font-size:9px;font-weight:650}.flag.freshMiss{background:#ecfdf5;color:#15803d;border:1px solid #86efac}.flag.dawnMiss{background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd}
 .driverCard.mismatch{border:2px solid var(--day)}.driverCard.external{border:2px solid var(--red)}
 .warn{margin-top:7px;padding:7px 8px;border-radius:9px;background:#fff7e7;color:#9c5b08;font-size:9.5px;line-height:1.45;white-space:pre-line;font-weight:600}
@@ -124,7 +127,7 @@ button,input{font:inherit}
 .metricPanel .k{font-size:12px;font-weight:650}.metricPanel .rate{font-size:16px;font-weight:700}
 .metricPanel .detail{font-size:12.5px;line-height:1.5}.metricPanel .dual{font-size:12px}.metricPanel .dual b{font-size:13.5px}
 .driverCamp,.waveBadge{font-size:11px}.driverScore{min-width:102px}.driverScore b{font-size:16px}.driverScore small{font-size:11px}
-.timeMeta{font-size:12px}.routeLabel{font-size:12.5px;color:#475569;font-weight:600}.missLine{font-size:12px}.flag{font-size:11px}.warn{font-size:11.5px}
+.timeMeta{font-size:12px}.routeLabel{font-size:12.5px;color:#475569;font-weight:600}.routeChip{font-size:12px}.missLine{font-size:12px}.flag{font-size:11px}.warn{font-size:11.5px}
 .metricBar,.scoreBar{height:7px;margin-top:7px;border-radius:999px;background:#e2e8f0;overflow:hidden}
 .metricBar i,.scoreBar i{display:block;height:100%;border-radius:inherit;transition:width .18s ease}
 .metricBar.delivery i,.scoreBar i{background:var(--blue)}.metricBar.freshDelivery i{background:var(--fresh)}.metricBar.return i{background:var(--return)}.metricBar.fresh i{background:var(--olive)}
@@ -373,10 +376,16 @@ function buildCamps(){
     const freshDelivery=backendDelivery(src,"fresh_delivery");
     const returns=backendCollection(src,"return",true);
     const fresh=backendCollection(src,"freshbag",false);
-    const rawRoutes=(Array.isArray(src.actual_routes)&&src.actual_routes.length?src.actual_routes:src.scheduled_routes)||[];
+    const rawRoutes=(Array.isArray(src.scheduled_routes)&&src.scheduled_routes.length?src.scheduled_routes:src.actual_routes)||[];
     const routes=uniq(rawRoutes.map(norm).filter(Boolean));
-    const extra=uniq((src.extra_routes||[]).map(subRoute).filter(Boolean));
-    const warns=extra.length?[`미계약 라우트 ${extra.join(", ")}`]:[];
+    const routeAlerts=Array.isArray(src.raw_payload?.route_alerts)?src.raw_payload.route_alerts:[];
+    const externalAlerts=routeAlerts.filter(x=>String(x?.type||"").toLowerCase()==="uncontracted");
+    const borrowedAlerts=routeAlerts.filter(x=>String(x?.type||"").toLowerCase()==="borrowed");
+    const externalRoutes=uniq(externalAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const borrowedRoutes=uniq(borrowedAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const warns=[];
+    if(borrowedRoutes.length)warns.push(`우리 라우트 오스캔 ${borrowedRoutes.join(", ")}`);
+    if(externalRoutes.length)warns.push(`타 라우트 오스캔 ${externalRoutes.join(", ")}`);
 
     addDelivery(g.totals.delivery,delivery);
     addDelivery(g.totals.freshDelivery,freshDelivery);
@@ -393,7 +402,8 @@ function buildCamps(){
       allCompletedAt:src.all_completed_at||null,
       freshMiss:String(src.fresh_miss||"N").toUpperCase()==="Y",
       dawnMiss:String(src.dawn_miss||"N").toUpperCase()==="Y",
-      status:extra.length?"external":"ok",
+      status:externalRoutes.length?"external":(borrowedRoutes.length?"mismatch":"ok"),
+      hasExternalRoute:externalRoutes.length>0,
       warns
     });
     g.workers++;
@@ -542,7 +552,7 @@ function renderCamps(){
           </div>
         </div>
         <div class="metrics">${metricsHtml({...c.totals,wave:c.wave})}</div>
-        ${c.totals.delivery.misscan?`<div class="missLine">미스캔 ${num(c.totals.delivery.misscan)}건</div>`:""}
+        ${c.totals.delivery.misscan?`<div class="missLine ${c.rows.some(r=>r.hasExternalRoute)?"red":""}">오스캔 ${num(c.totals.delivery.misscan)}건</div>`:""}
       </article>`;
     }).join("");
 
@@ -584,7 +594,7 @@ function renderDrivers(){
             <span class="waveBadge ${isNight(r.wave)?"night":"day"}">${waveLabel(r.wave)}</span>
             ${esc(r.driver)}
           </div>
-          <div class="routeLabel">${esc(r.routes.join(", ")||"라우트 없음")}</div>
+          <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
           <div class="timeMeta">
             <span>스캔 시작: ${fmtTime(r.scanStartedAt)}</span>
             <span>전체 완료: ${fmtTime(r.allCompletedAt)}</span>
@@ -593,7 +603,7 @@ function renderDrivers(){
         <div class="driverScore"><b>${pct(r.delivery.rate)}</b><small>배송 완료율</small><div class="scoreBar"><i style="width:${clampRate(r.delivery.rate)}%"></i></div></div>
       </div>
       <div class="metrics">${metricsHtml(r)}</div>
-      ${r.delivery.misscan?`<div class="missLine">미스캔 ${num(r.delivery.misscan)}건</div>`:""}
+      ${r.delivery.misscan?`<div class="missLine ${r.hasExternalRoute?"red":""}">오스캔 ${num(r.delivery.misscan)}건</div>`:""}
       ${flags?`<div class="flagLine">${flags}</div>`:""}
       ${r.warns.length?`<div class="warn ${r.status==="external"?"red":""}">${esc(r.warns.join("\n"))}</div>`:""}
     </article>`;
@@ -752,7 +762,7 @@ async function queryAll(){
     const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
     const [currentRes,freshRes,scheduleRes]=await Promise.all([
       S.sb.from("meta_realtime_current")
-        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss")
+        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
         .in("batch_id",ids),
       S.sb.from("meta_realtime_fresh_current")
         .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")

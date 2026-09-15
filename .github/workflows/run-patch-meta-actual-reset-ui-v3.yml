@@ -1,0 +1,40 @@
+name: Run Meta actual reset UI patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/run-patch-meta-actual-reset-ui-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/patch_meta_actual_reset_ui_v3.py
+      - run: |
+          grep -q 'class="excelDatePanel metaUploadPanel"' public/maroowell_schedule
+          grep -q 'const resetRows=metaResetRowsFromCurrent(current,metaDate)' public/maroowell_schedule
+          grep -q 'buildMetaUploadWorkbook(resetRows,"휴무")' public/maroowell_schedule
+          grep -q 'phase:"reset"' public/maroowell_schedule
+          ! grep -q 'meta_reset_disabled_direct_schedule_upload_only' workers/schedule-api/worker.js
+          node --check workers/schedule-api/worker.js
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/maroowell_schedule workers/schedule-api/worker.js
+          git commit -m "Restore Meta actual registrant reset then schedule upload"
+          git push
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config schedule-wrangler.toml --keep-vars
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config login-wrangler.toml --keep-vars

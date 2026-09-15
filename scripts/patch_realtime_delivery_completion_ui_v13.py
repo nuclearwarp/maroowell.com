@@ -106,3 +106,4 @@ s = s.replace('mw-realtime-live-v12', 'mw-realtime-live-v13', 1).replace('conten
 p.write_text(s, encoding="utf-8")
 
 print("patched realtime collector/frontend v13")
+# trigger 2026-09-16

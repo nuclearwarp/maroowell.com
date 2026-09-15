@@ -1,0 +1,38 @@
+name: Run realtime delivery completion UI v13
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/patch_realtime_delivery_completion_ui_v13.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python scripts/patch_realtime_delivery_completion_ui_v13.py
+      - name: Validate
+        run: |
+          node --check workers/meta-collector/entry.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('public/realtime').read_text(encoding='utf-8')
+          parts=re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>',s,re.S)
+          Path('/tmp/realtime-inline.js').write_text('\n'.join(x for x in parts if x.strip()),encoding='utf-8')
+          PY
+          node --check /tmp/realtime-inline.js
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add workers/meta-collector/entry.js public/realtime
+          git diff --cached --quiet && exit 0
+          git commit -m "Use delivery completion time and refresh realtime UI"
+          git push

@@ -1250,20 +1250,29 @@ async function getMetaWorkflowStatus(env, workflowId) {
     method: "GET"
   });
 
-  const envelope = result.body?.data || {};
+  const root = result.body || {};
+  const envelope = root?.data || {};
   const details = envelope?.data || {};
+  const statusRaw = clean(envelope.status || details.status || root.status).toUpperCase();
+  const failureMessage = clean(envelope.failureMessage || details.failureMessage || root.failureMessage || envelope.errorMessage || details.errorMessage || root.errorMessage || envelope.message || details.message);
+  const violations = [details.violations, envelope.violations, root.violations].find(Array.isArray) || [];
 
   return {
-    workflow_id: clean(envelope.workflowId) || clean(workflowId),
-    status: clean(envelope.status).toUpperCase() || "UNKNOWN",
-    failure_message: envelope.failureMessage ?? null,
+    workflow_id: clean(envelope.workflowId || details.workflowId || root.workflowId) || clean(workflowId),
+    status: statusRaw || "UNKNOWN",
+    failure_message: failureMessage || null,
     data: {
-      totalRows: Number(details.totalRows || 0),
-      created: Number(details.created || 0),
-      updated: Number(details.updated || 0),
-      modified: Number(details.modified || 0),
-      duplicated: Number(details.duplicated || 0),
-      violations: Array.isArray(details.violations) ? details.violations : []
+      totalRows: Number(details.totalRows ?? envelope.totalRows ?? root.totalRows ?? 0),
+      created: Number(details.created ?? envelope.created ?? root.created ?? 0),
+      updated: Number(details.updated ?? envelope.updated ?? root.updated ?? 0),
+      modified: Number(details.modified ?? envelope.modified ?? root.modified ?? 0),
+      duplicated: Number(details.duplicated ?? envelope.duplicated ?? root.duplicated ?? 0),
+      violations
+    },
+    diagnostic: {
+      api_message: clean(root.message) || null,
+      envelope_message: clean(envelope.message) || null,
+      details_message: clean(details.message) || null
     }
   };
 }

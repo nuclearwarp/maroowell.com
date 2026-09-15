@@ -1009,7 +1009,8 @@ const META_PERSON_ID_KEYS = new Set([
 ].map(metaKey));
 
 const META_STATUS_KEYS = new Set([
-  "workstatus", "schedulestatus", "attendance", "attendancestatus", "status", "worktype"
+  "workstatus", "workstatuscode", "workstatusname", "schedulestatus", "schedulestatuscode", "schedulestatusname",
+  "attendance", "attendancestatus", "attendancestatuscode", "attendancestatusname", "status", "statuscode", "statusname", "worktype"
 ].map(metaKey));
 
 const META_ROUTE_KEYS = new Set([
@@ -1058,14 +1059,23 @@ function metaStatusLooksWorking(status) {
 }
 
 function metaObjectHasRoute(obj) {
-  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
-  for (const [key, value] of Object.entries(obj)) {
-    if (!META_ROUTE_KEYS.has(metaKey(key))) continue;
-    if (Array.isArray(value) && value.length) return true;
-    if (typeof value === "string" && clean(value)) return true;
-    if (value && typeof value === "object" && Object.keys(value).length) return true;
+  const seen = new Set();
+  function walk(node, depth = 0) {
+    if (!node || typeof node !== "object" || depth > 4 || seen.has(node)) return false;
+    seen.add(node);
+    for (const [key, value] of Object.entries(node)) {
+      const k = metaKey(key);
+      if (META_ROUTE_KEYS.has(k) || k.includes("route")) {
+        if (Array.isArray(value) && value.length) return true;
+        if (typeof value === "string" && clean(value)) return true;
+        if (typeof value === "number") return true;
+        if (value && typeof value === "object" && Object.keys(value).length) return true;
+      }
+      if (value && typeof value === "object" && walk(value, depth + 1)) return true;
+    }
+    return false;
   }
-  return false;
+  return walk(obj);
 }
 
 function metaPersonFromObject(obj) {

@@ -1,0 +1,34 @@
+name: Run Meta upload JS repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/run-fix-meta-upload-js-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/fix_meta_upload_js_v4.py
+      - run: node --check /tmp/mw_schedule_inline.js
+      - run: |
+          grep -q 'class="excelDatePanel metaUploadPanel"' public/maroowell_schedule
+          grep -q 'const resetRows=metaResetRowsFromCurrent(current,metaDate)' public/maroowell_schedule
+          grep -q 'buildMetaUploadWorkbook(resetRows,"휴무")' public/maroowell_schedule
+          grep -q 'phase:"reset"' public/maroowell_schedule
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/maroowell_schedule
+          git commit -m "Repair Meta upload frontend syntax"
+          git push
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config login-wrangler.toml --keep-vars

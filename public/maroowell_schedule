@@ -1109,7 +1109,19 @@
       #metaUploadDateModal .excelDateBody{max-height:calc(90vh - 60px)!important;}
     }
     /* ===== META UPLOAD MODAL COMPACT FINAL END ===== */
-</style>
+
+    /* Meta actual registration status: read-only, auto-advanced after successful upload */
+    .updateEditor.actualOnly{height:38px;grid-template-columns:1fr;padding:4px 10px;min-width:190px}
+    .actualDateStatus{display:flex;align-items:center;justify-content:space-between;gap:14px;width:100%;white-space:nowrap}
+    .actualDateStatus span{font-size:12px;font-weight:900;color:#64748b}
+    .actualDateStatus strong{font-size:15px;font-weight:1000;color:#0f172a;letter-spacing:.01em}
+    @media(min-width:1181px){
+      .toolbar{grid-template-columns:160px 92px 300px 150px 200px max-content;gap:8px;padding-top:9px;padding-bottom:9px;align-items:end}
+      .toolbarActions{gap:7px}
+      .toolbarActions .btn,.weekBtns .btn{height:34px;padding:0 12px;font-size:12px}
+      .weekBtns{gap:6px}
+    }
+  </style>
 </head>
 
 <body>
@@ -1176,16 +1188,11 @@
         <input id="searchInput" class="input" type="text" placeholder="라우트 / 기사 / ID" autocomplete="off" />
       </div>
 
-      <div class="updateEditor" title="캠프 / 웨이브별 업데이트 현황">
-        <label class="dateMini">
-          <b>실제</b>
-          <input id="actualUpdateInput" type="date" />
-        </label>
-        <label class="dateMini">
-          <b>가라</b>
-          <input id="fakeUpdateInput" type="date" />
-        </label>
-        <button id="btnUpdateStatusSave" class="btnMini" type="button">등록</button>
+      <div class="updateEditor actualOnly" title="메타어드민 실제 등록 완료일">
+        <div class="actualDateStatus">
+          <span>메타 등록</span>
+          <strong id="actualUpdateText">-</strong>
+        </div>
       </div>
 
       <div class="toolbarActions">
@@ -1310,9 +1317,7 @@
         weekManualInput:document.getElementById("weekManualInput"),
         btnWeekManualApply:document.getElementById("btnWeekManualApply"),
         searchInput:document.getElementById("searchInput"),
-        actualUpdateInput:document.getElementById("actualUpdateInput"),
-        fakeUpdateInput:document.getElementById("fakeUpdateInput"),
-        btnUpdateStatusSave:document.getElementById("btnUpdateStatusSave"),
+        actualUpdateText:document.getElementById("actualUpdateText"),
         btnPrevWeek:document.getElementById("btnPrevWeek"),
         btnNextWeek:document.getElementById("btnNextWeek"),
         btnLoad:document.getElementById("btnLoad"),
@@ -2808,22 +2813,16 @@
 
       function setUpdateStatusEmpty(){
         state.updateStatus=null;
-        els.actualUpdateInput.value="";
-        els.fakeUpdateInput.value="";
-        els.actualUpdateInput.title="실제 업데이트 기준일 없음";
-        els.fakeUpdateInput.title="가라 업데이트 기준일 없음";
-        updateDateMiniLabels();
+        if(els.actualUpdateText)els.actualUpdateText.textContent="-";
       }
 
       function renderUpdateStatus(row){
         state.updateStatus=row || null;
         const actual=normalizeDateInput(row?.actual_update_date);
-        const fake=normalizeDateInput(row?.fake_update_date);
-        els.actualUpdateInput.value=actual || "";
-        els.fakeUpdateInput.value=fake || "";
-        els.actualUpdateInput.title=`실제 업데이트: ${actual ? dateDot(actual) : "-"}`;
-        els.fakeUpdateInput.title=`가라 업데이트: ${fake ? dateDot(fake) : "-"}`;
-        updateDateMiniLabels();
+        if(els.actualUpdateText){
+          els.actualUpdateText.textContent=actual ? dateDot(actual) : "-";
+          els.actualUpdateText.title=`메타어드민 실제 등록 완료일: ${actual ? dateDot(actual) : "-"}`;
+        }
       }
 
       async function loadUpdateStatusOnly(){
@@ -2845,38 +2844,21 @@
         }
       }
 
-      async function saveUpdateStatus(){
-        state.camp=clean(els.campInput.value);
-        state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
-        els.waveSelect.value=state.wave;
-        if(!state.camp){
-          alert("Camp를 먼저 입력하세요.");
-          return;
-        }
-
-        const actual=clean(els.actualUpdateInput.value);
-        const fake=clean(els.fakeUpdateInput.value);
-
-        setState("warn","DATE");
-        setStatus("업데이트 기준일 저장 중입니다.");
-        els.btnUpdateStatusSave.disabled=true;
-
-        try{
-          const json=await apiFetch("/schedule/update-status",{
-            method:"POST",
-            body:JSON.stringify({camp:state.camp,wave:state.wave,actual_update_date:actual || null,fake_update_date:fake || null})
-          });
-          renderUpdateStatus(json.update_status || null);
-          setState("ok","READY");
-          setStatus(`업데이트 기준일 저장 완료: 실제 ${actual?dateDot(actual):"-"} / 가라 ${fake?dateDot(fake):"-"}`);
-        }catch(e){
-          console.error(e);
-          setState("err","ERROR");
-          alert("업데이트 기준일 저장 실패: "+(e?.message||e));
-          setStatus("업데이트 기준일 저장 실패: "+(e?.message||e));
-        }finally{
-          els.btnUpdateStatusSave.disabled=false;
-        }
+      async function advanceActualUpdateDate(metaDate){
+        const next=normalizeDateInput(metaDate);
+        const current=normalizeDateInput(state.updateStatus?.actual_update_date);
+        if(!next || (current && next<=current))return false;
+        const json=await apiFetch("/schedule/update-status",{
+          method:"POST",
+          body:JSON.stringify({
+            camp:state.camp,
+            wave:state.wave,
+            actual_update_date:next,
+            fake_update_date:state.updateStatus?.fake_update_date || null
+          })
+        });
+        renderUpdateStatus(json.update_status || {actual_update_date:next});
+        return true;
       }
 
       async function loadAll(){
@@ -4406,6 +4388,7 @@
             throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
           }
 
+          await advanceActualUpdateDate(metaDate);
           const summary=metaWorkflowSummary(actualResult);
           setStatus(`메타어드민 전송 완료: 기존 ${resetRows.length}명 정리 / 신규 ${actualRows.length}명 / ${summary}`);
           alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n기존 등록 휴무 처리: ${resetRows.length}명\n신규 스케줄: ${actualRows.length}명\n\n${summary}`);
@@ -4612,58 +4595,11 @@
 
         els.waveSelect.value=state.wave;
 
-        [els.actualUpdateInput, els.fakeUpdateInput].forEach(input=>{
-          if(!input)return;
-          input.addEventListener("input",()=>updateDateMiniLabel(input));
-          input.addEventListener("change",()=>updateDateMiniLabel(input));
-
-          const dateMini=input.closest(".dateMini");
-          const openPickerFromUserAction=e=>{
-            e.preventDefault();
-            e.stopPropagation();
-            openNativeDatePicker(input);
-          };
-
-          input.addEventListener("click",openPickerFromUserAction);
-          dateMini?.addEventListener("click",openPickerFromUserAction);
-          dateMini?.addEventListener("keydown",e=>{
-            if(e.key==="Enter"||e.key===" "){
-              openPickerFromUserAction(e);
-            }
-          });
-          dateMini?.setAttribute("tabindex","0");
-          dateMini?.setAttribute("role","button");
-        });
-
-        els.btnExcelDateGenerate?.addEventListener("click",()=>{
-          exportMetaExcelForDates(selectedExcelDates());
-        });
-        els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
-        els.excelDateModal?.addEventListener("click",e=>{
-          if(e.target===els.excelDateModal) closeExcelDatePicker();
-        });
-        els.btnMetaUploadDateRun?.addEventListener("click",()=>{
-          const date=selectedMetaUploadDate();
-          if(!date){alert("메타어드민으로 전송할 일자를 선택하세요.");return;}
-          uploadMetaScheduleForDate(date);
-        });
-        els.btnMetaUploadDateClose?.addEventListener("click",closeMetaUploadDatePicker);
-        els.metaUploadDateModal?.addEventListener("click",e=>{
-          if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker();
-        });
-        els.btnLogout.addEventListener("click",async()=>{
-          try{await supabase.auth.signOut()}catch{}
-          location.href=LOGIN_PATH;
-        });
-
-        els.btnLoad.addEventListener("click",loadAll);
-        els.btnSave.addEventListener("click",saveAll);
         els.btnExportMeta.addEventListener("click",exportMetaExcel);
         els.btnMetaUpload?.addEventListener("click",openMetaUploadDatePicker);
         els.btnCopyImage.addEventListener("click",copyImage);
         els.btnReset.addEventListener("click",resetFilters);
         els.btnImportWeek.addEventListener("click",importWeek);
-        els.btnUpdateStatusSave.addEventListener("click",saveUpdateStatus);
 
         els.btnPrevWeek.addEventListener("click",()=>{
           applyWeekStart(addDays(state.weekStart||state.baseDate,-7),!!state.camp);

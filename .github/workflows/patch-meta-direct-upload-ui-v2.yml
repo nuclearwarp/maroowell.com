@@ -1,0 +1,159 @@
+name: Patch Meta direct upload logic and modal UI v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/patch-meta-direct-upload-ui-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Meta upload logic and modal UI
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('public/maroowell_schedule')
+          s = p.read_text(encoding='utf-8')
+
+          # 1) Meta date modal used an unstyled class (excelDateDialog), which made it span almost the full viewport.
+          old_modal = '<div id="metaUploadDateModal" class="excelDateModal" aria-hidden="true">\n    <div class="excelDateDialog" role="dialog" aria-modal="true" aria-labelledby="metaUploadDateTitle">'
+          new_modal = '<div id="metaUploadDateModal" class="excelDateModal" aria-hidden="true">\n    <div class="excelDatePanel" role="dialog" aria-modal="true" aria-labelledby="metaUploadDateTitle">'
+          if old_modal not in s:
+              raise SystemExit('meta modal class target not found')
+          s = s.replace(old_modal, new_modal, 1)
+
+          # 2) The intended behavior is direct upload of the same rows as manual Excel generation.
+          #    Do not reset existing MetaAdmin registrants to off-duty first.
+          old_desc = 'els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 메타어드민으로 전송할 일자를 하나 선택하세요. 전송 전 해당 캠프·주야·일자의 메타어드민 실제 등록 스케줄을 조회하고, 현재 근무로 등록된 사람만 먼저 휴무 처리한 뒤 마루웰 스케줄을 전송합니다.`;'
+          new_desc = 'els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 메타어드민으로 전송할 일자를 하나 선택하세요. 엑셀 생성 기능과 동일한 출근 스케줄을 그대로 전송합니다. 기존 메타 등록자를 휴무로 먼저 변경하지 않습니다.`;'
+          if old_desc not in s:
+              raise SystemExit('meta upload description target not found')
+          s = s.replace(old_desc, new_desc, 1)
+
+          new_fn = r'''      async function uploadMetaScheduleForDate(scheduleDate){
+        const selectedDate=normalizeDateInput(scheduleDate);
+        if(!selectedDate||!state.camp||!state.weekDates.includes(selectedDate)){
+          alert("전송할 일자를 다시 선택해주세요.");
+          return;
+        }
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+        if(state.metaUploadBusy)return;
+
+        state.metaUploadBusy=true;
+        if(els.btnMetaUpload)els.btnMetaUpload.disabled=true;
+        if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
+        closeMetaUploadDatePicker();
+
+        try{
+          setStatus(`${dateLabel(selectedDate)} 메타어드민 전송용 엑셀 생성 중...`);
+          try{
+            const added=await loadAllMaroowellInfoRowsForAccountLookup();
+            if(added>0)buildDriverAccounts();
+          }catch(e){
+            console.warn("[meta upload] global account refresh failed",e);
+          }
+          await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
+
+          // 수동 '엑셀 생성'과 동일한 collectMetaRows 결과만 그대로 업로드한다.
+          // MetaAdmin 기존 등록자를 먼저 휴무로 바꾸는 reset 업로드는 수행하지 않는다.
+          const actualRows=collectMetaRows({scheduleDate:selectedDate});
+          if(!actualRows.length)throw new Error(`${dateLabel(selectedDate)}에 전송할 출근 스케줄이 없습니다.`);
+
+          const metaDate=metaUploadDateForScheduleDate(selectedDate);
+          const names=actualRows.map(r=>r.name).filter(Boolean).sort((a,b)=>sortText(a,b));
+          const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n\n엑셀 생성 기능과 동일한 출근 스케줄 ${actualRows.length}명만 메타어드민에 그대로 업로드합니다.\n기존 등록자를 휴무로 먼저 변경하지 않습니다.\n\n전송 대상: ${names.join(", ")}\n\n계속할까요?`);
+          if(!ok){setStatus("메타어드민 전송 취소");return;}
+
+          setStatus(`메타어드민 엑셀 직접 업로드 중: ${actualRows.length}명`);
+          const actualWb=buildMetaUploadWorkbook(actualRows,META_WORK_STATUS);
+          const actualUpload=await uploadMetaWorkbook({
+            wb:actualWb,
+            fileName:`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${metaDate}_schedule.xlsx`,
+            camp:state.camp,wave:state.wave,metaDate,phase:"apply"
+          });
+          const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
+          if(clean(actualResult?.status).toUpperCase()!=="SUCCESS"){
+            throw new Error(metaWorkflowFailureText(actualResult,actualRows));
+          }
+
+          const summary=metaWorkflowSummary(actualResult);
+          setStatus(`메타어드민 전송 완료: ${dateLabel(selectedDate)} / ${actualRows.length}명 / ${summary}`);
+          alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n출근 ${actualRows.length}명\n${names.join(", ")}\n\n${summary}`);
+        }catch(e){
+          console.error("[meta upload]",e);
+          setStatus(`메타어드민 전송 실패: ${e?.message||e}`);
+          alert(`메타어드민 전송 실패\n\n${e?.message||e}`);
+        }finally{
+          state.metaUploadBusy=false;
+          if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;
+          if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
+        }
+      }
+
+      async function copyImage(){'''
+
+          pattern = r'      async function uploadMetaScheduleForDate\(scheduleDate\)\{.*?\n      \}\n\n      async function copyImage\(\)\{'
+          ns, n = re.subn(pattern, new_fn, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit(f'upload function replacement count={n}')
+          p.write_text(ns, encoding='utf-8')
+
+          # 3) Backend safety guard: reject any old reset/off phase even if a stale client tries it.
+          w = Path('workers/schedule-api/worker.js')
+          t = w.read_text(encoding='utf-8')
+          guard = 'meta_reset_disabled_direct_schedule_upload_only'
+          if guard not in t:
+              needle = '        const phase = clean(upload.phase) || "apply";\n\n        if (!camp) throw httpError(400, "camp_required");'
+              repl = '        const phase = clean(upload.phase) || "apply";\n\n        // Safety guard: direct schedule upload only. Old reset/off uploads are forbidden.\n        if (phase.toLowerCase() === "reset") throw httpError(409, "meta_reset_disabled_direct_schedule_upload_only");\n\n        if (!camp) throw httpError(400, "camp_required");'
+              if needle not in t:
+                  raise SystemExit('schedule worker reset guard target not found')
+              t = t.replace(needle, repl, 1)
+              w.write_text(t, encoding='utf-8')
+
+      - name: Verify patch
+        run: |
+          grep -q 'id="metaUploadDateModal"' public/maroowell_schedule
+          grep -A2 'id="metaUploadDateModal"' public/maroowell_schedule | grep -q 'class="excelDatePanel"'
+          grep -q '기존 메타 등록자를 휴무로 먼저 변경하지 않습니다' public/maroowell_schedule
+          grep -q 'const actualRows=collectMetaRows({scheduleDate:selectedDate})' public/maroowell_schedule
+          grep -q 'meta_reset_disabled_direct_schedule_upload_only' workers/schedule-api/worker.js
+          if grep -A120 'async function uploadMetaScheduleForDate' public/maroowell_schedule | grep -q 'resetWb'; then
+            echo 'reset upload still present in active send function'
+            exit 1
+          fi
+          node --check workers/schedule-api/worker.js
+
+      - name: Commit patch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add public/maroowell_schedule workers/schedule-api/worker.js
+          git commit -m "Fix Meta direct upload logic and compact date modal"
+          git push
+
+      - name: Deploy schedule API
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config schedule-wrangler.toml --keep-vars
+
+      - name: Deploy web assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config login-wrangler.toml --keep-vars

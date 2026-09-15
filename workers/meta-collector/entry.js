@@ -331,7 +331,7 @@ async function processBatch(env, cookies, batch) {
     const deliveryDone = d.total > 0 && d.scanned === 0 && (d.completed + d.impossible + d.assigned + d.pdd) >= d.total;
     const returnDone = batch.wave === "WAVE1" ? null : (ret.total === 0 || (ret.pending === 0 && ret.collected + ret.uncollected >= ret.total));
     const freshbagDone = fb.total === 0 || (fb.pending === 0 && fb.collected + fb.uncollected >= fb.total);
-    const allDone = deliveryDone && (batch.wave === "WAVE1" || returnDone) && freshbagDone;
+    const allDone = deliveryDone;
     const rec = {
       batch_id: batch.id, schedule_date: batch.schedule_date, meta_work_date: batch.meta_work_date,
       camp_code: batch.camp_code, camp_name: batch.camp_name, wave: batch.wave,
@@ -347,7 +347,7 @@ async function processBatch(env, cookies, batch) {
       freshbag_total: fb.total, freshbag_attempt_rate: fb.attemptRate, freshbag_collection_rate: fb.collectionRate,
       scan_started_at: prev?.scan_started_at || ((d.scanned + d.completed + d.impossible + d.pdd) > 0 ? now : null),
       delivery_started_at: prev?.delivery_started_at || ((d.completed + (ret?.collected || 0) + (ret?.uncollected || 0) + fb.collected + fb.uncollected) > 0 ? now : null),
-      delivery_completed_at: prev?.delivery_completed_at || (deliveryDone && (batch.wave === "WAVE1" || returnDone) ? now : null),
+      delivery_completed_at: prev?.delivery_completed_at || (deliveryDone ? now : null),
       all_completed_at: prev?.all_completed_at || (allDone ? now : null), first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
       delivery_done: deliveryDone, return_done: returnDone, freshbag_done: freshbagDone,
       raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now }, updated_at: now

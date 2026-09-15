@@ -1133,6 +1133,7 @@
       <button id="btnLoad" class="btn primary" type="button">불러오기</button>
       <button id="btnSave" class="btn ok" type="button">저장</button>
       <button id="btnExportMeta" class="btn excel" type="button">📊 엑셀 생성</button>
+      <button id="btnMetaUpload" class="btn ok" type="button">🚀 메타어드민 전송</button>
       <button id="btnCopyImage" class="btn warn" type="button">이미지 복사</button>
       <button id="btnReset" class="btn" type="button">초기화</button>
 
@@ -1180,6 +1181,22 @@
       <div class="excelDateBody">
         <p id="excelDateDesc" class="excelDateDesc">생성할 스케줄 일자를 선택하세요.</p>
         <div id="excelDateList" class="excelDateList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="metaUploadDateModal" class="excelDateModal" aria-hidden="true">
+    <div class="excelDateDialog" role="dialog" aria-modal="true" aria-labelledby="metaUploadDateTitle">
+      <div class="excelDateHead">
+        <h3 id="metaUploadDateTitle">메타어드민 전송 일자 선택</h3>
+        <div class="excelDateActions">
+          <button id="btnMetaUploadDateRun" class="btn ok" type="button">전송</button>
+          <button id="btnMetaUploadDateClose" class="btn" type="button">닫기</button>
+        </div>
+      </div>
+      <div class="excelDateBody">
+        <p id="metaUploadDateDesc" class="excelDateDesc">메타어드민으로 전송할 스케줄 일자를 하나 선택하세요.</p>
+        <div id="metaUploadDateList" class="excelDateList"></div>
       </div>
     </div>
   </div>
@@ -1237,6 +1254,7 @@
         btnLoad:document.getElementById("btnLoad"),
         btnSave:document.getElementById("btnSave"),
         btnExportMeta:document.getElementById("btnExportMeta"),
+        btnMetaUpload:document.getElementById("btnMetaUpload"),
         btnCopyImage:document.getElementById("btnCopyImage"),
         btnReset:document.getElementById("btnReset"),
         btnImportWeek:document.getElementById("btnImportWeek"),
@@ -1256,7 +1274,12 @@
         btnExcelDateGenerate:document.getElementById("btnExcelDateGenerate"),
         btnExcelDateClose:document.getElementById("btnExcelDateClose"),
         excelDateDesc:document.getElementById("excelDateDesc"),
-        excelDateList:document.getElementById("excelDateList")
+        excelDateList:document.getElementById("excelDateList"),
+        metaUploadDateModal:document.getElementById("metaUploadDateModal"),
+        metaUploadDateDesc:document.getElementById("metaUploadDateDesc"),
+        metaUploadDateList:document.getElementById("metaUploadDateList"),
+        btnMetaUploadDateRun:document.getElementById("btnMetaUploadDateRun"),
+        btnMetaUploadDateClose:document.getElementById("btnMetaUploadDateClose")
       };
 
       const state = {
@@ -1267,7 +1290,8 @@
         schedules:[],scheduleMap:new Map(),
         driversRaw:[],driverAccounts:[],accountByDisplay:new Map(),accountByExportName:new Map(),accountById:new Map(),metaInfoAccountsByName:new Map(),personColorMap:new Map(),
         expanded:new Set(),dirty:new Map(),loading:false,suggestInput:null,dayClipboard:null,
-        updateStatus:null
+        updateStatus:null,
+        metaUploadBusy:false
       };
 
       const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
@@ -1616,6 +1640,25 @@
         const res=await fetch(SCHEDULE_API_BASE+path,{
           ...(options||{}),
           headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`,...(options?.headers||{})}
+        });
+        const text=await res.text();
+        let json=null;
+        try{json=text?JSON.parse(text):null}catch{json={ok:false,error:text}}
+        if(!res.ok||json?.ok===false){
+          const err=new Error(json?.error||json?.message||`API 오류 ${res.status}`);
+          err.status=res.status;err.detail=json?.detail||json;throw err;
+        }
+        return json;
+      }
+
+      async function apiFetchForm(path,formData){
+        const {data}=await supabase.auth.getSession();
+        const token=data?.session?.access_token;
+        if(!token){location.href=LOGIN_PATH;throw new Error("로그인 세션이 없습니다.")}
+        const res=await fetch(SCHEDULE_API_BASE+path,{
+          method:"POST",
+          headers:{"Authorization":`Bearer ${token}`},
+          body:formData
         });
         const text=await res.text();
         let json=null;
@@ -3932,6 +3975,7 @@
         return dates.join("_");
       }
 
+      // LEGACY FALLBACK: MetaAdmin API가 막히거나 세션 연동이 실패할 때 수동 업로드용 XLSX를 생성하는 기존 기능. 삭제하지 말 것.
       function writeMetaExcelFileForDates(selectedDates,rows){
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
 
@@ -4038,6 +4082,263 @@
         return exportMetaExcelForDates([scheduleDate]);
       }
 
+
+      function closeMetaUploadDatePicker(){
+        if(!els.metaUploadDateModal)return;
+        els.metaUploadDateModal.classList.remove("open");
+        els.metaUploadDateModal.setAttribute("aria-hidden","true");
+        if(els.metaUploadDateList)els.metaUploadDateList.innerHTML="";
+        if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
+      }
+
+      function selectedMetaUploadDate(){
+        if(!els.metaUploadDateList)return "";
+        const selected=els.metaUploadDateList.querySelector(".excelDateOption.selected");
+        return normalizeDateInput(selected?.getAttribute("data-date")||"");
+      }
+
+      function updateMetaUploadRunButton(){
+        if(!els.btnMetaUploadDateRun)return;
+        els.btnMetaUploadDateRun.textContent=selectedMetaUploadDate()?"전송 (1)":"전송";
+      }
+
+      function openMetaUploadDatePicker(){
+        if(!els.metaUploadDateModal||!els.metaUploadDateList)return;
+        if(!state.camp||!state.weekDates.length){
+          alert("먼저 불러오기를 해주세요.");
+          return;
+        }
+        if(state.metaUploadBusy)return;
+
+        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} 중 메타어드민으로 전송할 일자를 하나 선택하세요. 기존 메타 스케줄이 있으면 먼저 해당 캠프·주야·일자의 전 인원을 휴무 처리한 뒤 현재 스케줄을 전송합니다.`;
+        els.metaUploadDateList.innerHTML=state.weekDates.map(date=>{
+          const metaDate=normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
+          const count=countMetaRowsForScheduleDate(date);
+          return `
+            <button class="excelDateOption" type="button" data-date="${esc(date)}" aria-pressed="false">
+              ${esc(dateLabel(date))}
+              <small>메타 업무일 ${esc(mdLabel(metaDate))} · 출근 ${count.toLocaleString("ko-KR")}명</small>
+            </button>
+          `;
+        }).join("");
+
+        els.metaUploadDateList.querySelectorAll("[data-date]").forEach(btn=>{
+          btn.addEventListener("click",()=>{
+            els.metaUploadDateList.querySelectorAll(".excelDateOption.selected").forEach(x=>{
+              x.classList.remove("selected");
+              x.setAttribute("aria-pressed","false");
+            });
+            btn.classList.add("selected");
+            btn.setAttribute("aria-pressed","true");
+            updateMetaUploadRunButton();
+          });
+        });
+
+        updateMetaUploadRunButton();
+        els.metaUploadDateModal.classList.add("open");
+        els.metaUploadDateModal.setAttribute("aria-hidden","false");
+      }
+
+      function metaUploadDateForScheduleDate(scheduleDate){
+        const date=normalizeDateInput(scheduleDate);
+        return normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
+      }
+
+      function isMetaResetCandidate(acc){
+        if(!acc||!state.camp)return false;
+        const camp=clean(acc.camp);
+        const wave=clean(acc.wave);
+        const position=clean(acc.position);
+        if(!camp||!campMatches(camp,state.camp))return false;
+        if(!wave||!explicitWaveMatches(wave,state.wave))return false;
+        if(isRetiredPosition(position))return false;
+        return true;
+      }
+
+      function metaResetRows(metaDate){
+        const out=[];
+        const seen=new Set();
+        for(const acc of state.driverAccounts||[]){
+          if(!isMetaResetCandidate(acc))continue;
+          const name=clean(acc.exportName||acc.displayName||acc.ownerName);
+          const id=clean(acc.exportId);
+          if(!name||!id)continue;
+          const key=keyOf(id)||keyOf(name);
+          if(!key||seen.has(key))continue;
+          seen.add(key);
+          out.push({date:metaDate,name,id,routes:[]});
+        }
+        return out.sort((a,b)=>{
+          const nc=sortText(a.name,b.name);
+          return nc!==0?nc:sortText(a.id,b.id);
+        });
+      }
+
+      // API 전송용 workbook 생성. 위 수동 엑셀 생성 기능과 병행 유지한다.
+      function buildMetaUploadWorkbook(rows,workStatus){
+        const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
+        const status=clean(workStatus)||META_WORK_STATUS;
+        const isOff=status==="휴무";
+        const aoa=[
+          header,
+          ...(rows||[]).map(r=>[
+            r.date,
+            META_VENDOR_NAME,
+            Number(META_BUSINESS_NO),
+            metaCampName(state.camp),
+            state.wave,
+            r.name,
+            r.id,
+            status,
+            isOff?"":metaRotationByWave(state.wave),
+            isOff?"":(r.routes||[]).join(",")
+          ])
+        ];
+        const wb=XLSX.utils.book_new();
+        const ws=XLSX.utils.aoa_to_sheet(aoa);
+        forceMetaAdminCellTypes(ws,aoa.length);
+        ws["!cols"]=[{wch:12},{wch:14},{wch:16},{wch:12},{wch:10},{wch:12},{wch:18},{wch:10},{wch:16},{wch:34}];
+        ws["!autofilter"]={ref:`A1:J${aoa.length}`};
+        XLSX.utils.book_append_sheet(wb,ws,"Sheet0");
+        return wb;
+      }
+
+      function metaWorkbookBlob(wb){
+        const bytes=XLSX.write(wb,{bookType:"xlsx",bookSST:true,cellDates:false,type:"array"});
+        return new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+      }
+
+      async function uploadMetaWorkbook({wb,fileName,camp,wave,metaDate,phase}){
+        const form=new FormData();
+        form.append("camp",camp);
+        form.append("wave",wave);
+        form.append("meta_date",metaDate);
+        form.append("phase",phase||"apply");
+        form.append("file",metaWorkbookBlob(wb),fileName);
+        return apiFetchForm("/schedule/meta/upload-excel",form);
+      }
+
+      const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+      async function pollMetaWorkflow(workflowId){
+        const id=clean(workflowId);
+        if(!id)throw new Error("메타어드민 workflowId가 없습니다.");
+        for(let i=0;i<90;i++){
+          const result=await apiFetch("/schedule/meta/workflow?workflow_id="+encodeURIComponent(id));
+          const status=clean(result?.status).toUpperCase();
+          if(status && status!=="RUNNING" && status!=="PENDING" && status!=="QUEUED")return result;
+          await sleep(1000);
+        }
+        throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");
+      }
+
+      function metaWorkflowSummary(result){
+        const d=result?.data||{};
+        return `총 ${Number(d.totalRows||0).toLocaleString("ko-KR")} / 생성 ${Number(d.created||0).toLocaleString("ko-KR")} / 수정 ${Number(d.updated||0).toLocaleString("ko-KR")} / 변경 ${Number(d.modified||0).toLocaleString("ko-KR")}`;
+      }
+
+      function metaWorkflowFailureText(result,rows){
+        const violations=Array.isArray(result?.data?.violations)?result.data.violations:[];
+        const lines=violations.slice(0,20).map(v=>{
+          const rowNum=Number(v?.rowNum||0);
+          const src=rowNum>=2?(rows||[])[rowNum-2]:null;
+          const who=src?[src.date,src.name,src.id].filter(Boolean).join(" · "):rowNum?`${rowNum}행`:"";
+          return `${who?who+" — ":""}${clean(v?.cause)||"처리 실패"}`;
+        });
+        if(violations.length>20)lines.push(`외 ${violations.length-20}건`);
+        return lines.join("\n")||clean(result?.failure_message)||"메타어드민 스케줄 처리에 실패했습니다.";
+      }
+
+      async function uploadMetaScheduleForDate(scheduleDate){
+        const selectedDate=normalizeDateInput(scheduleDate);
+        if(!selectedDate||!state.camp||!state.weekDates.includes(selectedDate)){
+          alert("전송할 일자를 다시 선택해주세요.");
+          return;
+        }
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+        if(state.metaUploadBusy)return;
+
+        state.metaUploadBusy=true;
+        if(els.btnMetaUpload)els.btnMetaUpload.disabled=true;
+        if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
+        closeMetaUploadDatePicker();
+
+        let resetCompleted=false;
+        try{
+          setStatus(`${dateLabel(selectedDate)} 메타어드민 전송 준비 중...`);
+          try{
+            const added=await loadAllMaroowellInfoRowsForAccountLookup();
+            if(added>0)buildDriverAccounts();
+          }catch(e){
+            console.warn("[meta upload] global account refresh failed",e);
+          }
+          await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
+
+          const actualRows=collectMetaRows({scheduleDate:selectedDate});
+          if(!actualRows.length)throw new Error(`${dateLabel(selectedDate)}에 전송할 출근 스케줄이 없습니다.`);
+
+          const metaDate=metaUploadDateForScheduleDate(selectedDate);
+          const current=await apiFetch("/schedule/meta/current?"+new URLSearchParams({
+            camp:state.camp,
+            wave:state.wave,
+            date:metaDate
+          }).toString());
+
+          const resetNeeded=current?.has_existing!==false;
+          if(resetNeeded){
+            const resetRows=metaResetRows(metaDate);
+            if(!resetRows.length)throw new Error("전체 휴무 처리에 사용할 현재 캠프 기사 계정을 찾지 못했습니다.");
+
+            const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)} 스케줄을 메타어드민에 전송합니다.\n\n기존 메타 스케줄이 확인되어 먼저 ${resetRows.length}명을 전체 휴무 처리한 뒤 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n계속할까요?`);
+            if(!ok){setStatus("메타어드민 전송 취소");return;}
+
+            setStatus(`기존 메타 스케줄 초기화 중: ${resetRows.length}명 전체 휴무`);
+            const resetWb=buildMetaUploadWorkbook(resetRows,"휴무");
+            const resetUpload=await uploadMetaWorkbook({
+              wb:resetWb,
+              fileName:`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${metaDate}_reset_off.xlsx`,
+              camp:state.camp,wave:state.wave,metaDate,phase:"reset"
+            });
+            const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
+            if(clean(resetResult?.status).toUpperCase()!=="SUCCESS"){
+              throw new Error("기존 스케줄 전체 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
+            }
+            resetCompleted=true;
+          }else{
+            const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)} 스케줄 ${actualRows.length}명을 메타어드민에 전송합니다.\n계속할까요?`);
+            if(!ok){setStatus("메타어드민 전송 취소");return;}
+          }
+
+          setStatus(`메타어드민 실제 스케줄 업로드 중: ${actualRows.length}명`);
+          const actualWb=buildMetaUploadWorkbook(actualRows,META_WORK_STATUS);
+          const actualUpload=await uploadMetaWorkbook({
+            wb:actualWb,
+            fileName:`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${metaDate}_schedule.xlsx`,
+            camp:state.camp,wave:state.wave,metaDate,phase:"apply"
+          });
+          const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
+          if(clean(actualResult?.status).toUpperCase()!=="SUCCESS"){
+            const prefix=resetCompleted?"※ 기존 스케줄은 이미 전체 휴무 처리된 상태입니다. 즉시 오류를 확인해주세요.\n\n":"";
+            throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
+          }
+
+          await apiFetch("/schedule/meta/current?"+new URLSearchParams({camp:state.camp,wave:state.wave,date:metaDate}).toString()).catch(()=>null);
+          const summary=metaWorkflowSummary(actualResult);
+          setStatus(`메타어드민 전송 완료: ${dateLabel(selectedDate)} / ${summary}`);
+          alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n${summary}`);
+        }catch(e){
+          console.error("[meta upload]",e);
+          setStatus(`메타어드민 전송 실패: ${e?.message||e}`);
+          alert(`메타어드민 전송 실패\n\n${e?.message||e}`);
+        }finally{
+          state.metaUploadBusy=false;
+          if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;
+          if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
+        }
+      }
 
       async function copyImage(){
         if(!window.htmlToImage){alert("이미지 변환 라이브러리를 불러오지 못했습니다.");return}
@@ -4261,7 +4562,15 @@
         els.excelDateModal?.addEventListener("click",e=>{
           if(e.target===els.excelDateModal) closeExcelDatePicker();
         });
-
+        els.btnMetaUploadDateRun?.addEventListener("click",()=>{
+          const date=selectedMetaUploadDate();
+          if(!date){alert("메타어드민으로 전송할 일자를 선택하세요.");return;}
+          uploadMetaScheduleForDate(date);
+        });
+        els.btnMetaUploadDateClose?.addEventListener("click",closeMetaUploadDatePicker);
+        els.metaUploadDateModal?.addEventListener("click",e=>{
+          if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker();
+        });
         els.btnLogout.addEventListener("click",async()=>{
           try{await supabase.auth.signOut()}catch{}
           location.href=LOGIN_PATH;
@@ -4270,6 +4579,7 @@
         els.btnLoad.addEventListener("click",loadAll);
         els.btnSave.addEventListener("click",saveAll);
         els.btnExportMeta.addEventListener("click",exportMetaExcel);
+        els.btnMetaUpload?.addEventListener("click",openMetaUploadDatePicker);
         els.btnCopyImage.addEventListener("click",copyImage);
         els.btnReset.addEventListener("click",resetFilters);
         els.btnImportWeek.addEventListener("click",importWeek);

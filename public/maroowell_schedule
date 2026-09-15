@@ -4216,24 +4216,27 @@
         return normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
       }
 
-      function metaResetRowsFromCurrent(current,metaDate){
-        // MetaAdmin 조회 결과의 실제 등록자만 휴무 처리한다.
-        const source=Array.isArray(current?.registered_people)?current.registered_people:[];
-        const out=[];
-        const seen=new Set();
+      function metaResetRowsFromCurrent(current,metaDate,actualRows=[]){
+        // MetaAdmin의 전체 51명 명단에서 이번 마루웰 실제 출근자를 제외한 나머지를 휴무로 맞춘다.
+        const source=Array.isArray(current?.all_people)&&current.all_people.length
+          ? current.all_people
+          : (Array.isArray(current?.registered_people)?current.registered_people:[]);
+        const activeKeys=new Set();
+        for(const row of actualRows||[]){
+          const idKey=keyOf(row?.id); const nameKey=keyOf(row?.name);
+          if(idKey)activeKeys.add(`id:${idKey}`); if(nameKey)activeKeys.add(`name:${nameKey}`);
+        }
+        const out=[]; const seen=new Set();
         for(const person of source){
           const name=clean(person?.name || person?.driver_name || person?.display_name);
           const id=clean(person?.id || person?.coupang_id || person?.login_id);
           if(!name||!id)continue;
-          const key=keyOf(id)||keyOf(name);
-          if(!key||seen.has(key))continue;
-          seen.add(key);
+          const idKey=keyOf(id), nameKey=keyOf(name);
+          if((idKey&&activeKeys.has(`id:${idKey}`)) || (nameKey&&activeKeys.has(`name:${nameKey}`)))continue;
+          const key=idKey||nameKey; if(!key||seen.has(key))continue; seen.add(key);
           out.push({date:metaDate,name,id,routes:[]});
         }
-        return out.sort((a,b)=>{
-          const nc=sortText(a.name,b.name);
-          return nc!==0?nc:sortText(a.id,b.id);
-        });
+        return out.sort((a,b)=>{ const nc=sortText(a.name,b.name); return nc!==0?nc:sortText(a.id,b.id); });
       }
 
       // API 전송용 workbook 생성. 위 수동 엑셀 생성 기능과 병행 유지한다.
@@ -4359,7 +4362,7 @@
             date:metaDate
           }).toString());
 
-          const resetRows=metaResetRowsFromCurrent(current,metaDate);
+          const resetRows=metaResetRowsFromCurrent(current,metaDate,actualRows);
           const resetNeeded=current?.has_existing===true && resetRows.length>0;
 
           if(current?.has_existing===true && !resetRows.length){
@@ -4369,7 +4372,7 @@
           const ok=confirm(
             `${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n\n`+
             (resetNeeded
-              ? `메타어드민 기존 등록 ${resetRows.length}명만 먼저 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n\n기존 등록: ${resetRows.map(r=>r.name).join(", ")}\n`
+              ? `메타어드민 전체 등록자 중 현재 마루웰 출근자가 아닌 ${resetRows.length}명을 먼저 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
               : `메타어드민 기존 등록자가 없어 현재 스케줄 ${actualRows.length}명을 바로 업로드합니다.\n`)+
             `\n계속할까요?`
           );

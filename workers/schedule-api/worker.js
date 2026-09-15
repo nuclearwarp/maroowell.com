@@ -1107,6 +1107,29 @@ function metaPersonFromObject(obj) {
   return { name, id, status: clean(status) || null };
 }
 
+function metaAnyPersonFromObject(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+  let name = firstMetaValue(obj, META_PERSON_NAME_KEYS);
+  let id = firstMetaValue(obj, META_PERSON_ID_KEYS);
+  if (id && id.includes("/")) {
+    const parsed = parseMetaAccountToken(id); id = parsed.id; if (!name && parsed.name) name = parsed.name;
+  }
+  if (name && name.includes("/")) {
+    const parsed = parseMetaAccountToken(name); if (!id && parsed.id) id = parsed.id; if (parsed.name) name = parsed.name;
+  }
+  name=clean(name); id=clean(id);
+  return name && id ? {name,id} : null;
+}
+function extractMetaAllPeople(payload) {
+  const out=[]; const seen=new Set(); const visited=new Set();
+  function walk(node){
+    if(!node || typeof node!=="object" || visited.has(node)) return; visited.add(node);
+    if(!Array.isArray(node)){ const p=metaAnyPersonFromObject(node); if(p){ const k=metaKey(p.id)||metaKey(p.name); if(k&&!seen.has(k)){seen.add(k);out.push(p);} } }
+    if(Array.isArray(node)){ for(const x of node) walk(x); } else { for(const v of Object.values(node)) if(v&&typeof v==="object") walk(v); }
+  }
+  walk(payload?.data ?? payload); return out;
+}
+
 function extractMetaRegisteredPeople(payload) {
   const out = [];
   const seen = new Set();
@@ -1179,6 +1202,7 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
   });
 
   const registeredPeople = extractMetaRegisteredPeople(result.body);
+  const allPeople = extractMetaAllPeople(result.body);
 
   return {
     camp,
@@ -1189,6 +1213,8 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
     has_existing: metaPayloadHasEntries(result.body),
     registered_people: registeredPeople,
     registered_count: registeredPeople.length,
+    all_people: allPeople,
+    all_people_count: allPeople.length,
     meta_response: result.body
   };
 }

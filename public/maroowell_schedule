@@ -4294,6 +4294,11 @@
         throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");
       }
 
+      function metaWorkflowSucceeded(result){
+        const status=clean(result?.status).toUpperCase();
+        return status==="SUCCESS" || status==="COMPLETED";
+      }
+
       function metaWorkflowSummary(result){
         const d=result?.data||{};
         return `총 ${Number(d.totalRows||0).toLocaleString("ko-KR")} / 생성 ${Number(d.created||0).toLocaleString("ko-KR")} / 수정 ${Number(d.updated||0).toLocaleString("ko-KR")} / 변경 ${Number(d.modified||0).toLocaleString("ko-KR")}`;
@@ -4379,7 +4384,7 @@
               camp:state.camp,wave:state.wave,metaDate,phase:"reset"
             });
             const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
-            if(clean(resetResult?.status).toUpperCase()!=="SUCCESS"){
+            if(!metaWorkflowSucceeded(resetResult)){
               throw new Error("기존 메타 등록자 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
             }
             resetCompleted=true;
@@ -4393,7 +4398,7 @@
             camp:state.camp,wave:state.wave,metaDate,phase:"apply"
           });
           const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
-          if(clean(actualResult?.status).toUpperCase()!=="SUCCESS"){
+          if(!metaWorkflowSucceeded(actualResult)){
             const prefix=resetCompleted?"※ 기존 MetaAdmin 등록자 휴무 처리는 완료된 상태입니다. 새 스케줄 업로드 오류를 즉시 확인해주세요.\n\n":"";
             throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
           }

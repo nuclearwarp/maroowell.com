@@ -1091,7 +1091,7 @@ function metaPersonFromObject(obj) {
   if (metaStatusLooksOff(status)) return null;
 
   const hasRoute = metaObjectHasRoute(obj);
-  const working = metaStatusLooksWorking(status) || hasRoute || (!status && !hasRoute);
+  const working = metaStatusLooksWorking(status) || hasRoute;
   if (!working) return null;
 
   return { name, id, status: clean(status) || null };

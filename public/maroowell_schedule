@@ -1153,6 +1153,8 @@
     }
   </style>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260916-1" />
+
+<style id="mw-schedule-readable-font">body,button,input,select,textarea,table,td{font-weight:500!important;text-rendering:optimizeLegibility!important;-webkit-font-smoothing:antialiased!important}th,.brandText h1,.boardTitle h2,strong,b{font-weight:750!important}.brandText p,.field label,.metaLine,.weekHint{font-weight:500!important}</style>
 </head>
 
 <body>
@@ -2860,6 +2862,14 @@
         state.camp=clean(els.campInput.value);
         state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
         els.waveSelect.value=state.wave;
+        [els.actualUpdateInput, els.fakeUpdateInput].forEach(input=>{if(!input)return;input.addEventListener("input",()=>updateDateMiniLabel(input));input.addEventListener("change",()=>updateDateMiniLabel(input));const dateMini=input.closest(".dateMini");const openPicker=e=>{e.preventDefault();e.stopPropagation();openNativeDatePicker(input)};input.addEventListener("click",openPicker);dateMini?.addEventListener("click",openPicker);dateMini?.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")openPicker(e)});dateMini?.setAttribute("tabindex","0");dateMini?.setAttribute("role","button")});
+        els.btnExcelDateGenerate?.addEventListener("click",()=>exportMetaExcelForDates(selectedExcelDates()));
+        els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
+        els.excelDateModal?.addEventListener("click",e=>{if(e.target===els.excelDateModal)closeExcelDatePicker()});
+        els.btnLogout?.addEventListener("click",async()=>{try{await supabase.auth.signOut()}catch{} location.href=LOGIN_PATH});
+        els.btnLoad?.addEventListener("click",loadAll);
+        els.btnSave?.addEventListener("click",saveAll);
+        els.btnUpdateStatusSave?.addEventListener("click",saveUpdateStatus);
         syncWaveFromCamp();
         if(!state.camp){
           setUpdateStatusEmpty();
@@ -4304,7 +4314,7 @@
         for(let i=0;i<90;i++){
           const result=await apiFetch("/schedule/meta/workflow?workflow_id="+encodeURIComponent(id));
           const status=clean(result?.status).toUpperCase();
-          if(status && status!=="RUNNING" && status!=="PENDING" && status!=="QUEUED")return result;
+          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_DOWNLOAD","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING"].includes(status))return result;
           await sleep(1000);
         }
         throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");

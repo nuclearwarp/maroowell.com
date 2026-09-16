@@ -139,7 +139,7 @@ button,input{font:inherit}
 </style>
 <meta name="mw-realtime-live-v13" content="13">
   <link rel="stylesheet" href="/mw-global-font.css?v=20260916-1" />
-  <link rel="stylesheet" href="/home-admin.css?v=20260916-3">
+  <link rel="stylesheet" href="/home-admin.css?v=20260916-5">
 </head>
 <body>
 <main class="wrap">
@@ -148,7 +148,6 @@ button,input{font:inherit}
   <h1 class="brandTitle">Home</h1>
   <div class="grow"></div>
   <span id="userPill" class="pill user">권한 확인 중</span>
-  <button id="collectorBtn" class="btn collectorOk" type="button" disabled hidden>자동 수집 확인 중</button>
   <button id="logoutBtn" class="btn danger" type="button">로그아웃</button>
 </header>
 
@@ -195,11 +194,8 @@ const S={
   sb:null,
   wave:"ALL",
   busy:false,
-  auto:Number(localStorage.getItem("mwRealtimeAuto")||1),
   timer:null,
   isAdmin:false,
-  collectorPaused:false,
-  collectorState:null,
   batches:[],
   sourceRows:[],
   scheduleRows:[],
@@ -625,50 +621,6 @@ async function logout(){
   finally{location.replace("/")}
 }
 
-function renderCollectorState(){
-  const b=$("collectorBtn");
-  b.disabled=!S.isAdmin;
-  if(S.collectorPaused){
-    b.className="btn collectorPaused";
-    b.textContent="자동 수집 정지됨";
-    b.title=S.isAdmin?"클릭하면 자동 수집을 재개합니다.":"최고관리자만 자동 수집을 재개할 수 있습니다.";
-  }else if(S.collectorState?.status==="error"){
-    b.className="btn collectorError";
-    b.textContent="수집 확인 필요";
-    b.title=S.collectorState?.last_error||"";
-  }else{
-    b.className="btn collectorOk";
-    b.textContent="자동 수집 정상";
-    b.title=S.isAdmin?"클릭하면 자동 수집을 잠시 정지합니다.":"최고관리자만 자동 수집을 정지할 수 있습니다.";
-  }
-}
-async function loadCollectorState(){
-  try{
-    const{data,error}=await S.sb.rpc("mw_meta_collector_state");
-    if(error)throw error;
-    S.collectorState=firstRow(data)||{};
-    S.collectorPaused=S.collectorState?.paused===true;
-  }catch(e){
-    console.warn("collector state",e);
-    S.collectorState={status:"error",last_error:String(e?.message||e)};
-  }
-  renderCollectorState();
-}
-async function toggleCollector(){
-  if(!S.isAdmin)return;
-  const next=!S.collectorPaused;
-  if(!confirm(next?"자동 수집을 잠시 정지할까요?\n현재 화면의 마지막 수집 데이터는 계속 조회할 수 있습니다.":"자동 수집을 다시 시작할까요?"))return;
-
-  const{error}=await S.sb.rpc("mw_set_meta_collector_paused",{p_paused:next});
-  if(error){
-    setStatus(`자동 수집 상태 변경 실패: ${esc(error.message||String(error))}`,true);
-    return;
-  }
-  await loadCollectorState();
-  setStatus(next?"자동 수집을 정지했습니다. META 아이디 조치 후 다시 재개해 주세요.":"자동 수집을 재개했습니다.");
-  await queryAll();
-}
-
 function buildFreshMaps(freshRows){
   const byPk=new Map(),byKey=new Map(),byCid=new Map(),byName=new Map();
   for(const f of freshRows||[]){
@@ -729,8 +681,7 @@ async function queryAll(){
       S.selected.clear();
       S.lastQueryAt=Date.now();
       renderAll();
-      await loadCollectorState();
-      setStatus(S.collectorPaused?"자동 수집이 정지되어 있으며 현재 진행 중인 배치가 없습니다.":"현재 진행 중인 배송 배치가 없습니다.");
+      setStatus("현재 진행 중인 배송 배치가 없습니다. · 1분 자동 새로고침");
       return;
     }
 
@@ -757,7 +708,6 @@ async function queryAll(){
     S.sourceRows=mergeFresh(currentRes.data||[],freshRes.data||[]);
     S.lastQueryAt=Date.now();
     applyWaveFilter();
-    await loadCollectorState();
 
     const visible=S.camps.reduce((n,c)=>n+c.rows.length,0);
     const errors=S.batches.filter(b=>b.status==="error");
@@ -766,10 +716,9 @@ async function queryAll(){
     const pollText=lastPoll?lastPoll.replace("T"," ").slice(11,19):"-";
 
     setStatus(
-      `${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 기사 <strong>${num(visible)}명</strong> · `+
-      `${S.collectorPaused?"자동 수집 정지":"자동 수집 중"} · `+
+      `${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 기사 <strong>${num(visible)}명</strong> · 1분 자동 새로고침 · `+
       `${errors.length?`오류 ${errors.length}건 · `:""}최근 수집 ${pollText}`,
-      errors.length===S.batches.length&&!S.collectorPaused
+      errors.length===S.batches.length
     );
   }catch(e){
     console.error(e);
@@ -781,9 +730,7 @@ async function queryAll(){
 
 function restartAuto(){
   clearInterval(S.timer);
-  S.timer=null;
-  localStorage.setItem("mwRealtimeAuto",String(S.auto));
-  if(S.auto>0)S.timer=setInterval(()=>{if(!S.busy)queryAll()},S.auto*60000);
+  S.timer=setInterval(()=>{if(!S.busy)queryAll()},60000);
 }
 
 async function copySection(id,name,trigger){
@@ -833,20 +780,7 @@ function bind(){
     document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===b));
     applyWaveFilter();
   }));
-
-  document.querySelectorAll(".autoBtn").forEach(b=>{
-    const m=Number(b.dataset.min);
-    b.classList.toggle("active",m===S.auto);
-    b.addEventListener("click",()=>{
-      S.auto=m;
-      document.querySelectorAll(".autoBtn").forEach(x=>x.classList.toggle("active",x===b));
-      restartAuto();
-      setStatus(m?`자동 새로고침 ${m}분 간격으로 설정했습니다.`:"자동 새로고침을 껐습니다.");
-    });
-  });
-
   $("queryBtn")?.addEventListener("click",queryAll);
-  $("collectorBtn").addEventListener("click",toggleCollector);
   $("logoutBtn").addEventListener("click",logout);
 
   document.querySelectorAll("[data-copy-section]").forEach(b=>b.addEventListener("click",e=>{
@@ -868,16 +802,12 @@ async function boot(){
   try{
     if(!(await auth()))return;
     document.documentElement.style.visibility="visible";
-    await loadCollectorState();
     await queryAll();
     restartAuto();
   }catch(e){
     document.documentElement.style.visibility="visible";
     $("userPill").className="pill err user";
     $("userPill").textContent="접근 불가";
-    $("collectorBtn").className="btn collectorError";
-    $("collectorBtn").textContent="수집 상태 확인 실패";
-    $("collectorBtn").disabled=true;
     setStatus(esc(e?.message||String(e)),true);
     if($("queryBtn"))$("queryBtn").disabled=true;
   }
@@ -886,6 +816,6 @@ async function boot(){
 boot();
 })();
 </script>
-  <script src="/home-admin.js?v=20260916-4"></script>
+  <script src="/home-admin.js?v=20260916-5"></script>
 </body>
 </html>

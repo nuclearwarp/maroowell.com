@@ -1,2 +1,933 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>이동 중 | 마루웰</title><script>location.replace("/realtime"+location.search+location.hash)</script><noscript><meta http-equiv="refresh" content="0;url=/realtime"></noscript>  <link rel="stylesheet" href="/mw-global-font.css?v=20260916-1" />
-</head><body></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="origin">
+<title>Home | Maroowell</title>
+<link rel="icon" href="/favicon.ico?v=2">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+<script src="/board-menu.js?v=20260915-realtime11" defer></script>
+<style>
+:root{
+  --bg:#f3f6f8;--card:#fff;--line:#dce5e8;--line2:#cbd5e1;--text:#172b36;--muted:#60727c;
+  --navy:#17364a;--day:#f59e0b;--night:#7c3aed;--blue:#2563eb;--fresh:#16a34a;
+  --return:#4169a1;--olive:#71823f;--red:#c52824;--shadow:0 10px 28px rgba(23,54,74,.08)
+}
+*{box-sizing:border-box}
+html,body{
+  margin:0;min-height:100%;background:var(--bg);color:var(--text);
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",Roboto,Arial,sans-serif;
+  font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased
+}
+body{
+  font-weight:400;letter-spacing:-.012em;
+  background:
+    radial-gradient(circle at 8% 0%,rgba(245,158,11,.055),transparent 26%),
+    radial-gradient(circle at 92% 0%,rgba(124,58,237,.055),transparent 26%),
+    var(--bg)
+}
+button,input{font:inherit}
+.wrap{width:min(1540px,100%);margin:auto;padding:10px 14px 40px}
+.card{background:rgba(255,255,255,.99);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:14px;margin-bottom:12px}
+.topbar{display:flex;align-items:center;gap:8px;padding:7px 10px;position:sticky;top:5px;z-index:20}
+.brandLogo{width:34px;height:34px;border:0;border-radius:10px;background:#fff;padding:0;display:grid;place-items:center;cursor:pointer}
+.brandLogo img{width:31px;height:31px;object-fit:contain}
+.brandTitle{font-size:20px;font-weight:650;line-height:1;margin:0;letter-spacing:-.02em}
+.grow{flex:1}
+.pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:38px;padding:0 12px;border-radius:11px;border:1px solid var(--line2);background:#fff;color:#475569;font-size:10.5px;font-weight:600;line-height:1;white-space:nowrap}
+.pill:before{content:"";width:6px;height:6px;border-radius:50%;background:#94a3b8}
+.pill.ok{border-color:#86efac;color:#166534}.pill.ok:before{background:#22c55e}
+.pill.err{border-color:#fecaca;color:#991b1b}.pill.err:before{background:#ef4444}
+.btn{height:38px;min-height:38px;padding:0 14px;border-radius:11px;border:1px solid var(--line2);background:#fff;color:#334155;font-weight:600;font-size:11.5px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;line-height:1;transition:.15s}
+.btn:active{transform:translateY(1px)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.danger{border-color:#ef4444;color:#dc2626}
+.btn.collectorOk{min-width:116px;border:1.5px solid #22c55e;color:#15803d;background:#fff}
+.btn.collectorPaused{min-width:116px;border:1.5px solid #fb923c;color:#c2410c;background:#fff7ed}
+.btn.collectorError{min-width:116px;border:1.5px solid #ef4444;color:#dc2626;background:#fff}
+.btn.collectorOk:disabled,.btn.collectorPaused:disabled,.btn.collectorError:disabled{opacity:1;cursor:default}
+.controls{display:grid;grid-template-columns:minmax(240px,1.15fr) minmax(220px,.9fr) minmax(330px,1.25fr) auto;gap:9px;align-items:end}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label,.caption,.status,.campMeta,.routeLabel,.timeMeta,.selectionHint{font-size:10.5px;color:var(--muted);font-weight:500}
+.liveMode{height:46px;display:flex;align-items:center;padding:0 13px;border:1px solid var(--line2);border-radius:11px;background:#f8fafc;color:#17364a;font-size:12px;font-weight:600}
+.waveToggle{height:46px;display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line2);border-radius:11px;overflow:hidden;background:#f8fafc}
+.waveBtn{border:0;background:transparent;color:#64748b;font-size:13px;font-weight:600;cursor:pointer}
+.waveBtn.all.active{background:var(--navy);color:#fff}.waveBtn.day.active{background:var(--day);color:#fff}.waveBtn.night.active{background:var(--night);color:#fff}
+.autoRow{height:46px;display:flex;align-items:center;gap:4px;overflow-x:auto}
+.autoBtn{height:34px;min-width:44px;padding:0 8px;border-radius:999px;border:1px solid var(--line2);background:#fff;color:#64748b;font-size:10.5px;font-weight:600;cursor:pointer}
+.autoBtn.active{background:#e9f0f3;border-color:#94a7b2;color:#17364a}
+.actions .btn{height:46px;min-width:76px}
+.status{margin-top:9px;min-height:18px;font-size:11.5px}.status.err{color:#b42318}.status strong{color:#334155}
+.sectionHead{display:flex;align-items:center;gap:8px;margin-bottom:10px}.sectionHead h2{font-size:17px;margin:0;font-weight:650;letter-spacing:-.03em}
+.headActions{margin-left:auto;display:flex;gap:6px}
+.copyBtn{height:32px;padding:0 11px;border-radius:9px;border:1px solid #67e8f9;background:#ecfeff;color:#0e7490;font-size:10.5px;font-weight:600;cursor:pointer}
+.copyBtn:hover{background:#cffafe}.copyBtn.copied{background:#dcfce7;border-color:#86efac;color:#166534}
+.summaryGrid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:7px}
+.summaryBox{border:1px solid var(--line);border-radius:13px;padding:10px 11px;background:#fff;min-width:0}
+.summaryBox .label{font-size:9.8px;color:#687a84;font-weight:600}
+.summaryBox .value{margin-top:4px;font-size:20px;font-weight:650;line-height:1.05;letter-spacing:-.035em}
+.summaryBox .sub{margin-top:6px;font-size:10.5px;line-height:1.35;color:#647680;font-weight:500}
+.summaryBox.delivery .value{color:var(--blue);font-size:17px}
+.summaryBox.freshDelivery .value{color:var(--fresh);font-size:17px}
+.summaryBox.return .value{color:var(--return);font-size:15px}.summaryBox.fresh .value{color:var(--olive);font-size:15px}.summaryBox.bad .value{color:var(--red)}
+.stackRate{display:grid;gap:2px;line-height:1.18}.stackRate div{white-space:nowrap}
+.campGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.driverGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.campCard,.driverCard{border:1px solid var(--line);border-radius:14px;background:#fff;padding:11px 12px}
+.campCard{cursor:pointer;transition:.08s}.campCard:hover{border-color:#aebcc4}
+.campCard.selected{border:2px solid var(--navy);box-shadow:0 0 0 3px rgba(23,54,74,.08)}
+.campCard.selected:after{content:"선택됨";display:inline-flex;margin-top:8px;padding:3px 7px;border-radius:999px;background:#17364a;color:#fff;font-size:9px;font-weight:600}
+.campTop,.driverTop{display:flex;align-items:flex-start;gap:8px}
+.campName,.driverName{font-size:15px;font-weight:650}
+.campMeta,.routeLabel{margin-top:4px;line-height:1.45;word-break:break-all}
+.campOps{margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;font-size:10px;font-weight:600}
+.campOps .absent{color:#b42318}.campOps .done{color:#15803d}.campOps .ok{color:#64748b}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}
+.driverCard .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+.metricPanel{border-radius:10px;background:#f4f7f8;padding:9px;min-width:0}
+.metricPanel.delivery{background:#eff6ff}.metricPanel.freshDelivery{background:#ecfdf5}.metricPanel.return{background:#eef3fa}.metricPanel.fresh{background:#f4f6ec}
+.metricPanel .k{font-size:12px;color:#334155;font-weight:800}
+.metricPanel .rate{margin-top:3px;font-size:12.5px;font-weight:650;line-height:1.25}
+.metricPanel .detail{margin-top:5px;font-size:11.5px;line-height:1.48;color:#52666f;font-weight:600;white-space:normal}
+.metricPanel .detailGrid{display:grid;grid-template-columns:56px minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:baseline}
+.metricPanel .detailGrid .detailValue{font-variant-numeric:tabular-nums;font-weight:700}
+.metricPanel.delivery .rate{color:var(--blue)}.metricPanel.freshDelivery .rate{color:var(--fresh)}.metricPanel.return .rate{color:var(--return)}.metricPanel.fresh .rate{color:var(--olive)}
+.metricPanel .dual{display:grid;gap:2px;margin-top:3px;font-size:11.5px;font-weight:650}.metricPanel .dual span{display:block;white-space:nowrap}.metricPanel .dual b{font-size:12.5px}
+.driverCamp{display:inline-flex;margin-right:7px;padding:2px 0;background:transparent;color:#17364a;font-size:16px;font-weight:800;vertical-align:0}
+.waveBadge{display:inline-flex;margin-right:5px;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:600;vertical-align:2px}
+.waveBadge.day{background:#fff6df;color:#9a5b00}.waveBadge.night{background:#f2ecff;color:#6d28d9}
+.driverScore{margin-left:auto;text-align:right}.driverScore b{display:block;font-size:13px;color:var(--blue);font-weight:650}.driverScore small{color:#73848e;font-size:9.5px;font-weight:500}
+.driverTop{position:relative;padding-bottom:25px}.timeMeta{position:absolute;left:0;right:0;bottom:0;margin-top:7px;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:12px;font-size:10px;width:100%}.timeMeta span:first-child{text-align:left}.timeMeta span:last-child{text-align:right}
+.missLine{margin-top:7px;padding:7px 9px;border-radius:9px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:10.5px;font-weight:700}
+.missLine.red{background:#fff0ef;color:#b42318;border-color:#fecaca}
+.routeChips{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
+.routeChip{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#f1f5f9;border:1px solid #dbe4ea;color:#435667;font-size:11px;font-weight:700;line-height:1}.routeChip.ownExtra{background:#fff7ed;border-color:#fdba74;color:#c2410c}.routeChip.externalExtra{background:#fff1f2;border-color:#fca5a5;color:#b91c1c}
+.flagLine{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}.flag{padding:4px 7px;border-radius:999px;font-size:9px;font-weight:650}.flag.freshMiss{background:#ecfdf5;color:#15803d;border:1px solid #86efac}.flag.dawnMiss{background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd}
+.driverCard.mismatch{border:2px solid var(--day)}.driverCard.external{border:2px solid var(--red)}
+.warn{margin-top:7px;padding:7px 8px;border-radius:9px;background:#fff7e7;color:#9c5b08;font-size:9.5px;line-height:1.45;white-space:pre-line;font-weight:600}
+.warn.red{background:#fff0ef;color:#b42318}
+.empty{padding:24px 14px;text-align:center;border:1px dashed #cad5da;border-radius:13px;background:#fafcfd;color:#7a8a93;font-size:11.5px}
+.loading{opacity:.58;pointer-events:none}.hidden{display:none!important}.selectionHint{margin-left:auto;font-size:9.5px}
+.copying{outline:2px solid rgba(23,54,74,.2);outline-offset:4px}.captureMeta{margin:0 0 10px;padding:7px 10px;border-radius:9px;background:#f4f7f8;color:#52666f;font-size:11px;font-weight:600;line-height:1.35}
+@media(max-width:1320px){.summaryGrid{grid-template-columns:repeat(5,1fr)}.campCard .metrics{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1120px){.driverGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:980px){.controls{grid-template-columns:1fr 1fr}.actions{grid-column:1/-1}.summaryGrid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.wrap{padding:7px}.topbar{top:2px}.pill.user{display:none}.controls{grid-template-columns:1fr}.actions{grid-column:auto}.actions .btn{width:100%}.summaryGrid{grid-template-columns:repeat(2,1fr)}.campGrid,.driverGrid{grid-template-columns:1fr}.metrics,.driverCard .metrics{grid-template-columns:1fr}.card{padding:11px;border-radius:15px}.selectionHint{display:none}}
+
+/* ===== realtime readability + progress bars v13 ===== */
+:root{--blue:#38bdf8;--fresh:#22c55e;--return:#6366f1;--olive:#84cc16}
+.field label,.caption,.status,.campMeta,.routeLabel,.timeMeta,.selectionHint{font-size:12px}
+.pill,.autoBtn,.copyBtn,.summaryBox .sub,.btn{font-size:12px}
+.summaryBox .label{font-size:12px}.summaryBox .value{font-size:22px}
+.summaryBox.delivery .value,.summaryBox.freshDelivery .value{font-size:20px}
+.summaryBox.return .value,.summaryBox.fresh .value{font-size:18px}
+.campName,.driverName{font-size:16px}.campOps{font-size:12px}
+.metricPanel{padding:10px 11px;border:1px solid rgba(148,163,184,.16)}
+.metricPanel.delivery{background:#f0f9ff}.metricPanel.freshDelivery{background:#f0fdf4}.metricPanel.return{background:#eef2ff}.metricPanel.fresh{background:#f7fee7}
+ .metricPanel .k{font-size:13.5px;font-weight:800}.metricPanel.delivery .k{color:#0369a1}.metricPanel.freshDelivery .k{color:#15803d}.metricPanel.return .k{color:#4338ca}.metricPanel.fresh .k{color:#4d7c0f}.metricPanel .rate{font-size:16px;font-weight:700}
+.metricPanel .detail{font-size:12.5px;line-height:1.5}.metricPanel .dual{font-size:12px}.metricPanel .dual b{font-size:13.5px}
+.driverCamp{font-size:16px;font-weight:800}.waveBadge{font-size:11px}.driverScore{min-width:102px}.driverScore b{font-size:16px}.driverScore small{font-size:11px}
+.timeMeta{font-size:12px;font-weight:600;color:#5b6f7a}.routeLabel{font-size:12.5px;color:#475569;font-weight:600}.routeChip{font-size:12px}.missLine{font-size:12px}.flag{font-size:11px}.warn{font-size:11.5px}
+.metricBar,.scoreBar{height:7px;margin-top:7px;border-radius:999px;background:#e2e8f0;overflow:hidden}
+.metricBar i,.scoreBar i{display:block;height:100%;border-radius:inherit;transition:width .18s ease}
+.metricBar.delivery i,.scoreBar i{background:var(--blue)}.metricBar.freshDelivery i{background:var(--fresh)}.metricBar.return i{background:var(--return)}.metricBar.fresh i{background:var(--olive)}
+.scoreBar{width:100%;height:6px}
+/* ===== realtime readability + progress bars v13 end ===== */
+
+</style>
+<meta name="mw-realtime-live-v13" content="13">
+  <link rel="stylesheet" href="/mw-global-font.css?v=20260916-1" />
+  <link rel="stylesheet" href="/home-admin.css?v=20260916-1">
+</head>
+<body>
+<main class="wrap">
+<header class="card topbar">
+  <button id="mwBoardMenuToggle" class="brandLogo" type="button" aria-label="마루웰 메뉴 열기"><img src="/favicon.ico?v=2" alt="M"></button>
+  <h1 class="brandTitle">실시간 현황</h1>
+  <div class="grow"></div>
+  <span id="userPill" class="pill user">권한 확인 중</span>
+  <button id="collectorBtn" class="btn collectorOk" type="button" disabled>자동 수집 확인 중</button>
+  <button id="logoutBtn" class="btn danger" type="button">로그아웃</button>
+</header>
+
+<section id="controlCard" class="card">
+  <div class="controls">
+    <div class="field">
+      <label>조회 기준</label>
+      <div class="liveMode">현재 운행 배치 · 백엔드 자동 수집</div>
+      <input id="scheduleDate" type="hidden">
+    </div>
+    <div class="field">
+      <label>표시 필터</label>
+      <div class="waveToggle">
+        <button class="waveBtn all active" data-wave="ALL" type="button">전체</button>
+        <button class="waveBtn day" data-wave="WAVE2" type="button">주간</button>
+        <button class="waveBtn night" data-wave="WAVE1" type="button">야간</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>자동 새로고침</label>
+      <div class="autoRow">
+        <button class="autoBtn" data-min="0" type="button">끔</button>
+        <button class="autoBtn active" data-min="1" type="button">1분</button>
+        <button class="autoBtn" data-min="3" type="button">3분</button>
+        <button class="autoBtn" data-min="5" type="button">5분</button>
+        <button class="autoBtn" data-min="10" type="button">10분</button>
+        <button class="autoBtn" data-min="15" type="button">15분</button>
+        <button class="autoBtn" data-min="30" type="button">30분</button>
+      </div>
+    </div>
+    <div class="actions"><button id="queryBtn" class="btn primary" type="button">새로고침</button></div>
+  </div>
+  <div id="queryStatus" class="status">실시간 데이터를 준비하고 있습니다.</div>
+</section>
+
+<section id="summarySection" class="card">
+  <div class="sectionHead">
+    <h2 id="summaryTitle">전체 실시간 현황</h2>
+    <span id="summaryCaption" class="caption">조회 전</span>
+    <div class="headActions"><button class="copyBtn" data-copy-section="summarySection" data-copy-name="전체 현황" type="button">이미지 복사</button></div>
+  </div>
+  <div class="summaryGrid">
+    <div class="summaryBox"><div class="label">운행 캠프</div><div id="campCount" class="value">-</div><div class="sub">현재 배치 기준</div></div>
+    <div class="summaryBox"><div class="label">기사</div><div id="attendanceCount" class="value">-</div><div class="sub">스캔 시작 기준</div></div>
+    <div class="summaryBox"><div class="label">주간 / 야간</div><div id="workerCount" class="value">-</div><div class="sub">현재 표시 기준</div></div>
+    <div class="summaryBox"><div class="label">배송 수량</div><div id="deliveryTotal" class="value">-</div><div class="sub">전체 배송</div></div>
+    <div class="summaryBox delivery"><div class="label">배송 완료율</div><div id="deliveryRate" class="value">-</div><div id="deliverySub" class="sub">-</div></div>
+    <div class="summaryBox freshDelivery"><div class="label">신선 완료율</div><div id="freshDeliveryRate" class="value">-</div><div id="freshDeliverySub" class="sub">-</div></div>
+    <div class="summaryBox return"><div class="label">반품</div><div id="returnRate" class="value">-</div><div id="returnSub" class="sub">-</div></div>
+    <div class="summaryBox fresh"><div class="label">프백</div><div id="freshRate" class="value">-</div><div id="freshSub" class="sub">-</div></div>
+    <div class="summaryBox bad"><div class="label">미스캔</div><div id="misscanTotal" class="value">-</div><div class="sub">배송 위탁/미스캔</div></div>
+  </div>
+</section>
+
+<section id="campSection" class="card">
+  <div class="sectionHead">
+    <h2>캠프별 현황</h2><span id="campCaption" class="caption">조회 전</span><span class="selectionHint">여러 캠프 선택 가능 · ESC 전체 해제</span>
+    <div class="headActions"><button class="copyBtn" data-copy-section="campSection" data-copy-name="캠프별 현황" type="button">이미지 복사</button></div>
+  </div>
+  <div id="campBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
+</section>
+
+<section id="driverSection" class="card">
+  <div class="sectionHead">
+    <h2>기사별 현황</h2><span id="driverCaption" class="caption">완료율 낮은 순</span>
+    <div class="headActions"><button class="copyBtn" data-copy-section="driverSection" data-copy-name="기사별 현황" type="button">이미지 복사</button></div>
+  </div>
+  <div id="driverBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
+</section>
+</main>
+
+<script>
+(()=>{"use strict";
+
+const SUPA="https://rgqerimdxkthkcewqbbe.supabase.co";
+const KEY=["sb_publishable_","FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H"].join("");
+const $=id=>document.getElementById(id);
+
+const S={
+  sb:null,
+  wave:"ALL",
+  busy:false,
+  auto:Number(localStorage.getItem("mwRealtimeAuto")||1),
+  timer:null,
+  isAdmin:false,
+  collectorPaused:false,
+  collectorState:null,
+  batches:[],
+  sourceRows:[],
+  scheduleRows:[],
+  camps:[],
+  selected:new Set(),
+  lastQueryAt:0
+};
+
+const esc=v=>String(v??"")
+  .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+const num=v=>new Intl.NumberFormat("ko-KR").format(Number(v||0));
+const pct=v=>`${Number(v||0).toFixed(1)}%`;
+const ratio=(a,b)=>Number(b||0)>0?Number(a||0)*100/Number(b):0;
+const uniq=a=>[...new Set((a||[]).filter(Boolean))];
+const norm=v=>String(v||"").trim().replace(/[^0-9A-Za-z가-힣]/g,"").toUpperCase();
+const subRoute=v=>{const n=norm(v),m=n.match(/^(.+?[A-Z])\d{2}$/);return m?.[1]||n};
+const nameKey=v=>String(v||"").trim().replace(/\s+/g,"").toLowerCase();
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const addIsoDate=(date,days)=>{const d=new Date(date+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10)};
+const kstNow=()=>{const d=new Date(Date.now()+9*3600000);return{date:d.toISOString().slice(0,10),hour:d.getUTCHours()}};
+const defaultDate=()=>kstNow().date;
+const activeScheduleDateForWave=wave=>{const k=kstNow();return wave==="WAVE1"&&k.hour<12?addIsoDate(k.date,-1):k.date};
+const batchIsCurrentShift=b=>String(b?.schedule_date||"")===activeScheduleDateForWave(String(b?.wave||"").toUpperCase());
+const waveLabel=w=>w==="WAVE1"?"야간":w==="WAVE2"?"주간":"전체";
+const isNight=w=>w==="WAVE1";
+const firstRow=data=>Array.isArray(data)?(data[0]||null):(data||null);
+
+function fmtTime(v){
+  if(!v)return "-";
+  const m=String(v).match(/[T\s](\d{2}):(\d{2})/);
+  if(!m)return "-";
+  return `${Number(m[1])}시 ${m[2]}분`;
+}
+function setStatus(t,e=false){
+  $("queryStatus").innerHTML=t;
+  $("queryStatus").classList.toggle("err",!!e);
+}
+function setBusy(v){
+  S.busy=!!v;
+  $("controlCard").classList.toggle("loading",S.busy);
+  $("queryBtn").disabled=S.busy;
+}
+function cleanCampName(name,code=""){
+  let n=String(name||"").trim().replace(/^M_/i,"M");
+  if(/익산\s*1/i.test(n))return "M익산1";
+  return n||String(code||"").trim();
+}
+function blankDelivery(){
+  return{total:0,misscan:0,remaining:0,completed:0,impossible:0,pddMiss:0,rate:0,hasData:false};
+}
+function addDelivery(a,b){
+  for(const k of["total","misscan","remaining","completed","impossible","pddMiss"])a[k]=(a[k]||0)+(b[k]||0);
+  a.hasData=!!(a.hasData||b?.hasData);
+  a.rate=ratio(a.completed||0,a.total);
+}
+function collectionBlank(){
+  return{total:0,collected:0,uncollected:0,assigned:0,absent:0,completionRate:0,collectionRate:0};
+}
+function addCollection(a,b){
+  for(const k of["total","collected","uncollected","assigned","absent"])a[k]=(a[k]||0)+(b[k]||0);
+  a.completionRate=ratio((a.collected||0)+(a.uncollected||0),a.total);
+  a.collectionRate=ratio(a.collected,a.total);
+}
+function backendDelivery(r,p="delivery"){
+  const rawTotal=r[`${p}_total`];
+  const total=Number(rawTotal||0);
+  const misscan=Number(r[`${p}_assigned`]||0);
+  const remaining=Number(r[`${p}_scanned`]||0);
+  const completed=Number(r[`${p}_completed`]||0);
+  const impossible=Number(r[`${p}_impossible`]||0);
+  const pddMiss=Number(r[`${p}_pdd_miss`]||0);
+  const rate=ratio(completed,total);
+  return{
+    total,misscan,remaining,completed,impossible,pddMiss,rate,
+    hasData:p==="fresh_delivery" ? rawTotal!=null&&total>0 : total>0
+  };
+}
+function backendCollection(r,p,includeAbsent=false){
+  const assigned=Number(r[`${p}_pending`]||0);
+  const collected=Number(r[`${p}_collected`]||0);
+  const uncollected=Number(r[`${p}_uncollected`]??r[`${p}_uncollected_raw`]??0);
+  const absent=includeAbsent?Number(r[`${p}_absent_raw`]||0):0;
+  const total=Number(r[`${p}_total`]||0)||(assigned+collected+uncollected+absent);
+  return{
+    total,assigned,collected,uncollected,absent,
+    completionRate:Number(r[`${p}_attempt_rate`]??ratio(collected+uncollected,total)),
+    collectionRate:Number(r[`${p}_collection_rate`]??ratio(collected,total))
+  };
+}
+function isStarted(r){
+  return !!r.scan_started_at ||
+    Number(r.delivery_scanned||0)>0 ||
+    Number(r.delivery_completed||0)>0 ||
+    Number(r.delivery_impossible||0)>0 ||
+    Number(r.delivery_pdd_miss||0)>0;
+}
+
+function makeScheduleIndex(){
+  const byCampWave=new Map();
+  for(const x of S.scheduleRows||[]){
+    if(x.is_active===false || norm(x.route_label)==="휴무자")continue;
+    const camp=cleanCampName(x.camp);
+    const wave=String(x.wave||"").toUpperCase();
+    const scheduleDate=String(x.schedule_date||"");
+    if(!camp||!wave||!scheduleDate)continue;
+    const key=`${scheduleDate}|${camp}|${wave}`;
+    if(!byCampWave.has(key))byCampWave.set(key,new Map());
+    const display=String(x.driver_display_name||x.driver_name||x.driver_owner_name||x.driver_coupang_id||"").trim();
+    const cid=String(x.driver_coupang_id||"").trim().toLowerCase();
+    const nk=nameKey(display);
+    const pk=cid?`id:${cid}`:`name:${nk}`;
+    if(display&&pk!=="name:")byCampWave.get(key).set(pk,{display,cid,nk});
+  }
+  return byCampWave;
+}
+
+function buildCamps(){
+  const batchMap=new Map((S.batches||[]).map(b=>[b.id,b]));
+  const groups=new Map();
+
+  for(const src of S.sourceRows||[]){
+    const b=batchMap.get(src.batch_id)||{};
+    const wave=String(src.wave||b.wave||"").toUpperCase();
+    if(S.wave!=="ALL"&&wave!==S.wave)continue;
+    if(!isStarted(src))continue;
+
+    const name=cleanCampName(src.camp_name||b.camp_name,src.camp_code||b.camp_code);
+    const key=`${name}|${wave}`;
+    let g=groups.get(key);
+    if(!g){
+      g={
+        key,name,wave,code:src.camp_code||b.camp_code||"",scheduleDate:String(b.schedule_date||""),
+        status:b.status||"collecting",lastPolledAt:b.last_polled_at||null,
+        rows:[],workers:0,
+        totals:{delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collectionBlank(),fresh:collectionBlank()},
+        scheduledCount:0,absentNames:[],campCompletedAt:null
+      };
+      groups.set(key,g);
+    }
+
+    const delivery=backendDelivery(src,"delivery");
+    const freshDelivery=backendDelivery(src,"fresh_delivery");
+    const returns=backendCollection(src,"return",true);
+    const fresh=backendCollection(src,"freshbag",false);
+    const baseRoutes=(Array.isArray(src.scheduled_routes)&&src.scheduled_routes.length?src.scheduled_routes:src.actual_routes)||[];
+    const routeAlerts=Array.isArray(src.raw_payload?.route_alerts)?src.raw_payload.route_alerts:[];
+    const externalAlerts=routeAlerts.filter(x=>String(x?.type||"").toLowerCase()==="uncontracted");
+    const ownRouteAlerts=routeAlerts.filter(x=>["borrowed","owner_mismatch"].includes(String(x?.type||"").toLowerCase()));
+    const externalRoutes=uniq(externalAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const ownExtraRoutes=uniq(ownRouteAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const routes=uniq([...baseRoutes.map(norm),...ownExtraRoutes,...externalRoutes].filter(Boolean)).sort((a,b)=>a.localeCompare(b,"en",{numeric:true,sensitivity:"base"}));
+    const warns=[];
+    if(ownExtraRoutes.length)warns.push(`마루웰 라우트 스캔 /  ${ownExtraRoutes.join(", ")}`);
+    if(externalRoutes.length)warns.push(`타 라우트 오스캔 /  ${externalRoutes.join(", ")}`);
+
+    addDelivery(g.totals.delivery,delivery);
+    addDelivery(g.totals.freshDelivery,freshDelivery);
+    addCollection(g.totals.returns,returns);
+    addCollection(g.totals.fresh,fresh);
+
+    g.rows.push({
+      campKey:key,camp:name,wave,
+      driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),
+      driverPk:src.driver_pk==null?null:Number(src.driver_pk),
+      coupangId:String(src.coupang_id||"").trim().toLowerCase(),
+      routes,ownExtraRoutes,externalRoutes,delivery,freshDelivery,returns,fresh,
+      scanStartedAt:src.scan_started_at||null,
+      allCompletedAt:src.all_completed_at||null,
+      freshMiss:String(src.fresh_miss||"N").toUpperCase()==="Y",
+      dawnMiss:String(src.dawn_miss||"N").toUpperCase()==="Y",
+      status:externalRoutes.length?"external":(ownExtraRoutes.length?"mismatch":"ok"),
+      hasExternalRoute:externalRoutes.length>0,
+      warns
+    });
+    g.workers++;
+  }
+
+  const scheduleIndex=makeScheduleIndex();
+  for(const g of groups.values()){
+    const scheduled=scheduleIndex.get(`${g.scheduleDate}|${g.name}|${g.wave}`)||new Map();
+    g.scheduledCount=scheduled.size;
+
+    const presentIds=new Set(g.rows.map(r=>r.coupangId).filter(Boolean));
+    const presentNames=new Set(g.rows.map(r=>nameKey(r.driver)).filter(Boolean));
+    g.absentNames=[...scheduled.values()]
+      .filter(p=>!(p.cid&&presentIds.has(p.cid)) && !presentNames.has(p.nk))
+      .map(p=>p.display);
+
+    if(scheduled.size>0&&g.absentNames.length===0){
+      const completionTimes=[];
+      let allDone=true;
+      for(const p of scheduled.values()){
+        const row=g.rows.find(r=>(p.cid&&r.coupangId===p.cid)||nameKey(r.driver)===p.nk);
+        if(!row?.allCompletedAt){allDone=false;break}
+        completionTimes.push(row.allCompletedAt);
+      }
+      if(allDone&&completionTimes.length===scheduled.size){
+        g.campCompletedAt=completionTimes.sort().at(-1)||null;
+      }
+    }
+  }
+
+  return [...groups.values()];
+}
+
+function aggregate(camps){
+  const a={workers:0,delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collectionBlank(),fresh:collectionBlank()};
+  for(const c of camps){
+    a.workers+=c.workers||0;
+    addDelivery(a.delivery,c.totals.delivery);
+    addDelivery(a.freshDelivery,c.totals.freshDelivery);
+    addCollection(a.returns,c.totals.returns);
+    addCollection(a.fresh,c.totals.fresh);
+  }
+  return a;
+}
+
+function clampRate(v){return Math.max(0,Math.min(100,Number(v||0)))}
+function metricBar(cls,rate){return `<div class="metricBar ${cls}"><i style="width:${clampRate(rate)}%"></i></div>`}
+function deliveryPanel(cls,label,m){
+  if(cls==="freshDelivery"){
+    const rate=m?.hasData?m.rate:0;
+    return `<div class="metricPanel ${cls}">
+      <div class="k">${label}</div>
+      <div class="rate">${m?.hasData?pct(m.rate):"-"}</div>
+      ${metricBar(cls,rate)}
+      <div class="detail detailGrid">${m?.hasData?`<span>남음</span><span class="detailValue">${num(m.remaining)}</span><span>전체</span><span class="detailValue">${num(m.total)}</span>`:`<span>상태</span><span class="detailValue">데이터 없음</span>`}</div>
+    </div>`;
+  }
+  return `<div class="metricPanel ${cls}">
+    <div class="k">${label}</div>
+    <div class="rate">${pct(m.rate)}</div>
+    ${metricBar(cls,m.rate)}
+    <div class="detail detailGrid"><span>완료</span><span class="detailValue">${num(m.completed)} / ${num(m.total)}</span><span>미배송</span><span class="detailValue">${num(m.impossible)}</span><span>남음</span><span class="detailValue">${num(m.remaining)}</span></div>
+  </div>`;
+}
+function collectionPanel(cls,label,m,wave){
+  if(cls==="return"&&isNight(wave))return "";
+  const detail=cls==="return"
+    ? `<div class="detail detailGrid"><span>회수</span><span class="detailValue">${num(m.collected)}</span><span>미회수</span><span class="detailValue">${num(m.uncollected)}</span><span>회수대기</span><span class="detailValue">${num(m.assigned)}</span>${m.absent?`<span>부재</span><span class="detailValue">${num(m.absent)}</span>`:""}</div>`
+    : `<div class="detail detailGrid"><span>회수</span><span class="detailValue">${num(m.collected)}</span><span>미회수</span><span class="detailValue">${num(m.uncollected)}</span><span>회수대기</span><span class="detailValue">${num(m.assigned)}</span></div>`;
+  return `<div class="metricPanel ${cls}">
+    <div class="k">${label}</div>
+    <div class="dual"><span>완료율 <b>${pct(m.completionRate)}</b></span><span>회수율 <b>${pct(m.collectionRate)}</b></span></div>
+    ${metricBar(cls,m.completionRate)}
+    ${detail}
+  </div>`;
+}
+function metricsHtml(x){
+  const w=x.wave||S.wave;
+  return `${deliveryPanel("delivery","배송",x.delivery)}
+    ${isNight(w)?"":deliveryPanel("freshDelivery","신선 20시",x.freshDelivery)}
+    ${collectionPanel("return","반품",x.returns,w)}
+    ${collectionPanel("fresh","프백",x.fresh,w)}`;
+}
+
+function renderSummary(){
+  const a=aggregate(S.camps);
+  const rows=S.camps.flatMap(c=>c.rows);
+  const dayCount=rows.filter(r=>r.wave==="WAVE2").length;
+  const nightCount=rows.filter(r=>r.wave==="WAVE1").length;
+  const onlyNight=S.wave==="WAVE1";
+
+  document.querySelector(".summaryBox.return")?.classList.toggle("hidden",onlyNight);
+  document.querySelector(".summaryBox.freshDelivery")?.classList.toggle("hidden",onlyNight);
+
+  $("summaryTitle").textContent=S.wave==="ALL"?"전체 실시간 현황":`전체 ${waveLabel(S.wave)} 현황`;
+  $("campCount").textContent=num(new Set(S.camps.map(c=>c.name)).size);
+  $("attendanceCount").textContent=num(a.workers);
+  $("workerCount").textContent=S.wave==="ALL"?`${dayCount} / ${nightCount}`:num(a.workers);
+  $("deliveryTotal").textContent=num(a.delivery.total);
+  $("deliveryRate").textContent=pct(a.delivery.rate);
+  $("deliverySub").innerHTML=`완료 ${num(a.delivery.completed)} / ${num(a.delivery.total)}<br>미배송 ${num(a.delivery.impossible)}<br>남음 ${num(a.delivery.remaining)}`;
+  $("freshDeliveryRate").textContent=onlyNight||!a.freshDelivery.hasData?"-":pct(a.freshDelivery.rate);
+  $("freshDeliverySub").innerHTML=onlyNight
+    ?"야간 미조회"
+    :(!a.freshDelivery.hasData
+      ?"데이터 없음"
+      :`남음 ${num(a.freshDelivery.remaining)} / 전체 ${num(a.freshDelivery.total)}`);
+  $("returnRate").innerHTML=`<div class="stackRate"><div>완료율 ${pct(a.returns.completionRate)}</div><div>회수율 ${pct(a.returns.collectionRate)}</div></div>`;
+  $("returnSub").innerHTML=`회수 ${num(a.returns.collected)}<br>미회수 ${num(a.returns.uncollected)}<br>회수대기 ${num(a.returns.assigned)}${a.returns.absent?`<br>부재 ${num(a.returns.absent)}`:""}`;
+  $("freshRate").innerHTML=`<div class="stackRate"><div>완료율 ${pct(a.fresh.completionRate)}</div><div>회수율 ${pct(a.fresh.collectionRate)}</div></div>`;
+  $("freshSub").innerHTML=`회수 ${num(a.fresh.collected)}<br>미회수 ${num(a.fresh.uncollected)}<br>회수대기 ${num(a.fresh.assigned)}`;
+  $("misscanTotal").textContent=num(a.delivery.misscan);
+
+  const q=S.lastQueryAt?new Date(S.lastQueryAt):null;
+  $("summaryCaption").textContent=q?`${waveLabel(S.wave)} · ${q.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"조회 전";
+}
+
+function renderCamps(){
+  const body=$("campBody");
+  $("campCaption").textContent=`${S.camps.length}개 운행 단위 · 클릭해 기사 필터`;
+
+  if(!S.camps.length){
+    body.className="empty";
+    body.textContent="현재 표시할 운행 데이터가 없습니다.";
+    return;
+  }
+
+  body.className="campGrid";
+  body.innerHTML=S.camps.slice()
+    .sort((a,b)=>a.totals.delivery.rate-b.totals.delivery.rate||a.name.localeCompare(b.name,"ko")||a.wave.localeCompare(b.wave))
+    .map(c=>{
+      let ops="";
+      if(c.absentNames.length){
+        ops=`<span class="absent">미출근 ${num(c.absentNames.length)}명 · ${esc(c.absentNames.join(", "))}</span>`;
+      }else if(c.campCompletedAt){
+        ops=`<span class="done">전원 완료 · ${fmtTime(c.campCompletedAt)}</span>`;
+      }else if(c.scheduledCount){
+        ops=`<span class="ok">출근 ${num(c.workers)} / 스케줄 ${num(c.scheduledCount)}명</span>`;
+      }
+      return `<article class="campCard ${S.selected.has(c.key)?"selected":""}" data-camp-key="${esc(c.key)}">
+        <div class="campTop">
+          <div>
+            <div class="campName">${esc(c.name)} <span class="waveBadge ${isNight(c.wave)?"night":"day"}">${waveLabel(c.wave)}</span></div>
+            <div class="campMeta">기사 ${num(c.workers)}명 · 배송 ${num(c.totals.delivery.total)}건</div>
+            <div class="campOps">${ops}</div>
+          </div>
+        </div>
+        <div class="metrics">${metricsHtml({...c.totals,wave:c.wave})}</div>
+        ${c.totals.delivery.misscan?`<div class="missLine">미스캔 ${num(c.totals.delivery.misscan)}건</div>`:""}
+      </article>`;
+    }).join("");
+
+  body.querySelectorAll(".campCard").forEach(el=>el.addEventListener("click",()=>{
+    const k=el.dataset.campKey;
+    S.selected.has(k)?S.selected.delete(k):S.selected.add(k);
+    renderCamps();renderDrivers();
+  }));
+}
+
+function renderDrivers(){
+  const rows=S.camps.flatMap(c=>c.rows)
+    .filter(r=>!S.selected.size||S.selected.has(r.campKey))
+    .sort((a,b)=>{
+      const rateDiff=a.delivery.rate-b.delivery.rate;
+      if(rateDiff)return rateDiff;
+      if(a.delivery.rate>=100&&b.delivery.rate>=100){
+        const at=String(a.allCompletedAt||"");
+        const bt=String(b.allCompletedAt||"");
+        if(at||bt){
+          if(!at)return -1;
+          if(!bt)return 1;
+          const doneDiff=bt.localeCompare(at);
+          if(doneDiff)return doneDiff;
+        }
+      }
+      return b.delivery.misscan-a.delivery.misscan||a.camp.localeCompare(b.camp,"ko")||a.driver.localeCompare(b.driver,"ko");
+    });
+
+  const mode=S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave);
+  $("driverCaption").textContent=S.selected.size
+    ? `${rows.length}명 · ${[...S.selected].map(x=>x.split("|")[0]).join(", ")} · ${mode} · 완료율 낮은 순`
+    : `${rows.length}명 · 전체 캠프 · ${mode} · 완료율 낮은 순`;
+
+  const body=$("driverBody");
+  if(!rows.length){
+    body.className="empty";
+    body.textContent="현재 표시할 기사 데이터가 없습니다.";
+    return;
+  }
+
+  body.className="driverGrid";
+  body.innerHTML=rows.map(r=>{
+    const flags=[
+      r.freshMiss?`<span class="flag freshMiss">Fresh Miss</span>`:"",
+      r.dawnMiss?`<span class="flag dawnMiss">Dawn Miss</span>`:""
+    ].filter(Boolean).join("");
+    return `<article class="driverCard ${r.status}">
+      <div class="driverTop">
+        <div>
+          <div class="driverName">
+            <span class="driverCamp">${esc(r.camp)}</span>
+            <span class="waveBadge ${isNight(r.wave)?"night":"day"}">${waveLabel(r.wave)}</span>
+            ${esc(r.driver)}
+          </div>
+          <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip ${r.externalRoutes?.includes(x)?"externalExtra":(r.ownExtraRoutes?.includes(x)?"ownExtra":"")}">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
+          <div class="timeMeta">
+            <span>스캔 시작: ${fmtTime(r.scanStartedAt)}</span>
+            <span>전체 완료: ${fmtTime(r.allCompletedAt)}</span>
+          </div>
+        </div>
+        <div class="driverScore"><b>${pct(r.delivery.rate)}</b><small>배송 완료율</small><div class="scoreBar"><i style="width:${clampRate(r.delivery.rate)}%"></i></div></div>
+      </div>
+      <div class="metrics">${metricsHtml(r)}</div>
+      ${r.delivery.misscan?`<div class="missLine">미스캔 ${num(r.delivery.misscan)}건</div>`:""}
+      ${flags?`<div class="flagLine">${flags}</div>`:""}
+      ${r.warns.length?`<div class="warn ${r.status==="external"?"red":""}">${esc(r.warns.join("\n"))}</div>`:""}
+    </article>`;
+  }).join("");
+}
+
+function renderAll(){
+  renderSummary();renderCamps();renderDrivers();
+}
+function applyWaveFilter(){
+  S.camps=buildCamps();
+  S.selected.clear();
+  renderAll();
+}
+
+async function auth(){
+  S.sb=window.supabase.createClient(SUPA,KEY,{
+    auth:{persistSession:true,storage:sessionStorage,autoRefreshToken:true,detectSessionInUrl:true}
+  });
+
+  const{data:{session},error}=await S.sb.auth.getSession();
+  if(error)throw error;
+  if(!session){location.replace("/?next=%2Frealtime");return false}
+
+  const [{data:a,error:ae},{data:b,error:be}]=await Promise.all([
+    S.sb.rpc("mw_my_access").maybeSingle(),
+    S.sb.rpc("mw_my_account_state").maybeSingle()
+  ]);
+  if(ae)throw ae;
+  if(be)throw be;
+
+  if(!(a?.is_maroowell===true&&Number(a?.max_role_level||0)>=30&&b?.approval_status==="approved"&&b?.app_only!==true)){
+    throw new Error("실시간 현황은 마루웰 팀장 이상 이용할 수 있습니다.");
+  }
+
+  S.isAdmin=a?.is_admin===true&&Number(a?.max_role_level||0)>=90;
+  $("userPill").className="pill ok user";
+  $("userPill").textContent=a.email||session.user?.email||"마루웰";
+  return true;
+}
+async function logout(){
+  try{$("logoutBtn").disabled=true;await S.sb?.auth?.signOut()}
+  finally{location.replace("/")}
+}
+
+function renderCollectorState(){
+  const b=$("collectorBtn");
+  b.disabled=!S.isAdmin;
+  if(S.collectorPaused){
+    b.className="btn collectorPaused";
+    b.textContent="자동 수집 정지됨";
+    b.title=S.isAdmin?"클릭하면 자동 수집을 재개합니다.":"최고관리자만 자동 수집을 재개할 수 있습니다.";
+  }else if(S.collectorState?.status==="error"){
+    b.className="btn collectorError";
+    b.textContent="수집 확인 필요";
+    b.title=S.collectorState?.last_error||"";
+  }else{
+    b.className="btn collectorOk";
+    b.textContent="자동 수집 정상";
+    b.title=S.isAdmin?"클릭하면 자동 수집을 잠시 정지합니다.":"최고관리자만 자동 수집을 정지할 수 있습니다.";
+  }
+}
+async function loadCollectorState(){
+  try{
+    const{data,error}=await S.sb.rpc("mw_meta_collector_state");
+    if(error)throw error;
+    S.collectorState=firstRow(data)||{};
+    S.collectorPaused=S.collectorState?.paused===true;
+  }catch(e){
+    console.warn("collector state",e);
+    S.collectorState={status:"error",last_error:String(e?.message||e)};
+  }
+  renderCollectorState();
+}
+async function toggleCollector(){
+  if(!S.isAdmin)return;
+  const next=!S.collectorPaused;
+  if(!confirm(next?"자동 수집을 잠시 정지할까요?\n현재 화면의 마지막 수집 데이터는 계속 조회할 수 있습니다.":"자동 수집을 다시 시작할까요?"))return;
+
+  const{error}=await S.sb.rpc("mw_set_meta_collector_paused",{p_paused:next});
+  if(error){
+    setStatus(`자동 수집 상태 변경 실패: ${esc(error.message||String(error))}`,true);
+    return;
+  }
+  await loadCollectorState();
+  setStatus(next?"자동 수집을 정지했습니다. META 아이디 조치 후 다시 재개해 주세요.":"자동 수집을 재개했습니다.");
+  await queryAll();
+}
+
+function buildFreshMaps(freshRows){
+  const byPk=new Map(),byKey=new Map(),byCid=new Map(),byName=new Map();
+  for(const f of freshRows||[]){
+    if(f.driver_pk!=null)byPk.set(`${f.batch_id}|${Number(f.driver_pk)}`,f);
+    if(f.meta_worker_key)byKey.set(`${f.batch_id}|${String(f.meta_worker_key).toLowerCase()}`,f);
+    if(f.coupang_id)byCid.set(`${f.batch_id}|${String(f.coupang_id).trim().toLowerCase()}`,f);
+    if(f.driver_name)byName.set(`${f.batch_id}|${nameKey(f.driver_name)}`,f);
+  }
+  return{byPk,byKey,byCid,byName};
+}
+function mergeFresh(rows,freshRows){
+  const fm=buildFreshMaps(freshRows);
+  return (rows||[]).map(r=>{
+    const f=
+      (r.driver_pk!=null&&fm.byPk.get(`${r.batch_id}|${Number(r.driver_pk)}`))||
+      (r.meta_worker_key&&fm.byKey.get(`${r.batch_id}|${String(r.meta_worker_key).toLowerCase()}`))||
+      (r.coupang_id&&fm.byCid.get(`${r.batch_id}|${String(r.coupang_id).trim().toLowerCase()}`))||
+      (r.driver_name&&fm.byName.get(`${r.batch_id}|${nameKey(r.driver_name)}`));
+
+    if(!f){
+      return{...r,fresh_delivery_total:null,fresh_delivery_complete_rate:null};
+    }
+    return{
+      ...r,
+      fresh_delivery_assigned:f.delivery_assigned,
+      fresh_delivery_scanned:f.delivery_scanned,
+      fresh_delivery_completed:f.delivery_completed,
+      fresh_delivery_impossible:f.delivery_impossible,
+      fresh_delivery_pdd_miss:f.delivery_pdd_miss,
+      fresh_delivery_total:f.delivery_total,
+      fresh_delivery_complete_rate:f.delivery_complete_rate,
+      fresh_miss:f.fresh_miss||r.fresh_miss
+    };
+  });
+}
+
+async function queryAll(){
+  if(S.busy)return;
+  setBusy(true);
+  try{
+    const today=defaultDate();
+    $("scheduleDate").value=today;
+    const activeStatuses=["collecting","completion_candidate","overdue","error","paused"];
+
+    const {data:batches,error:be}=await S.sb
+      .from("meta_realtime_batch")
+      .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,updated_at")
+      .in("status",activeStatuses)
+      .order("updated_at",{ascending:false});
+    if(be)throw be;
+
+    S.batches=(batches||[]).filter(batchIsCurrentShift);
+
+    if(!S.batches.length){
+      S.scheduleRows=[];
+      S.sourceRows=[];
+      S.camps=[];
+      S.selected.clear();
+      S.lastQueryAt=Date.now();
+      renderAll();
+      await loadCollectorState();
+      setStatus(S.collectorPaused?"자동 수집이 정지되어 있으며 현재 진행 중인 배치가 없습니다.":"현재 진행 중인 배송 배치가 없습니다.");
+      return;
+    }
+
+    const ids=S.batches.map(b=>b.id);
+    const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
+    const [currentRes,freshRes,scheduleRes]=await Promise.all([
+      S.sb.from("meta_realtime_current")
+        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
+        .in("batch_id",ids),
+      S.sb.from("meta_realtime_fresh_current")
+        .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
+        .in("batch_id",ids),
+      S.sb.from("maroowell_schedule")
+        .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
+        .in("schedule_date",scheduleDates)
+        .eq("is_active",true)
+    ]);
+
+    if(currentRes.error)throw currentRes.error;
+    if(freshRes.error)throw freshRes.error;
+    if(scheduleRes.error)throw scheduleRes.error;
+
+    S.scheduleRows=scheduleRes.data||[];
+    S.sourceRows=mergeFresh(currentRes.data||[],freshRes.data||[]);
+    S.lastQueryAt=Date.now();
+    applyWaveFilter();
+    await loadCollectorState();
+
+    const visible=S.camps.reduce((n,c)=>n+c.rows.length,0);
+    const errors=S.batches.filter(b=>b.status==="error");
+    const polls=S.batches.map(b=>String(b.last_polled_at||"")).filter(Boolean).sort();
+    const lastPoll=polls.at(-1)||"";
+    const pollText=lastPoll?lastPoll.replace("T"," ").slice(11,19):"-";
+
+    setStatus(
+      `${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 기사 <strong>${num(visible)}명</strong> · `+
+      `${S.collectorPaused?"자동 수집 정지":"자동 수집 중"} · `+
+      `${errors.length?`오류 ${errors.length}건 · `:""}최근 수집 ${pollText}`,
+      errors.length===S.batches.length&&!S.collectorPaused
+    );
+  }catch(e){
+    console.error(e);
+    setStatus(`백엔드 조회 실패: ${esc(e?.message||String(e))}`,true);
+  }finally{
+    setBusy(false);
+  }
+}
+
+function restartAuto(){
+  clearInterval(S.timer);
+  S.timer=null;
+  localStorage.setItem("mwRealtimeAuto",String(S.auto));
+  if(S.auto>0)S.timer=setInterval(()=>{if(!S.busy)queryAll()},S.auto*60000);
+}
+
+async function copySection(id,name,trigger){
+  const el=$(id);
+  if(!el||!window.htmlToImage)return setStatus("이미지 캡처 모듈을 불러오지 못했습니다.",true);
+
+  const buttons=[...el.querySelectorAll(".copyBtn")];
+  const original=trigger?.textContent||"이미지 복사";
+  const stamp=document.createElement("div");
+  const q=S.lastQueryAt?new Date(S.lastQueryAt):null;
+  const queryTime=q?q.toLocaleString("ko-KR",{hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"}):"조회 전";
+  stamp.className="captureMeta";
+  stamp.textContent=`데이터 조회 기준 · ${S.wave==="ALL"?"주간·야간 통합":waveLabel(S.wave)} · 조회시각 ${queryTime}`;
+  el.insertBefore(stamp,el.firstChild);
+  buttons.forEach(b=>b.style.visibility="hidden");
+  el.classList.add("copying");
+
+  let copied=false;
+  try{
+    const pixel=Math.max(1,Math.min(2,15000/Math.max(1,el.scrollHeight)));
+    const blob=await window.htmlToImage.toBlob(el,{backgroundColor:"#f3f6f8",pixelRatio:pixel,cacheBust:true});
+    if(!blob)throw new Error("이미지 생성 실패");
+    if(!navigator.clipboard?.write||typeof ClipboardItem==="undefined")throw new Error("이미지 클립보드 복사를 지원하지 않습니다.");
+    await navigator.clipboard.write([new ClipboardItem({"image/png":blob})]);
+    copied=true;
+    setStatus(`${esc(name)} 이미지를 클립보드에 복사했습니다.`);
+  }catch(e){
+    setStatus(`이미지 복사 실패: ${esc(e?.message||String(e))}`,true);
+  }finally{
+    buttons.forEach(b=>b.style.visibility="");
+    el.classList.remove("copying");
+    stamp.remove();
+  }
+
+  if(copied&&trigger){
+    trigger.textContent="복사됨!";
+    trigger.classList.add("copied");
+    setTimeout(()=>{trigger.textContent=original;trigger.classList.remove("copied")},1400);
+  }
+}
+
+function bind(){
+  $("scheduleDate").value=defaultDate();
+
+  document.querySelectorAll(".waveBtn").forEach(b=>b.addEventListener("click",()=>{
+    S.wave=b.dataset.wave;
+    document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===b));
+    applyWaveFilter();
+  }));
+
+  document.querySelectorAll(".autoBtn").forEach(b=>{
+    const m=Number(b.dataset.min);
+    b.classList.toggle("active",m===S.auto);
+    b.addEventListener("click",()=>{
+      S.auto=m;
+      document.querySelectorAll(".autoBtn").forEach(x=>x.classList.toggle("active",x===b));
+      restartAuto();
+      setStatus(m?`자동 새로고침 ${m}분 간격으로 설정했습니다.`:"자동 새로고침을 껐습니다.");
+    });
+  });
+
+  $("queryBtn").addEventListener("click",queryAll);
+  $("collectorBtn").addEventListener("click",toggleCollector);
+  $("logoutBtn").addEventListener("click",logout);
+
+  document.querySelectorAll("[data-copy-section]").forEach(b=>b.addEventListener("click",e=>{
+    e.stopPropagation();
+    copySection(b.dataset.copySection,b.dataset.copyName,b);
+  }));
+
+  document.addEventListener("keydown",e=>{
+    if(e.key==="Escape"&&S.selected.size){
+      S.selected.clear();
+      renderCamps();renderDrivers();
+      setStatus("캠프 선택을 모두 해제했습니다.");
+    }
+  });
+}
+
+async function boot(){
+  bind();
+  try{
+    if(!(await auth()))return;
+    document.documentElement.style.visibility="visible";
+    await loadCollectorState();
+    await queryAll();
+    restartAuto();
+  }catch(e){
+    document.documentElement.style.visibility="visible";
+    $("userPill").className="pill err user";
+    $("userPill").textContent="접근 불가";
+    $("collectorBtn").className="btn collectorError";
+    $("collectorBtn").textContent="수집 상태 확인 실패";
+    $("collectorBtn").disabled=true;
+    setStatus(esc(e?.message||String(e)),true);
+    $("queryBtn").disabled=true;
+  }
+}
+
+boot();
+})();
+</script>
+  <script src="/home-admin.js?v=20260916-1"></script>
+</body>
+</html>

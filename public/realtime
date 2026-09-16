@@ -103,7 +103,7 @@ button,input{font:inherit}
 .missLine{margin-top:7px;padding:7px 9px;border-radius:9px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:10.5px;font-weight:700}
 .missLine.red{background:#fff0ef;color:#b42318;border-color:#fecaca}
 .routeChips{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
-.routeChip{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#f1f5f9;border:1px solid #dbe4ea;color:#435667;font-size:11px;font-weight:700;line-height:1}
+.routeChip{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;background:#f1f5f9;border:1px solid #dbe4ea;color:#435667;font-size:11px;font-weight:700;line-height:1}.routeChip.ownExtra{background:#fff7ed;border-color:#fdba74;color:#c2410c}.routeChip.externalExtra{background:#fff1f2;border-color:#fca5a5;color:#b91c1c}
 .flagLine{margin-top:7px;display:flex;gap:5px;flex-wrap:wrap}.flag{padding:4px 7px;border-radius:999px;font-size:9px;font-weight:650}.flag.freshMiss{background:#ecfdf5;color:#15803d;border:1px solid #86efac}.flag.dawnMiss{background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd}
 .driverCard.mismatch{border:2px solid var(--day)}.driverCard.external{border:2px solid var(--red)}
 .warn{margin-top:7px;padding:7px 8px;border-radius:9px;background:#fff7e7;color:#9c5b08;font-size:9.5px;line-height:1.45;white-space:pre-line;font-weight:600}
@@ -378,15 +378,15 @@ function buildCamps(){
     const freshDelivery=backendDelivery(src,"fresh_delivery");
     const returns=backendCollection(src,"return",true);
     const fresh=backendCollection(src,"freshbag",false);
-    const rawRoutes=(Array.isArray(src.scheduled_routes)&&src.scheduled_routes.length?src.scheduled_routes:src.actual_routes)||[];
-    const routes=uniq(rawRoutes.map(norm).filter(Boolean)).sort((a,b)=>a.localeCompare(b,"en",{numeric:true,sensitivity:"base"}));
+    const baseRoutes=(Array.isArray(src.scheduled_routes)&&src.scheduled_routes.length?src.scheduled_routes:src.actual_routes)||[];
     const routeAlerts=Array.isArray(src.raw_payload?.route_alerts)?src.raw_payload.route_alerts:[];
     const externalAlerts=routeAlerts.filter(x=>String(x?.type||"").toLowerCase()==="uncontracted");
-    const borrowedAlerts=routeAlerts.filter(x=>String(x?.type||"").toLowerCase()==="borrowed");
+    const ownRouteAlerts=routeAlerts.filter(x=>["borrowed","owner_mismatch"].includes(String(x?.type||"").toLowerCase()));
     const externalRoutes=uniq(externalAlerts.map(x=>norm(x?.route)).filter(Boolean));
-    const borrowedRoutes=uniq(borrowedAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const ownExtraRoutes=uniq(ownRouteAlerts.map(x=>norm(x?.route)).filter(Boolean));
+    const routes=uniq([...baseRoutes.map(norm),...ownExtraRoutes,...externalRoutes].filter(Boolean)).sort((a,b)=>a.localeCompare(b,"en",{numeric:true,sensitivity:"base"}));
     const warns=[];
-    if(borrowedRoutes.length)warns.push(`우리 라우트 오스캔 ${borrowedRoutes.join(", ")}`);
+    if(ownExtraRoutes.length)warns.push(`우리 라우트 추가 스캔 ${ownExtraRoutes.join(", ")}`);
     if(externalRoutes.length)warns.push(`타 라우트 오스캔 ${externalRoutes.join(", ")}`);
 
     addDelivery(g.totals.delivery,delivery);
@@ -399,12 +399,12 @@ function buildCamps(){
       driver:String(src.driver_name||src.coupang_id||"담당 확인").trim(),
       driverPk:src.driver_pk==null?null:Number(src.driver_pk),
       coupangId:String(src.coupang_id||"").trim().toLowerCase(),
-      routes,delivery,freshDelivery,returns,fresh,
+      routes,ownExtraRoutes,externalRoutes,delivery,freshDelivery,returns,fresh,
       scanStartedAt:src.scan_started_at||null,
       allCompletedAt:src.all_completed_at||null,
       freshMiss:String(src.fresh_miss||"N").toUpperCase()==="Y",
       dawnMiss:String(src.dawn_miss||"N").toUpperCase()==="Y",
-      status:externalRoutes.length?"external":(borrowedRoutes.length?"mismatch":"ok"),
+      status:externalRoutes.length?"external":(ownExtraRoutes.length?"mismatch":"ok"),
       hasExternalRoute:externalRoutes.length>0,
       warns
     });
@@ -596,7 +596,7 @@ function renderDrivers(){
             <span class="waveBadge ${isNight(r.wave)?"night":"day"}">${waveLabel(r.wave)}</span>
             ${esc(r.driver)}
           </div>
-          <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
+          <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip ${r.externalRoutes?.includes(x)?"externalExtra":(r.ownExtraRoutes?.includes(x)?"ownExtra":"")}">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
           <div class="timeMeta">
             <span>스캔 시작: ${fmtTime(r.scanStartedAt)}</span>
             <span>전체 완료: ${fmtTime(r.allCompletedAt)}</span>

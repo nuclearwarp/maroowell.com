@@ -104,8 +104,9 @@ function deliveryMetric(s = {}) {
   const impossible = +s.impossibleCount || 0;
   const pdd = +s.pddMissCount || 0;
   const total = assigned + scanned + completed + impossible + pdd;
-  const settled = completed + impossible + assigned + pdd;
-  return { assigned, scanned, completed, impossible, pdd, total, rate: pct(settled, total) };
+  const sourceRate = Number(s.completedRatio);
+  const rate = Number.isFinite(sourceRate) ? sourceRate : (total > 0 ? pct(completed, total) : 0);
+  return { assigned, scanned, completed, impossible, pdd, total, rate };
 }
 function collectionMetric(s = {}, includeAbsent = false) {
   const pending = +s.assignedCount || 0;

@@ -2862,19 +2862,8 @@
         state.camp=clean(els.campInput.value);
         state.wave=waveForCamp(state.camp) || normalizeWave(els.waveSelect.value);
         els.waveSelect.value=state.wave;
-        [els.actualUpdateInput, els.fakeUpdateInput].forEach(input=>{if(!input)return;input.addEventListener("input",()=>updateDateMiniLabel(input));input.addEventListener("change",()=>updateDateMiniLabel(input));const dateMini=input.closest(".dateMini");const openPicker=e=>{e.preventDefault();e.stopPropagation();openNativeDatePicker(input)};input.addEventListener("click",openPicker);dateMini?.addEventListener("click",openPicker);dateMini?.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")openPicker(e)});dateMini?.setAttribute("tabindex","0");dateMini?.setAttribute("role","button")});
-        els.btnExcelDateGenerate?.addEventListener("click",()=>exportMetaExcelForDates(selectedExcelDates()));
-        els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
-        els.excelDateModal?.addEventListener("click",e=>{if(e.target===els.excelDateModal)closeExcelDatePicker()});
-        els.btnLogout?.addEventListener("click",async()=>{try{await supabase.auth.signOut()}catch{} location.href=LOGIN_PATH});
-        els.btnLoad?.addEventListener("click",loadAll);
-        els.btnSave?.addEventListener("click",saveAll);
-        els.btnUpdateStatusSave?.addEventListener("click",saveUpdateStatus);
         syncWaveFromCamp();
-        if(!state.camp){
-          setUpdateStatusEmpty();
-          return;
-        }
+        if(!state.camp){setUpdateStatusEmpty();return;}
         try{
           const params=new URLSearchParams({camp:state.camp,wave:state.wave});
           const json=await apiFetch("/schedule/update-status?"+params.toString());
@@ -4314,7 +4303,7 @@
         for(let i=0;i<90;i++){
           const result=await apiFetch("/schedule/meta/workflow?workflow_id="+encodeURIComponent(id));
           const status=clean(result?.status).toUpperCase();
-          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_DOWNLOAD","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING"].includes(status))return result;
+          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING"].includes(status))return result;
           await sleep(1000);
         }
         throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");
@@ -4322,7 +4311,7 @@
 
       function metaWorkflowSucceeded(result){
         const status=clean(result?.status).toUpperCase();
-        return status==="SUCCESS" || status==="COMPLETED";
+        return status==="SUCCESS" || status==="COMPLETED" || status==="WAIT_FOR_DOWNLOAD" || status==="DOWNLOAD_READY";
       }
 
       function metaWorkflowSummary(result){
@@ -4626,100 +4615,37 @@
       }
 
       function bind(){
-
-        if(els.btnToggleToolbar){
-          els.btnToggleToolbar.addEventListener("click",()=>{
-            const hidden = !els.toolbar.classList.contains("toolbarHidden");
-            setToolbarHidden(hidden);
-          });
-        }
-
+        els.btnToggleToolbar?.addEventListener("click",()=>setToolbarHidden(!els.toolbar.classList.contains("toolbarHidden")));
         els.waveSelect.value=state.wave;
-
-        els.btnExportMeta.addEventListener("click",exportMetaExcel);
-        els.btnMetaUpload?.addEventListener("click",openMetaUploadDatePicker);
-        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const date=selectedMetaUploadDate();if(!date){alert("전송할 일자를 선택해주세요.");return;}uploadMetaScheduleForDate(date);});
+        [els.actualUpdateInput,els.fakeUpdateInput].forEach(input=>{if(!input)return;input.addEventListener("input",()=>updateDateMiniLabel(input));input.addEventListener("change",()=>updateDateMiniLabel(input));const dm=input.closest(".dateMini");const open=e=>{e.preventDefault();e.stopPropagation();openNativeDatePicker(input)};input.addEventListener("click",open);dm?.addEventListener("click",open);dm?.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" ")open(e)});dm?.setAttribute("tabindex","0");dm?.setAttribute("role","button")});
+        els.btnExcelDateGenerate?.addEventListener("click",()=>exportMetaExcelForDates(selectedExcelDates()));
+        els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
+        els.excelDateModal?.addEventListener("click",e=>{if(e.target===els.excelDateModal)closeExcelDatePicker()});
+        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const date=selectedMetaUploadDate();if(!date){alert("전송할 일자를 선택해주세요.");return;}uploadMetaScheduleForDate(date)});
         els.btnMetaUploadDateClose?.addEventListener("click",closeMetaUploadDatePicker);
-        els.metaUploadDateModal?.addEventListener("click",e=>{if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker();});
-        els.btnCopyImage.addEventListener("click",copyImage);
-        els.btnReset.addEventListener("click",resetFilters);
-        els.btnImportWeek.addEventListener("click",importWeek);
-
-        els.btnPrevWeek.addEventListener("click",()=>{
-          applyWeekStart(addDays(state.weekStart||state.baseDate,-7),!!state.camp);
-        });
-
-        els.btnNextWeek.addEventListener("click",()=>{
-          applyWeekStart(addDays(state.weekStart||state.baseDate,7),!!state.camp);
-        });
-
-        els.weekButton.addEventListener("click",e=>{
-          e.stopPropagation();
-          hideSuggest();
-          if(els.weekPopup.classList.contains("open"))closeWeekPicker();
-          else openWeekPicker();
-        });
-
-        els.btnWeekManualApply.addEventListener("click",()=>{
-          const ws=parseWeekLabelInput(els.weekManualInput.value);
-          if(!ws){
-            alert("주차 형식을 인식하지 못했습니다.\n예: 2026 - 01W");
-            return;
-          }
-          applyWeekStart(ws,!!state.camp);
-        });
-
-        els.weekManualInput.addEventListener("keydown",e=>{
-          if(e.key==="Enter"){
-            e.preventDefault();
-            els.btnWeekManualApply.click();
-          }
-        });
-
-        document.addEventListener("click",e=>{
-          if(!e.target.closest(".weekPickerWrap"))closeWeekPicker();
-          if(!e.target.closest(".suggestBox")&&!e.target.closest(".cellEdit"))hideSuggest();
-        });
-
-        document.addEventListener("keydown",e=>{
-          if(e.key==="Escape"){
-            closeWeekPicker();
-            hideSuggest();
-            closeExcelDatePicker();
-            closeMetaUploadDatePicker();
-          }
-        });
-
-        els.boardWrap.addEventListener("scroll",hideSuggest,{passive:true});
-        window.addEventListener("resize",()=>{
-          hideSuggest();
-          updateDateMiniLabels();
-        });
-
-        els.waveSelect.addEventListener("change",()=>{
-          syncWaveFromCamp();
-        });
-
-        els.campInput.addEventListener("change",()=>{
-          state.camp=clean(els.campInput.value);
-          syncWaveFromCamp();
-          state.dirty.clear();
-          hideSuggest();
-          if(state.camp)loadAll();
-          else{
-            renderHeader();
-            loadUpdateStatusOnly();
-          }
-        });
-
-        els.searchInput.addEventListener("input",()=>render());
-
-        window.addEventListener("beforeunload",e=>{
-          if(state.dirty.size>0){
-            e.preventDefault();
-            e.returnValue="";
-          }
-        });
+        els.metaUploadDateModal?.addEventListener("click",e=>{if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker()});
+        els.btnLogout?.addEventListener("click",async()=>{try{await supabase.auth.signOut()}catch{} location.href=LOGIN_PATH});
+        els.btnLoad?.addEventListener("click",loadAll);
+        els.btnSave?.addEventListener("click",saveAll);
+        els.btnExportMeta?.addEventListener("click",exportMetaExcel);
+        els.btnMetaUpload?.addEventListener("click",openMetaUploadDatePicker);
+        els.btnCopyImage?.addEventListener("click",copyImage);
+        els.btnReset?.addEventListener("click",resetFilters);
+        els.btnImportWeek?.addEventListener("click",importWeek);
+        els.btnUpdateStatusSave?.addEventListener("click",saveUpdateStatus);
+        els.btnPrevWeek?.addEventListener("click",()=>applyWeekStart(addDays(state.weekStart||state.baseDate,-7),!!state.camp));
+        els.btnNextWeek?.addEventListener("click",()=>applyWeekStart(addDays(state.weekStart||state.baseDate,7),!!state.camp));
+        els.weekButton?.addEventListener("click",e=>{e.stopPropagation();hideSuggest();els.weekPopup.classList.contains("open")?closeWeekPicker():openWeekPicker()});
+        els.btnWeekManualApply?.addEventListener("click",()=>{const ws=parseWeekLabelInput(els.weekManualInput.value);if(!ws){alert("주차 형식을 확인해주세요. 예: 2026 - 01W");return;}applyWeekStart(ws,!!state.camp)});
+        els.weekManualInput?.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();els.btnWeekManualApply?.click()}});
+        document.addEventListener("click",e=>{if(!e.target.closest(".weekPickerWrap"))closeWeekPicker();if(!e.target.closest(".suggestBox")&&!e.target.closest(".cellEdit"))hideSuggest()});
+        document.addEventListener("keydown",e=>{if(e.key==="Escape"){closeWeekPicker();hideSuggest();closeExcelDatePicker();closeMetaUploadDatePicker()}});
+        els.boardWrap?.addEventListener("scroll",hideSuggest,{passive:true});
+        window.addEventListener("resize",()=>{hideSuggest();updateDateMiniLabels()});
+        els.waveSelect?.addEventListener("change",syncWaveFromCamp);
+        els.campInput?.addEventListener("change",()=>{state.camp=clean(els.campInput.value);syncWaveFromCamp();state.dirty.clear();hideSuggest();if(state.camp)loadAll();else{renderHeader();loadUpdateStatusOnly()}});
+        els.searchInput?.addEventListener("input",render);
+        window.addEventListener("beforeunload",e=>{if(state.dirty.size>0){e.preventDefault();e.returnValue=""}});
       }
 
       async function boot(){

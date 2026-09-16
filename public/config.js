@@ -119,14 +119,71 @@ window.MARUWELL_CONFIG = {
   async function directRoutePriceList(headers) {
     const auth = bearer(headers);
     if (!/^Bearer\s+\S+/i.test(auth)) return jsonResponse({ok:false,error:"로그인 세션이 필요합니다."},401);
-    const url = new URL(`${supabaseBase}/rest/v1/maroowell_route`);
-    url.searchParams.set("select","*");
-    url.searchParams.set("order","seq.asc");
-    const res = await nativeFetch(url.href,{headers:{apikey:publishableKey,Authorization:auth,Accept:"application/json"},cache:"no-store"});
-    const text = await res.text();
-    if(!res.ok) return jsonResponse({ok:false,error:errorText(text,`라우트 단가 조회 실패 (HTTP ${res.status})`)},res.status);
-    let rows=[]; try{rows=JSON.parse(text)}catch{}
-    return Array.isArray(rows) ? jsonResponse({ok:true,rows,mode:"supabase-direct-v120"}) : jsonResponse({ok:false,error:"라우트 단가 응답 형식 오류"},502);
+    const h={apikey:publishableKey,Authorization:auth,Accept:"application/json"};
+    const [routesRes,ratesRes,periodsRes]=await Promise.all([
+      nativeFetch(`${supabaseBase}/rest/v1/maroowell_route?select=*&order=seq.asc`,{headers:h,cache:"no-store"}),
+      nativeFetch(`${supabaseBase}/rest/v1/maroowell_route_rates?select=route_seq,period_code,origin_price,fixed_price,backup_price&order=route_seq.asc,period_code.asc`,{headers:h,cache:"no-store"}),
+      nativeFetch(`${supabaseBase}/rest/v1/maroowell_rate_periods?select=period_code,period_label,effective_from,effective_to,sort_order,is_active&order=sort_order.asc`,{headers:h,cache:"no-store"})
+    ]);
+    const responses=[routesRes,ratesRes,periodsRes];    for(const res of responses){if(!res.ok){const text=await res.text();return jsonResponse({ok:false,error:errorText(text,`라우트 단가 조회 실패 (HTTP ${res.status})`)},res.status)}}
+    const routes=await routesRes.json(), rates=await ratesRes.json(), periods=await periodsRes.json();
+    const byRoute=new Map();
+    for(const r of Array.isArray(rates)?rates:[]){const key=String(r.route_seq);if(!byRoute.has(key))byRoute.set(key,{});byRoute.get(key)[String(r.period_code)]=r}
+    const rows=(Array.isArray(routes)?routes:[]).map(route=>{
+      const rateMap=byRoute.get(String(route.seq))||{};
+      const out={...route};
+      for(const y of ["2024","2025","2026"]){const rr=rateMap[y]||{};const yy=y.slice(2);out[`${yy}_origin_price`]=rr.origin_price??route[`${yy}y_orgin_price`]??null;out[`${yy}_fixed_price`]=rr.fixed_price??(y==="2026"?route.fixed_price:null);out[`${yy}_backup_price`]=rr.backup_price??(y==="2026"?route.backup_price:null)}
+      return out;
+    });
+    return jsonResponse({ok:true,rows,periods:Array.isArray(periods)?periods:[],mode:"supabase-rate-history-v1"});
+  }
+
+  async function directRoutePriceSave(headers,payload) {
+    const auth=bearer(headers);
+    if(!/^Bearer\s+\S+/i.test(auth)) return jsonResponse({ok:false,error:"로그인 세션이 필요합니다."},401);
+    const baseHeaders={apikey:publishableKey,Authorization:auth,"Content-Type":"application/json",Accept:"application/json"};
+    const baseKeys=new Set(["camp","route","wave","contract_date","address","route_tip"]);
+    const years=["2024","2025","2026"];
+    const rateKey=(yy,t)=>`${yy.slice(2)}_${t}_price`;    async function call(path,method,body,prefer="return=minimal"){
+      const h={...baseHeaders,Prefer:prefer};
+      const res=await nativeFetch(`${supabaseBase}${path}`,{method,headers:h,body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});
+      const text=await res.text();
+      if(!res.ok)throw new Error(errorText(text,`라우트 단가 저장 실패 (HTTP ${res.status})`));
+      if(!text)return null;
+      try{return JSON.parse(text)}catch{return null}
+    }
+    function splitRow(row){
+      const base={};
+      for(const k of baseKeys)if(Object.prototype.hasOwnProperty.call(row,k))base[k]=row[k];
+      const rates=[];
+      for(const y of years){
+        const rr={period_code:y};let touched=false;
+        for(const t of ["origin","fixed","backup"]){const k=rateKey(y,t);if(Object.prototype.hasOwnProperty.call(row,k)){rr[`${t}_price`]=row[k];touched=true}}
+        if(touched)rates.push(rr)
+      }
+      return{base,rates}
+    }
+    try{      for(const seq of (Array.isArray(payload?.deleteIds)?payload.deleteIds:[])){
+        await call(`/rest/v1/maroowell_route?seq=eq.${encodeURIComponent(seq)}`,"DELETE")
+      }
+      for(const row of (Array.isArray(payload?.updateRows)?payload.updateRows:[])){
+        const seq=row?.seq;if(seq==null)continue;
+        const {base,rates}=splitRow(row);
+        if(Object.keys(base).length)await call(`/rest/v1/maroowell_route?seq=eq.${encodeURIComponent(seq)}`,"PATCH",base);
+        if(rates.length){
+          const body=rates.map(r=>({...r,route_seq:seq}));
+          await call('/rest/v1/maroowell_route_rates?on_conflict=route_seq,period_code',"POST",body,"resolution=merge-duplicates,return=minimal")
+        }
+      }
+      for(const row of (Array.isArray(payload?.newRows)?payload.newRows:[])){
+        const {base,rates}=splitRow(row);
+        const inserted=await call('/rest/v1/maroowell_route?select=seq',"POST",base,"return=representation");
+        const seq=Array.isArray(inserted)?inserted[0]?.seq:null;
+        if(seq==null)throw new Error("신규 라우트 seq를 확인할 수 없습니다.");
+        const allRates=years.map(y=>{const found=rates.find(r=>r.period_code===y)||{period_code:y};return{...found,route_seq:seq}});
+        await call('/rest/v1/maroowell_route_rates?on_conflict=route_seq,period_code',"POST",allRates,"resolution=merge-duplicates,return=minimal");
+      }      return jsonResponse({ok:true,mode:"supabase-rate-history-v1"});
+    }catch(e){return jsonResponse({ok:false,error:e?.message||String(e)},400)}
   }
 
   async function refreshWebSessionToken() {
@@ -174,6 +231,7 @@ window.MARUWELL_CONFIG = {
     if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/freshbag/upsert")) return directFreshbagBulk(input,init,headers);
     if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/account/query")) return directAccountQuery(input,init,headers);
     if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/route-price/list")) return directRoutePriceList(headers);
+    if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/route-price/save")) return directRoutePriceSave(headers,jsonBody(init)||{});
     if(url && method==="POST" && /\/route-info\//.test(url.pathname)) return routeInfoWithRetry(input,init,url);
     if(isAccessRequest(url,method)) return cachedAccessFetch(input,init,url,method,headers);
     return nativeFetch(input,init);

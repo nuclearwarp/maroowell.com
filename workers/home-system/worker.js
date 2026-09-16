@@ -1,5 +1,6 @@
-﻿const J={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
-const ACTIVE=["collecting","completion_candidate","overdue","error"];`nconst TASK_ASSIGNEE_IDS=new Set([1,2,17,71,21,18,46]);
+const J={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
+const ACTIVE=["collecting","completion_candidate","overdue","error"];
+const TASK_ASSIGNEE_IDS=new Set([1,2,17,71,21,18,46]);
 const clean=v=>String(v??"").trim();
 const n=v=>Number(v||0);
 const enc=encodeURIComponent;

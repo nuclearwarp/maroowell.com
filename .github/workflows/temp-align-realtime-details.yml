@@ -1,0 +1,48 @@
+name: Patch realtime detail alignment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/temp-align-realtime-details.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Align collection detail columns
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('public/realtime')
+          s = p.read_text(encoding='utf-8')
+          old_css = '.metricPanel .detail{margin-top:5px;font-size:11.5px;line-height:1.48;color:#52666f;font-weight:600;white-space:normal}'
+          new_css = old_css + '\n.metricPanel .detailGrid{display:grid;grid-template-columns:56px minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:baseline}\n.metricPanel .detailGrid .detailValue{font-variant-numeric:tabular-nums;font-weight:700}'
+          if old_css not in s:
+              raise RuntimeError('detail css target not found')
+          s = s.replace(old_css, new_css, 1)
+          old = '''  const detail=cls==="return"
+    ? `<div class="detail">회수 ${num(m.collected)}<br>미회수 ${num(m.uncollected)}<br>회수대기 ${num(m.assigned)}${m.absent?`<br>부재 ${num(m.absent)}`:""}</div>`
+    : `<div class="detail">회수 ${num(m.collected)}<br>미회수 ${num(m.uncollected)}<br>회수대기 ${num(m.assigned)}</div>`;'''
+          new = '''  const detail=cls==="return"
+    ? `<div class="detail detailGrid"><span>회수</span><span class="detailValue">${num(m.collected)}</span><span>미회수</span><span class="detailValue">${num(m.uncollected)}</span><span>회수대기</span><span class="detailValue">${num(m.assigned)}</span>${m.absent?`<span>부재</span><span class="detailValue">${num(m.absent)}</span>`:""}</div>`
+    : `<div class="detail detailGrid"><span>회수</span><span class="detailValue">${num(m.collected)}</span><span>미회수</span><span class="detailValue">${num(m.uncollected)}</span><span>회수대기</span><span class="detailValue">${num(m.assigned)}</span></div>`;'''
+          if old not in s:
+              raise RuntimeError('collection detail target not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit patch
+        shell: bash
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/realtime
+          git commit -m "Align realtime collection detail columns"
+          git push origin main

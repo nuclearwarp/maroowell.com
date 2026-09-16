@@ -145,44 +145,15 @@ button,input{font:inherit}
 <main class="wrap">
 <header class="card topbar">
   <button id="mwBoardMenuToggle" class="brandLogo" type="button" aria-label="마루웰 메뉴 열기"><img src="/favicon.ico?v=2" alt="M"></button>
-  <h1 class="brandTitle">실시간 현황</h1>
+  <h1 class="brandTitle">Home</h1>
   <div class="grow"></div>
   <span id="userPill" class="pill user">권한 확인 중</span>
   <button id="collectorBtn" class="btn collectorOk" type="button" disabled>자동 수집 확인 중</button>
   <button id="logoutBtn" class="btn danger" type="button">로그아웃</button>
 </header>
 
-<section id="controlCard" class="card">
-  <div class="controls">
-    <div class="field">
-      <label>조회 기준</label>
-      <div class="liveMode">현재 운행 배치 · 백엔드 자동 수집</div>
-      <input id="scheduleDate" type="hidden">
-    </div>
-    <div class="field">
-      <label>표시 필터</label>
-      <div class="waveToggle">
-        <button class="waveBtn all active" data-wave="ALL" type="button">전체</button>
-        <button class="waveBtn day" data-wave="WAVE2" type="button">주간</button>
-        <button class="waveBtn night" data-wave="WAVE1" type="button">야간</button>
-      </div>
-    </div>
-    <div class="field">
-      <label>자동 새로고침</label>
-      <div class="autoRow">
-        <button class="autoBtn" data-min="0" type="button">끔</button>
-        <button class="autoBtn active" data-min="1" type="button">1분</button>
-        <button class="autoBtn" data-min="3" type="button">3분</button>
-        <button class="autoBtn" data-min="5" type="button">5분</button>
-        <button class="autoBtn" data-min="10" type="button">10분</button>
-        <button class="autoBtn" data-min="15" type="button">15분</button>
-        <button class="autoBtn" data-min="30" type="button">30분</button>
-      </div>
-    </div>
-    <div class="actions"><button id="queryBtn" class="btn primary" type="button">새로고침</button></div>
-  </div>
-  <div id="queryStatus" class="status">실시간 데이터를 준비하고 있습니다.</div>
-</section>
+<input id="scheduleDate" type="hidden">
+<div id="queryStatus" hidden></div>
 
 <section id="summarySection" class="card">
   <div class="sectionHead">
@@ -205,19 +176,12 @@ button,input{font:inherit}
 
 <section id="campSection" class="card">
   <div class="sectionHead">
-    <h2>캠프별 현황</h2><span id="campCaption" class="caption">조회 전</span><span class="selectionHint">여러 캠프 선택 가능 · ESC 전체 해제</span>
+    <h2>캠프별 실시간 현황</h2><span id="campCaption" class="caption">조회 전</span><a class="btn" href="/realtime" style="margin-left:auto;text-decoration:none">기사별 실시간 현황 보기</a>
     <div class="headActions"><button class="copyBtn" data-copy-section="campSection" data-copy-name="캠프별 현황" type="button">이미지 복사</button></div>
   </div>
   <div id="campBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
 </section>
 
-<section id="driverSection" class="card">
-  <div class="sectionHead">
-    <h2>기사별 현황</h2><span id="driverCaption" class="caption">완료율 낮은 순</span>
-    <div class="headActions"><button class="copyBtn" data-copy-section="driverSection" data-copy-name="기사별 현황" type="button">이미지 복사</button></div>
-  </div>
-  <div id="driverBody" class="empty">조회 결과가 여기에 표시됩니다.</div>
-</section>
 </main>
 
 <script>
@@ -275,8 +239,8 @@ function setStatus(t,e=false){
 }
 function setBusy(v){
   S.busy=!!v;
-  $("controlCard").classList.toggle("loading",S.busy);
-  $("queryBtn").disabled=S.busy;
+  if($("controlCard"))$("controlCard").classList.toggle("loading",S.busy);
+  if($("queryBtn"))$("queryBtn").disabled=S.busy;
 }
 function cleanCampName(name,code=""){
   let n=String(name||"").trim().replace(/^M_/i,"M");
@@ -527,7 +491,7 @@ function renderSummary(){
 
 function renderCamps(){
   const body=$("campBody");
-  $("campCaption").textContent=`${S.camps.length}개 운행 단위 · 클릭해 기사 필터`;
+  $("campCaption").textContent=`${S.camps.length}개 운행 단위 · 기사별 상세는 실시간 현황에서 확인`;
 
   if(!S.camps.length){
     body.className="empty";
@@ -547,7 +511,7 @@ function renderCamps(){
       }else if(c.scheduledCount){
         ops=`<span class="ok">출근 ${num(c.workers)} / 스케줄 ${num(c.scheduledCount)}명</span>`;
       }
-      return `<article class="campCard ${S.selected.has(c.key)?"selected":""}" data-camp-key="${esc(c.key)}">
+      return `<article class="campCard">
         <div class="campTop">
           <div>
             <div class="campName">${esc(c.name)} <span class="waveBadge ${isNight(c.wave)?"night":"day"}">${waveLabel(c.wave)}</span></div>
@@ -559,12 +523,6 @@ function renderCamps(){
         ${c.totals.delivery.misscan?`<div class="missLine">미스캔 ${num(c.totals.delivery.misscan)}건</div>`:""}
       </article>`;
     }).join("");
-
-  body.querySelectorAll(".campCard").forEach(el=>el.addEventListener("click",()=>{
-    const k=el.dataset.campKey;
-    S.selected.has(k)?S.selected.delete(k):S.selected.add(k);
-    renderCamps();renderDrivers();
-  }));
 }
 
 function renderDrivers(){
@@ -629,7 +587,7 @@ function renderDrivers(){
 }
 
 function renderAll(){
-  renderSummary();renderCamps();renderDrivers();
+  renderSummary();renderCamps();
 }
 function applyWaveFilter(){
   S.camps=buildCamps();
@@ -644,7 +602,7 @@ async function auth(){
 
   const{data:{session},error}=await S.sb.auth.getSession();
   if(error)throw error;
-  if(!session){location.replace("/?next=%2Frealtime");return false}
+  if(!session){location.replace("/?next=%2Fhome");return false}
 
   const [{data:a,error:ae},{data:b,error:be}]=await Promise.all([
     S.sb.rpc("mw_my_access").maybeSingle(),
@@ -653,7 +611,7 @@ async function auth(){
   if(ae)throw ae;
   if(be)throw be;
 
-  if(!(a?.is_maroowell===true&&Number(a?.max_role_level||0)>=30&&b?.approval_status==="approved"&&b?.app_only!==true)){
+  if(!(a?.is_maroowell===true&&a?.is_admin===true&&Number(a?.max_role_level||0)>=90&&b?.approval_status==="approved"&&b?.app_only!==true)){
     throw new Error("실시간 현황은 마루웰 팀장 이상 이용할 수 있습니다.");
   }
 
@@ -887,7 +845,7 @@ function bind(){
     });
   });
 
-  $("queryBtn").addEventListener("click",queryAll);
+  $("queryBtn")?.addEventListener("click",queryAll);
   $("collectorBtn").addEventListener("click",toggleCollector);
   $("logoutBtn").addEventListener("click",logout);
 
@@ -899,7 +857,7 @@ function bind(){
   document.addEventListener("keydown",e=>{
     if(e.key==="Escape"&&S.selected.size){
       S.selected.clear();
-      renderCamps();renderDrivers();
+      renderCamps();
       setStatus("캠프 선택을 모두 해제했습니다.");
     }
   });
@@ -921,7 +879,7 @@ async function boot(){
     $("collectorBtn").textContent="수집 상태 확인 실패";
     $("collectorBtn").disabled=true;
     setStatus(esc(e?.message||String(e)),true);
-    $("queryBtn").disabled=true;
+    if($("queryBtn"))$("queryBtn").disabled=true;
   }
 }
 

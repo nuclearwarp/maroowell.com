@@ -43,17 +43,13 @@ var login_worker_v2_default = {
         );
 
         const landingHelper = `  async function resolveLandingPath() {
-    try {
-      const { data: access, error } = await supabase.rpc("mw_my_access").maybeSingle();
-      if (!error && access?.is_maroowell === true && Number(access?.max_role_level || 0) >= 90) return "/home";
-    } catch (_) {}
-    return "/zipcode_search";
+    return "/post_login";
   }
 
   async function resolvePostLoginTarget() {
     const requested = params.get("next");
     if (requested && !["/zipcode_search", "/zipcode_search/", "/post_login", "/post_login/"].includes(requested)) return safeNextUrl(requested);
-    return resolveLandingPath();
+    return "/post_login";
   }
 
 `;

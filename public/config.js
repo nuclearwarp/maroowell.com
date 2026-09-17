@@ -7,7 +7,7 @@ window.MARUWELL_CONFIG = {
   CLEANSING_HISTORY_API_BASE: "https://cleansinghistory.maroowell.com",
   PATHS: {
     login: "/",
-    index: "/zipcode_search",
+    index: "/post_login",
     route: "/coupangRouteMap.html",
     dragon_car_index: "/dragon_car_index.html",
     maroowell_info: "/maroowell_info.html"
@@ -220,94 +220,20 @@ window.MARUWELL_CONFIG = {
   async function cachedAccessFetch(input,init,url,method,headers) {
     const key=`${method}|${url.href}|${bearer(headers)}|${typeof init?.body==="string"?init.body:""}`;
     const hit=accessCache.get(key), now=Date.now();
-    if(hit&&hit.exp>now) return new Response(hit.body,{status:hit.status,headers:hit.headers});
-    const res=await nativeFetch(input,init); const body=await res.clone().text();
-    if(res.ok) accessCache.set(key,{body,status:res.status,headers:Array.from(res.headers.entries()),exp:now+ACCESS_TTL});
-    return res;
+    if(hit&&hit.exp>now) return hit.res.clone();
+    const res=await nativeFetch(input,init), buf=await res.arrayBuffer(), h=new Headers(res.headers), saved=new Response(buf.slice(0),{status:res.status,statusText:res.statusText,headers:h});
+    accessCache.set(key,{exp:now+ACCESS_TTL,res:saved});
+    return new Response(buf,{status:res.status,statusText:res.statusText,headers:h});
   }
 
-  window.fetch = async function mwFetchV120(input,init) {
-    const url=toUrl(input), method=methodOf(input,init), headers=headersOf(input,init);
-    if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/freshbag/upsert")) return directFreshbagBulk(input,init,headers);
-    if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/account/query")) return directAccountQuery(input,init,headers);
-    if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/route-price/list")) return directRoutePriceList(headers);
-    if(url && method==="POST" && url.origin!==supabaseOrigin && url.pathname.endsWith("/route-price/save")) return directRoutePriceSave(headers,jsonBody(init)||{});
-    if(url && method==="POST" && /\/route-info\//.test(url.pathname)) return routeInfoWithRetry(input,init,url);
-    if(isAccessRequest(url,method)) return cachedAccessFetch(input,init,url,method,headers);
+  window.fetch = async function(input, init) {
+    const url = toUrl(input), method = methodOf(input,init), headers = headersOf(input,init);
+    if (url && url.origin===supabaseOrigin && method==="POST" && url.pathname==="/rest/v1/coupang_freshbag") return directFreshbagBulk(input,init,headers);
+    if (url && url.origin===supabaseOrigin && method==="POST" && url.pathname==="/rest/v1/rpc/mw_account_statistics") return directAccountQuery(input,init,headers);
+    if (url && url.origin===supabaseOrigin && method==="GET" && url.pathname==="/rest/v1/maroowell_route") return directRoutePriceList(headers);
+    if (url && url.origin===supabaseOrigin && method==="POST" && url.pathname==="/rest/v1/rpc/mw_route_price_save") return directRoutePriceSave(headers,jsonBody(init)||{});
+    if (url && url.origin===supabaseOrigin && url.pathname.includes("/rest/v1/maroowell_route_info")) return routeInfoWithRetry(input,init,url);
+    if (isAccessRequest(url,method)) return cachedAccessFetch(input,init,url,method,headers);
     return nativeFetch(input,init);
   };
 })();
-
-// 라우트 편집기의 분석 scope는 subsubroute/route_polygon만 허용한다.
-(() => {
-  if (window.__MW_ROUTE_ANALYSIS_SCOPE_GUARD_V120__) return;
-  const currentPath=String(location.pathname||"").replace(/\.html$/i,"").replace(/\/$/,"");
-  if(currentPath!=="/coupangRouteMap" || typeof window.fetch!=="function") return;
-  window.__MW_ROUTE_ANALYSIS_SCOPE_GUARD_V120__=true;
-  const previousFetch=window.fetch.bind(window);
-  const finitePositive=(...xs)=>{for(const x of xs){const n=Number(x);if(Number.isSafeInteger(n)&&n>0)return n}return null};
-  window.fetch=async function(input,init){
-    let url; try{url=typeof input==="string"?new URL(input,location.href):new URL(input.url)}catch{return previousFetch(input,init)}
-    const method=String(init?.method||input?.method||"GET").toUpperCase();
-    if(url.hostname!=="zip.maroowell.com" || !["/terrain","/building/stats"].includes(url.pathname) || method!=="POST" || typeof init?.body!=="string") return previousFetch(input,init);
-    let p; try{p=JSON.parse(init.body)}catch{return previousFetch(input,init)}
-    delete p.subrouteId; delete p.subroute_id;
-    let scope=String(p.scopeType||p.scope_type||"").trim();
-    if(scope==="subroute") scope="subsubroute";
-    if(scope==="zipcode") throw new Error("라우트 편집기에서는 zipcode 분석 scope를 사용할 수 없습니다.");
-    if(scope==="subsubroute") {
-      const id=finitePositive(p.subsubrouteId,p.subsubroute_id,p.scopeKey,p.scope_key);
-      if(!id) throw new Error("라우트 분석에는 유효한 subsubroutes.id가 필요합니다.");
-      Object.assign(p,{scopeType:"subsubroute",scope_type:"subsubroute",scopeKey:String(id),scope_key:String(id),subsubrouteId:id,subsubroute_id:id});
-      delete p.zipcode; delete p.zip_code; delete p.postalCode; delete p.postal_code;
-    }
-    return previousFetch(input,{...init,body:JSON.stringify(p)});
-  };
-})();
-
-// maroowell_route_info 검색 UX 보강: 클릭 즉시 상태를 보여주고, 앱에서 camp/route 파라미터로
-// 들어온 경우 초기화가 완료된 후 자동 조회한다. 실제 조회는 페이지의 loadData가 수행한다.
-window.addEventListener("DOMContentLoaded",()=>{
-  const path=String(location.pathname||"").replace(/\.html$/i,"").replace(/\/$/,"");
-  if(path==="/maroowell_route_info") {
-    const campInput=document.getElementById("campInput"), routeInput=document.getElementById("routeSearchInput"), loadBtn=document.getElementById("loadBtn"), status=document.getElementById("statusText");
-    if(loadBtn) loadBtn.addEventListener("click",()=>{ if(status) status.textContent="조회 요청 중..."; },true);
-    const params=new URLSearchParams(location.search); const camp=String(params.get("camp")||"").trim(), route=String(params.get("route")||"").trim();
-    if(camp&&campInput&&routeInput&&loadBtn){campInput.value=camp;routeInput.value=route;let n=0;const t=setInterval(()=>{n++;const s=status?.textContent||"";if((s.includes("Camp")&&s.includes("Route"))||n>40){clearInterval(t);loadBtn.click()}},200)}
-  }
-
-  if(path!=="/admin_access") return;
-  const cfg=window.MARUWELL_CONFIG||{};
-  const list=document.getElementById("accountSearchList");
-  if(!list) return;
-  const addDeleteButtons=()=>{
-    list.querySelectorAll("article.item").forEach(article=>{
-      if(article.querySelector("[data-delete-account]")) return;
-      const source=article.querySelector("[data-account-action][data-user-id]");
-      const userId=source?.getAttribute("data-user-id");
-      if(!userId) return;
-      const actions=article.querySelector(".accountActions"); if(!actions) return;
-      const btn=document.createElement("button"); btn.type="button"; btn.className="btn red small"; btn.textContent="계정 삭제"; btn.dataset.deleteAccount=userId;
-      actions.appendChild(btn);
-    });
-  };
-  const observer=new MutationObserver(addDeleteButtons); observer.observe(list,{childList:true,subtree:true}); addDeleteButtons();
-  list.addEventListener("click",async e=>{
-    const btn=e.target.closest("[data-delete-account]"); if(!btn)return;
-    e.preventDefault(); e.stopPropagation();
-    const userId=btn.dataset.deleteAccount; const article=btn.closest("article.item"); const label=article?.querySelector(".name")?.textContent?.trim()||"선택 계정";
-    if(!confirm(`${label} 계정을 완전히 삭제할까요?\n\n로그인 계정과 연결된 앱/권한 정보가 삭제됩니다.`)) return;
-    btn.disabled=true; btn.textContent="삭제 중...";
-    try{
-      if(!window.supabase?.createClient) throw new Error("Supabase SDK를 불러오지 못했습니다.");
-      let storage; try{storage=sessionStorage}catch{storage=undefined}
-      const client=window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:!!storage,storage,autoRefreshToken:true,detectSessionInUrl:true}});
-      const {data:{session}}=await client.auth.getSession(); if(!session?.access_token) throw new Error("로그인 세션이 없습니다.");
-      const res=await fetch(String(cfg.SUPABASE_URL).replace(/\/$/,"")+"/functions/v1/admin-delete-account",{method:"POST",headers:{apikey:cfg.SUPABASE_ANON_KEY,Authorization:"Bearer "+session.access_token,"Content-Type":"application/json"},body:JSON.stringify({user_id:userId}),cache:"no-store"});
-      const text=await res.text(); let data={}; try{data=JSON.parse(text)}catch{data={error:text}}
-      if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
-      article.remove();
-      const status=document.getElementById("statusText"); if(status){status.textContent=`${label} 계정을 삭제했습니다.`;status.className="statusText ok"}
-    }catch(err){alert(err?.message||String(err));btn.disabled=false;btn.textContent="계정 삭제"}
-  },true);
-});

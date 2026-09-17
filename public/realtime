@@ -730,6 +730,7 @@ function mergeFresh(rows,freshRows){
       (r.driver_name&&fm.byName.get(`${r.batch_id}|${nameKey(r.driver_name)}`));
 
     if(!f){
+      if(r.fresh_delivery_total!=null || r.fresh_delivery_complete_rate!=null)return r;
       return{...r,fresh_delivery_total:null,fresh_delivery_complete_rate:null};
     }
     return{
@@ -752,7 +753,7 @@ async function queryAll(){
   try{
     const today=defaultDate();
     $("scheduleDate").value=today;
-    const activeStatuses=["collecting","completion_candidate","overdue","error","paused"];
+    const activeStatuses=["collecting","completion_candidate","overdue","error","paused","finalized"];
 
     const {data:batches,error:be}=await S.sb
       .from("meta_realtime_batch")
@@ -777,12 +778,15 @@ async function queryAll(){
 
     const ids=S.batches.map(b=>b.id);
     const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
-    const [currentRes,freshRes,scheduleRes]=await Promise.all([
+    const [currentRes,freshRes,finalRes,scheduleRes]=await Promise.all([
       S.sb.from("meta_realtime_current")
         .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
         .in("batch_id",ids),
       S.sb.from("meta_realtime_fresh_current")
         .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
+        .in("batch_id",ids),
+      S.sb.from("meta_realtime_final")
+        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate")
         .in("batch_id",ids),
       S.sb.from("maroowell_schedule")
         .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
@@ -792,10 +796,11 @@ async function queryAll(){
 
     if(currentRes.error)throw currentRes.error;
     if(freshRes.error)throw freshRes.error;
+    if(finalRes.error)throw finalRes.error;
     if(scheduleRes.error)throw scheduleRes.error;
 
     S.scheduleRows=scheduleRes.data||[];
-    S.sourceRows=mergeFresh(currentRes.data||[],freshRes.data||[]);
+    S.sourceRows=mergeFresh([...(currentRes.data||[]),...(finalRes.data||[])],freshRes.data||[]);
     S.lastQueryAt=Date.now();
     applyWaveFilter();
     await loadCollectorState();

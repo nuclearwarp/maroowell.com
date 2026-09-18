@@ -24,6 +24,10 @@ begin
   limit 1;
 
   if new.category_id = resignation_category_id then
+    if new.resignation_notice_date is null and new.occurred_at is not null then
+      new.resignation_notice_date := (new.occurred_at at time zone 'Asia/Seoul')::date;
+    end if;
+
     if trim(coalesce(new.person_name_snapshot, '')) = '김용준'
        or trim(coalesce(new.title, '')) = '김용준 퇴사' then
       new.resignation_last_work_date := date '2026-09-25';
@@ -38,7 +42,7 @@ $$;
 
 drop trigger if exists trg_home_issue_resignation_dates on public.home_issues;
 create trigger trg_home_issue_resignation_dates
-before insert or update of category_id, title, person_name_snapshot, resignation_notice_date
+before insert or update of category_id, title, person_name_snapshot, resignation_notice_date, occurred_at
 on public.home_issues
 for each row
 execute function private.mw_home_issue_resignation_dates();

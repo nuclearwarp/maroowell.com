@@ -679,18 +679,25 @@ async function handleRouteDelete(request, env) {
 
 // ---------- /route-master ----------
 async function enrichMasterVendorNames(rows, env) {
-  const ids = Array.from(new Set((rows || []).map(r => safeTrim(r?.vendor_id)).filter(Boolean)));
-  if (!ids.length) return rows || [];
   const params = new URLSearchParams();
   params.set("select", "id,name,nickname,business_number");
-  params.set("id", `in.(${ids.join(",")})`);
+  params.set("limit", "1000");
   const vendors = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
-  const map = new Map((Array.isArray(vendors) ? vendors : []).map(v => [String(v.id), v]));
+  const list = Array.isArray(vendors) ? vendors : [];
+  const byId = new Map(list.map(v => [String(v.id), v]));
+  const normBn = v => String(v || "").replace(/[^0-9]/g, "");
+  const byBn = new Map(list.filter(v => normBn(v.business_number)).map(v => [normBn(v.business_number), v]));
   for (const row of rows || []) {
-    const v = map.get(String(row.vendor_id || ""));
+    const v = byId.get(String(row.vendor_id || ""));
+    const v1 = byBn.get(normBn(row.vendor_business_number_1w));
+    const v2 = byBn.get(normBn(row.vendor_business_number_2w));
     row.vendor_name = v?.name || null;
     row.vendor_nickname = v?.nickname || null;
     row.vendor_business_number = v?.business_number || null;
+    row.vendor_1w_name = v1?.name || null;
+    row.vendor_1w_nickname = v1?.nickname || null;
+    row.vendor_2w_name = v2?.name || null;
+    row.vendor_2w_nickname = v2?.nickname || null;
   }
   return rows || [];
 }
@@ -725,7 +732,14 @@ async function handleRouteMasterPost(request, env, access) {
   if (!camp || !code) return json({ error: "camp and code are required" }, 400);
   const result = await supabaseFetch(env, "/rest/v1/rpc/mw_route_master_update", {
     method: "POST",
-    body: JSON.stringify({ p_id: id, p_new_camp: camp, p_new_code: code, p_actor_user_id: access?.userId || null }),
+    body: JSON.stringify({
+      p_id: id,
+      p_new_camp: camp,
+      p_new_code: code,
+      p_actor_user_id: access?.userId || null,
+      p_delivery_location_name: Object.prototype.hasOwnProperty.call(body, "delivery_location_name") ? body.delivery_location_name : null,
+      p_delivery_location_address: Object.prototype.hasOwnProperty.call(body, "delivery_location_address") ? body.delivery_location_address : null,
+    }),
   });
   return json({ result }, 200, { "Cache-Control": "no-store" });
 }

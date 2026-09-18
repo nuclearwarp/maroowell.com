@@ -1,4 +1,5 @@
 // login-worker-v2.js
+// MW_BUILD_20260918_ROUTE_MASTER_VENDOR_DELIVERY
 var login_worker_v2_default = {
   async fetch(request, env) {
     try {

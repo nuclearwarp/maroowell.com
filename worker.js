@@ -41,6 +41,14 @@ export default {
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
+      if (path === "/route-master") {
+        const access = await requireRouteWriteAccess(request, env);
+        if (request.method === "GET") return cors(await handleRouteMasterGet(url, env));
+        if (request.method === "POST") return cors(await handleRouteMasterPost(request, env, access));
+        if (request.method === "DELETE") return cors(await handleRouteMasterDelete(request, env, access));
+        return cors(json({ error: "Method Not Allowed" }, 405));
+      }
+
       if (path === "/addresses" && request.method === "GET") {
         return cors(await handleAddressesGet(url, env));
       }
@@ -520,6 +528,7 @@ async function handleRouteGet(url, env) {
   params.set("select", "*");
   params.set("camp", `eq.${camp}`);
   params.set("order", "full_code.asc");
+  params.set("is_active", "eq.true");
 
   if (code) {
     if (mode === "exact") params.set("full_code", `eq.${code}`);
@@ -666,6 +675,70 @@ async function handleRouteDelete(request, env) {
   await hydrateRouteRowsWithCamps([row], env);
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+// ---------- /route-master ----------
+async function enrichMasterVendorNames(rows, env) {
+  const ids = Array.from(new Set((rows || []).map(r => safeTrim(r?.vendor_id)).filter(Boolean)));
+  if (!ids.length) return rows || [];
+  const params = new URLSearchParams();
+  params.set("select", "id,name,nickname,business_number");
+  params.set("id", `in.(${ids.join(",")})`);
+  const vendors = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
+  const map = new Map((Array.isArray(vendors) ? vendors : []).map(v => [String(v.id), v]));
+  for (const row of rows || []) {
+    const v = map.get(String(row.vendor_id || ""));
+    row.vendor_name = v?.name || null;
+    row.vendor_nickname = v?.nickname || null;
+    row.vendor_business_number = v?.business_number || null;
+  }
+  return rows || [];
+}
+
+async function handleRouteMasterGet(url, env) {
+  const includeInactive = safeTrim(url.searchParams.get("include_inactive")) === "1";
+  const params = new URLSearchParams();
+  params.set("select", "id,camp,code,full_code,vendor_id,vendor_business_number_1w,vendor_business_number_2w,delivery_location_name,delivery_location_address,is_active,created_at,updated_at");
+  params.set("order", "camp.asc,full_code.asc,id.asc");
+  if (!includeInactive) params.set("is_active", "eq.true");
+  const polyParams = new URLSearchParams();
+  polyParams.set("select", "id");
+  polyParams.set("polygon_wgs84", "not.is.null");
+  if (!includeInactive) polyParams.set("is_active", "eq.true");
+  const [rows, polyRows] = await Promise.all([
+    supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${params.toString()}`, { method: "GET" }),
+    supabaseFetch(env, `/rest/v1/${ROUTE_TABLE}?${polyParams.toString()}`, { method: "GET" }),
+  ]);
+  const out = Array.isArray(rows) ? rows : [];
+  const polygonIds = new Set((Array.isArray(polyRows) ? polyRows : []).map(r => String(r.id)));
+  for (const row of out) row.has_polygon = polygonIds.has(String(row.id));
+  await enrichMasterVendorNames(out, env);
+  return json({ rows: out }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleRouteMasterPost(request, env, access) {
+  const body = await readJson(request);
+  const id = Number(body.id);
+  const camp = safeTrim(body.camp);
+  const code = safeTrim(body.code);
+  if (!Number.isFinite(id)) return json({ error: "id is required" }, 400);
+  if (!camp || !code) return json({ error: "camp and code are required" }, 400);
+  const result = await supabaseFetch(env, "/rest/v1/rpc/mw_route_master_update", {
+    method: "POST",
+    body: JSON.stringify({ p_id: id, p_new_camp: camp, p_new_code: code, p_actor_user_id: access?.userId || null }),
+  });
+  return json({ result }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleRouteMasterDelete(request, env, access) {
+  const body = await readJson(request);
+  const id = Number(body.id);
+  if (!Number.isFinite(id)) return json({ error: "id is required" }, 400);
+  const result = await supabaseFetch(env, "/rest/v1/rpc/mw_route_master_delete", {
+    method: "POST",
+    body: JSON.stringify({ p_id: id, p_actor_user_id: access?.userId || null }),
+  });
+  return json({ result }, 200, { "Cache-Control": "no-store" });
 }
 
 // ---------- /vendors ----------

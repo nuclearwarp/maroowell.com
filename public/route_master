@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="/config.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>라우트 통합 관리</title>
+  <link rel="icon" href="/favicon.ico?v=2" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{--bg:#f5f7fb;--card:#fff;--line:#d8e0ee;--txt:#0f172a;--muted:#64748b;--blue:#2563eb;--red:#dc2626;--green:#16a34a}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:"Noto Sans KR",system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--txt);font-weight:500}
+    body{padding:14px}.wrap{max-width:1800px;margin:auto}.top{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:20px;padding:13px 16px;box-shadow:0 10px 28px rgba(15,23,42,.07)}
+    .top img{width:32px;height:32px}.title{font-size:22px;font-weight:800}.spacer{flex:1}.btn{height:38px;padding:0 14px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.btn.danger{color:var(--red);border-color:#fecaca;background:#fff5f5}
+    .toolbar{margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff;border:1px solid var(--line);border-radius:18px;padding:10px 12px}.input{height:38px;border:1px solid #cbd5e1;border-radius:11px;padding:0 11px;font:inherit;font-size:13px;outline:none;background:#fff}.input:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+    .stats{display:flex;gap:7px;flex-wrap:wrap}.pill{padding:7px 10px;border-radius:999px;background:#f8fafc;border:1px solid var(--line);font-size:12px;font-weight:700;color:#475569}
+    .sheet{margin-top:10px;border:1px solid var(--line);border-radius:18px;background:#fff;overflow:auto;max-height:calc(100vh - 160px)}table{width:100%;border-collapse:separate;border-spacing:0;min-width:1350px}th,td{padding:9px 10px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;font-size:12px;vertical-align:middle}th{position:sticky;top:0;z-index:2;background:#eaf2ff;font-weight:800;text-align:center;white-space:nowrap}td{background:#fff}tr:nth-child(even) td{background:#f8fafc}tr.inactive td{opacity:.52;background:#f1f5f9}.center{text-align:center}.code{font-weight:800;font-size:13px}.vendor{font-weight:700}.muted{color:var(--muted)}.ok{color:var(--green);font-weight:800}.no{color:#94a3b8}
+    .rowBtns{display:flex;gap:5px;justify-content:center}.mini{height:30px;padding:0 9px;border-radius:9px;border:1px solid #cbd5e1;background:#fff;font-weight:700;cursor:pointer}.mini.danger{color:var(--red);border-color:#fecaca;background:#fff5f5}
+    .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(15,23,42,.45);z-index:100}.modal.show{display:grid}.modalCard{width:min(480px,calc(100vw - 28px));background:#fff;border-radius:20px;padding:20px;box-shadow:0 24px 70px rgba(15,23,42,.25)}.modalCard h3{margin:0 0 14px;font-size:19px}.field{display:grid;gap:6px;margin:12px 0}.field label{font-size:12px;font-weight:800;color:#475569}.modalActions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.note{font-size:12px;line-height:1.55;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:10px}
+    @media(max-width:800px){body{padding:8px}.top{border-radius:16px;flex-wrap:wrap}.title{font-size:19px}.toolbar{border-radius:15px}.input{flex:1 1 150px}.sheet{max-height:none}}
+  </style>
+  <link rel="stylesheet" href="/mw-global-font.css?v=20260916-1" />
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a id="mwBoardMenuToggle" href="/home" title="메뉴"><img src="/favicon.ico" alt="MW"></a>
+    <div class="title">라우트 통합 관리</div><div class="spacer"></div>
+    <div id="user" class="pill">세션 확인 중</div>
+    <button id="reload" class="btn primary">새로고침</button>
+  </div>
+  <div class="toolbar">
+    <input id="q" class="input" placeholder="캠프 · 라우트 · 벤더 검색" style="min-width:250px">
+    <input id="camp" class="input" placeholder="캠프 필터">
+    <input id="vendor" class="input" placeholder="벤더 필터">
+    <label class="pill"><input id="inactive" type="checkbox"> 삭제 포함</label>
+    <div class="stats">
+      <span id="total" class="pill">전체 0</span><span id="visible" class="pill">표시 0</span><span id="poly" class="pill">폴리곤 0</span>
+    </div>
+  </div>
+  <div class="sheet">
+    <table>
+      <thead><tr><th>ID</th><th>캠프</th><th>라우트</th><th>현재 벤더</th><th>1W 사업자</th><th>2W 사업자</th><th>폴리곤</th><th>입차지</th><th>수정일</th><th>상태</th><th>관리</th></tr></thead>
+      <tbody id="body"><tr><td colspan="11" class="center muted">불러오는 중...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<div id="modal" class="modal">
+  <div class="modalCard">
+    <h3>라우트 마스터 수정</h3>
+    <div id="editMeta" class="note"></div>
+    <div class="field"><label>캠프</label><input id="editCamp" class="input"></div>
+    <div class="field"><label>라우트 번호</label><input id="editCode" class="input"></div>
+    <div class="note">저장하면 연결된 마루웰 라우트·서서브 정보의 캠프/라우트 코드가 함께 변경됩니다. 폴리곤 좌표는 수정하지 않습니다.</div>
+    <div class="modalActions"><button id="cancel" class="btn">취소</button><button id="save" class="btn primary">저장</button></div>
+  </div>
+</div>
+<script>
+(async()=>{
+"use strict";
+const cfg=window.MARUWELL_CONFIG||{}, API="https://purple-river-0717.brain-0f6.workers.dev";
+const storage=(()=>{try{return sessionStorage}catch{return null}})();
+const sb=(cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY&&window.supabase?.createClient)?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:!!storage,storage:storage||undefined,autoRefreshToken:true,detectSessionInUrl:true}}):null;
+const $=id=>document.getElementById(id), state={rows:[],filtered:[],token:"",editing:null};
+const esc=v=>String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
+const clean=v=>String(v??"").trim(), lower=v=>clean(v).toLowerCase();
+function fmtDate(v){if(!v)return"-";try{return new Date(v).toLocaleString("ko-KR",{year:"2-digit",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"})}catch{return v}}
+async function api(path,opt={}){const res=await fetch(API+path,{...opt,headers:{"Content-Type":"application/json","Authorization":"Bearer "+state.token,...(opt.headers||{})},cache:"no-store"});const text=await res.text();let data=null;try{data=text?JSON.parse(text):null}catch{data=text}if(!res.ok)throw new Error(data?.error||data?.message||text||("HTTP "+res.status));return data}
+function natural(a,b){return String(a||"").localeCompare(String(b||""),"ko",{numeric:true,sensitivity:"base"})}
+function filterRows(){const q=lower($("q").value),c=lower($("camp").value),v=lower($("vendor").value);state.filtered=state.rows.filter(r=>{const vendor=[r.vendor_name,r.vendor_nickname,r.vendor_business_number,r.vendor_business_number_1w,r.vendor_business_number_2w].filter(Boolean).join(" ");const hay=[r.camp,r.full_code,r.code,vendor,r.delivery_location_name,r.delivery_location_address].join(" ").toLowerCase();return(!q||hay.includes(q))&&(!c||lower(r.camp).includes(c))&&(!v||vendor.toLowerCase().includes(v))}).sort((a,b)=>natural(a.camp,b.camp)||natural(a.full_code,b.full_code));render()}
+function render(){const rows=state.filtered;$("total").textContent="전체 "+state.rows.length;$("visible").textContent="표시 "+rows.length;$("poly").textContent="폴리곤 "+rows.filter(r=>r.has_polygon).length;if(!rows.length){$("body").innerHTML='<tr><td colspan="11" class="center muted">조회 결과가 없습니다.</td></tr>';return}
+$("body").innerHTML=rows.map(r=>`<tr class="${r.is_active===false?"inactive":""}">
+<td class="center">${r.id}</td><td class="center">${esc(r.camp)}</td><td class="center code">${esc(r.full_code||r.code)}</td>
+<td><div class="vendor">${esc(r.vendor_name||r.vendor_nickname||"-")}</div><div class="muted">${esc(r.vendor_business_number||"")}</div></td>
+<td class="center">${esc(r.vendor_business_number_1w||"-")}</td><td class="center">${esc(r.vendor_business_number_2w||"-")}</td>
+<td class="center ${r.has_polygon?"ok":"no"}">${r.has_polygon?"있음":"없음"}</td><td>${esc(r.delivery_location_name||"-")}<div class="muted">${esc(r.delivery_location_address||"")}</div></td>
+<td class="center muted">${fmtDate(r.updated_at)}</td><td class="center">${r.is_active===false?"삭제됨":"사용중"}</td>
+<td><div class="rowBtns">${r.is_active===false?"":`<button class="mini" data-edit="${r.id}">수정</button><button class="mini danger" data-del="${r.id}">삭제</button>`}</div></td></tr>`).join("")}
+async function load(){try{$("body").innerHTML='<tr><td colspan="11" class="center muted">불러오는 중...</td></tr>';const d=await api("/route-master?include_inactive="+($("inactive").checked?"1":"0"));state.rows=Array.isArray(d?.rows)?d.rows:[];filterRows()}catch(e){$("body").innerHTML='<tr><td colspan="11" class="center" style="color:#dc2626">불러오기 실패: '+esc(e.message)+'</td></tr>'}}
+function openEdit(id){const r=state.rows.find(x=>Number(x.id)===Number(id));if(!r)return;state.editing=r;$("editCamp").value=r.camp||"";$("editCode").value=r.full_code||r.code||"";$("editMeta").innerHTML="ID "+r.id+" · 현재 벤더 <b>"+esc(r.vendor_name||r.vendor_nickname||"-")+"</b> · 폴리곤 <b>"+(r.has_polygon?"있음":"없음")+"</b>";$("modal").classList.add("show");setTimeout(()=>$("editCamp").focus(),30)}
+async function saveEdit(){if(!state.editing)return;const camp=clean($("editCamp").value),code=clean($("editCode").value).toUpperCase();if(!camp||!code){alert("캠프와 라우트 번호를 입력하세요.");return}if(!confirm(state.editing.camp+" / "+(state.editing.full_code||state.editing.code)+" → "+camp+" / "+code+"\n\n연결된 라우트 정보도 함께 변경합니다. 폴리곤은 그대로 유지합니다."))return;try{$("save").disabled=true;const d=await api("/route-master",{method:"POST",body:JSON.stringify({id:state.editing.id,camp,code})});$("modal").classList.remove("show");state.editing=null;const a=d?.result?.affected||d?.result?.result?.affected;if(a)alert("저장 완료\n라우트 "+(a.maroowell_route||0)+"건 / 상세 "+(a.route_info||0)+"건 / 폴리곤 연결 "+(a.polygons||0)+"건 동기화");await load()}catch(e){alert("저장 실패: "+e.message)}finally{$("save").disabled=false}}
+async function removeRoute(id){const r=state.rows.find(x=>Number(x.id)===Number(id));if(!r)return;if(!confirm("라우트를 삭제 처리할까요?\n\n"+r.camp+" / "+(r.full_code||r.code)+"\n\n폴리곤 좌표와 이력은 보존되고, 활성 목록에서 제외됩니다."))return;try{await api("/route-master",{method:"DELETE",body:JSON.stringify({id:r.id})});await load()}catch(e){alert("삭제 실패: "+e.message)}}
+$("reload").onclick=load;$("q").oninput=filterRows;$("camp").oninput=filterRows;$("vendor").oninput=filterRows;$("inactive").onchange=load;$("cancel").onclick=()=>{$("modal").classList.remove("show");state.editing=null};$("save").onclick=saveEdit;
+$("body").onclick=e=>{const edit=e.target.closest("[data-edit]"),del=e.target.closest("[data-del]");if(edit)openEdit(edit.dataset.edit);if(del)removeRoute(del.dataset.del)};$("modal").onclick=e=>{if(e.target===$("modal"))$("cancel").click()};window.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("modal").classList.contains("show"))$("cancel").click()});
+if(!sb){alert("Supabase 설정을 확인하세요.");return}const {data:{session}}=await sb.auth.getSession();if(!session){location.replace("/?next="+encodeURIComponent(location.pathname));return}state.token=session.access_token;$("user").textContent=session.user?.email||"로그인";await load();
+})();
+</script>
+<script>window.MW_BOARD_MENU_MODE="internal";</script>
+<script src="/board-menu.js"></script>
+</body>
+</html>

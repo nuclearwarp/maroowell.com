@@ -462,7 +462,7 @@ async function processBatch(env, cookies, batch) {
       fresh_delivery_pdd_miss: prev?.fresh_delivery_pdd_miss || 0, fresh_delivery_total: prev?.fresh_delivery_total || 0,
       fresh_delivery_complete_rate: prev?.fresh_delivery_complete_rate || 0,
       return_pending: ret?.pending ?? null, return_collected: ret?.collected ?? null, return_uncollected_raw: ret?.rawUn ?? null,
-      return_absent_raw: ret?.rawAbsent ?? null, return_uncollected: ret?.uncollected ?? null,
+      return_absent_raw: ret?.rawAbsent ?? null,
       return_total: ret?.total ?? null, return_attempt_rate: ret?.attemptRate ?? null, return_collection_rate: ret?.collectionRate ?? null,
       freshbag_pending: fb.pending, freshbag_collected: fb.collected, freshbag_uncollected: fb.uncollected,
       freshbag_total: fb.total, freshbag_attempt_rate: fb.attemptRate, freshbag_collection_rate: fb.collectionRate,
@@ -483,8 +483,9 @@ async function processBatch(env, cookies, batch) {
       delivery_completed_at: allDone ? allCompletedAt : (prev?.delivery_completed_at || null),
       all_completed_at: allCompletedAt,
       first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
-      delivery_done: deliveryDone, return_done: batch.wave === "WAVE1" ? null : returnDone, freshbag_done: freshbagDone,
-      all_done: allDone,
+      delivery_done: allDone ? true : deliveryDone,
+      return_done: batch.wave === "WAVE1" ? null : (allDone ? true : returnDone),
+      freshbag_done: allDone ? true : freshbagDone,
       raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now, total_remaining: totalRemaining },
       updated_at: now
     };
@@ -519,7 +520,8 @@ async function processBatch(env, cookies, batch) {
         fresh_delivery_completed:fr?.delivery_completed ?? 0,fresh_delivery_impossible:fr?.delivery_impossible ?? 0,
         fresh_delivery_pdd_miss:fr?.delivery_pdd_miss ?? 0,fresh_delivery_total:fr?.delivery_total ?? 0,
         fresh_delivery_complete_rate:fr?.delivery_complete_rate ?? 0,
-        return_pending:r.return_pending,return_collected:r.return_collected,return_uncollected:r.return_uncollected,return_total:r.return_total,
+        return_pending:r.return_pending,return_collected:r.return_collected,
+        return_uncollected:Math.max(Number(r.return_uncollected_raw || 0),Number(r.return_absent_raw || 0)),return_total:r.return_total,
         freshbag_pending:r.freshbag_pending,freshbag_collected:r.freshbag_collected,freshbag_uncollected:r.freshbag_uncollected,freshbag_total:r.freshbag_total,
         delivery_remaining:deliveryRemaining,total_remaining:totalRemaining,actual_routes:r.actual_routes
       };
@@ -527,13 +529,13 @@ async function processBatch(env, cookies, batch) {
     await sbUpsert(env, "meta_realtime_history", historyRows, "batch_id,meta_worker_key,sample_minute");
   }
 
-  const complete = rows.length > 0 && rows.every(r => r.all_done === true);
+  const complete = rows.length > 0 && rows.every(r => !!r.completion_detected_at);
   const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
   const inferred = rows.some(r => r.completion_method === "stale_tail_30m");
   const batchMethod = complete ? (inferred ? "stale_tail_30m" : "exact_2poll") : null;
   const patch = {
     meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
-    completed_worker_count: rows.filter(r => r.all_done === true).length,
+    completed_worker_count: rows.filter(r => !!r.completion_detected_at).length,
     stable_complete_poll_count: stable, status: complete ? "completion_candidate" : "collecting",
     completion_method: batchMethod, completion_detected_at: complete ? now : null,
     poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now

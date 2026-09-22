@@ -322,9 +322,30 @@ async function ensureBatches(env) {
     }
   }
 }
+function isActiveBatchDate(batch) {
+  const kp = kstParts();
+  const wave = String(batch?.wave || "").toUpperCase();
+  const scheduleDate = String(batch?.schedule_date || "");
+  if (wave === "WAVE2") return scheduleDate === kp.date;
+  if (wave === "WAVE1") {
+    const activeNightDate = kp.hour < 12 ? addDate(kp.date, -1) : kp.date;
+    return scheduleDate === activeNightDate;
+  }
+  return false;
+}
+async function purgeStaleRealtimeRows(env) {
+  const rows = await sbGet(env, "meta_realtime_batch?select=id,schedule_date,wave,status&status=in.(collecting,completion_candidate,overdue,error)") || [];
+  const stale = rows.filter(r => !isActiveBatchDate(r));
+  for (const batch of stale) {
+    await sbDelete(env, `meta_realtime_current?batch_id=eq.${batch.id}`);
+    await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
+  }
+  return stale.length;
+}
 async function dueBatches(env) {
   const now = encodeURIComponent(nowIso());
-  return await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
+  const rows = await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
+  return rows.filter(isActiveBatchDate);
 }
 async function storeFreshRows(env, batch, schedule, directory, fresh, now) {
   if (batch.wave !== "WAVE2" || !fresh?.success) return [];
@@ -571,6 +592,7 @@ async function runCollector(env, force = false) {
   const state = await sessionState(env);
   if (!state?.cookie_bundle) return { ok: false, error: "META DB session 없음" };
   const cookies = parseCookieBundle(state.cookie_bundle);
+  await purgeStaleRealtimeRows(env);
   await ensureBatches(env);
   const due = await dueBatches(env), results = [];
   for (const batch of due) {

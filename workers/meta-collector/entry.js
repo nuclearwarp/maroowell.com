@@ -118,6 +118,63 @@ function collectionMetric(s = {}, includeAbsent = false) {
   const attempted = collected + uncollected;
   return { pending, collected, rawUn, rawAbsent, uncollected, total, attemptRate: pct(attempted, total), collectionRate: pct(collected, total) };
 }
+
+function tsMs(v) {
+  if (!v) return NaN;
+  const s = String(v);
+  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(s) ? s : s + "Z");
+}
+function minutesBetween(a, b) {
+  const x = tsMs(a), y = tsMs(b);
+  return Number.isFinite(x) && Number.isFinite(y) ? Math.max(0, (y - x) / 60000) : 0;
+}
+function addMinutesIso(v, minutes) {
+  const x = tsMs(v);
+  if (!Number.isFinite(x)) return null;
+  return new Date(x + minutes * 60000).toISOString().slice(0, -1);
+}
+function sampleMinute(v) { return String(v || "").slice(0, 16) + ":00"; }
+function expectedRounds(batch) { return Math.max(1, Math.min(3, Number(batch?.expected_rounds || 2))); }
+function progressChanged(prev, d, ret, fb, wave) {
+  if (!prev) return false;
+  const pairs = [
+    [prev.delivery_assigned,d.assigned],[prev.delivery_scanned,d.scanned],[prev.delivery_completed,d.completed],
+    [prev.delivery_impossible,d.impossible],[prev.delivery_pdd_miss,d.pdd],[prev.delivery_total,d.total],
+    [prev.freshbag_pending,fb.pending],[prev.freshbag_collected,fb.collected],[prev.freshbag_uncollected,fb.uncollected]
+  ];
+  if (wave !== "WAVE1" && ret) pairs.push(
+    [prev.return_pending,ret.pending],[prev.return_collected,ret.collected],[prev.return_uncollected_raw,ret.rawUn],[prev.return_absent_raw,ret.rawAbsent]
+  );
+  return pairs.some(([a,b]) => Number(a ?? 0) !== Number(b ?? 0));
+}
+function scanActivity(prev, d) {
+  if (!prev) return d.scanned > 0 || d.completed > 0 || d.impossible > 0 || d.pdd > 0;
+  return d.scanned > Number(prev.delivery_scanned || 0)
+    || d.total > Number(prev.delivery_total || 0)
+    || d.assigned > Number(prev.delivery_assigned || 0);
+}
+function deliveryActivity(prev, d, ret, fb, wave) {
+  if (!prev) return (d.completed + d.impossible + d.pdd + fb.collected + fb.uncollected + (wave === "WAVE1" ? 0 : ((ret?.collected || 0) + (ret?.uncollected || 0)))) > 0;
+  return d.completed > Number(prev.delivery_completed || 0)
+    || d.impossible > Number(prev.delivery_impossible || 0)
+    || d.pdd > Number(prev.delivery_pdd_miss || 0)
+    || fb.collected > Number(prev.freshbag_collected || 0)
+    || fb.uncollected > Number(prev.freshbag_uncollected || 0)
+    || (wave !== "WAVE1" && (
+      (ret?.collected || 0) > Number(prev.return_collected || 0)
+      || (ret?.uncollected || 0) > Number(prev.return_uncollected || 0)
+    ));
+}
+function roundFields(prev, round) {
+  return {
+    scan: prev?.[`round${round}_scan_started_at`] || null,
+    delivery: prev?.[`round${round}_delivery_started_at`] || null,
+    completed: prev?.[`round${round}_completed_at`] || null,
+    detected: prev?.[`round${round}_completion_detected_at`] || null,
+    method: prev?.[`round${round}_completion_method`] || null
+  };
+}
+
 function metaCampCandidates(codes) {
   const out = [];
   for (const raw of codes || []) {
@@ -243,7 +300,7 @@ function scheduleMatchByRoutes(rows, actualRoutes) {
 async function ensureBatches(env) {
   const kp = kstParts();
   const targets = [];
-  if (kp.hour >= 8) targets.push({ date: kp.date, wave: "WAVE2" });
+  if (kp.hour >= 7) targets.push({ date: kp.date, wave: "WAVE2" });
   if (kp.hour >= 20) targets.push({ date: kp.date, wave: "WAVE1" });
   else if (kp.hour < 12) targets.push({ date: addDate(kp.date, -1), wave: "WAVE1" });
   for (const t of targets) {
@@ -260,7 +317,7 @@ async function ensureBatches(env) {
       await sbPost(env, "meta_realtime_batch", {
         schedule_date: t.date, meta_work_date: t.wave === "WAVE1" ? addDate(t.date, 1) : t.date,
         camp_code: campCode, camp_name: camp, wave: t.wave, meta_camp_codes: codes,
-        status: "collecting", poll_interval_seconds: 60, next_poll_at: nowIso(), updated_at: nowIso()
+        status: "collecting", expected_rounds: 2, poll_interval_seconds: 60, next_poll_at: nowIso(), updated_at: nowIso()
       });
     }
   }
@@ -270,7 +327,7 @@ async function dueBatches(env) {
   return await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
 }
 async function storeFreshRows(env, batch, schedule, directory, fresh, now) {
-  if (batch.wave !== "WAVE2" || !fresh?.success) return 0;
+  if (batch.wave !== "WAVE2" || !fresh?.success) return [];
   const map = new Map();
   for (const src of metaContent(fresh.body)) {
     const w = src?.workerInfo || {}, name = workerName(src), metaCid = coupangId(src);
@@ -290,7 +347,7 @@ async function storeFreshRows(env, batch, schedule, directory, fresh, now) {
   await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
   const rows = [...map.values()];
   if (rows.length) await sbUpsert(env, "meta_realtime_fresh_current", rows, "batch_id,meta_worker_key");
-  return rows.length;
+  return rows;
 }
 
 async function processBatch(env, cookies, batch) {
@@ -306,7 +363,7 @@ async function processBatch(env, cookies, batch) {
   const directory = await loadDriverDirectory(env);
   const prevRows = await sbGet(env, `meta_realtime_current?select=*&batch_id=eq.${batch.id}`) || [];
   const prevMap = new Map(prevRows.map(r => [rowIdentity(r), r]));
-  const byKey = new Map(), now = nowIso();
+  const byKey = new Map(), now = nowIso(), expRounds = expectedRounds(batch);
 
   for (const src of metaContent(main.body)) {
     const w = src?.workerInfo || {}, name = workerName(src);
@@ -329,10 +386,64 @@ async function processBatch(env, cookies, batch) {
       const ownerName = String(owner.driver_display_name || owner.driver_name || owner.driver_owner_name || owner.driver_coupang_id || "원주인").trim();
       return { route, type: "borrowed", owner: ownerName };
     });
-    const deliveryDone = d.total > 0 && d.scanned === 0 && (d.completed + d.impossible + d.assigned + d.pdd) >= d.total;
-    const returnDone = batch.wave === "WAVE1" ? null : (ret.total === 0 || (ret.pending === 0 && ret.collected + ret.uncollected >= ret.total));
-    const freshbagDone = fb.total === 0 || (fb.pending === 0 && fb.collected + fb.uncollected >= fb.total);
-    const allDone = deliveryDone;
+
+    const deliveryDone = d.total > 0 && d.scanned === 0;
+    const returnDone = batch.wave === "WAVE1" ? true : (ret.total === 0 || ret.pending === 0);
+    const freshbagDone = fb.total === 0 || fb.pending === 0;
+    const exactDone = deliveryDone && returnDone && freshbagDone;
+    const changed = progressChanged(prev, d, ret, fb, batch.wave);
+    const scanMoved = scanActivity(prev, d);
+    const deliveryMoved = deliveryActivity(prev, d, ret, fb, batch.wave);
+
+    let currentRound = Math.max(1, Math.min(3, Number(prev?.current_round || 1)));
+    let lastProgressAt = changed ? now : (prev?.last_progress_at || now);
+    let lastScanActivityAt = scanMoved ? now : (prev?.last_scan_activity_at || null);
+    const rounds = {1:roundFields(prev,1),2:roundFields(prev,2),3:roundFields(prev,3)};
+
+    if (!rounds[1].scan && (d.scanned > 0 || d.completed > 0 || d.impossible > 0 || d.pdd > 0)) rounds[1].scan = now;
+    if (!rounds[currentRound].delivery && deliveryMoved) rounds[currentRound].delivery = now;
+
+    if (rounds[currentRound].completed && currentRound < expRounds && scanMoved) {
+      currentRound += 1;
+      if (!rounds[currentRound].scan) rounds[currentRound].scan = now;
+      if (!rounds[currentRound].delivery && deliveryMoved) rounds[currentRound].delivery = now;
+      lastProgressAt = now;
+      lastScanActivityAt = now;
+    }
+
+    const idleMinutes = minutesBetween(lastProgressAt, now);
+    if (currentRound < expRounds && rounds[currentRound].delivery && !rounds[currentRound].completed && idleMinutes >= 30) {
+      rounds[currentRound].completed = addMinutesIso(lastProgressAt, 1);
+      rounds[currentRound].detected = now;
+      rounds[currentRound].method = "idle_30m";
+    }
+
+    const deliveryRemaining = Math.max(0, d.scanned);
+    const totalRemaining = deliveryRemaining + (batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0)) + Math.max(0, fb.pending || 0);
+    const exactCandidate = exactDone ? (prev?.exact_complete_candidate_at || now) : null;
+    const exactConfirmed = exactDone && !!prev?.exact_complete_candidate_at;
+    const finalRoundReady = currentRound >= expRounds && !!rounds[currentRound].delivery;
+    const staleTailConfirmed = finalRoundReady && totalRemaining <= 2 && idleMinutes >= 30;
+
+    let allDone = false, allCompletedAt = null, completionMethod = null, completionDetectedAt = null;
+    if (exactConfirmed && finalRoundReady) {
+      allDone = true;
+      allCompletedAt = prev.exact_complete_candidate_at;
+      completionMethod = "exact_2poll";
+      completionDetectedAt = now;
+    } else if (staleTailConfirmed) {
+      allDone = true;
+      allCompletedAt = addMinutesIso(lastProgressAt, 1);
+      completionMethod = "stale_tail_30m";
+      completionDetectedAt = now;
+    }
+
+    if (allDone) {
+      if (!rounds[currentRound].completed) rounds[currentRound].completed = allCompletedAt;
+      if (!rounds[currentRound].detected) rounds[currentRound].detected = completionDetectedAt;
+      if (!rounds[currentRound].method) rounds[currentRound].method = completionMethod;
+    }
+
     const rec = {
       batch_id: batch.id, schedule_date: batch.schedule_date, meta_work_date: batch.meta_work_date,
       camp_code: batch.camp_code, camp_name: batch.camp_name, wave: batch.wave,
@@ -340,18 +451,36 @@ async function processBatch(env, cookies, batch) {
       driver_name: mappedName, driver_account_type: accountType, scheduled_routes: scheduledRoutes, actual_routes: actualRoutes,
       delivery_assigned: d.assigned, delivery_scanned: d.scanned, delivery_completed: d.completed, delivery_impossible: d.impossible,
       delivery_pdd_miss: d.pdd, delivery_total: d.total, delivery_complete_rate: d.rate,
-      fresh_delivery_assigned: 0, fresh_delivery_scanned: 0, fresh_delivery_completed: 0,
-      fresh_delivery_impossible: 0, fresh_delivery_pdd_miss: 0, fresh_delivery_total: 0, fresh_delivery_complete_rate: 0,
-      return_pending: ret?.pending ?? null, return_collected: ret?.collected ?? null, return_uncollected_raw: ret?.rawUn ?? null, return_absent_raw: ret?.rawAbsent ?? null,
+      fresh_delivery_assigned: prev?.fresh_delivery_assigned || 0, fresh_delivery_scanned: prev?.fresh_delivery_scanned || 0,
+      fresh_delivery_completed: prev?.fresh_delivery_completed || 0, fresh_delivery_impossible: prev?.fresh_delivery_impossible || 0,
+      fresh_delivery_pdd_miss: prev?.fresh_delivery_pdd_miss || 0, fresh_delivery_total: prev?.fresh_delivery_total || 0,
+      fresh_delivery_complete_rate: prev?.fresh_delivery_complete_rate || 0,
+      return_pending: ret?.pending ?? null, return_collected: ret?.collected ?? null, return_uncollected_raw: ret?.rawUn ?? null,
+      return_absent_raw: ret?.rawAbsent ?? null, return_uncollected: ret?.uncollected ?? null,
       return_total: ret?.total ?? null, return_attempt_rate: ret?.attemptRate ?? null, return_collection_rate: ret?.collectionRate ?? null,
       freshbag_pending: fb.pending, freshbag_collected: fb.collected, freshbag_uncollected: fb.uncollected,
       freshbag_total: fb.total, freshbag_attempt_rate: fb.attemptRate, freshbag_collection_rate: fb.collectionRate,
-      scan_started_at: prev?.scan_started_at || ((d.scanned + d.completed + d.impossible + d.pdd) > 0 ? now : null),
-      delivery_started_at: prev?.delivery_started_at || ((d.completed + (ret?.collected || 0) + (ret?.uncollected || 0) + fb.collected + fb.uncollected) > 0 ? now : null),
-      delivery_completed_at: prev?.delivery_completed_at || (deliveryDone ? now : null),
-      all_completed_at: prev?.all_completed_at || (allDone ? now : null), first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
-      delivery_done: deliveryDone, return_done: returnDone, freshbag_done: freshbagDone,
-      raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now }, updated_at: now
+
+      current_round: currentRound, expected_rounds: expRounds,
+      last_progress_at: lastProgressAt, last_scan_activity_at: lastScanActivityAt,
+      exact_complete_candidate_at: exactCandidate,
+      round1_scan_started_at: rounds[1].scan, round1_delivery_started_at: rounds[1].delivery,
+      round1_completed_at: rounds[1].completed, round1_completion_detected_at: rounds[1].detected, round1_completion_method: rounds[1].method,
+      round2_scan_started_at: rounds[2].scan, round2_delivery_started_at: rounds[2].delivery,
+      round2_completed_at: rounds[2].completed, round2_completion_detected_at: rounds[2].detected, round2_completion_method: rounds[2].method,
+      round3_scan_started_at: rounds[3].scan, round3_delivery_started_at: rounds[3].delivery,
+      round3_completed_at: rounds[3].completed, round3_completion_detected_at: rounds[3].detected, round3_completion_method: rounds[3].method,
+      completion_method: completionMethod, completion_detected_at: completionDetectedAt,
+
+      scan_started_at: prev?.scan_started_at || rounds[1].scan,
+      delivery_started_at: prev?.delivery_started_at || rounds[1].delivery,
+      delivery_completed_at: allDone ? allCompletedAt : (prev?.delivery_completed_at || null),
+      all_completed_at: allCompletedAt,
+      first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
+      delivery_done: deliveryDone, return_done: batch.wave === "WAVE1" ? null : returnDone, freshbag_done: freshbagDone,
+      all_done: allDone,
+      raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now, total_remaining: totalRemaining },
+      updated_at: now
     };
     const old = byKey.get(key);
     if (!old || rec.delivery_total > old.delivery_total) byKey.set(key, rec);
@@ -365,30 +494,59 @@ async function processBatch(env, cookies, batch) {
   const rows = [...byKey.values()];
   await sbDelete(env, `meta_realtime_current?batch_id=eq.${batch.id}`);
   if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
-  await storeFreshRows(env, batch, schedule, directory, fresh, now);
-  const complete = rows.length > 0 && rows.every(r => r.delivery_done && (batch.wave === "WAVE1" || r.return_done) && r.freshbag_done);
+
+  const freshRows = await storeFreshRows(env, batch, schedule, directory, fresh, now);
+  const freshMap = new Map((freshRows || []).map(r => [r.meta_worker_key, r]));
+  if (rows.length) {
+    const minute = sampleMinute(now);
+    const historyRows = rows.map(r => {
+      const fr = freshMap.get(r.meta_worker_key);
+      const deliveryRemaining = Math.max(0, Number(r.delivery_scanned || 0));
+      const totalRemaining = deliveryRemaining + (batch.wave === "WAVE1" ? 0 : Math.max(0, Number(r.return_pending || 0))) + Math.max(0, Number(r.freshbag_pending || 0));
+      return {
+        batch_id:r.batch_id,sampled_at:now,sample_minute:minute,schedule_date:r.schedule_date,meta_work_date:r.meta_work_date,
+        camp_code:r.camp_code,camp_name:r.camp_name,wave:r.wave,meta_worker_key:r.meta_worker_key,driver_pk:r.driver_pk,
+        coupang_id:r.coupang_id,driver_name:r.driver_name,current_round:r.current_round,expected_rounds:r.expected_rounds,
+        delivery_assigned:r.delivery_assigned,delivery_scanned:r.delivery_scanned,delivery_completed:r.delivery_completed,
+        delivery_impossible:r.delivery_impossible,delivery_pdd_miss:r.delivery_pdd_miss,delivery_total:r.delivery_total,delivery_complete_rate:r.delivery_complete_rate,
+        fresh_delivery_assigned:fr?.delivery_assigned ?? 0,fresh_delivery_scanned:fr?.delivery_scanned ?? 0,
+        fresh_delivery_completed:fr?.delivery_completed ?? 0,fresh_delivery_impossible:fr?.delivery_impossible ?? 0,
+        fresh_delivery_pdd_miss:fr?.delivery_pdd_miss ?? 0,fresh_delivery_total:fr?.delivery_total ?? 0,
+        fresh_delivery_complete_rate:fr?.delivery_complete_rate ?? 0,
+        return_pending:r.return_pending,return_collected:r.return_collected,return_uncollected:r.return_uncollected,return_total:r.return_total,
+        freshbag_pending:r.freshbag_pending,freshbag_collected:r.freshbag_collected,freshbag_uncollected:r.freshbag_uncollected,freshbag_total:r.freshbag_total,
+        delivery_remaining:deliveryRemaining,total_remaining:totalRemaining,actual_routes:r.actual_routes
+      };
+    });
+    await sbUpsert(env, "meta_realtime_history", historyRows, "batch_id,meta_worker_key,sample_minute");
+  }
+
+  const complete = rows.length > 0 && rows.every(r => r.all_done === true);
   const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
-  const kp = kstParts(), lateNight = batch.wave === "WAVE1" && kp.hour >= 12 && kp.hour < 20;
-  const interval = lateNight ? 300 : 60;
+  const inferred = rows.some(r => r.completion_method === "stale_tail_30m");
+  const batchMethod = complete ? (inferred ? "stale_tail_30m" : "exact_2poll") : null;
   const patch = {
     meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
-    completed_worker_count: rows.filter(r => r.delivery_done && (batch.wave === "WAVE1" || r.return_done) && r.freshbag_done).length,
-    stable_complete_poll_count: stable, status: complete ? "completion_candidate" : (lateNight ? "overdue" : "collecting"),
-    poll_interval_seconds: interval, next_poll_at: kstIsoAt(Date.now() + interval * 1000), last_error: null, updated_at: now
+    completed_worker_count: rows.filter(r => r.all_done === true).length,
+    stable_complete_poll_count: stable, status: complete ? "completion_candidate" : "collecting",
+    completion_method: batchMethod, completion_detected_at: complete ? now : null,
+    poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now
   };
   if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
-  if (complete && stable >= 2) {
+
+  if (complete) {
     const freshFinal = await sbGet(env, `meta_realtime_fresh_current?select=*&batch_id=eq.${batch.id}`) || [];
     const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
-    for (const f of freshFinal) {
-      await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(f.meta_worker_key)}`, {
-        fresh_delivery_assigned:f.delivery_assigned, fresh_delivery_scanned:f.delivery_scanned, fresh_delivery_completed:f.delivery_completed,
-        fresh_delivery_impossible:f.delivery_impossible, fresh_delivery_pdd_miss:f.delivery_pdd_miss, fresh_delivery_total:f.delivery_total, fresh_delivery_complete_rate:f.delivery_complete_rate
+    for (const fr of freshFinal) {
+      await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(fr.meta_worker_key)}`, {
+        fresh_delivery_assigned:fr.delivery_assigned, fresh_delivery_scanned:fr.delivery_scanned, fresh_delivery_completed:fr.delivery_completed,
+        fresh_delivery_impossible:fr.delivery_impossible, fresh_delivery_pdd_miss:fr.delivery_pdd_miss, fresh_delivery_total:fr.delivery_total,
+        fresh_delivery_complete_rate:fr.delivery_complete_rate
       });
     }
     await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
-    return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes };
+    return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes, completion_method: batchMethod };
   }
   return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, codes };
 }

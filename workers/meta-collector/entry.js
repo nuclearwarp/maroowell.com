@@ -167,8 +167,8 @@ function deliveryActivity(prev, d, ret, fb, wave) {
 }
 function roundFields(prev, round) {
   return {
-    scan: prev?.[`round${round}_scan_started_at`] || null,
-    delivery: prev?.[`round${round}_delivery_started_at`] || null,
+    scan: prev?.[`round${round}_scan_started_at`] || (round === 1 ? (prev?.scan_started_at || null) : null),
+    delivery: prev?.[`round${round}_delivery_started_at`] || (round === 1 ? (prev?.delivery_started_at || null) : null),
     completed: prev?.[`round${round}_completed_at`] || null,
     detected: prev?.[`round${round}_completion_detected_at`] || null,
     method: prev?.[`round${round}_completion_method`] || null

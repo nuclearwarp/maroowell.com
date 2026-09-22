@@ -419,11 +419,17 @@ async function processBatch(env, cookies, batch) {
     }
 
     const deliveryRemaining = Math.max(0, d.scanned);
-    const totalRemaining = deliveryRemaining + (batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0)) + Math.max(0, fb.pending || 0);
+    const returnRemaining = batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0);
+    const freshbagRemaining = Math.max(0, fb.pending || 0);
+    const totalRemaining = deliveryRemaining + returnRemaining + freshbagRemaining;
     const exactCandidate = exactDone ? (prev?.exact_complete_candidate_at || now) : null;
     const exactConfirmed = exactDone && !!prev?.exact_complete_candidate_at;
     const finalRoundReady = currentRound >= expRounds && !!rounds[currentRound].delivery;
-    const staleTailConfirmed = finalRoundReady && totalRemaining <= 2 && idleMinutes >= 30;
+    const staleTailConfirmed = finalRoundReady
+      && deliveryRemaining <= 2
+      && (batch.wave === "WAVE1" || returnRemaining <= 2)
+      && freshbagRemaining <= 2
+      && idleMinutes >= 30;
 
     let allDone = false, allCompletedAt = null, completionMethod = null, completionDetectedAt = null;
     if (exactConfirmed && finalRoundReady) {

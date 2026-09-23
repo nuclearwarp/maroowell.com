@@ -192,17 +192,13 @@ function scanActivity(prev, d) {
     || d.total > Number(prev.delivery_total || 0)
     || d.assigned > Number(prev.delivery_assigned || 0);
 }
-function deliveryActivity(prev, d, ret, fb, wave) {
-  if (!prev) return (d.completed + d.impossible + d.pdd + fb.collected + fb.uncollected + (wave === "WAVE1" ? 0 : ((ret?.collected || 0) + (ret?.uncollected || 0)))) > 0;
+function deliveryActivity(prev, d) {
+  // "배송 시작"은 배송 자체의 실적 변화만 의미한다.
+  // 반품/프백 변화는 progress 판단에는 쓰지만 배송 시작시각을 만들지 않는다.
+  if (!prev) return (d.completed + d.impossible + d.pdd) > 0;
   return d.completed > Number(prev.delivery_completed || 0)
     || d.impossible > Number(prev.delivery_impossible || 0)
-    || d.pdd > Number(prev.delivery_pdd_miss || 0)
-    || fb.collected > Number(prev.freshbag_collected || 0)
-    || fb.uncollected > Number(prev.freshbag_uncollected || 0)
-    || (wave !== "WAVE1" && (
-      (ret?.collected || 0) > Number(prev.return_collected || 0)
-      || (ret?.uncollected || 0) > Number(prev.return_uncollected || 0)
-    ));
+    || d.pdd > Number(prev.delivery_pdd_miss || 0);
 }
 function roundFields(prev, round) {
   return {
@@ -453,7 +449,7 @@ async function processBatch(env, cookies, batch) {
     const exactDone = deliveryDone && returnDone && freshbagDone;
     const changed = progressChanged(prev, d, ret, fb, batch.wave);
     const scanMoved = scanActivity(prev, d);
-    const deliveryMoved = deliveryActivity(prev, d, ret, fb, batch.wave);
+    const deliveryMoved = deliveryActivity(prev, d);
 
     let currentRound = Math.max(1, Math.min(3, Number(prev?.current_round || 1)));
     let lastProgressAt = changed ? now : (prev?.last_progress_at || now);

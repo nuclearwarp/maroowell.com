@@ -135,6 +135,20 @@ function addMinutesIso(v, minutes) {
 }
 function sampleMinute(v) { return String(v || "").slice(0, 16) + ":00"; }
 function expectedRounds(batch) { return Math.max(1, Math.min(3, Number(batch?.expected_rounds || 2))); }
+function metricsCloseReached(batch) {
+  const kp = kstParts();
+  const scheduleDate = String(batch?.schedule_date || "");
+  const wave = String(batch?.wave || "").toUpperCase();
+  if (!scheduleDate) return false;
+  if (wave === "WAVE2") {
+    return kp.date > scheduleDate || (kp.date === scheduleDate && kp.hour === 23 && kp.minute >= 59);
+  }
+  if (wave === "WAVE1") {
+    const closeDate = addDate(scheduleDate, 1);
+    return kp.date > closeDate || (kp.date === closeDate && kp.hour === 11 && kp.minute >= 59);
+  }
+  return false;
+}
 function progressChanged(prev, d, ret, fb, wave) {
   if (!prev) return false;
   const pairs = [
@@ -452,20 +466,24 @@ async function processBatch(env, cookies, batch) {
       && freshbagRemaining <= 2
       && idleMinutes >= 30;
 
-    let allDone = false, allCompletedAt = null, completionMethod = null, completionDetectedAt = null;
-    if (exactConfirmed) {
+    let allDone = !!prev?.all_completed_at;
+    let allCompletedAt = prev?.all_completed_at || null;
+    let completionMethod = prev?.completion_method || null;
+    let completionDetectedAt = prev?.completion_detected_at || null;
+
+    if (!allCompletedAt && exactConfirmed) {
       allDone = true;
       allCompletedAt = prev.exact_complete_candidate_at;
       completionMethod = "exact_2poll";
       completionDetectedAt = now;
-    } else if (staleTailConfirmed) {
+    } else if (!allCompletedAt && staleTailConfirmed) {
       allDone = true;
       allCompletedAt = addMinutesIso(lastProgressAt, 1);
       completionMethod = "stale_tail_30m";
       completionDetectedAt = now;
     }
 
-    if (allDone) {
+    if (allCompletedAt) {
       if (!rounds[currentRound].completed) rounds[currentRound].completed = allCompletedAt;
       if (!rounds[currentRound].detected) rounds[currentRound].detected = completionDetectedAt;
       if (!rounds[currentRound].method) rounds[currentRound].method = completionMethod;
@@ -501,12 +519,12 @@ async function processBatch(env, cookies, batch) {
 
       scan_started_at: prev?.scan_started_at || rounds[1].scan,
       delivery_started_at: prev?.delivery_started_at || rounds[1].delivery,
-      delivery_completed_at: allDone ? allCompletedAt : (prev?.delivery_completed_at || null),
-      all_completed_at: allCompletedAt,
+      delivery_completed_at: prev?.delivery_completed_at || allCompletedAt || null,
+      all_completed_at: prev?.all_completed_at || allCompletedAt || null,
       first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
-      delivery_done: allDone ? true : deliveryDone,
-      return_done: batch.wave === "WAVE1" ? null : (allDone ? true : returnDone),
-      freshbag_done: allDone ? true : freshbagDone,
+      delivery_done: deliveryDone,
+      return_done: batch.wave === "WAVE1" ? null : returnDone,
+      freshbag_done: freshbagDone,
       raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now, total_remaining: totalRemaining },
       updated_at: now
     };
@@ -551,21 +569,23 @@ async function processBatch(env, cookies, batch) {
     await sbUpsert(env, "meta_realtime_history", historyRows, "batch_id,meta_worker_key,sample_minute");
   }
 
-  const complete = rows.length > 0 && rows.every(r => !!r.completion_detected_at);
+  const complete = rows.length > 0 && rows.every(r => !!r.all_completed_at);
   const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
   const inferred = rows.some(r => r.completion_method === "stale_tail_30m");
-  const batchMethod = complete ? (inferred ? "stale_tail_30m" : "exact_2poll") : null;
+  const batchMethod = complete ? (inferred ? "stale_tail_30m" : (batch.completion_method || "exact_2poll")) : null;
+  const shouldFinalize = complete && metricsCloseReached(batch);
   const patch = {
     meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
-    completed_worker_count: rows.filter(r => !!r.completion_detected_at).length,
+    completed_worker_count: rows.filter(r => !!r.all_completed_at).length,
     stable_complete_poll_count: stable, status: complete ? "completion_candidate" : "collecting",
-    completion_method: batchMethod, completion_detected_at: complete ? now : null,
+    completion_method: complete ? (batch.completion_method || batchMethod) : null,
+    completion_detected_at: complete ? (batch.completion_detected_at || now) : null,
     poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now
   };
   if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
 
-  if (complete) {
+  if (shouldFinalize) {
     const freshFinal = await sbGet(env, `meta_realtime_fresh_current?select=*&batch_id=eq.${batch.id}`) || [];
     const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
     for (const fr of freshFinal) {
@@ -578,7 +598,7 @@ async function processBatch(env, cookies, batch) {
     await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
     return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes, completion_method: batchMethod };
   }
-  return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, codes };
+  return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, collecting_after_completion: complete, codes };
 }
 
 async function heartbeat(env, cookies) {

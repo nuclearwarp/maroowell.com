@@ -520,8 +520,16 @@ async function processBatch(env, cookies, batch) {
   }
 
   const rows = [...byKey.values()];
-  await sbDelete(env, `meta_realtime_current?batch_id=eq.${batch.id}`);
   if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
+
+  // Keep current state stable across polls. Remove only workers that have been absent
+  // from META for at least 5 minutes, instead of deleting/reinserting the whole batch.
+  const liveKeys = new Set(rows.map(r => rowIdentity(r)));
+  for (const prev of prevRows) {
+    if (liveKeys.has(rowIdentity(prev))) continue;
+    if (minutesBetween(prev.last_seen_at || prev.updated_at, now) < 5) continue;
+    if (prev.id) await sbDelete(env, `meta_realtime_current?id=eq.${encodeURIComponent(prev.id)}`);
+  }
 
   const freshRows = await storeFreshRows(env, batch, schedule, directory, fresh, now);
   const freshMap = new Map((freshRows || []).map(r => [r.meta_worker_key, r]));
@@ -596,15 +604,34 @@ async function runCollector(env, force = false) {
   await ensureBatches(env);
   const due = await dueBatches(env), results = [];
   for (const batch of due) {
+    const lockToken = crypto.randomUUID();
+    let claimed = false;
     try {
+      claimed = await sbPost(env, "rpc/meta_claim_realtime_batch", {
+        p_batch_id: batch.id,
+        p_token: lockToken,
+        p_lease_seconds: 120
+      });
+      if (!claimed) {
+        results.push({ camp: batch.camp_name, wave: batch.wave, skipped: "collector_locked" });
+        continue;
+      }
       results.push(await processBatch(env, cookies, batch));
     } catch (e) {
       const msg = String(e?.message || e);
       results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
-      await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
-        status: "error", last_error: msg.slice(0, 500), next_poll_at: kstIsoAt(Date.now() + 300000), updated_at: nowIso()
-      });
+      if (claimed) {
+        await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
+          status: "error", last_error: msg.slice(0, 500), next_poll_at: kstIsoAt(Date.now() + 300000), updated_at: nowIso()
+        });
+      }
       if (/META (401|403|302)/.test(msg)) { await saveSession(env, cookies, "expired", Number(msg.match(/META (\d+)/)?.[1] || 401), msg.slice(0, 250)); break; }
+    } finally {
+      if (claimed) {
+        try {
+          await sbPost(env, "rpc/meta_release_realtime_batch", { p_batch_id: batch.id, p_token: lockToken });
+        } catch {}
+      }
     }
   }
   const kp = kstParts();

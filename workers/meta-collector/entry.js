@@ -600,25 +600,27 @@ async function processBatch(env, cookies, batch) {
   const completedCount = expected.length
     ? expected.filter(p => !!stateRows.find(r => currentMatchesPerson(r,p) && r.work_completed_at)).length
     : stateRows.filter(r => !!r.work_completed_at).length;
-  const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
-  const inferred = matched.some(r => r.completion_method === "stale_tail_30m");
-  const batchMethod = complete ? (inferred ? "stale_tail_30m" : (batch.completion_method || "exact_2poll")) : null;
-  const workCompletedAt = complete
+  const newlyCompletedAt = complete
     ? matched.map(r => r.work_completed_at).filter(Boolean).sort().at(-1)
-    : (batch.work_completed_at || null);
-  const shouldFinalize = complete && metricsCloseReached(batch);
+    : null;
+  const campWorkCompletedAt = batch.work_completed_at || newlyCompletedAt || null;
+  const campComplete = !!campWorkCompletedAt;
+  const stable = campComplete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
+  const inferred = matched.some(r => r.completion_method === "stale_tail_30m");
+  const batchMethod = campComplete ? (inferred ? "stale_tail_30m" : (batch.completion_method || "exact_2poll")) : null;
+  const shouldFinalize = campComplete && metricsCloseReached(batch);
   const patch = {
     meta_camp_codes: codes, last_polled_at: now, worker_count: stateRows.length,
     completed_worker_count: completedCount,
     stable_complete_poll_count: stable,
-    status: complete ? "completion_candidate" : "collecting",
-    work_completed_at: complete ? (batch.work_completed_at || workCompletedAt) : null,
+    status: campComplete ? "completion_candidate" : "collecting",
+    work_completed_at: campWorkCompletedAt,
     metrics_status: "collecting",
-    completion_method: complete ? (batch.completion_method || batchMethod) : null,
-    completion_detected_at: complete ? (batch.completion_detected_at || now) : null,
+    completion_method: campComplete ? (batch.completion_method || batchMethod) : null,
+    completion_detected_at: campComplete ? (batch.completion_detected_at || now) : null,
     poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now
   };
-  if (complete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
+  if (campComplete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
 
   if (shouldFinalize) {
@@ -634,7 +636,7 @@ async function processBatch(env, cookies, batch) {
     await sbDelete(env, `meta_realtime_fresh_current?batch_id=eq.${batch.id}`);
     return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, finalized, codes, completion_method: batchMethod };
   }
-  return { camp: batch.camp_name, wave: batch.wave, workers: rows.length, complete, stable, collecting_after_completion: complete, codes };
+  return { camp: batch.camp_name, wave: batch.wave, workers: stateRows.length, complete: campComplete, stable, collecting_after_completion: campComplete, codes };
 }
 
 async function heartbeat(env, cookies) {

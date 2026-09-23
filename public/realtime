@@ -99,7 +99,7 @@ button,input{font:inherit}
 .waveBadge{display:inline-flex;margin-right:5px;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:600;vertical-align:2px}
 .waveBadge.day{background:#fff6df;color:#9a5b00}.waveBadge.night{background:#f2ecff;color:#6d28d9}
 .driverScore{margin-left:auto;text-align:right}.driverScore b{display:block;font-size:13px;color:var(--blue);font-weight:650}.driverScore small{color:#73848e;font-size:9.5px;font-weight:500}
-.driverTop{position:relative;padding-bottom:25px}.timeMeta{position:absolute;left:0;right:0;bottom:0;margin-top:7px;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:12px;font-size:10px;width:100%}.timeMeta span:first-child{text-align:left}.timeMeta span:last-child{text-align:right}
+.driverTop{position:relative;padding-bottom:31px}.timeMeta{position:absolute;left:0;right:0;bottom:0;margin-top:7px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;gap:4px;width:100%}.timeStep{min-width:0;height:23px;padding:0 5px;border-radius:7px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;font-size:9px;font-style:normal;overflow:hidden}.timeStep b{font-size:8.5px;font-weight:700}.timeStep em{font-style:normal;font-variant-numeric:tabular-nums;font-weight:700}.timeStep.scan{background:#f8fafc;color:#52666f;border-color:#dbe4ea}.timeStep.first{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.timeStep.second{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe}.timeStep.done{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}
 .missLine{margin-top:7px;padding:7px 9px;border-radius:9px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:10.5px;font-weight:700}
 .missLine.red{background:#fff0ef;color:#b42318;border-color:#fecaca}
 .routeChips{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
@@ -268,6 +268,11 @@ function fmtTime(v){
   if(!m)return "-";
   return `${Number(m[1])}시 ${m[2]}분`;
 }
+function fmtClock(v){
+  if(!v)return "-";
+  const m=String(v).match(/[T\s](\d{2}):(\d{2})/);
+  return m?`${m[1]}:${m[2]}`:"-";
+}
 function setStatus(t,e=false){
   $("queryStatus").innerHTML=t;
   $("queryStatus").classList.toggle("err",!!e);
@@ -402,6 +407,9 @@ function buildCamps(){
       coupangId:String(src.coupang_id||"").trim().toLowerCase(),
       routes,ownExtraRoutes,externalRoutes,delivery,freshDelivery,returns,fresh,
       scanStartedAt:src.scan_started_at||null,
+      firstDeliveryStartedAt:src.round1_delivery_started_at||src.delivery_started_at||null,
+      round2ScanStartedAt:src.round2_scan_started_at||null,
+      round2DeliveryStartedAt:src.round2_delivery_started_at||null,
       allCompletedAt:src.all_completed_at||null,
       freshMiss:String(src.fresh_miss||"N").toUpperCase()==="Y",
       dawnMiss:String(src.dawn_miss||"N").toUpperCase()==="Y",
@@ -613,8 +621,10 @@ function renderDrivers(){
           </div>
           <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip ${r.externalRoutes?.includes(x)?"externalExtra":(r.ownExtraRoutes?.includes(x)?"ownExtra":"")}">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
           <div class="timeMeta">
-            <span>스캔 시작: ${fmtTime(r.scanStartedAt)}</span>
-            <span>전체 완료: ${fmtTime(r.allCompletedAt)}</span>
+            <span class="timeStep scan"><b>스캔</b><em>${fmtClock(r.scanStartedAt)}</em></span>
+            <span class="timeStep first"><b>첫배송</b><em>${fmtClock(r.firstDeliveryStartedAt)}</em></span>
+            <span class="timeStep second"><b>2차배송</b><em>${fmtClock(r.round2DeliveryStartedAt)}</em></span>
+            <span class="timeStep done"><b>완료</b><em>${fmtClock(r.allCompletedAt)}</em></span>
           </div>
         </div>
         <div class="driverScore"><b>${pct(r.delivery.rate)}</b><small>배송 완료율</small><div class="scoreBar"><i style="width:${clampRate(r.delivery.rate)}%"></i></div></div>
@@ -753,7 +763,7 @@ async function queryAll(){
   try{
     const today=defaultDate();
     $("scheduleDate").value=today;
-    const activeStatuses=["collecting","completion_candidate","overdue","error","paused","finalized"];
+    const activeStatuses=["collecting","completion_candidate","overdue","error","paused"];
 
     const {data:batches,error:be}=await S.sb
       .from("meta_realtime_batch")
@@ -778,15 +788,12 @@ async function queryAll(){
 
     const ids=S.batches.map(b=>b.id);
     const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
-    const [currentRes,freshRes,finalRes,scheduleRes]=await Promise.all([
+    const [currentRes,freshRes,scheduleRes]=await Promise.all([
       S.sb.from("meta_realtime_current")
-        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
+        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
         .in("batch_id",ids),
       S.sb.from("meta_realtime_fresh_current")
         .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
-        .in("batch_id",ids),
-      S.sb.from("meta_realtime_final")
-        .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate")
         .in("batch_id",ids),
       S.sb.from("maroowell_schedule")
         .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
@@ -796,11 +803,10 @@ async function queryAll(){
 
     if(currentRes.error)throw currentRes.error;
     if(freshRes.error)throw freshRes.error;
-    if(finalRes.error)throw finalRes.error;
     if(scheduleRes.error)throw scheduleRes.error;
 
     S.scheduleRows=scheduleRes.data||[];
-    S.sourceRows=mergeFresh([...(currentRes.data||[]),...(finalRes.data||[])],freshRes.data||[]);
+    S.sourceRows=mergeFresh(currentRes.data||[],freshRes.data||[]);
     S.lastQueryAt=Date.now();
     applyWaveFilter();
     await loadCollectorState();

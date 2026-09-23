@@ -136,18 +136,43 @@ function addMinutesIso(v, minutes) {
 function sampleMinute(v) { return String(v || "").slice(0, 16) + ":00"; }
 function expectedRounds(batch) { return Math.max(1, Math.min(3, Number(batch?.expected_rounds || 2))); }
 function metricsCloseReached(batch) {
+  const close = tsMs(batch?.metrics_close_at);
+  if (Number.isFinite(close)) return Date.now() >= close;
   const kp = kstParts();
   const scheduleDate = String(batch?.schedule_date || "");
   const wave = String(batch?.wave || "").toUpperCase();
   if (!scheduleDate) return false;
-  if (wave === "WAVE2") {
-    return kp.date > scheduleDate || (kp.date === scheduleDate && kp.hour === 23 && kp.minute >= 59);
-  }
+  if (wave === "WAVE2") return kp.date > scheduleDate || (kp.date === scheduleDate && kp.hour === 23 && kp.minute >= 59);
   if (wave === "WAVE1") {
     const closeDate = addDate(scheduleDate, 1);
     return kp.date > closeDate || (kp.date === closeDate && kp.hour === 11 && kp.minute >= 59);
   }
   return false;
+}
+function schedulePersonKey(r) {
+  const id = String(r?.driver_coupang_id || "").trim().toLowerCase();
+  if (id) return `id:${id}`;
+  const name = String(r?.driver_display_name || r?.driver_name || r?.driver_owner_name || "").trim();
+  return name ? `name:${name}` : "";
+}
+function scheduledPeople(rows) {
+  const map = new Map();
+  for (const r of rows || []) {
+    if (!r || r.route_label === "휴무자") continue;
+    const key = schedulePersonKey(r);
+    if (key && !map.has(key)) map.set(key, {
+      key,
+      id: String(r.driver_coupang_id || "").trim().toLowerCase(),
+      names: uniq([r.driver_display_name,r.driver_name,r.driver_owner_name].map(x=>String(x||"").trim()).filter(Boolean))
+    });
+  }
+  return [...map.values()];
+}
+function currentMatchesPerson(r, p) {
+  const id = String(r?.coupang_id || "").trim().toLowerCase();
+  if (p.id && id === p.id) return true;
+  const name = String(r?.driver_name || "").trim();
+  return !!name && p.names.includes(name);
 }
 function progressChanged(prev, d, ret, fb, wave) {
   if (!prev) return false;
@@ -457,8 +482,9 @@ async function processBatch(env, cookies, batch) {
     const returnRemaining = batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0);
     const freshbagRemaining = Math.max(0, fb.pending || 0);
     const totalRemaining = deliveryRemaining + returnRemaining + freshbagRemaining;
-    const exactCandidate = exactDone ? (prev?.exact_complete_candidate_at || now) : null;
-    const exactConfirmed = exactDone && !!prev?.exact_complete_candidate_at;
+    const hadDeliveryActivity = !!(prev?.delivery_started_at || rounds[1].delivery || d.completed > 0 || d.impossible > 0 || d.pdd > 0);
+    const exactCandidate = exactDone && hadDeliveryActivity ? (prev?.exact_complete_candidate_at || now) : null;
+    const exactConfirmed = exactDone && hadDeliveryActivity && !!prev?.exact_complete_candidate_at;
     const finalRoundReady = currentRound >= expRounds && !!rounds[currentRound].delivery;
     const staleTailConfirmed = finalRoundReady
       && deliveryRemaining <= 2
@@ -466,25 +492,22 @@ async function processBatch(env, cookies, batch) {
       && freshbagRemaining <= 2
       && idleMinutes >= 30;
 
-    let allDone = !!prev?.all_completed_at;
-    let allCompletedAt = prev?.all_completed_at || null;
+    let workCompletedAt = prev?.work_completed_at || null;
     let completionMethod = prev?.completion_method || null;
     let completionDetectedAt = prev?.completion_detected_at || null;
 
-    if (!allCompletedAt && exactConfirmed) {
-      allDone = true;
-      allCompletedAt = prev.exact_complete_candidate_at;
+    if (!workCompletedAt && exactConfirmed) {
+      workCompletedAt = prev.exact_complete_candidate_at;
       completionMethod = "exact_2poll";
       completionDetectedAt = now;
-    } else if (!allCompletedAt && staleTailConfirmed) {
-      allDone = true;
-      allCompletedAt = addMinutesIso(lastProgressAt, 1);
+    } else if (!workCompletedAt && staleTailConfirmed) {
+      workCompletedAt = addMinutesIso(lastProgressAt, 1);
       completionMethod = "stale_tail_30m";
       completionDetectedAt = now;
     }
 
-    if (allCompletedAt) {
-      if (!rounds[currentRound].completed) rounds[currentRound].completed = allCompletedAt;
+    if (workCompletedAt) {
+      if (!rounds[currentRound].completed) rounds[currentRound].completed = workCompletedAt;
       if (!rounds[currentRound].detected) rounds[currentRound].detected = completionDetectedAt;
       if (!rounds[currentRound].method) rounds[currentRound].method = completionMethod;
     }
@@ -516,11 +539,12 @@ async function processBatch(env, cookies, batch) {
       round3_scan_started_at: rounds[3].scan, round3_delivery_started_at: rounds[3].delivery,
       round3_completed_at: rounds[3].completed, round3_completion_detected_at: rounds[3].detected, round3_completion_method: rounds[3].method,
       completion_method: completionMethod, completion_detected_at: completionDetectedAt,
+      work_completed_at: workCompletedAt,
 
       scan_started_at: prev?.scan_started_at || rounds[1].scan,
       delivery_started_at: prev?.delivery_started_at || rounds[1].delivery,
-      delivery_completed_at: prev?.delivery_completed_at || allCompletedAt || null,
-      all_completed_at: prev?.all_completed_at || allCompletedAt || null,
+      delivery_completed_at: prev?.delivery_completed_at || workCompletedAt || null,
+      all_completed_at: workCompletedAt,
       first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
       delivery_done: deliveryDone,
       return_done: batch.wave === "WAVE1" ? null : returnDone,
@@ -569,15 +593,31 @@ async function processBatch(env, cookies, batch) {
     await sbUpsert(env, "meta_realtime_history", historyRows, "batch_id,meta_worker_key,sample_minute");
   }
 
-  const complete = rows.length > 0 && rows.every(r => !!r.all_completed_at);
+  const stateRows = await sbGet(env, `meta_realtime_current?select=meta_worker_key,coupang_id,driver_name,work_completed_at,completion_method&batch_id=eq.${batch.id}`) || [];
+  const expected = scheduledPeople(schedule);
+  const matched = expected.length
+    ? expected.map(p => stateRows.find(r => currentMatchesPerson(r,p))).filter(Boolean)
+    : stateRows;
+  const complete = matched.length > 0
+    && (expected.length === 0 || matched.length === expected.length)
+    && matched.every(r => !!r.work_completed_at);
+  const completedCount = expected.length
+    ? expected.filter(p => !!stateRows.find(r => currentMatchesPerson(r,p) && r.work_completed_at)).length
+    : stateRows.filter(r => !!r.work_completed_at).length;
   const stable = complete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
-  const inferred = rows.some(r => r.completion_method === "stale_tail_30m");
+  const inferred = matched.some(r => r.completion_method === "stale_tail_30m");
   const batchMethod = complete ? (inferred ? "stale_tail_30m" : (batch.completion_method || "exact_2poll")) : null;
+  const workCompletedAt = complete
+    ? matched.map(r => r.work_completed_at).filter(Boolean).sort().at(-1)
+    : (batch.work_completed_at || null);
   const shouldFinalize = complete && metricsCloseReached(batch);
   const patch = {
-    meta_camp_codes: codes, last_polled_at: now, worker_count: rows.length,
-    completed_worker_count: rows.filter(r => !!r.all_completed_at).length,
-    stable_complete_poll_count: stable, status: complete ? "completion_candidate" : "collecting",
+    meta_camp_codes: codes, last_polled_at: now, worker_count: stateRows.length,
+    completed_worker_count: completedCount,
+    stable_complete_poll_count: stable,
+    status: complete ? "completion_candidate" : "collecting",
+    work_completed_at: complete ? (batch.work_completed_at || workCompletedAt) : null,
+    metrics_status: "collecting",
     completion_method: complete ? (batch.completion_method || batchMethod) : null,
     completion_detected_at: complete ? (batch.completion_detected_at || now) : null,
     poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now

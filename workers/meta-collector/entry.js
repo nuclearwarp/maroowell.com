@@ -520,16 +520,9 @@ async function processBatch(env, cookies, batch) {
   }
 
   const rows = [...byKey.values()];
+  // Current is stateful for the full active batch. Never delete a worker row merely
+  // because META omitted it from one or more polls; finalize is the only bulk cleanup.
   if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
-
-  // Keep current state stable across polls. Remove only workers that have been absent
-  // from META for at least 5 minutes, instead of deleting/reinserting the whole batch.
-  const liveKeys = new Set(rows.map(r => rowIdentity(r)));
-  for (const prev of prevRows) {
-    if (liveKeys.has(rowIdentity(prev))) continue;
-    if (minutesBetween(prev.last_seen_at || prev.updated_at, now) < 5) continue;
-    if (prev.id) await sbDelete(env, `meta_realtime_current?id=eq.${encodeURIComponent(prev.id)}`);
-  }
 
   const freshRows = await storeFreshRows(env, batch, schedule, directory, fresh, now);
   const freshMap = new Map((freshRows || []).map(r => [r.meta_worker_key, r]));

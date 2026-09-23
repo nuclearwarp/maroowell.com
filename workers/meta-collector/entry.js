@@ -136,7 +136,8 @@ function addMinutesIso(v, minutes) {
 function sampleMinute(v) { return String(v || "").slice(0, 16) + ":00"; }
 function expectedRounds(batch) { return Math.max(1, Math.min(3, Number(batch?.expected_rounds || 2))); }
 function metricsCloseReached(batch) {
-  const close = tsMs(batch?.metrics_close_at);
+  const rawClose = batch?.metrics_close_at ? String(batch.metrics_close_at).replace(" ","T") : "";
+  const close = rawClose ? Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(rawClose) ? rawClose : rawClose + "+09:00") : NaN;
   if (Number.isFinite(close)) return Date.now() >= close;
   const kp = kstParts();
   const scheduleDate = String(batch?.schedule_date || "");

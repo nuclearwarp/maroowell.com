@@ -99,7 +99,7 @@ button,input{font:inherit}
 .waveBadge{display:inline-flex;margin-right:5px;padding:3px 7px;border-radius:999px;font-size:9px;font-weight:600;vertical-align:2px}
 .waveBadge.day{background:#fff6df;color:#9a5b00}.waveBadge.night{background:#f2ecff;color:#6d28d9}
 .driverScore{margin-left:auto;text-align:right}.driverScore b{display:block;font-size:13px;color:var(--blue);font-weight:650}.driverScore small{color:#73848e;font-size:9.5px;font-weight:500}
-.driverTop{position:relative;padding-bottom:37px}.timeMeta{position:absolute;left:0;right:0;bottom:0;margin-top:7px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;gap:5px;width:100%}.timeStep{min-width:0;height:29px;padding:0 7px;border-radius:8px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;font-style:normal;overflow:hidden;line-height:1}.timeStep b{font-size:10.5px;font-weight:800;letter-spacing:-.02em}.timeStep em{font-size:12.5px;font-style:normal;font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:-.01em}.timeStep.scan{background:#f8fafc;color:#52666f;border-color:#dbe4ea}.timeStep.first{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.timeStep.second{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe}.timeStep.done{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}.doneBadge{display:inline-flex;align-items:center;justify-content:center;padding:3px 6px;border-radius:6px;background:#dcfce7;border:1px solid #86efac;color:#15803d;font-size:9px;font-weight:900;line-height:1;white-space:nowrap}
+.driverTop{position:relative;padding-bottom:37px}.timeMeta{position:absolute;left:0;right:0;bottom:0;margin-top:7px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;gap:5px;width:100%}.timeStep{min-width:0;height:29px;padding:0 7px;border-radius:8px;border:1px solid #e2e8f0;display:flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;font-style:normal;overflow:hidden;line-height:1}.timeStep b{font-size:10.5px;font-weight:800;letter-spacing:-.02em}.timeStep em{font-size:12.5px;font-style:normal;font-variant-numeric:tabular-nums;font-weight:800;letter-spacing:-.01em}.timeStep.scan{background:#f8fafc;color:#52666f;border-color:#dbe4ea}.timeStep.first{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.timeStep.second{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe}.timeStep.done{background:#f0fdf4;color:#15803d;border-color:#bbf7d0}.doneBadge{display:inline-flex;align-items:center;justify-content:center;margin-left:7px;padding:3px 7px;border-radius:7px;background:#dcfce7;border:1px solid #86efac;color:#15803d;font-size:16px;font-weight:900;line-height:1.05;white-space:nowrap;vertical-align:0}
 .missLine{margin-top:7px;padding:7px 9px;border-radius:9px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font-size:10.5px;font-weight:700}
 .missLine.red{background:#fff0ef;color:#b42318;border-color:#fecaca}
 .routeChips{margin-top:6px;display:flex;gap:5px;flex-wrap:wrap}
@@ -266,7 +266,7 @@ const parseKstDbTime=v=>{
 };
 const kstBoundary=(date,hour)=>new Date(`${date}T${String(hour).padStart(2,"0")}:00:00+09:00`);
 const completedVisibleUntil=(batch,rows)=>{
-  const done=(rows||[]).filter(r=>r.all_done===true&&r.all_completed_at);
+  const done=(rows||[]).filter(r=>!!r.all_completed_at);
   if(!done.length || done.length!==(rows||[]).length)return null;
   const times=done.map(r=>parseKstDbTime(r.all_completed_at)).filter(Boolean);
   if(!times.length)return null;
@@ -636,14 +636,14 @@ function renderDrivers(){
           <div class="driverName">
             <span class="driverCamp">${esc(r.camp)}</span>
             <span class="waveBadge ${isNight(r.wave)?"night":"day"}">${waveLabel(r.wave)}</span>
-            ${esc(r.driver)}
+            ${esc(r.driver)}${r.allCompletedAt?'<span class="doneBadge">완료!</span>':""}
           </div>
           <div class="routeChips">${r.routes.length?r.routes.map(x=>`<span class="routeChip ${r.externalRoutes?.includes(x)?"externalExtra":(r.ownExtraRoutes?.includes(x)?"ownExtra":"")}">${esc(x)}</span>`).join(""):`<span class="routeChip">라우트 없음</span>`}</div>
           <div class="timeMeta">
             <span class="timeStep scan"><b>스캔</b><em>${fmtClock(r.scanStartedAt)}</em></span>
             <span class="timeStep first"><b>첫배송</b><em>${fmtClock(r.firstDeliveryStartedAt)}</em></span>
             <span class="timeStep second"><b>2차배송</b><em>${fmtClock(r.round2DeliveryStartedAt)}</em></span>
-            <span class="timeStep done"><b>완료</b><em>${fmtClock(r.allCompletedAt)}</em>${r.allCompletedAt?'<span class="doneBadge">완료!</span>':""}</span>
+            <span class="timeStep done"><b>완료</b><em>${fmtClock(r.allCompletedAt)}</em></span>
           </div>
         </div>
         <div class="driverScore"><b>${pct(r.delivery.rate)}</b><small>배송 완료율</small><div class="scoreBar"><i style="width:${clampRate(r.delivery.rate)}%"></i></div></div>
@@ -830,6 +830,13 @@ async function queryAll(){
     if(finalRes.error)throw finalRes.error;
     if(scheduleRes.error)throw scheduleRes.error;
 
+    const currentRows=currentRes.data||[];
+    const currentByBatch=new Map();
+    for(const row of currentRows){
+      if(!currentByBatch.has(row.batch_id))currentByBatch.set(row.batch_id,[]);
+      currentByBatch.get(row.batch_id).push(row);
+    }
+
     const finalRows=finalRes.data||[];
     const finalByBatch=new Map();
     for(const row of finalRows){
@@ -838,16 +845,26 @@ async function queryAll(){
     }
 
     const now=new Date();
+    const visibleActiveBatches=activeBatches.filter(b=>{
+      const rows=currentByBatch.get(b.id)||[];
+      const until=completedVisibleUntil(b,rows);
+      return !until||now<until;
+    });
+    const visibleActiveIds=new Set(visibleActiveBatches.map(b=>b.id));
+
     const visibleFinalBatches=finalizedBatches.filter(b=>{
       const until=completedVisibleUntil(b,finalByBatch.get(b.id)||[]);
       return !!until&&now<until;
     });
     const visibleFinalIds=new Set(visibleFinalBatches.map(b=>b.id));
+
+    const visibleCurrentRows=currentRows.filter(r=>visibleActiveIds.has(r.batch_id));
+    const visibleFreshRows=(freshRes.data||[]).filter(r=>visibleActiveIds.has(r.batch_id));
     const visibleFinalRows=finalRows.filter(r=>visibleFinalIds.has(r.batch_id));
 
-    S.batches=[...activeBatches,...visibleFinalBatches];
+    S.batches=[...visibleActiveBatches,...visibleFinalBatches];
     S.scheduleRows=scheduleRes.data||[];
-    S.sourceRows=[...mergeFresh(currentRes.data||[],freshRes.data||[]),...visibleFinalRows];
+    S.sourceRows=[...mergeFresh(visibleCurrentRows,visibleFreshRows),...visibleFinalRows];
 
     if(!S.batches.length){
       S.camps=[];

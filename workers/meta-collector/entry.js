@@ -453,7 +453,7 @@ async function processBatch(env, cookies, batch) {
       && idleMinutes >= 30;
 
     let allDone = false, allCompletedAt = null, completionMethod = null, completionDetectedAt = null;
-    if (exactConfirmed && finalRoundReady) {
+    if (exactConfirmed) {
       allDone = true;
       allCompletedAt = prev.exact_complete_candidate_at;
       completionMethod = "exact_2poll";

@@ -266,9 +266,11 @@ const parseKstDbTime=v=>{
 };
 const kstBoundary=(date,hour)=>new Date(`${date}T${String(hour).padStart(2,"0")}:00:00+09:00`);
 const completedVisibleUntil=(batch,rows)=>{
-  const done=(rows||[]).filter(r=>!!r.all_completed_at);
+  const stored=parseKstDbTime(batch?.visible_until);
+  if(stored)return stored;
+  const done=(rows||[]).filter(r=>!!(r.work_completed_at||r.all_completed_at));
   if(!done.length || done.length!==(rows||[]).length)return null;
-  const times=done.map(r=>parseKstDbTime(r.all_completed_at)).filter(Boolean);
+  const times=done.map(r=>parseKstDbTime(r.work_completed_at||r.all_completed_at)).filter(Boolean);
   if(!times.length)return null;
   const completed=new Date(Math.max(...times.map(d=>d.getTime())));
   const base21=kstBoundary(String(batch.schedule_date||""),21);
@@ -391,6 +393,7 @@ function buildCamps(){
       g={
         key,name,wave,code:src.camp_code||b.camp_code||"",scheduleDate:String(b.schedule_date||""),
         status:b.status||"collecting",lastPolledAt:b.last_polled_at||null,
+        workCompletedAt:b.work_completed_at||null,visibleUntil:b.visible_until||null,metricsStatus:b.metrics_status||"collecting",
         rows:[],workers:0,
         totals:{delivery:blankDelivery(),freshDelivery:blankDelivery(),returns:collectionBlank(),fresh:collectionBlank()},
         scheduledCount:0,absentNames:[],campCompletedAt:null
@@ -428,7 +431,7 @@ function buildCamps(){
       firstDeliveryStartedAt:src.round1_delivery_started_at||src.delivery_started_at||null,
       round2ScanStartedAt:src.round2_scan_started_at||null,
       round2DeliveryStartedAt:src.round2_delivery_started_at||null,
-      allCompletedAt:src.all_completed_at||null,
+      allCompletedAt:src.work_completed_at||src.all_completed_at||null,
       allDone:src.all_done===true,
       freshMiss:String(src.fresh_miss||"N").toUpperCase()==="Y",
       dawnMiss:String(src.dawn_miss||"N").toUpperCase()==="Y",
@@ -450,7 +453,9 @@ function buildCamps(){
       .filter(p=>!(p.cid&&presentIds.has(p.cid)) && !presentNames.has(p.nk))
       .map(p=>p.display);
 
-    if(scheduled.size>0&&g.absentNames.length===0){
+    if(g.workCompletedAt){
+      g.campCompletedAt=g.workCompletedAt;
+    }else if(scheduled.size>0&&g.absentNames.length===0){
       const completionTimes=[];
       let allDone=true;
       for(const p of scheduled.values()){
@@ -787,7 +792,7 @@ async function queryAll(){
 
     const {data:batches,error:be}=await S.sb
       .from("meta_realtime_batch")
-      .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,completion_method,completion_detected_at,finalized_at,updated_at")
+      .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,completion_method,completion_detected_at,work_completed_at,visible_until,metrics_status,metrics_close_at,metrics_closed_at,finalized_at,updated_at")
       .in("status",queryStatuses)
       .order("updated_at",{ascending:false});
     if(be)throw be;
@@ -800,7 +805,7 @@ async function queryAll(){
 
     const currentQuery=activeIds.length
       ? S.sb.from("meta_realtime_current")
-          .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
+          .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
           .in("batch_id",activeIds)
       : Promise.resolve({data:[],error:null});
 
@@ -812,7 +817,7 @@ async function queryAll(){
 
     const finalQuery=finalIds.length
       ? S.sb.from("meta_realtime_final")
-          .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate")
+          .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate")
           .in("batch_id",finalIds)
       : Promise.resolve({data:[],error:null});
 

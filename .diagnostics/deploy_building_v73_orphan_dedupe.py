@@ -92,8 +92,11 @@ new2='''    const bucket = v62ResolvedClassificationBucket(item.row, item.classi
     }
     addUnits({'''
 # replace only in orphan loop region after insert
-idx=s.find('for (const item of orphanDetailUnits)')
-pos=s.find(old2,idx)
+idx=s.find('const v73ResidentialTitleCountParcels = new Set()')
+if idx<0: raise RuntimeError("v73 title parcel set anchor missing")
+loop_idx=s.find('for (const item of orphanDetailUnits)',idx)
+if loop_idx<0: raise RuntimeError("v73 orphan loop anchor missing")
+pos=s.find(old2,loop_idx)
 if pos<0: raise RuntimeError("orphan bucket anchor missing")
 s=s[:pos]+s[pos:].replace(old2,new2,1)
 

@@ -1111,7 +1111,10 @@ function metaPersonFromObject(obj) {
   if (metaStatusLooksOff(status)) return null;
 
   const hasRoute = metaObjectHasRoute(obj);
-  const working = metaStatusLooksWorking(status) || hasRoute;
+  // Original MetaAdmin behavior: a current-schedule person can be returned with
+  // only name + Coupang ID and no explicit status/route fields.
+  // Treat that shape as registered, exactly as the initial working implementation did.
+  const working = metaStatusLooksWorking(status) || hasRoute || (!status && !hasRoute);
   if (!working) return null;
 
   return { name, id, status: clean(status) || null };

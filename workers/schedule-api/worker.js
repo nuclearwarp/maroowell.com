@@ -1276,9 +1276,27 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
     method: "GET"
   });
 
+  // Keep the original recursive extractor as the primary source.
+  // MetaAdmin response shape has changed several times, so a rigid scheduleGroups-only
+  // parser can return zero people even while the API connection is healthy.
+  const legacyRegistered = extractMetaRegisteredPeople(result.body);
+  const legacyAll = extractMetaAllPeople(result.body);
   const structured = extractMetaScheduleGroupsPeople(result.body, date);
-  const registeredPeople = structured.found_groups ? structured.active : extractMetaRegisteredPeople(result.body);
-  const allPeople = structured.found_groups ? structured.all : extractMetaAllPeople(result.body);
+
+  const registeredMap = new Map();
+  for (const person of [...legacyRegistered, ...(structured.active || [])]) {
+    const key = metaKey(person?.id) || metaKey(person?.name);
+    if (key && !registeredMap.has(key)) registeredMap.set(key, person);
+  }
+
+  const allMap = new Map();
+  for (const person of [...legacyAll, ...(structured.all || [])]) {
+    const key = metaKey(person?.id) || metaKey(person?.name);
+    if (key && !allMap.has(key)) allMap.set(key, person);
+  }
+
+  const registeredPeople = [...registeredMap.values()];
+  const allPeople = [...allMap.values()];
 
   return {
     camp,

@@ -11,6 +11,10 @@ var login_worker_v2_default = {
       const response = await env.ASSETS.fetch(new Request(url.toString(), request));
       const path = url.pathname.replace(/\/+$/, "") || "/";
 
+      if (path === "/maroowell_schedule" || path === "/maroowell_schedule.html") {
+        return Response.redirect(new URL("/maroowell_schedule-v20260926-1.html", url).toString(), 302);
+      }
+
       const withNoStore = async (res, type) => {
         const body = await res.text();
         const headers = new Headers(res.headers);

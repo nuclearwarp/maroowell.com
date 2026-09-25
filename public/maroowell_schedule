@@ -4515,18 +4515,36 @@
             const plan=plans[i];
             setStatus("메타어드민 전송 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · 출근 "+plan.actualRows.length+" / 휴무 "+plan.offRows.length);
 
-            const wb=buildMetaUploadWorkbook(plan.rows,META_WORK_STATUS);
-            const upload=await uploadMetaWorkbook({
-              wb,
+            if(plan.offRows.length){
+              setStatus("기존 MetaAdmin 등록자 휴무 처리 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · "+plan.offRows.length+"명");
+              const resetWb=buildMetaUploadWorkbook(plan.offRows,"휴무");
+              const resetUpload=await uploadMetaWorkbook({
+                wb:resetWb,
+                fileName:metaCampName(state.camp)+"_"+waveLabel(state.wave)+"_"+plan.metaDate+"_reset_off.xlsx",
+                camp:state.camp,
+                wave:state.wave,
+                metaDate:plan.metaDate,
+                phase:"reset"
+              });
+              const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
+              if(!metaWorkflowSucceeded(resetResult)){
+                throw new Error(dateLabel(plan.selectedDate)+" 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,plan.offRows));
+              }
+            }
+
+            setStatus("현재 마루웰 출근자 반영 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · "+plan.actualRows.length+"명");
+            const actualWb=buildMetaUploadWorkbook(plan.actualRows,META_WORK_STATUS);
+            const actualUpload=await uploadMetaWorkbook({
+              wb:actualWb,
               fileName:metaCampName(state.camp)+"_"+waveLabel(state.wave)+"_"+plan.metaDate+"_schedule.xlsx",
               camp:state.camp,
               wave:state.wave,
               metaDate:plan.metaDate,
               phase:"apply"
             });
-            const result=await pollMetaWorkflow(upload.workflow_id);
+            const result=await pollMetaWorkflow(actualUpload.workflow_id);
             if(!metaWorkflowSucceeded(result)){
-              throw new Error(dateLabel(plan.selectedDate)+"\n"+metaWorkflowFailureText(result,plan.rows));
+              throw new Error(dateLabel(plan.selectedDate)+" 출근 반영 실패\n"+metaWorkflowFailureText(result,plan.actualRows));
             }
 
             setStatus("메타어드민 실제 반영 확인 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate));

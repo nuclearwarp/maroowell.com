@@ -178,10 +178,6 @@ export default {
         const metaDate = normalizeDate(upload.meta_date);
         const phase = clean(upload.phase) || "apply";
 
-        if (phase.toLowerCase() === "reset") {
-          throw httpError(409, "meta_reset_disabled_direct_schedule_upload_only");
-        }
-
         if (!camp) throw httpError(400, "camp_required");
         if (!metaDate) throw httpError(400, "meta_date_required");
         if (!upload.file) throw httpError(400, "file_required");

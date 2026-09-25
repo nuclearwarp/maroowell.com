@@ -31,7 +31,7 @@ window.MARUWELL_CONFIG = {
   PATHS: {
     login: "/",
     index: "/post_login",
-    route: "/route-map-v69-20260925.html",
+    route: "/route-map-v70-20260925.html",
     dragon_car_index: "/dragon_car_index.html",
     maroowell_info: "/maroowell_info.html"
   }

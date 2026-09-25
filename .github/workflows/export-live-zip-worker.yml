@@ -1,0 +1,43 @@
+name: Export live zip worker source
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export live worker source
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, urllib.request
+          from email.parser import BytesParser
+          from email.policy import default
+          account='0f644373a9db40f2b36e4ffece348c46'
+          script='purple-resonance-61ea'
+          url=f'https://api.cloudflare.com/client/v4/accounts/{account}/workers/scripts/{script}/content/v2'
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['CLOUDFLARE_API_TOKEN']})
+          with urllib.request.urlopen(req,timeout=30) as r:
+              body=r.read(); ctype=r.headers['content-type']
+          msg=BytesParser(policy=default).parsebytes((f'Content-Type: {ctype}\r\nMIME-Version: 1.0\r\n\r\n').encode()+body)
+          src=None
+          for p in msg.iter_parts():
+              if p.get_param('name',header='content-disposition')=='worker.js':
+                  src=(p.get_payload(decode=True) or b'').decode()
+                  break
+          if not src:
+              raise SystemExit('worker.js part not found')
+          open('/tmp/live-worker.js','w',encoding='utf-8').write(src)
+          print('bytes',len(src.encode()))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-zip-worker-source
+          path: /tmp/live-worker.js
+          retention-days: 1

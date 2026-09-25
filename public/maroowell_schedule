@@ -1327,12 +1327,13 @@
         WAVE2:["WAVE2","W2","주간","DAY","D"]
       };
 
-      // 최대 40명까지 같은 화면에서 사람별 색상이 겹치지 않도록 40개 고유색을 사용한다.
+      // 현재 주차에 실제 등장하는 기사들은 서로 확실히 구분되도록 고대비 순서로 배정한다.
       const LIGHT_PALETTE = [
-        "#f39b9b","#c3f4d1","#c17df2","#eee6b5","#9be4f3","#f4c3dd","#9af27d","#b7b5ee","#f3b89b","#c3f4e1",
-        "#e97df2","#e2eeb5","#9bc7f3","#f4c3cd","#7df287","#cab5ee","#f3d69b","#c3f4f2","#f27dd5","#cfeeb5",
-        "#9baaf3","#f4c9c3","#7df2ae","#ddb5ee","#f2f39b","#c3e5f4","#f27dad","#bceeb5","#aa9bf3","#f4d9c3",
-        "#7df2d5","#eeb5eb","#d5f39b","#c3d5f4","#f27d86","#b5eec1","#c79bf3","#f4eac3","#7de8f2","#eeb5d8"
+        "#71D7E5","#F07A83","#69DFA2","#F2B28D","#8BB8E8","#B994E8","#E6D56F","#E99BC9",
+        "#72D5C4","#A9B8C9","#F29D62","#79B8A8","#D48AE8","#87C96D","#E6A6C5","#7FA7E8",
+        "#E7C576","#8FD7B8","#D79275","#9E8CE6","#69C6DB","#E88691","#7BD28C","#E3B16E",
+        "#86AEDD","#C48BE2","#D8CD74","#DB94BD","#66CBB7","#A7B1C2","#E28D5B","#75B6A6",
+        "#C87FDC","#82C363","#DEA0BD","#769FD9","#DCC06E","#88CFB1","#CF886F","#9485DA"
       ];
 
       const els = {
@@ -1682,6 +1683,28 @@
         const key=account?.colorKey || account?.ownerName || clean(value) || "-";
         return assignColorKey(key);
       }
+
+      function rebuildVisiblePersonColors(){
+        const entries=[];
+        const seen=new Set();
+        for(const row of state.schedules||[]){
+          if(row?.is_active===false)continue;
+          const value=clean(row?.driver_display_name||row?.driver_name);
+          if(!value)continue;
+          const account=resolveAccount(value);
+          const key=clean(account?.colorKey||account?.ownerName||value);
+          const dedupe=keyOf(key);
+          if(!dedupe||seen.has(dedupe))continue;
+          seen.add(dedupe);
+          entries.push({key,label:clean(account?.ownerName||value)});
+        }
+        entries.sort((a,b)=>sortText(a.label,b.label));
+        state.personColorMap.clear();
+        entries.forEach((entry,index)=>{
+          state.personColorMap.set(entry.key,LIGHT_PALETTE[index%LIGHT_PALETTE.length]);
+        });
+      }
+
       function textColorForBg(){return "#0f172a"}
 
       function splitPersonNames(value){
@@ -2924,6 +2947,7 @@
           renderUpdateStatus(json.update_status || null);
           buildDriverAccounts();
           await ensureGlobalInfoAccountsForNames(assignedNamesFromSchedules());
+          rebuildVisiblePersonColors();
           makeScheduleMap();
           buildRoutes();
           render();
@@ -4305,10 +4329,25 @@
       async function pollMetaWorkflow(workflowId){
         const id=clean(workflowId);
         if(!id)throw new Error("메타어드민 workflowId가 없습니다.");
-        for(let i=0;i<90;i++){
+        let continued=false;
+        for(let i=0;i<120;i++){
           const result=await apiFetch("/schedule/meta/workflow?workflow_id="+encodeURIComponent(id));
           const status=clean(result?.status).toUpperCase();
-          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING"].includes(status))return result;
+
+          if(status==="WAIT_FOR_DOWNLOAD"){
+            if(!continued){
+              setStatus("메타어드민 라우트 불일치 확인 단계 진행 중...");
+              await apiFetch("/schedule/meta/continue",{
+                method:"POST",
+                body:JSON.stringify({workflow_id:id})
+              });
+              continued=true;
+            }
+            await sleep(1000);
+            continue;
+          }
+
+          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING","DOWNLOAD_READY"].includes(status))return result;
           await sleep(1000);
         }
         throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");

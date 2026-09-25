@@ -456,6 +456,7 @@ async function processBatch(env, cookies, batch) {
     let lastProgressAt = changed ? now : (prev?.last_progress_at || now);
     let lastScanActivityAt = scanMoved ? now : (prev?.last_scan_activity_at || null);
     const rounds = {1:roundFields(prev,1),2:roundFields(prev,2),3:roundFields(prev,3)};
+    const reopenedByScan = !!prev?.work_completed_at && scanMoved;
 
     if (!rounds[1].scan && (d.scanned > 0 || d.completed > 0 || d.impossible > 0 || d.pdd > 0)) rounds[1].scan = now;
     if (!rounds[currentRound].delivery && deliveryMoved) rounds[currentRound].delivery = now;
@@ -466,6 +467,12 @@ async function processBatch(env, cookies, batch) {
       if (!rounds[currentRound].delivery && deliveryMoved) rounds[currentRound].delivery = now;
       lastProgressAt = now;
       lastScanActivityAt = now;
+    } else if (reopenedByScan && rounds[currentRound].completed) {
+      // 완료 뒤 추가 스캔이 잡히면 마지막 회차 완료를 다시 연다.
+      // 이전 회차 완료 시각은 보존하고, 최종 회차에서 추가 스캔된 경우만 해당 회차 완료를 지운다.
+      rounds[currentRound].completed = null;
+      rounds[currentRound].detected = null;
+      rounds[currentRound].method = null;
     }
 
     const idleMinutes = minutesBetween(lastProgressAt, now);
@@ -480,8 +487,8 @@ async function processBatch(env, cookies, batch) {
     const freshbagRemaining = Math.max(0, fb.pending || 0);
     const totalRemaining = deliveryRemaining + returnRemaining + freshbagRemaining;
     const hadDeliveryActivity = !!(prev?.delivery_started_at || rounds[1].delivery || d.completed > 0 || d.impossible > 0 || d.pdd > 0);
-    const exactCandidate = exactDone && hadDeliveryActivity ? (prev?.exact_complete_candidate_at || now) : null;
-    const exactConfirmed = exactDone && hadDeliveryActivity && !!prev?.exact_complete_candidate_at;
+    const exactCandidate = !reopenedByScan && exactDone && hadDeliveryActivity ? (prev?.exact_complete_candidate_at || now) : null;
+    const exactConfirmed = !reopenedByScan && exactDone && hadDeliveryActivity && !!prev?.exact_complete_candidate_at;
     const finalRoundReady = currentRound >= expRounds && !!rounds[currentRound].delivery;
     const staleTailConfirmed = finalRoundReady
       && deliveryRemaining <= 2
@@ -489,15 +496,15 @@ async function processBatch(env, cookies, batch) {
       && freshbagRemaining <= 2
       && idleMinutes >= 30;
 
-    let workCompletedAt = prev?.work_completed_at || null;
-    let completionMethod = prev?.completion_method || null;
-    let completionDetectedAt = prev?.completion_detected_at || null;
+    let workCompletedAt = reopenedByScan ? null : (prev?.work_completed_at || null);
+    let completionMethod = reopenedByScan ? null : (prev?.completion_method || null);
+    let completionDetectedAt = reopenedByScan ? null : (prev?.completion_detected_at || null);
 
-    if (!workCompletedAt && exactConfirmed) {
+    if (!reopenedByScan && !workCompletedAt && exactConfirmed) {
       workCompletedAt = prev.exact_complete_candidate_at;
       completionMethod = "exact_2poll";
       completionDetectedAt = now;
-    } else if (!workCompletedAt && staleTailConfirmed) {
+    } else if (!reopenedByScan && !workCompletedAt && staleTailConfirmed) {
       workCompletedAt = addMinutesIso(lastProgressAt, 1);
       completionMethod = "stale_tail_30m";
       completionDetectedAt = now;
@@ -540,7 +547,7 @@ async function processBatch(env, cookies, batch) {
 
       scan_started_at: prev?.scan_started_at || rounds[1].scan,
       delivery_started_at: prev?.delivery_started_at || rounds[1].delivery,
-      delivery_completed_at: prev?.delivery_completed_at || workCompletedAt || null,
+      delivery_completed_at: reopenedByScan ? null : (prev?.delivery_completed_at || workCompletedAt || null),
       all_completed_at: workCompletedAt,
       first_seen_at: prev?.first_seen_at || now, last_seen_at: now,
       delivery_done: deliveryDone,
@@ -604,8 +611,10 @@ async function processBatch(env, cookies, batch) {
   const newlyCompletedAt = complete
     ? matched.map(r => r.work_completed_at).filter(Boolean).sort().at(-1)
     : null;
-  const campWorkCompletedAt = batch.work_completed_at || newlyCompletedAt || null;
-  const campComplete = !!campWorkCompletedAt;
+  // 기사 한 명이라도 완료 후 추가 스캔으로 재개되면 캠프 완료도 즉시 해제한다.
+  // 다시 전원이 완료된 시점의 최신 기사 완료시각으로 캠프 완료시각을 재계산한다.
+  const campWorkCompletedAt = complete ? (newlyCompletedAt || batch.work_completed_at || null) : null;
+  const campComplete = complete && !!campWorkCompletedAt;
   const stable = campComplete ? Number(batch.stable_complete_poll_count || 0) + 1 : 0;
   const inferred = matched.some(r => r.completion_method === "stale_tail_30m");
   const batchMethod = campComplete ? (inferred ? "stale_tail_30m" : (batch.completion_method || "exact_2poll")) : null;
@@ -619,9 +628,9 @@ async function processBatch(env, cookies, batch) {
     metrics_status: "collecting",
     completion_method: campComplete ? (batch.completion_method || batchMethod) : null,
     completion_detected_at: campComplete ? (batch.completion_detected_at || now) : null,
+    completion_candidate_at: campComplete ? (batch.completion_candidate_at || now) : null,
     poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now
   };
-  if (campComplete && !batch.completion_candidate_at) patch.completion_candidate_at = now;
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
 
   if (shouldFinalize) {

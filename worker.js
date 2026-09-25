@@ -1050,6 +1050,7 @@ async function handleCampsPost(request, env) {
   const mbCamp = safeTrim(body.mb_camp ?? body.delivery_location_name ?? body.name);
   const address = safeTrim(body.address);
   const code = safeTrim(body.code);
+  const numberingUrl = safeTrim(body.numbering_url);
   const latitude = parseMaybeNumber(body.latitude);
   const longitude = parseMaybeNumber(body.longitude);
 
@@ -1064,6 +1065,9 @@ async function handleCampsPost(request, env) {
   };
   if (code || Object.prototype.hasOwnProperty.call(body, "code")) {
     patch.code = code || null;
+  }
+  if (numberingUrl || Object.prototype.hasOwnProperty.call(body, "numbering_url")) {
+    patch.numbering_url = numberingUrl || null;
   }
   if (latitude != null || Object.prototype.hasOwnProperty.call(body, "latitude")) {
     patch.latitude = latitude;

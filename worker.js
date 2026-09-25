@@ -67,6 +67,11 @@ export default {
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
+      if (path === "/camps/batch" && request.method === "POST") {
+        await requireRouteWriteAccess(request, env);
+        return cors(await handleCampsBatch(request, env));
+      }
+
       if (path === "/vendors") {
         if (request.method === "GET") return cors(await handleVendorsGet(url, env));
         if (request.method === "POST") {

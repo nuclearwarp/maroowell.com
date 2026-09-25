@@ -72,6 +72,18 @@ export default {
         return cors(await handleCampsBatch(request, env));
       }
 
+      if (path === "/access" && request.method === "GET") {
+        try {
+          const access = await requireRouteWriteAccess(request, env);
+          return cors(json({ ok:true, canEdit:true, canClhi:true, access:{ can_clhi:true }, roleLevel:access.roleLevel }));
+        } catch (e) {
+          if ([401,403].includes(Number(e?.status))) {
+            return cors(json({ ok:true, canEdit:false, canClhi:false, access:{ can_clhi:false } }));
+          }
+          throw e;
+        }
+      }
+
       if (path === "/vendors") {
         if (request.method === "GET") return cors(await handleVendorsGet(url, env));
         if (request.method === "POST") {

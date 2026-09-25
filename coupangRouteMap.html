@@ -2311,6 +2311,9 @@
   ).replace(/\/+$/, "");
   const TERRAIN_ENDPOINT = `${ANALYSIS_API_BASE}/terrain`;
   const BUILDING_STATS_ENDPOINT = `${ANALYSIS_API_BASE}/building/stats`;
+  const BUILDING_JOB_ENDPOINT = `${ANALYSIS_API_BASE}/building/jobs`;
+  const BUILDING_JOB_POLL_MS = 1500;
+  const BUILDING_JOB_CLIENT_WAIT_MS = 15 * 60 * 1000;
 
   // V58 FRONTEND SYNC: V57 백엔드의 최초 원천 캐시 적재가 60초를 넘을 수 있으므로
   // 브라우저가 서버 작업을 중간에 취소하지 않게 safety timeout만 180초로 둔다.
@@ -2320,7 +2323,9 @@
   const BUILDING_STATS_FETCH_RETRY_COUNT = 0;
   const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
   const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
-  const BUILDING_CALC_CONCURRENCY = 1;
+  // 실제 계산은 Cloudflare Queue에서도 최대 3개로 제한한다.
+  // 프론트도 3개까지만 동시에 제출/상태조회하여 공공데이터 원천 burst를 과도하게 만들지 않는다.
+  const BUILDING_CALC_CONCURRENCY = 3;
   const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";
 
   const BUILDING_GEOCODE_CONCURRENCY = 3;
@@ -4841,6 +4846,81 @@
     throw lastError||new Error("BUILDING_STATS request failed");
   }
 
+  async function buildingJobFetch(accessToken,url,options={}){
+    let token=await getTerrainAccessToken(false).catch(()=>accessToken||"");
+    if(!token)throw new Error("로그인이 만료되었습니다.");
+    const run=async currentToken=>{
+      const response=await fetch(url,{
+        ...options,
+        headers:{...(options.headers||{}),Authorization:`Bearer ${currentToken}`},
+        cache:"no-store"
+      });
+      const text=await response.text();
+      let data=null; try{data=text?JSON.parse(text):null;}catch{}
+      return {response,text,data};
+    };
+    let result=await run(token);
+    let message=String(result.data?.error||result.data?.message||result.text||"");
+    if((!result.response.ok||result.data?.ok===false)&&isBuildingAuthRejected(result.response.status,message)){
+      token=await getTerrainAccessToken(true);
+      result=await run(token);
+      message=String(result.data?.error||result.data?.message||result.text||"");
+    }
+    if(!result.response.ok||result.data?.ok===false){
+      const error=new Error(message||`HTTP ${result.response.status}`);
+      error.responseData=result.data&&typeof result.data==="object"?result.data:null;
+      error.httpStatus=result.response.status;
+      throw error;
+    }
+    return result.data||{};
+  }
+
+  async function startBuildingJob(accessToken,payload){
+    return await buildingJobFetch(accessToken,BUILDING_JOB_ENDPOINT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload)
+    });
+  }
+
+  async function pollBuildingJob(accessToken,jobId,updateMessage){
+    const started=Date.now();
+    while(true){
+      const data=await buildingJobFetch(accessToken,`${BUILDING_JOB_ENDPOINT}/${encodeURIComponent(jobId)}`,{method:"GET"});
+      const status=String(data?.status||"");
+      const progress=data?.progress||{};
+      const processed=Number(progress.processedParcelCount||0);
+      const remaining=Number(progress.remainingParcelCount||0);
+      const total=Number(progress.totalParcelCount||processed+remaining||0);
+      let message=String(progress.message||"백그라운드에서 세대수를 계산하고 있습니다.");
+      if(total>0)message+=` · ${Math.min(processed,total).toLocaleString("ko-KR")}/${total.toLocaleString("ko-KR")}`;
+      updateMessage?.(message);
+
+      if(status==="completed"){
+        if(!data?.result?.buildingStats)throw new Error("백그라운드 분석 결과가 비어 있습니다.");
+        return data.result;
+      }
+      if(status==="error"||status==="cancelled"){
+        throw new Error(String(data?.error||"백그라운드 세대수 분석에 실패했습니다."));
+      }
+      if(Date.now()-started>BUILDING_JOB_CLIENT_WAIT_MS){
+        // 화면의 폴링만 중지한다. Queue 작업 자체는 서버에서 계속 진행된다.
+        throw new Error("분석은 백그라운드에서 계속 진행 중입니다. 잠시 후 다시 조회하면 완료된 캐시를 불러옵니다.");
+      }
+      await new Promise(resolve=>setTimeout(resolve,BUILDING_JOB_POLL_MS));
+    }
+  }
+
+  async function runBuildingJob(accessToken,payload,updateMessage){
+    const created=await startBuildingJob(accessToken,payload);
+    const jobId=String(created?.jobId||"");
+    if(!jobId)throw new Error("백그라운드 분석 작업 ID를 받지 못했습니다.");
+    updateMessage?.(created?.reused===true
+      ? "기존 백그라운드 분석 작업을 이어서 확인합니다."
+      : "백그라운드 분석을 시작했습니다. 페이지를 닫아도 계속 진행됩니다.");
+    return await pollBuildingJob(accessToken,jobId,updateMessage);
+  }
+
   function analysisScopePayload(target,geometry){
     return {
       scopeType:target.scopeType,scopeKey:target.scopeKey,scope_type:target.scopeType,scope_key:target.scopeKey,
@@ -4932,90 +5012,10 @@
       locationSource:"KAKAO_POLYGON_REVERSE_PARCEL"
     };
 
-    let data=await postBuildingStats(accessToken,basePayload);
+    // 오래 걸리는 Building HUB/K-APT/전유부 continuation은 서버 Queue로 넘긴다.
+    // 최초 필지 탐색까지만 브라우저에서 하고, 이후 작업은 페이지 이탈과 무관하게 계속된다.
+    const data=await runBuildingJob(accessToken,basePayload,updateMessage);
 
-    // 방어 코드: 백엔드가 discovery를 다시 요구하는 버전이어도 같은 필지 증거로 재요청한다.
-    if(data?.requiresScopeDiscovery===true){
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,
-        forceRefresh:false,
-        force_refresh:false
-      });
-    }
-
-    let scopeTitleEvidence=Array.isArray(data?.scopeTitleContinuation?.evidence)?data.scopeTitleContinuation.evidence:[];
-    for(let round=0;data?.requiresScopeTitleContinuation===true&&round<BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS;round++){
-      const progress=data?.progress||data?.scopeTitleContinuation||{};
-      const processed=Number(progress.processedParcelCount||scopeTitleEvidence.length||0), remaining=Number(progress.remainingParcelCount||0);
-      const total=Number(progress.totalDirectParcelCount||processed+remaining||0);
-      updateMessage(`건축물대장 필지 확인 ${Math.min(processed,total||processed).toLocaleString("ko-KR")}/${(total||processed+remaining).toLocaleString("ko-KR")}필지`);
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,scopeParcels:scopeDiscovery?.parcels||undefined,
-        scopeParcelDiscovery:scopeDiscovery?.diagnostics||undefined,scopeTitleEvidence,locationSource:"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL"
-      });
-      if(Array.isArray(data?.scopeTitleContinuation?.evidence))scopeTitleEvidence=data.scopeTitleContinuation.evidence;
-    }
-    if(data?.requiresScopeTitleContinuation===true)throw new Error(`폴리곤 필지 표제부 확인을 완료하지 못했습니다. 남은 필지 ${Number(data?.scopeTitleContinuation?.remainingParcelCount||0).toLocaleString("ko-KR")}건`);
-
-    const locationsByKey=new Map();
-    for(let round=0;data?.requiresGeocoding===true&&round<BUILDING_GEOCODE_MAX_ROUNDS;round++){
-      const targets=Array.isArray(data.geocodingTargets)?data.geocodingTargets:[];
-      if(!targets.length)break;
-      updateMessage(`건축물 위치 확인 중 ${round+1}/${BUILDING_GEOCODE_MAX_ROUNDS} · ${targets.length.toLocaleString("ko-KR")}건`);
-      const locations=await geocodeBuildingTargets(targets,memoryKey,feature);
-      const before=locationsByKey.size;
-      locations.forEach(location=>{
-        if(location?.key)locationsByKey.set(location.key,location);
-        if(location?.parcelKey)locationsByKey.set(`parcel:${location.parcelKey}`,location);
-      });
-      if(locationsByKey.size===before&&targets.length>0)break;
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,buildingLocations:[...locationsByKey.values()],
-        scopeParcels:scopeDiscovery?.parcels||undefined,scopeParcelDiscovery:scopeDiscovery?.diagnostics||undefined,scopeTitleEvidence,
-        locationSource:scopeDiscovery?.parcels?.length?"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH":"KAKAO_JS_GEOCODER"
-      });
-    }
-    if(data?.requiresGeocoding===true){
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,allowPartial:true,allow_partial:true,buildingLocations:[...locationsByKey.values()],
-        scopeParcels:scopeDiscovery?.parcels||undefined,scopeParcelDiscovery:scopeDiscovery?.diagnostics||undefined,scopeTitleEvidence,
-        locationSource:scopeDiscovery?.parcels?.length?"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH":"KAKAO_JS_GEOCODER"
-      });
-    }
-    if(data?.requiresGeocoding===true){
-      const coverage=Number(data?.coveragePercent);
-      throw new Error(`건물주소 확인을 완료하지 못했습니다.${Number.isFinite(coverage)?` 현재 확인율 ${coverage.toLocaleString("ko-KR",{maximumFractionDigits:1})}%.`:""}`);
-    }
-
-    let kaptInfoEvidence=Array.isArray(data?.kaptInfoContinuation?.evidence)?data.kaptInfoContinuation.evidence:[];
-    for(let round=0;data?.requiresKaptInfoContinuation===true&&round<BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS;round++){
-      const progress=data?.progress||data?.kaptInfoContinuation||{};
-      const processed=Number(progress.processedComplexCount||kaptInfoEvidence.length||0), remaining=Number(progress.remainingComplexCount||0);
-      const total=Number(progress.totalComplexCount||processed+remaining||0);
-      updateMessage(`아파트 단지 정보 확인 ${Math.min(processed,total||processed).toLocaleString("ko-KR")}/${(total||processed+remaining).toLocaleString("ko-KR")}단지`);
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,allowPartial:true,allow_partial:true,buildingLocations:[...locationsByKey.values()],
-        scopeParcels:scopeDiscovery?.parcels||undefined,scopeParcelDiscovery:scopeDiscovery?.diagnostics||undefined,scopeTitleEvidence,kaptInfoEvidence,
-        locationSource:scopeDiscovery?.parcels?.length?"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH":"KAKAO_JS_GEOCODER"
-      });
-      if(Array.isArray(data?.kaptInfoContinuation?.evidence))kaptInfoEvidence=data.kaptInfoContinuation.evidence;
-    }
-    if(data?.requiresKaptInfoContinuation===true)throw new Error(`K-APT 단지 상세조회를 완료하지 못했습니다. 남은 단지 ${Number(data?.kaptInfoContinuation?.remainingComplexCount||0).toLocaleString("ko-KR")}건`);
-
-    let detailEvidence=Array.isArray(data?.detailContinuation?.evidence)?data.detailContinuation.evidence:[];
-    for(let round=0;data?.requiresDetailContinuation===true&&round<BUILDING_DETAIL_CONTINUATION_MAX_ROUNDS;round++){
-      const progress=data?.progress||data?.detailContinuation||{};
-      const processed=Number(progress.processedParcelCount||detailEvidence.length||0), remaining=Number(progress.remainingParcelCount||0);
-      const total=Number(progress.totalDetailParcelCount||processed+remaining||0);
-      updateMessage(`건물·상가 전유부 상세조회 ${Math.min(processed,total||processed).toLocaleString("ko-KR")}/${(total||processed+remaining).toLocaleString("ko-KR")}필지`);
-      data=await postBuildingStats(accessToken,{
-        ...basePayload,forceRefresh:false,force_refresh:false,allowPartial:true,allow_partial:true,buildingLocations:[...locationsByKey.values()],
-        scopeParcels:scopeDiscovery?.parcels||undefined,scopeParcelDiscovery:scopeDiscovery?.diagnostics||undefined,scopeTitleEvidence,kaptInfoEvidence,detailEvidence,
-        locationSource:scopeDiscovery?.parcels?.length?"KAKAO_ROUTE_POLYGON_REVERSE_PARCEL+ADDRESS_SEARCH":"KAKAO_JS_GEOCODER"
-      });
-      if(Array.isArray(data?.detailContinuation?.evidence))detailEvidence=data.detailContinuation.evidence;
-    }
-    if(data?.requiresDetailContinuation===true)throw new Error(`상세 필지 분석을 완료하지 못했습니다. 남은 필지 ${Number(data?.detailContinuation?.remainingParcelCount||0).toLocaleString("ko-KR")}건`);
     if(!data?.buildingStats)throw new Error("배송 호수 분석 결과가 비어 있습니다.");
 
     const deliveryCount=Number(data?.buildingStats?.deliveryUnitCount||data?.buildingStats?.delivery_unit_count||0);
@@ -5127,7 +5127,7 @@
               const text=legal.map(row=>typeof row==="string"?row:row?.legalDongCode).filter(Boolean).join(", ");
               if(text)message+=` · 조회 법정동 ${text}`;
             }
-            if(error?.name==="AbortError")message=`요청 시간초과(${Math.round(BUILDING_STATS_FETCH_TIMEOUT_MS/1000)}초)`;
+            if(error?.name==="AbortError")message="캐시 확인 요청이 시간초과되었습니다. 백그라운드 계산으로 전환해 다시 시도해 주세요.";
             buildingResultByRouteKey.set(job.routeKey,{status:"error",error:message});
             errorCount++;
           }

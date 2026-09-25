@@ -1202,6 +1202,67 @@ function metaPayloadHasEntries(payload) {
   return false;
 }
 
+function extractMetaScheduleGroupsPeople(payload, targetDate) {
+  const root = payload?.data ?? payload;
+  const groups = [];
+  const visited = new Set();
+
+  function collect(node) {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (const item of node) collect(item);
+      return;
+    }
+    if (Array.isArray(node.scheduleGroups)) groups.push(...node.scheduleGroups);
+    for (const value of Object.values(node)) {
+      if (value && typeof value === "object") collect(value);
+    }
+  }
+  collect(root);
+
+  const allMap = new Map();
+  const activeMap = new Map();
+
+  for (const group of groups) {
+    const users = Array.isArray(group?.users) ? group.users : [];
+    const byLogin = new Map();
+
+    for (const user of users) {
+      const id = clean(user?.loginId || user?.login_id || user?.coupangId || user?.coupang_id || user?.id);
+      const name = clean(user?.name || user?.userName || user?.displayName || user?.driverName || user?.workerName);
+      if (!id) continue;
+      const person = { id, name:name || id };
+      byLogin.set(metaKey(id), person);
+      allMap.set(metaKey(id), person);
+    }
+
+    const schedules = Array.isArray(group?.schedules) ? group.schedules : [];
+    for (const schedule of schedules) {
+      const workDate = clean(schedule?.workDate || schedule?.work_date || schedule?.date);
+      if (targetDate && workDate && workDate !== targetDate) continue;
+
+      const assigned = Array.isArray(schedule?.assignedUsers) ? schedule.assignedUsers : [];
+      for (const assignedUser of assigned) {
+        const attendance = compact(assignedUser?.attendance || assignedUser?.attendanceStatus || assignedUser?.status).toUpperCase();
+        if (attendance && !["PRESENT","WORK","WORKING","ACTIVE","SCHEDULED","출근"].includes(attendance)) continue;
+
+        const id = clean(assignedUser?.loginId || assignedUser?.login_id || assignedUser?.coupangId || assignedUser?.coupang_id || assignedUser?.id);
+        if (!id) continue;
+        const base = byLogin.get(metaKey(id)) || {};
+        const name = clean(assignedUser?.name || assignedUser?.userName || assignedUser?.displayName || base.name || id);
+        activeMap.set(metaKey(id), { id, name, status:attendance || "PRESENT" });
+      }
+    }
+  }
+
+  return {
+    active: [...activeMap.values()],
+    all: [...allMap.values()],
+    found_groups: groups.length
+  };
+}
+
 async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes = await selectMetaCampCodes(env, camp);
   const campCode = codes[0];
   const query = new URLSearchParams({
@@ -1215,8 +1276,9 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
     method: "GET"
   });
 
-  const registeredPeople = extractMetaRegisteredPeople(result.body);
-  const allPeople = extractMetaAllPeople(result.body);
+  const structured = extractMetaScheduleGroupsPeople(result.body, date);
+  const registeredPeople = structured.found_groups ? structured.active : extractMetaRegisteredPeople(result.body);
+  const allPeople = structured.found_groups ? structured.all : extractMetaAllPeople(result.body);
 
   return {
     camp,

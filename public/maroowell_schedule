@@ -4206,15 +4206,22 @@
         if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
       }
 
+      function selectedMetaUploadDates(){
+        if(!els.metaUploadDateList)return [];
+        return Array.from(els.metaUploadDateList.querySelectorAll(".excelDateOption.selected"))
+          .map(btn=>normalizeDateInput(btn.getAttribute("data-date")||""))
+          .filter(Boolean)
+          .sort();
+      }
+
       function selectedMetaUploadDate(){
-        if(!els.metaUploadDateList)return "";
-        const selected=els.metaUploadDateList.querySelector(".excelDateOption.selected");
-        return normalizeDateInput(selected?.getAttribute("data-date")||"");
+        return selectedMetaUploadDates()[0]||"";
       }
 
       function updateMetaUploadRunButton(){
         if(!els.btnMetaUploadDateRun)return;
-        els.btnMetaUploadDateRun.textContent=selectedMetaUploadDate()?"전송 (1)":"전송";
+        const count=selectedMetaUploadDates().length;
+        els.btnMetaUploadDateRun.textContent=count?("전송 ("+count+")"):"전송";
       }
 
       function openMetaUploadDatePicker(){
@@ -4225,7 +4232,10 @@
         }
         if(state.metaUploadBusy)return;
 
-        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자를 선택하세요. 엑셀 생성과 동일한 현재 마루웰 출근 스케줄만 메타어드민에 직접 업로드합니다.`;
+        const multi=normalizeWave(state.wave)==="WAVE2";
+        els.metaUploadDateDesc.textContent=multi
+          ? `${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 여러 일자를 선택할 수 있습니다. 날짜별 출근/휴무를 MetaAdmin에 같이 반영합니다.`
+          : `${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자 1개를 선택하세요.`;
         els.metaUploadDateList.innerHTML=state.weekDates.map(date=>{
           const metaDate=normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
           const count=countMetaRowsForScheduleDate(date);
@@ -4239,12 +4249,16 @@
 
         els.metaUploadDateList.querySelectorAll("[data-date]").forEach(btn=>{
           btn.addEventListener("click",()=>{
-            els.metaUploadDateList.querySelectorAll(".excelDateOption.selected").forEach(x=>{
-              x.classList.remove("selected");
-              x.setAttribute("aria-pressed","false");
-            });
-            btn.classList.add("selected");
-            btn.setAttribute("aria-pressed","true");
+            const multi=normalizeWave(state.wave)==="WAVE2";
+            const selected=!btn.classList.contains("selected");
+            if(!multi){
+              els.metaUploadDateList.querySelectorAll(".excelDateOption.selected").forEach(x=>{
+                x.classList.remove("selected");
+                x.setAttribute("aria-pressed","false");
+              });
+            }
+            btn.classList.toggle("selected",multi?selected:true);
+            btn.setAttribute("aria-pressed",(multi?selected:true)?"true":"false");
             updateMetaUploadRunButton();
           });
         });
@@ -4275,7 +4289,7 @@
           const idKey=keyOf(id), nameKey=keyOf(name);
           if((idKey&&activeKeys.has(`id:${idKey}`)) || (nameKey&&activeKeys.has(`name:${nameKey}`)))continue;
           const key=idKey||nameKey; if(!key||seen.has(key))continue; seen.add(key);
-          out.push({date:metaDate,name,id,routes:[]});
+          out.push({date:metaDate,name,id,routes:[],workStatus:"휴무"});
         }
         return out.sort((a,b)=>{ const nc=sortText(a.name,b.name); return nc!==0?nc:sortText(a.id,b.id); });
       }
@@ -4283,22 +4297,25 @@
       // API 전송용 workbook 생성. 위 수동 엑셀 생성 기능과 병행 유지한다.
       function buildMetaUploadWorkbook(rows,workStatus){
         const header=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
-        const status=clean(workStatus)||META_WORK_STATUS;
-        const isOff=status==="휴무";
+        const defaultStatus=clean(workStatus)||META_WORK_STATUS;
         const aoa=[
           header,
-          ...(rows||[]).map(r=>[
-            r.date,
-            META_VENDOR_NAME,
-            Number(META_BUSINESS_NO),
-            metaCampName(state.camp),
-            state.wave,
-            r.name,
-            r.id,
-            status,
-            isOff?"":metaRotationByWave(state.wave),
-            isOff?"":(r.routes||[]).join(",")
-          ])
+          ...(rows||[]).map(r=>{
+            const status=clean(r?.workStatus)||defaultStatus;
+            const isOff=status==="휴무";
+            return [
+              r.date,
+              META_VENDOR_NAME,
+              Number(META_BUSINESS_NO),
+              metaCampName(state.camp),
+              state.wave,
+              r.name,
+              r.id,
+              status,
+              isOff?"":metaRotationByWave(state.wave),
+              isOff?"":(r.routes||[]).join(",")
+            ];
+          })
         ];
         const wb=XLSX.utils.book_new();
         const ws=XLSX.utils.aoa_to_sheet(aoa);
@@ -4358,36 +4375,56 @@
         return status==="SUCCESS" || status==="COMPLETED";
       }
 
-      async function verifyMetaScheduleApplied({camp,wave,metaDate,rows}){
-        const expected=(rows||[]).filter(r=>clean(r?.id)||clean(r?.name));
-        if(!expected.length)throw new Error("메타어드민 반영 검증 대상이 없습니다.");
-
+      async function verifyMetaScheduleApplied({camp,wave,metaDate,activeRows=[],offRows=[]}){
         let last=null;
-        for(let attempt=0;attempt<8;attempt++){
+        for(let attempt=0;attempt<10;attempt++){
           if(attempt>0)await sleep(1200);
           const qs=new URLSearchParams({camp,wave,date:metaDate});
           last=await apiFetch("/schedule/meta/current?"+qs.toString());
 
-          const raw=last?.meta_response ?? last;
-          const haystack=JSON.stringify(raw||{}).replace(/\s+/g,"").toLowerCase();
-          const missing=expected.filter(row=>{
-            const id=clean(row?.id).replace(/\s+/g,"").toLowerCase();
-            const name=clean(row?.name).replace(/\s+/g,"").toLowerCase();
-            return !((id&&haystack.includes(id)) || (name&&haystack.includes(name)));
+          const current=Array.isArray(last?.registered_people)?last.registered_people:[];
+          const keys=new Set();
+          for(const person of current){
+            const id=keyOf(person?.id); const name=keyOf(person?.name);
+            if(id)keys.add("id:"+id);
+            if(name)keys.add("name:"+name);
+          }
+
+          const missingActive=(activeRows||[]).filter(row=>{
+            const id=keyOf(row?.id); const name=keyOf(row?.name);
+            return !((id&&keys.has("id:"+id)) || (name&&keys.has("name:"+name)));
           });
 
-          if(!missing.length)return {ok:true,current:last};
+          const stillActiveOff=(offRows||[]).filter(row=>{
+            const id=keyOf(row?.id); const name=keyOf(row?.name);
+            return (id&&keys.has("id:"+id)) || (name&&keys.has("name:"+name));
+          });
+
+          if(!missingActive.length && !stillActiveOff.length){
+            return {ok:true,current:last};
+          }
         }
 
-        const raw=last?.meta_response ?? last;
-        const haystack=JSON.stringify(raw||{}).replace(/\s+/g,"").toLowerCase();
-        const missing=expected.filter(row=>{
-          const id=clean(row?.id).replace(/\s+/g,"").toLowerCase();
-          const name=clean(row?.name).replace(/\s+/g,"").toLowerCase();
-          return !((id&&haystack.includes(id)) || (name&&haystack.includes(name)));
+        const current=Array.isArray(last?.registered_people)?last.registered_people:[];
+        const keys=new Set();
+        for(const person of current){
+          const id=keyOf(person?.id); const name=keyOf(person?.name);
+          if(id)keys.add("id:"+id);
+          if(name)keys.add("name:"+name);
+        }
+        const missingActive=(activeRows||[]).filter(row=>{
+          const id=keyOf(row?.id); const name=keyOf(row?.name);
+          return !((id&&keys.has("id:"+id)) || (name&&keys.has("name:"+name)));
+        }).map(r=>clean(r?.name)||clean(r?.id));
+        const stillActiveOff=(offRows||[]).filter(row=>{
+          const id=keyOf(row?.id); const name=keyOf(row?.name);
+          return (id&&keys.has("id:"+id)) || (name&&keys.has("name:"+name));
         }).map(r=>clean(r?.name)||clean(r?.id));
 
-        throw new Error("업로드 요청은 처리됐지만 MetaAdmin 실제 스케줄 반영을 확인하지 못했습니다."+(missing.length?("\n미확인: "+missing.join(", ")):""));
+        const details=[];
+        if(missingActive.length)details.push("출근 미반영: "+missingActive.join(", "));
+        if(stillActiveOff.length)details.push("휴무 미반영: "+stillActiveOff.join(", "));
+        throw new Error("업로드 요청은 처리됐지만 MetaAdmin 실제 스케줄 반영을 확인하지 못했습니다."+(details.length?("\n"+details.join("\n")):""));
       }
 
       function metaWorkflowSummary(result){
@@ -4412,10 +4449,18 @@
         return `메타어드민 스케줄 처리에 실패했습니다.\n상태: ${status}\nWorkflow: ${wid}\nRows: ${Number(d.totalRows||0)} / 생성 ${Number(d.created||0)} / 수정 ${Number(d.updated||0)+Number(d.modified||0)} / 중복 ${Number(d.duplicated||0)}`;
       }
 
-      async function uploadMetaScheduleForDate(scheduleDate){
-        const selectedDate=normalizeDateInput(scheduleDate);
-        if(!selectedDate||!state.camp||!state.weekDates.includes(selectedDate)){
-          alert("전송할 일자를 다시 선택해주세요.");
+      async function uploadMetaSchedulesForDates(scheduleDates){
+        const dates=Array.from(new Set((scheduleDates||[])
+          .map(normalizeDateInput)
+          .filter(date=>date&&state.weekDates.includes(date))
+        )).sort();
+
+        if(!dates.length||!state.camp){
+          alert("전송할 일자를 선택해주세요.");
+          return;
+        }
+        if(normalizeWave(state.wave)==="WAVE1" && dates.length>1){
+          alert("야간은 한 번에 1개 일자만 전송할 수 있습니다.");
           return;
         }
         if(!window.XLSX){
@@ -4430,7 +4475,7 @@
         closeMetaUploadDatePicker();
 
         try{
-          setStatus(`${dateLabel(selectedDate)} 메타어드민 전송용 엑셀 생성 중...`);
+          setStatus("메타어드민 전송용 데이터 준비 중...");
           try{
             const added=await loadAllMaroowellInfoRowsForAccountLookup();
             if(added>0)buildDriverAccounts();
@@ -4438,62 +4483,88 @@
             console.warn("[meta upload] global account refresh failed",e);
           }
           await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
-          const actualRows=collectMetaRows({scheduleDate:selectedDate});
-          if(!actualRows.length)throw new Error(`${dateLabel(selectedDate)}에 전송할 출근 스케줄이 없습니다.`);
 
-          const metaDate=metaUploadDateForScheduleDate(selectedDate);
-          const names=actualRows.map(r=>r.name).filter(Boolean).sort((a,b)=>sortText(a,b));
-          const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}
+          const plans=[];
+          for(const selectedDate of dates){
+            const actualRows=collectMetaRows({scheduleDate:selectedDate}).map(row=>({...row,workStatus:META_WORK_STATUS}));
+            const metaDate=metaUploadDateForScheduleDate(selectedDate);
 
-엑셀 생성 기능과 동일한 출근 스케줄 ${actualRows.length}명만 메타어드민에 그대로 업로드합니다.
-기존 등록자를 휴무로 먼저 변경하지 않습니다.
+            const qs=new URLSearchParams({camp:state.camp,wave:state.wave,date:metaDate});
+            const current=await apiFetch("/schedule/meta/current?"+qs.toString());
+            const offRows=metaResetRowsFromCurrent(current,metaDate,actualRows);
+            const rows=[...actualRows,...offRows];
 
-전송 대상: ${names.join(", ")}
-
-계속할까요?`);
-          if(!ok){setStatus("메타어드민 전송 취소");return;}
-
-          setStatus(`메타어드민 엑셀 직접 업로드 중: ${actualRows.length}명`);
-          const actualWb=buildMetaUploadWorkbook(actualRows,META_WORK_STATUS);
-          const actualUpload=await uploadMetaWorkbook({
-            wb:actualWb,
-            fileName:`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${metaDate}_schedule.xlsx`,
-            camp:state.camp,wave:state.wave,metaDate,phase:"apply"
-          });
-          const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
-          if(!metaWorkflowSucceeded(actualResult)){
-            throw new Error(metaWorkflowFailureText(actualResult,actualRows));
+            if(!rows.length){
+              throw new Error(dateLabel(selectedDate)+"에 전송할 출근/휴무 스케줄이 없습니다.");
+            }
+            plans.push({selectedDate,metaDate,actualRows,offRows,rows,current});
           }
 
-          setStatus("메타어드민 실제 반영 확인 중...");
-          await verifyMetaScheduleApplied({
-            camp:state.camp,
-            wave:state.wave,
-            metaDate,
-            rows:actualRows
-          });
+          const summaryLines=plans.map(plan=>
+            dateLabel(plan.selectedDate)+" · 출근 "+plan.actualRows.length+"명 / 휴무 "+plan.offRows.length+"명"
+          );
+          const ok=confirm(
+            state.camp+" / "+waveLabel(state.wave)+"\n\n"+
+            summaryLines.join("\n")+
+            "\n\n선택한 날짜의 출근/휴무 상태를 MetaAdmin에 반영합니다. 계속할까요?"
+          );
+          if(!ok){setStatus("메타어드민 전송 취소");return;}
 
-          await advanceActualUpdateDate(metaDate).catch(()=>{});
-          const summary=metaWorkflowSummary(actualResult);
-          setStatus(`메타어드민 전송 완료: ${dateLabel(selectedDate)} / ${actualRows.length}명 / ${summary}`);
-          alert(`메타어드민 전송이 완료되었습니다.
+          const completed=[];
+          for(let i=0;i<plans.length;i++){
+            const plan=plans[i];
+            setStatus("메타어드민 전송 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · 출근 "+plan.actualRows.length+" / 휴무 "+plan.offRows.length);
 
-${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}
-출근 ${actualRows.length}명
-${names.join(", ")}
+            const wb=buildMetaUploadWorkbook(plan.rows,META_WORK_STATUS);
+            const upload=await uploadMetaWorkbook({
+              wb,
+              fileName:metaCampName(state.camp)+"_"+waveLabel(state.wave)+"_"+plan.metaDate+"_schedule.xlsx",
+              camp:state.camp,
+              wave:state.wave,
+              metaDate:plan.metaDate,
+              phase:"apply"
+            });
+            const result=await pollMetaWorkflow(upload.workflow_id);
+            if(!metaWorkflowSucceeded(result)){
+              throw new Error(dateLabel(plan.selectedDate)+"\n"+metaWorkflowFailureText(result,plan.rows));
+            }
 
-${summary}`);
+            setStatus("메타어드민 실제 반영 확인 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate));
+            await verifyMetaScheduleApplied({
+              camp:state.camp,
+              wave:state.wave,
+              metaDate:plan.metaDate,
+              activeRows:plan.actualRows,
+              offRows:plan.offRows
+            });
+
+            completed.push({
+              date:plan.selectedDate,
+              active:plan.actualRows.length,
+              off:plan.offRows.length,
+              summary:metaWorkflowSummary(result)
+            });
+          }
+
+          const latestMetaDate=plans.map(p=>p.metaDate).sort().at(-1);
+          if(latestMetaDate)await advanceActualUpdateDate(latestMetaDate).catch(()=>{});
+
+          const doneText=completed.map(x=>dateLabel(x.date)+" · 출근 "+x.active+" / 휴무 "+x.off).join("\n");
+          setStatus("메타어드민 전송 완료: "+completed.length+"개 일자");
+          alert("메타어드민 전송이 완료되었습니다.\n\n"+doneText);
         }catch(e){
           console.error("[meta upload]",e);
-          setStatus(`메타어드민 전송 실패: ${e?.message||e}`);
-          alert(`메타어드민 전송 실패
-
-${e?.message||e}`);
+          setStatus("메타어드민 전송 실패: "+(e?.message||e));
+          alert("메타어드민 전송 실패\n\n"+(e?.message||e));
         }finally{
           state.metaUploadBusy=false;
           if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;
           if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
         }
+      }
+
+      async function uploadMetaScheduleForDate(scheduleDate){
+        return uploadMetaSchedulesForDates([scheduleDate]);
       }
 
       async function copyImage(){
@@ -4684,7 +4755,7 @@ ${e?.message||e}`);
         els.btnExcelDateGenerate?.addEventListener("click",()=>exportMetaExcelForDates(selectedExcelDates()));
         els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
         els.excelDateModal?.addEventListener("click",e=>{if(e.target===els.excelDateModal)closeExcelDatePicker()});
-        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const date=selectedMetaUploadDate();if(!date){alert("전송할 일자를 선택해주세요.");return;}uploadMetaScheduleForDate(date)});
+        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const dates=selectedMetaUploadDates();if(!dates.length){alert("전송할 일자를 선택해주세요.");return;}uploadMetaSchedulesForDates(dates)});
         els.btnMetaUploadDateClose?.addEventListener("click",closeMetaUploadDatePicker);
         els.metaUploadDateModal?.addEventListener("click",e=>{if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker()});
         els.btnLogout?.addEventListener("click",async()=>{try{await supabase.auth.signOut()}catch{} location.href=LOGIN_PATH});

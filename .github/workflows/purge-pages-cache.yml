@@ -1,0 +1,21 @@
+name: Purge Pages cache
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'coupangRouteMap.html'
+      - 'public/coupangRouteMap.html'
+      - '.github/workflows/purge-pages-cache.yml'
+  workflow_dispatch:
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge route map URLs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ZONE_ID=$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/zones?name=maroowell.com" | jq -r '.result[0].id // empty')
+          test -n "$ZONE_ID"
+          curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/purge_cache" --data '{"files":["https://maroowell.com/coupangRouteMap.html","https://maroowell.com/coupangRouteMap"]}' | jq -e '.success == true'

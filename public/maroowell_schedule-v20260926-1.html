@@ -4273,22 +4273,18 @@
         return normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
       }
 
-      function metaResetRowsFromCurrent(current,metaDate,actualRows=[]){
-        // MetaAdmin의 전체 51명 명단에서 이번 마루웰 실제 출근자를 제외한 나머지를 휴무로 맞춘다.
+      function metaResetRowsFromCurrent(current,metaDate){
+        // 초창기 원래 로직: 해당 업무일 MetaAdmin에 실제 등록된 인원을 전부 먼저 휴무 처리한다.
+        // 등록되지 않은 인원은 건드리지 않고, 이후 현재 마루웰 출근 스케줄을 다시 업로드한다.
         const source=Array.isArray(current?.registered_people)?current.registered_people:[];
-        const activeKeys=new Set();
-        for(const row of actualRows||[]){
-          const idKey=keyOf(row?.id); const nameKey=keyOf(row?.name);
-          if(idKey)activeKeys.add(`id:${idKey}`); if(nameKey)activeKeys.add(`name:${nameKey}`);
-        }
         const out=[]; const seen=new Set();
         for(const person of source){
           const name=clean(person?.name || person?.driver_name || person?.display_name);
           const id=clean(person?.id || person?.coupang_id || person?.login_id);
           if(!name||!id)continue;
-          const idKey=keyOf(id), nameKey=keyOf(name);
-          if((idKey&&activeKeys.has(`id:${idKey}`)) || (nameKey&&activeKeys.has(`name:${nameKey}`)))continue;
-          const key=idKey||nameKey; if(!key||seen.has(key))continue; seen.add(key);
+          const key=keyOf(id)||keyOf(name);
+          if(!key||seen.has(key))continue;
+          seen.add(key);
           out.push({date:metaDate,name,id,routes:[],workStatus:"휴무"});
         }
         return out.sort((a,b)=>{ const nc=sortText(a.name,b.name); return nc!==0?nc:sortText(a.id,b.id); });
@@ -4491,17 +4487,33 @@
 
             const qs=new URLSearchParams({camp:state.camp,wave:state.wave,date:metaDate});
             const current=await apiFetch("/schedule/meta/current?"+qs.toString());
-            const offRows=metaResetRowsFromCurrent(current,metaDate,actualRows);
-            const rows=[...actualRows,...offRows];
 
-            if(!rows.length){
-              throw new Error(dateLabel(selectedDate)+"에 전송할 출근/휴무 스케줄이 없습니다.");
+            // 초창기 원래 로직:
+            // 1) MetaAdmin 해당 일자의 현재 등록자를 전부 휴무 처리
+            // 2) 현재 마루웰 당일 출근 엑셀을 다시 업로드
+            const resetRows=metaResetRowsFromCurrent(current,metaDate);
+
+            // 최종 검증에서는 다시 출근으로 올라갈 사람을 제외하고,
+            // 실제로 휴무 상태로 남아야 하는 사람만 검사한다.
+            const activeKeys=new Set();
+            for(const row of actualRows){
+              const idKey=keyOf(row?.id), nameKey=keyOf(row?.name);
+              if(idKey)activeKeys.add("id:"+idKey);
+              if(nameKey)activeKeys.add("name:"+nameKey);
             }
-            plans.push({selectedDate,metaDate,actualRows,offRows,rows,current});
+            const finalOffRows=resetRows.filter(row=>{
+              const idKey=keyOf(row?.id), nameKey=keyOf(row?.name);
+              return !((idKey&&activeKeys.has("id:"+idKey)) || (nameKey&&activeKeys.has("name:"+nameKey)));
+            });
+
+            if(!actualRows.length && !resetRows.length){
+              throw new Error(dateLabel(selectedDate)+"에 전송할 스케줄이 없습니다.");
+            }
+            plans.push({selectedDate,metaDate,actualRows,resetRows,finalOffRows,current});
           }
 
           const summaryLines=plans.map(plan=>
-            dateLabel(plan.selectedDate)+" · 출근 "+plan.actualRows.length+"명 / 휴무 "+plan.offRows.length+"명"
+            dateLabel(plan.selectedDate)+" · 기존 등록 "+plan.resetRows.length+"명 전체 휴무 → 출근 "+plan.actualRows.length+"명 재등록"
           );
           const ok=confirm(
             state.camp+" / "+waveLabel(state.wave)+"\n\n"+
@@ -4513,11 +4525,11 @@
           const completed=[];
           for(let i=0;i<plans.length;i++){
             const plan=plans[i];
-            setStatus("메타어드민 전송 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · 출근 "+plan.actualRows.length+" / 휴무 "+plan.offRows.length);
+            setStatus("메타어드민 전송 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · 기존 등록 "+plan.resetRows.length+"명 전체 휴무 후 출근 "+plan.actualRows.length+"명 재등록");
 
-            if(plan.offRows.length){
-              setStatus("기존 MetaAdmin 등록자 휴무 처리 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · "+plan.offRows.length+"명");
-              const resetWb=buildMetaUploadWorkbook(plan.offRows,"휴무");
+            if(plan.resetRows.length){
+              setStatus("기존 MetaAdmin 등록자 전체 휴무 처리 중 ("+(i+1)+"/"+plans.length+"): "+dateLabel(plan.selectedDate)+" · "+plan.resetRows.length+"명");
+              const resetWb=buildMetaUploadWorkbook(plan.resetRows,"휴무");
               const resetUpload=await uploadMetaWorkbook({
                 wb:resetWb,
                 fileName:metaCampName(state.camp)+"_"+waveLabel(state.wave)+"_"+plan.metaDate+"_reset_off.xlsx",
@@ -4528,7 +4540,7 @@
               });
               const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
               if(!metaWorkflowSucceeded(resetResult)){
-                throw new Error(dateLabel(plan.selectedDate)+" 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,plan.offRows));
+                throw new Error(dateLabel(plan.selectedDate)+" 전체 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,plan.resetRows));
               }
             }
 
@@ -4553,13 +4565,13 @@
               wave:state.wave,
               metaDate:plan.metaDate,
               activeRows:plan.actualRows,
-              offRows:plan.offRows
+              offRows:plan.finalOffRows
             });
 
             completed.push({
               date:plan.selectedDate,
               active:plan.actualRows.length,
-              off:plan.offRows.length,
+              off:plan.finalOffRows.length,
               summary:metaWorkflowSummary(result)
             });
           }

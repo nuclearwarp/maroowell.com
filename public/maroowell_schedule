@@ -1766,8 +1766,15 @@
         let json=null;
         try{json=text?JSON.parse(text):null}catch{json={ok:false,error:text}}
         if(!res.ok||json?.ok===false){
-          const err=new Error(json?.error||json?.message||`API 오류 ${res.status}`);
-          err.status=res.status;err.detail=json?.detail||json;throw err;
+          const detail=json?.detail||json;
+          let upstream="";
+          try{
+            const raw=detail?.data ?? detail?.message ?? detail;
+            upstream=typeof raw==="string"?raw:JSON.stringify(raw);
+          }catch{}
+          const base=json?.error||json?.message||`API 오류 ${res.status}`;
+          const err=new Error(upstream && upstream!=="{}" ? `${base}: ${upstream}` : base);
+          err.status=res.status;err.detail=detail;throw err;
         }
         return json;
       }
@@ -4194,7 +4201,7 @@
         }
         if(state.metaUploadBusy)return;
 
-        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자를 선택하세요. 전송 시 메타어드민의 해당 업무일 기존 등록자를 먼저 조회하여, 실제 등록되어 있는 인원만 휴무 처리한 뒤 현재 마루웰 스케줄을 업로드합니다.`;
+        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자를 선택하세요. 엑셀 생성과 동일한 현재 마루웰 출근 스케줄만 메타어드민에 직접 업로드합니다.`;
         els.metaUploadDateList.innerHTML=state.weekDates.map(date=>{
           const metaDate=normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
           const count=countMetaRowsForScheduleDate(date);
@@ -4351,9 +4358,8 @@
         if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
         closeMetaUploadDatePicker();
 
-        let resetCompleted=false;
         try{
-          setStatus(`${dateLabel(selectedDate)} 메타어드민 전송 준비 중...`);
+          setStatus(`${dateLabel(selectedDate)} 메타어드민 전송용 엑셀 생성 중...`);
           try{
             const added=await loadAllMaroowellInfoRowsForAccountLookup();
             if(added>0)buildDriverAccounts();
@@ -4361,49 +4367,22 @@
             console.warn("[meta upload] global account refresh failed",e);
           }
           await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
-
           const actualRows=collectMetaRows({scheduleDate:selectedDate});
           if(!actualRows.length)throw new Error(`${dateLabel(selectedDate)}에 전송할 출근 스케줄이 없습니다.`);
 
           const metaDate=metaUploadDateForScheduleDate(selectedDate);
-          const current=await apiFetch("/schedule/meta/current?"+new URLSearchParams({
-            camp:state.camp,
-            wave:state.wave,
-            date:metaDate
-          }).toString());
+          const names=actualRows.map(r=>r.name).filter(Boolean).sort((a,b)=>sortText(a,b));
+          const ok=confirm(`${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}
 
-          const resetRows=metaResetRowsFromCurrent(current,metaDate,actualRows);
-          const resetNeeded=current?.has_existing===true && resetRows.length>0;
+엑셀 생성 기능과 동일한 출근 스케줄 ${actualRows.length}명만 메타어드민에 그대로 업로드합니다.
+기존 등록자를 휴무로 먼저 변경하지 않습니다.
 
-          if(current?.has_existing===true && !resetRows.length){
-            console.warn("[meta upload] existing rows found but no active registrants extracted; reset skipped", current?.meta_response);
-          }
+전송 대상: ${names.join(", ")}
 
-          const ok=confirm(
-            `${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n\n`+
-            (resetNeeded
-              ? `메타어드민 전체 등록자 중 현재 마루웰 출근자가 아닌 ${resetRows.length}명을 먼저 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
-              : `메타어드민 기존 등록자가 없어 현재 스케줄 ${actualRows.length}명을 바로 업로드합니다.\n`)+
-            `\n계속할까요?`
-          );
+계속할까요?`);
           if(!ok){setStatus("메타어드민 전송 취소");return;}
 
-          if(resetNeeded){
-            setStatus(`기존 메타 등록 ${resetRows.length}명 휴무 처리 중...`);
-            const resetWb=buildMetaUploadWorkbook(resetRows,"휴무");
-            const resetUpload=await uploadMetaWorkbook({
-              wb:resetWb,
-              fileName:`${metaCampName(state.camp)}_${waveLabel(state.wave)}_${metaDate}_reset_off.xlsx`,
-              camp:state.camp,wave:state.wave,metaDate,phase:"reset"
-            });
-            const resetResult=await pollMetaWorkflow(resetUpload.workflow_id);
-            if(!metaWorkflowSucceeded(resetResult)){
-              throw new Error("기존 메타 등록자 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
-            }
-            resetCompleted=true;
-          }
-
-          setStatus(`현재 마루웰 스케줄 ${actualRows.length}명 업로드 중...`);
+          setStatus(`메타어드민 엑셀 직접 업로드 중: ${actualRows.length}명`);
           const actualWb=buildMetaUploadWorkbook(actualRows,META_WORK_STATUS);
           const actualUpload=await uploadMetaWorkbook({
             wb:actualWb,
@@ -4412,18 +4391,25 @@
           });
           const actualResult=await pollMetaWorkflow(actualUpload.workflow_id);
           if(!metaWorkflowSucceeded(actualResult)){
-            const prefix=resetCompleted?"※ 기존 MetaAdmin 등록자 휴무 처리는 완료된 상태입니다. 새 스케줄 업로드 오류를 즉시 확인해주세요.\n\n":"";
-            throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
+            throw new Error(metaWorkflowFailureText(actualResult,actualRows));
           }
 
-          await advanceActualUpdateDate(metaDate);
+          await advanceActualUpdateDate(metaDate).catch(()=>{});
           const summary=metaWorkflowSummary(actualResult);
-          setStatus(`메타어드민 전송 완료: 기존 ${resetRows.length}명 정리 / 신규 ${actualRows.length}명 / ${summary}`);
-          alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n기존 등록 휴무 처리: ${resetRows.length}명\n신규 스케줄: ${actualRows.length}명\n\n${summary}`);
+          setStatus(`메타어드민 전송 완료: ${dateLabel(selectedDate)} / ${actualRows.length}명 / ${summary}`);
+          alert(`메타어드민 전송이 완료되었습니다.
+
+${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}
+출근 ${actualRows.length}명
+${names.join(", ")}
+
+${summary}`);
         }catch(e){
           console.error("[meta upload]",e);
           setStatus(`메타어드민 전송 실패: ${e?.message||e}`);
-          alert(`메타어드민 전송 실패\n\n${e?.message||e}`);
+          alert(`메타어드민 전송 실패
+
+${e?.message||e}`);
         }finally{
           state.metaUploadBusy=false;
           if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;

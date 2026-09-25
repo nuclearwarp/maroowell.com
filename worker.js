@@ -782,7 +782,7 @@ function vendorDedupeKey(row) {
 async function handleVendorsGet(url, env) {
   const q = safeTrim(url.searchParams.get("q"));
   const limitRaw = Number(url.searchParams.get("limit"));
-  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 200) : 50;
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 1000) : 500;
 
   if (!q) {
     const params = new URLSearchParams();

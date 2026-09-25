@@ -1,3 +1,26 @@
+// Ensure the global typography stylesheet is always loaded last so legacy page CSS cannot override it.
+(() => {
+  "use strict";
+  const TYPOGRAPHY_HREF = "/mw-global-font.css?v=20260925-3";
+  function installTypography() {
+    try {
+      const head = document.head || document.documentElement;
+      const existing = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+        .find(el => /\/mw-global-font\.css(?:\?|$)/.test(String(el.getAttribute("href") || "")));
+      const link = existing || document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = TYPOGRAPHY_HREF;
+      if (existing) existing.remove();
+      head.appendChild(link);
+    } catch {}
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installTypography, { once:true });
+  } else {
+    installTypography();
+  }
+})();
+
 // MarooWell Frontend Config
 // Frontend에는 Supabase publishable key만 둡니다. service_role/secret key는 절대 노출하지 않습니다.
 window.MARUWELL_CONFIG = {

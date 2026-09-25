@@ -210,6 +210,20 @@
         return { row:null, type:"UNASSIGNED" };
       }
 
+      function campSortCompare(a,b) {
+        const campCompare = text(a.camp).localeCompare(text(b.camp),"ko",{numeric:true,sensitivity:"base"});
+        if (campCompare !== 0) return campCompare;
+
+        const aBase = isBaseCampRow(a) ? 0 : 1;
+        const bBase = isBaseCampRow(b) ? 0 : 1;
+        if (aBase !== bBase) return aBase - bBase;
+
+        const mbCompare = text(a.mb_camp).localeCompare(text(b.mb_camp),"ko",{numeric:true,sensitivity:"base"});
+        if (mbCompare !== 0) return mbCompare;
+
+        return Number(a.id || 0) - Number(b.id || 0);
+      }
+
       function parentCandidates(row) {
         return state.rows.filter((candidate) => {
           if (candidate._deleted || candidate.id == null || candidate === row || !isBaseCampRow(candidate)) return false;
@@ -363,19 +377,7 @@
             (!f.desc || text(row.description).toLowerCase().includes(f.desc));
         });
 
-        filteredRows.sort((a,b) => {
-          const campCompare = text(a.camp).localeCompare(text(b.camp),"ko",{numeric:true,sensitivity:"base"});
-          if (campCompare !== 0) return campCompare;
-
-          const aBase = isBaseCampRow(a) ? 0 : 1;
-          const bBase = isBaseCampRow(b) ? 0 : 1;
-          if (aBase !== bBase) return aBase - bBase;
-
-          const mbCompare = text(a.mb_camp).localeCompare(text(b.mb_camp),"ko",{numeric:true,sensitivity:"base"});
-          if (mbCompare !== 0) return mbCompare;
-
-          return Number(a.id || 0) - Number(b.id || 0);
-        });
+        filteredRows.sort(campSortCompare);
 
         return [...newRows, ...filteredRows];
       }
@@ -459,7 +461,10 @@
           const data = await response.json();
           if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
           const rows = Array.isArray(data) ? data : data?.rows || [];
-          state.rows = rows.map(normalizeIncoming); state.deletedIds.clear(); updateFilterOptions(); render();
+          state.rows = rows.map(normalizeIncoming).sort(campSortCompare);
+          state.deletedIds.clear();
+          updateFilterOptions();
+          render();
           dom.ready.textContent = "준비 완료"; dom.ready.className = "pill ok"; setStatus(`캠프 ${rows.length.toLocaleString()}건을 불러왔습니다.`,"ok");
         } catch (error) {
           console.error(error); dom.ready.textContent = "오류"; dom.ready.className = "pill warn"; setStatus(error.message || String(error),"err");

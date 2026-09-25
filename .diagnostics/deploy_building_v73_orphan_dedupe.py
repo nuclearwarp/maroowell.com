@@ -84,21 +84,19 @@ insert=r'''  // V73: if the same parcel already has an explicit residential titl
 if marker not in s: raise RuntimeError("orphan loop marker missing")
 s=s.replace(marker,insert,1)
 
-old2='''    const bucket = v62ResolvedClassificationBucket(item.row, item.classification);
-    addUnits({'''
-new2='''    const bucket = v62ResolvedClassificationBucket(item.row, item.classification);
-    if (bucket === "residential" && v73ResidentialTitleCountParcels.has(item.parcelKey)) {
-      continue;
-    }
-    addUnits({'''
-# replace only in orphan loop region after insert
 idx=s.find('const v73ResidentialTitleCountParcels = new Set()')
 if idx<0: raise RuntimeError("v73 title parcel set anchor missing")
 loop_idx=s.find('for (const item of orphanDetailUnits)',idx)
 if loop_idx<0: raise RuntimeError("v73 orphan loop anchor missing")
-pos=s.find(old2,loop_idx)
-if pos<0: raise RuntimeError("orphan bucket anchor missing")
-s=s[:pos]+s[pos:].replace(old2,new2,1)
+bucket_idx=s.find('const bucket = v62ResolvedClassificationBucket',loop_idx)
+if bucket_idx<0: raise RuntimeError("orphan bucket anchor missing")
+bucket_end=s.find(';',bucket_idx)
+if bucket_end<0: raise RuntimeError("orphan bucket statement end missing")
+guard='''
+    if (bucket === "residential" && v73ResidentialTitleCountParcels.has(item.parcelKey)) {
+      continue;
+    }'''
+s=s[:bucket_end+1]+guard+s[bucket_end+1:]
 
 deploy(s)
 verify=fetch_source()

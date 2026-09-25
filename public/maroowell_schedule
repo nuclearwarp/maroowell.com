@@ -4316,7 +4316,39 @@
 
       function metaWorkflowSucceeded(result){
         const status=clean(result?.status).toUpperCase();
-        return status==="SUCCESS" || status==="COMPLETED" || status==="WAIT_FOR_DOWNLOAD" || status==="DOWNLOAD_READY";
+        return status==="SUCCESS" || status==="COMPLETED";
+      }
+
+      async function verifyMetaScheduleApplied({camp,wave,metaDate,rows}){
+        const expected=(rows||[]).filter(r=>clean(r?.id)||clean(r?.name));
+        if(!expected.length)throw new Error("메타어드민 반영 검증 대상이 없습니다.");
+
+        let last=null;
+        for(let attempt=0;attempt<8;attempt++){
+          if(attempt>0)await sleep(1200);
+          const qs=new URLSearchParams({camp,wave,date:metaDate});
+          last=await apiFetch("/schedule/meta/current?"+qs.toString());
+
+          const raw=last?.meta_response ?? last;
+          const haystack=JSON.stringify(raw||{}).replace(/\s+/g,"").toLowerCase();
+          const missing=expected.filter(row=>{
+            const id=clean(row?.id).replace(/\s+/g,"").toLowerCase();
+            const name=clean(row?.name).replace(/\s+/g,"").toLowerCase();
+            return !((id&&haystack.includes(id)) || (name&&haystack.includes(name)));
+          });
+
+          if(!missing.length)return {ok:true,current:last};
+        }
+
+        const raw=last?.meta_response ?? last;
+        const haystack=JSON.stringify(raw||{}).replace(/\s+/g,"").toLowerCase();
+        const missing=expected.filter(row=>{
+          const id=clean(row?.id).replace(/\s+/g,"").toLowerCase();
+          const name=clean(row?.name).replace(/\s+/g,"").toLowerCase();
+          return !((id&&haystack.includes(id)) || (name&&haystack.includes(name)));
+        }).map(r=>clean(r?.name)||clean(r?.id));
+
+        throw new Error("업로드 요청은 처리됐지만 MetaAdmin 실제 스케줄 반영을 확인하지 못했습니다."+(missing.length?("\n미확인: "+missing.join(", ")):""));
       }
 
       function metaWorkflowSummary(result){
@@ -4393,6 +4425,14 @@
           if(!metaWorkflowSucceeded(actualResult)){
             throw new Error(metaWorkflowFailureText(actualResult,actualRows));
           }
+
+          setStatus("메타어드민 실제 반영 확인 중...");
+          await verifyMetaScheduleApplied({
+            camp:state.camp,
+            wave:state.wave,
+            metaDate,
+            rows:actualRows
+          });
 
           await advanceActualUpdateDate(metaDate).catch(()=>{});
           const summary=metaWorkflowSummary(actualResult);

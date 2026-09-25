@@ -1,0 +1,43 @@
+name: Deploy building analysis background jobs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.diagnostics/deploy_building_analysis_jobs.py'
+      - '.github/workflows/deploy-building-analysis-jobs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0f644373a9db40f2b36e4ffece348c46
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create queue if needed
+        shell: bash
+        run: |
+          set +e
+          npx wrangler@4 queues create maroowell-building-analysis
+          exit 0
+      - name: Patch and deploy live worker
+        run: python .diagnostics/deploy_building_analysis_jobs.py
+      - name: Attach queue consumer
+        shell: bash
+        run: |
+          set +e
+          out=$(npx wrangler@4 queues consumer worker add maroowell-building-analysis purple-resonance-61ea --batch-size 1 --batch-timeout 1 --message-retries 3 --max-concurrency 3 2>&1)
+          code=$?
+          echo "$out"
+          if [ $code -ne 0 ] && ! echo "$out" | grep -Eiq 'already|consumer.*exists|409'; then exit $code; fi
+          exit 0
+      - name: Verify health
+        run: |
+          sleep 3
+          curl -fsS https://purple-resonance-61ea.brain-0f6.workers.dev/health | grep -q '"ok":true'

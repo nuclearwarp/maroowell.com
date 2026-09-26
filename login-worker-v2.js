@@ -84,10 +84,6 @@ var login_worker_v2_default = {
         return withNoStore(response, "text/html; charset=utf-8");
       }
 
-      if ((path === "/maroowell_schedule" || path === "/maroowell_schedule.html") && response.ok) {
-        return withNoStore(response, "text/html; charset=utf-8");
-      }
-
       return response;
     } catch (error) {
       console.error(error);

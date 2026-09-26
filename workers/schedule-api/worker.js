@@ -210,16 +210,6 @@ export default {
         }, 200, cors);
       }
 
-      if (url.pathname === "/schedule/meta/continue" && request.method === "POST") {
-        requireWrite(auth);
-        const body = await readJson(request);
-        const workflowId = clean(body?.workflow_id || body?.workflowId);
-        if (!workflowId) throw httpError(400, "workflow_id_required");
-
-        const result = await continueMetaScheduleUpload(env, workflowId);
-        return json({ ok:true, ...result }, 200, cors);
-      }
-
       return json({
         ok: false,
         error: "not_found",
@@ -1198,67 +1188,6 @@ function metaPayloadHasEntries(payload) {
   return false;
 }
 
-function extractMetaScheduleGroupsPeople(payload, targetDate) {
-  const root = payload?.data ?? payload;
-  const groups = [];
-  const visited = new Set();
-
-  function collect(node) {
-    if (!node || typeof node !== "object" || visited.has(node)) return;
-    visited.add(node);
-    if (Array.isArray(node)) {
-      for (const item of node) collect(item);
-      return;
-    }
-    if (Array.isArray(node.scheduleGroups)) groups.push(...node.scheduleGroups);
-    for (const value of Object.values(node)) {
-      if (value && typeof value === "object") collect(value);
-    }
-  }
-  collect(root);
-
-  const allMap = new Map();
-  const activeMap = new Map();
-
-  for (const group of groups) {
-    const users = Array.isArray(group?.users) ? group.users : [];
-    const byLogin = new Map();
-
-    for (const user of users) {
-      const id = clean(user?.loginId || user?.login_id || user?.coupangId || user?.coupang_id || user?.id);
-      const name = clean(user?.name || user?.userName || user?.displayName || user?.driverName || user?.workerName);
-      if (!id) continue;
-      const person = { id, name:name || id };
-      byLogin.set(metaKey(id), person);
-      allMap.set(metaKey(id), person);
-    }
-
-    const schedules = Array.isArray(group?.schedules) ? group.schedules : [];
-    for (const schedule of schedules) {
-      const workDate = clean(schedule?.workDate || schedule?.work_date || schedule?.date);
-      if (targetDate && workDate && workDate !== targetDate) continue;
-
-      const assigned = Array.isArray(schedule?.assignedUsers) ? schedule.assignedUsers : [];
-      for (const assignedUser of assigned) {
-        const attendance = compact(assignedUser?.attendance || assignedUser?.attendanceStatus || assignedUser?.status).toUpperCase();
-        if (attendance && !["PRESENT","WORK","WORKING","ACTIVE","SCHEDULED","출근"].includes(attendance)) continue;
-
-        const id = clean(assignedUser?.loginId || assignedUser?.login_id || assignedUser?.coupangId || assignedUser?.coupang_id || assignedUser?.id);
-        if (!id) continue;
-        const base = byLogin.get(metaKey(id)) || {};
-        const name = clean(assignedUser?.name || assignedUser?.userName || assignedUser?.displayName || base.name || id);
-        activeMap.set(metaKey(id), { id, name, status:attendance || "PRESENT" });
-      }
-    }
-  }
-
-  return {
-    active: [...activeMap.values()],
-    all: [...allMap.values()],
-    found_groups: groups.length
-  };
-}
-
 async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes = await selectMetaCampCodes(env, camp);
   const campCode = codes[0];
   const query = new URLSearchParams({
@@ -1272,27 +1201,8 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
     method: "GET"
   });
 
-  // Keep the original recursive extractor as the primary source.
-  // MetaAdmin response shape has changed several times, so a rigid scheduleGroups-only
-  // parser can return zero people even while the API connection is healthy.
-  const legacyRegistered = extractMetaRegisteredPeople(result.body);
-  const legacyAll = extractMetaAllPeople(result.body);
-  const structured = extractMetaScheduleGroupsPeople(result.body, date);
-
-  const registeredMap = new Map();
-  for (const person of [...legacyRegistered, ...(structured.active || [])]) {
-    const key = metaKey(person?.id) || metaKey(person?.name);
-    if (key && !registeredMap.has(key)) registeredMap.set(key, person);
-  }
-
-  const allMap = new Map();
-  for (const person of [...legacyAll, ...(structured.all || [])]) {
-    const key = metaKey(person?.id) || metaKey(person?.name);
-    if (key && !allMap.has(key)) allMap.set(key, person);
-  }
-
-  const registeredPeople = [...registeredMap.values()];
-  const allPeople = [...allMap.values()];
+  const registeredPeople = extractMetaRegisteredPeople(result.body);
+  const allPeople = extractMetaAllPeople(result.body);
 
   return {
     camp,
@@ -1367,20 +1277,6 @@ async function uploadMetaScheduleExcel(env, { camp, wave, metaDate, phase, file 
     camp_code: codes[0],
     workflow_id: workflowId,
     accepted: true
-  };
-}
-
-async function continueMetaScheduleUpload(env, workflowId) {
-  const id = clean(workflowId);
-  const result = await metaRequest(env, "/v1/schedules/upload-workflow/signal", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workflowId:id, status:"CONTINUE" })
-  });
-  return {
-    workflow_id:id,
-    continued:true,
-    response:result.body
   };
 }
 

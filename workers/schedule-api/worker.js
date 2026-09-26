@@ -851,7 +851,7 @@ async function selectMetaCampCodes(env, camp) {
 
   try {
     rows = await supabaseSelect(env, TABLE_CAMPS, {
-      select: "camp,code",
+      select: "camp,code,mb_camp,updated_at",
       camp: `eq.${camp}`,
       limit: "100"
     });
@@ -861,18 +861,38 @@ async function selectMetaCampCodes(env, camp) {
 
   if (!rows.length) {
     const all = await supabaseSelect(env, TABLE_CAMPS, {
-      select: "camp,code",
+      select: "camp,code,mb_camp,updated_at",
       limit: "10000"
     }).catch(() => []);
     const key = normalizeCampLookup(camp);
     rows = all.filter(row => normalizeCampLookup(row.camp) === key);
   }
 
-  const codes = uniqStrings(rows.map(row => clean(row.code).toUpperCase())).sort();
-  if (!codes.length) {
+  const usable = rows
+    .map(row => ({
+      code: clean(row.code).toUpperCase(),
+      mbCamp: clean(row.mb_camp),
+      updatedAt: clean(row.updated_at)
+    }))
+    .filter(row => row.code);
+
+  if (!usable.length) {
     throw httpError(400, "meta_camp_code_not_found", { camp });
   }
-  return codes;
+
+  usable.sort((a, b) => {
+    const aMain = metaKey(a.mbCamp) === metaKey("본캠프") ? 1 : 0;
+    const bMain = metaKey(b.mbCamp) === metaKey("본캠프") ? 1 : 0;
+    if (aMain !== bMain) return bMain - aMain;
+
+    const aTime = Date.parse(a.updatedAt) || 0;
+    const bTime = Date.parse(b.updatedAt) || 0;
+    if (aTime !== bTime) return bTime - aTime;
+
+    return a.code.localeCompare(b.code);
+  });
+
+  return uniqStrings(usable.map(row => row.code));
 }
 
 function parseCookieBundle(bundle) {

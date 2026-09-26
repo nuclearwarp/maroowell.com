@@ -1747,8 +1747,18 @@
         let json=null;
         try{json=text?JSON.parse(text):null}catch{json={ok:false,error:text}}
         if(!res.ok||json?.ok===false){
-          const err=new Error(json?.error||json?.message||`API 오류 ${res.status}`);
-          err.status=res.status;err.detail=json?.detail||json;throw err;
+          const detail=json?.detail||json||{};
+          let suffix="";
+          if(json?.error==="meta_request_failed"){
+            const upstreamStatus=detail?.status||"";
+            const upstreamPath=detail?.path||"";
+            let upstreamData="";
+            try{upstreamData=typeof detail?.data==="string"?detail.data:JSON.stringify(detail?.data||"")}catch{}
+            if(upstreamData.length>400)upstreamData=upstreamData.slice(0,400)+"…";
+            suffix=` [Meta HTTP ${upstreamStatus||"?"}${upstreamPath?` · ${upstreamPath}`:""}${upstreamData?` · ${upstreamData}`:""}]`;
+          }
+          const err=new Error((json?.error||json?.message||`API 오류 ${res.status}`)+suffix);
+          err.status=res.status;err.detail=detail;throw err;
         }
         return json;
       }
@@ -4362,7 +4372,6 @@
           await ensureGlobalInfoAccountsForNames(metaDisplayNamesOnBoard());
 
           const actualRows=collectMetaRows({scheduleDate:selectedDate});
-          if(!actualRows.length)throw new Error(`${dateLabel(selectedDate)}에 전송할 출근 스케줄이 없습니다.`);
 
           const metaDate=metaUploadDateForScheduleDate(selectedDate);
           const current=await apiFetch("/schedule/meta/current?"+new URLSearchParams({
@@ -4371,8 +4380,8 @@
             date:metaDate
           }).toString());
 
-          const resetRows=metaResetRowsFromCurrent(current,metaDate,actualRows);
-          const resetNeeded=current?.has_existing===true && resetRows.length>0;
+          const resetRows=metaResetRowsFromCurrent(current,metaDate);
+          const resetNeeded=resetRows.length>0;
 
           if(current?.has_existing===true && !resetRows.length){
             console.warn("[meta upload] existing rows found but no active registrants extracted; reset skipped", current?.meta_response);
@@ -4381,8 +4390,11 @@
           const ok=batch?true:confirm(
             `${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n\n`+
             (resetNeeded
-              ? `메타어드민 기존 등록 ${resetRows.length}명을 전부 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 다시 업로드합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
-              : `메타어드민 기존 등록자가 없어 현재 스케줄 ${actualRows.length}명을 바로 업로드합니다.\n`)+
+              ? `메타어드민 기존 등록 ${resetRows.length}명을 전부 휴무 처리합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
+              : `메타어드민 기존 등록자는 없습니다.\n`)+
+            (actualRows.length
+              ? `그 다음 현재 스케줄 ${actualRows.length}명을 출근으로 다시 등록합니다.\n`
+              : `현재 마루웰 출근자는 0명이므로 휴무 처리 후 추가 등록 없이 완료합니다.\n`)+
             `\n계속할까요?`
           );
           if(!ok){setStatus("메타어드민 전송 취소");return;}
@@ -4400,6 +4412,14 @@
               throw new Error("기존 메타 등록자 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
             }
             resetCompleted=true;
+          }
+
+          if(!actualRows.length){
+            await advanceActualUpdateDate(metaDate);
+            const summary=resetNeeded ? `기존 ${resetRows.length}명 전원 휴무 처리 / 신규 출근 0명` : `기존 등록 없음 / 신규 출근 0명`;
+            setStatus(`메타어드민 전송 완료: ${summary}`);
+            if(!batch)alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n${summary}`);
+            return {selectedDate,metaDate,resetCount:resetRows.length,actualCount:0,summary};
           }
 
           setStatus(`현재 마루웰 스케줄 ${actualRows.length}명 업로드 중...`);

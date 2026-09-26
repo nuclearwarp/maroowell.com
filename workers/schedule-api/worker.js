@@ -1188,12 +1188,106 @@ function metaPayloadHasEntries(payload) {
   return false;
 }
 
-async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes = await selectMetaCampCodes(env, camp);
+function metaWeekRange(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(clean(date));
+  if (!m) throw httpError(400, "invalid_meta_date", { date });
+
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(d.getTime())) throw httpError(400, "invalid_meta_date", { date });
+
+  const start = new Date(d);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+
+  const iso = value => value.toISOString().slice(0, 10);
+  return { dateFrom: iso(start), dateTo: iso(end) };
+}
+
+function extractMetaScheduleForDate(payload, { campCode, waveCode, date }) {
+  const root = payload?.data ?? payload ?? {};
+  const groups = Array.isArray(root?.scheduleGroups) ? root.scheduleGroups : [];
+  const targetCamp = clean(campCode).toUpperCase();
+  const targetWave = normalizeWave(waveCode);
+
+  const matchingGroups = groups.filter(group => {
+    const groupCamp = clean(group?.campCode).toUpperCase();
+    const groupWave = normalizeWave(group?.waveCode);
+    return (!targetCamp || groupCamp === targetCamp)
+      && (!targetWave || groupWave === targetWave);
+  });
+
+  const registered = [];
+  const registeredSeen = new Set();
+  const allPeople = [];
+  const allSeen = new Set();
+  let scheduleFound = false;
+
+  for (const group of matchingGroups) {
+    const userMap = new Map();
+
+    for (const user of Array.isArray(group?.users) ? group.users : []) {
+      const id = clean(user?.loginId);
+      const name = clean(user?.name);
+      if (!id) continue;
+
+      userMap.set(metaKey(id), { id, name: name || id });
+
+      const key = metaKey(id);
+      if (key && !allSeen.has(key)) {
+        allSeen.add(key);
+        allPeople.push({ id, name: name || id });
+      }
+    }
+
+    for (const schedule of Array.isArray(group?.schedules) ? group.schedules : []) {
+      if (clean(schedule?.workDate) !== clean(date)) continue;
+      scheduleFound = true;
+
+      for (const assigned of Array.isArray(schedule?.assignedUsers) ? schedule.assignedUsers : []) {
+        const attendance = clean(assigned?.attendance).toUpperCase();
+        if (attendance !== "PRESENT") continue;
+
+        const id = clean(assigned?.loginId);
+        if (!id) continue;
+
+        const base = userMap.get(metaKey(id));
+        const name = clean(assigned?.name) || clean(base?.name) || id;
+        const key = metaKey(id);
+        if (!key || registeredSeen.has(key)) continue;
+
+        registeredSeen.add(key);
+        registered.push({
+          id,
+          name,
+          status: attendance,
+          trips: Array.isArray(assigned?.trips) ? assigned.trips : [],
+          sub_routes: Array.isArray(assigned?.subRoutes) ? assigned.subRoutes : []
+        });
+      }
+    }
+  }
+
+  return {
+    schedule_found: scheduleFound,
+    registered_people: registered,
+    all_people: allPeople,
+    matching_group_count: matchingGroups.length
+  };
+}
+
+async function getMetaCurrentSchedule(env, { camp, wave, date }) {
+  const codes = await selectMetaCampCodes(env, camp);
   const campCode = codes[0];
+  const normalizedWave = normalizeWave(wave);
+  const range = metaWeekRange(date);
+
+  // MetaAdmin UI itself queries the whole Sunday-Saturday week, then renders
+  // the selected workDate from scheduleGroups[].schedules[].
   const query = new URLSearchParams({
-    dateFrom: date,
-    dateTo: date,
-    waveCode: normalizeWave(wave),
+    dateFrom: range.dateFrom,
+    dateTo: range.dateTo,
+    waveCode: normalizedWave,
     campCodes: campCode
   });
 
@@ -1201,20 +1295,26 @@ async function getMetaCurrentSchedule(env, { camp, wave, date }) {  const codes 
     method: "GET"
   });
 
-  const registeredPeople = extractMetaRegisteredPeople(result.body);
-  const allPeople = extractMetaAllPeople(result.body);
+  const parsed = extractMetaScheduleForDate(result.body, {
+    campCode,
+    waveCode: normalizedWave,
+    date
+  });
 
   return {
     camp,
-    wave: normalizeWave(wave),
+    wave: normalizedWave,
     meta_date: date,
+    meta_date_from: range.dateFrom,
+    meta_date_to: range.dateTo,
     camp_code: campCode,
     camp_codes: codes,
-    has_existing: metaPayloadHasEntries(result.body),
-    registered_people: registeredPeople,
-    registered_count: registeredPeople.length,
-    all_people: allPeople,
-    all_people_count: allPeople.length,
+    has_existing: parsed.schedule_found,
+    registered_people: parsed.registered_people,
+    registered_count: parsed.registered_people.length,
+    all_people: parsed.all_people,
+    all_people_count: parsed.all_people.length,
+    matching_group_count: parsed.matching_group_count,
     meta_response: result.body
   };
 }

@@ -1230,12 +1230,17 @@ function extractMetaScheduleForDate(payload, { campCode, waveCode, date }) {
   const targetCamp = clean(campCode).toUpperCase();
   const targetWave = normalizeWave(waveCode);
 
-  const matchingGroups = groups.filter(group => {
+  const exactGroups = groups.filter(group => {
     const groupCamp = clean(group?.campCode).toUpperCase();
     const groupWave = normalizeWave(group?.waveCode);
     return (!targetCamp || groupCamp === targetCamp)
       && (!targetWave || groupWave === targetWave);
   });
+
+  // /v2/schedules is already filtered by campCodes + waveCode.
+  // Prefer exact group metadata, but never discard the response if Coupang omits
+  // or changes group-level camp/wave fields for a particular day.
+  const matchingGroups = exactGroups.length ? exactGroups : groups;
 
   const registered = [];
   const registeredSeen = new Set();

@@ -4175,15 +4175,18 @@
         if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
       }
 
-      function selectedMetaUploadDate(){
-        if(!els.metaUploadDateList)return "";
-        const selected=els.metaUploadDateList.querySelector(".excelDateOption.selected");
-        return normalizeDateInput(selected?.getAttribute("data-date")||"");
+      function selectedMetaUploadDates(){
+        if(!els.metaUploadDateList)return [];
+        return Array.from(els.metaUploadDateList.querySelectorAll(".excelDateOption.selected"))
+          .map(el=>normalizeDateInput(el.getAttribute("data-date")||""))
+          .filter(Boolean)
+          .sort();
       }
 
       function updateMetaUploadRunButton(){
         if(!els.btnMetaUploadDateRun)return;
-        els.btnMetaUploadDateRun.textContent=selectedMetaUploadDate()?"전송 (1)":"전송";
+        const count=selectedMetaUploadDates().length;
+        els.btnMetaUploadDateRun.textContent=count?`전송 (${count})`:"전송";
       }
 
       function openMetaUploadDatePicker(){
@@ -4194,7 +4197,7 @@
         }
         if(state.metaUploadBusy)return;
 
-        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자를 선택하세요. 전송 시 메타어드민의 해당 업무일 기존 등록자를 먼저 조회하여, 실제 등록되어 있는 인원만 휴무 처리한 뒤 현재 마루웰 스케줄을 업로드합니다.`;
+        els.metaUploadDateDesc.textContent=`${state.camp || "-"} / ${waveLabel(state.wave)} / ${weekRangeLabel()} · 전송할 일자를 하나 이상 선택하세요. 선택한 날짜는 순서대로 처리하며, 각 업무일의 기존 등록자를 전부 휴무 처리한 뒤 현재 마루웰 스케줄을 다시 업로드합니다.`;
         els.metaUploadDateList.innerHTML=state.weekDates.map(date=>{
           const metaDate=normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
           const count=countMetaRowsForScheduleDate(date);
@@ -4208,12 +4211,9 @@
 
         els.metaUploadDateList.querySelectorAll("[data-date]").forEach(btn=>{
           btn.addEventListener("click",()=>{
-            els.metaUploadDateList.querySelectorAll(".excelDateOption.selected").forEach(x=>{
-              x.classList.remove("selected");
-              x.setAttribute("aria-pressed","false");
-            });
-            btn.classList.add("selected");
-            btn.setAttribute("aria-pressed","true");
+            const selected=!btn.classList.contains("selected");
+            btn.classList.toggle("selected",selected);
+            btn.setAttribute("aria-pressed",selected?"true":"false");
             updateMetaUploadRunButton();
           });
         });
@@ -4228,22 +4228,18 @@
         return normalizeWave(state.wave)==="WAVE1"?addDays(date,1):date;
       }
 
-      function metaResetRowsFromCurrent(current,metaDate,actualRows=[]){
-        // MetaAdmin의 전체 51명 명단에서 이번 마루웰 실제 출근자를 제외한 나머지를 휴무로 맞춘다.
+      function metaResetRowsFromCurrent(current,metaDate){
+        // 원래 설계: 해당 업무일 MetaAdmin에 실제 등록된 인원은 전부 먼저 휴무 처리한다.
+        // 그 다음 현재 마루웰 출근 스케줄을 다시 업로드한다.
         const source=Array.isArray(current?.registered_people)?current.registered_people:[];
-        const activeKeys=new Set();
-        for(const row of actualRows||[]){
-          const idKey=keyOf(row?.id); const nameKey=keyOf(row?.name);
-          if(idKey)activeKeys.add(`id:${idKey}`); if(nameKey)activeKeys.add(`name:${nameKey}`);
-        }
         const out=[]; const seen=new Set();
         for(const person of source){
           const name=clean(person?.name || person?.driver_name || person?.display_name);
           const id=clean(person?.id || person?.coupang_id || person?.login_id);
           if(!name||!id)continue;
-          const idKey=keyOf(id), nameKey=keyOf(name);
-          if((idKey&&activeKeys.has(`id:${idKey}`)) || (nameKey&&activeKeys.has(`name:${nameKey}`)))continue;
-          const key=idKey||nameKey; if(!key||seen.has(key))continue; seen.add(key);
+          const key=keyOf(id)||keyOf(name);
+          if(!key||seen.has(key))continue;
+          seen.add(key);
           out.push({date:metaDate,name,id,routes:[]});
         }
         return out.sort((a,b)=>{ const nc=sortText(a.name,b.name); return nc!==0?nc:sortText(a.id,b.id); });
@@ -4334,7 +4330,8 @@
         return `메타어드민 스케줄 처리에 실패했습니다.\n상태: ${status}\nWorkflow: ${wid}\nRows: ${Number(d.totalRows||0)} / 생성 ${Number(d.created||0)} / 수정 ${Number(d.updated||0)+Number(d.modified||0)} / 중복 ${Number(d.duplicated||0)}`;
       }
 
-      async function uploadMetaScheduleForDate(scheduleDate){
+      async function uploadMetaScheduleForDate(scheduleDate,options={}){
+        const batch=!!options.batch;
         const selectedDate=normalizeDateInput(scheduleDate);
         if(!selectedDate||!state.camp||!state.weekDates.includes(selectedDate)){
           alert("전송할 일자를 다시 선택해주세요.");
@@ -4344,12 +4341,14 @@
           alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
           return;
         }
-        if(state.metaUploadBusy)return;
+        if(state.metaUploadBusy&&!batch)return;
 
-        state.metaUploadBusy=true;
-        if(els.btnMetaUpload)els.btnMetaUpload.disabled=true;
-        if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
-        closeMetaUploadDatePicker();
+        if(!batch){
+          state.metaUploadBusy=true;
+          if(els.btnMetaUpload)els.btnMetaUpload.disabled=true;
+          if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
+          closeMetaUploadDatePicker();
+        }
 
         let resetCompleted=false;
         try{
@@ -4379,10 +4378,10 @@
             console.warn("[meta upload] existing rows found but no active registrants extracted; reset skipped", current?.meta_response);
           }
 
-          const ok=confirm(
+          const ok=batch?true:confirm(
             `${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n\n`+
             (resetNeeded
-              ? `메타어드민 전체 등록자 중 현재 마루웰 출근자가 아닌 ${resetRows.length}명을 먼저 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 업로드합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
+              ? `메타어드민 기존 등록 ${resetRows.length}명을 전부 휴무 처리한 뒤, 현재 스케줄 ${actualRows.length}명을 다시 업로드합니다.\n\n휴무 처리: ${resetRows.map(r=>r.name).join(", ")}\n`
               : `메타어드민 기존 등록자가 없어 현재 스케줄 ${actualRows.length}명을 바로 업로드합니다.\n`)+
             `\n계속할까요?`
           );
@@ -4419,11 +4418,77 @@
           await advanceActualUpdateDate(metaDate);
           const summary=metaWorkflowSummary(actualResult);
           setStatus(`메타어드민 전송 완료: 기존 ${resetRows.length}명 정리 / 신규 ${actualRows.length}명 / ${summary}`);
-          alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n기존 등록 휴무 처리: ${resetRows.length}명\n신규 스케줄: ${actualRows.length}명\n\n${summary}`);
+          if(!batch)alert(`메타어드민 전송이 완료되었습니다.\n\n${state.camp} / ${waveLabel(state.wave)} / ${dateLabel(selectedDate)}\n기존 등록 휴무 처리: ${resetRows.length}명\n신규 스케줄: ${actualRows.length}명\n\n${summary}`);
+          return {selectedDate,metaDate,resetCount:resetRows.length,actualCount:actualRows.length,summary};
         }catch(e){
           console.error("[meta upload]",e);
           setStatus(`메타어드민 전송 실패: ${e?.message||e}`);
+          if(batch)throw e;
           alert(`메타어드민 전송 실패\n\n${e?.message||e}`);
+        }finally{
+          if(!batch){
+            state.metaUploadBusy=false;
+            if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;
+            if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=false;
+          }
+        }
+      }
+
+      async function uploadMetaSchedulesForDates(scheduleDates){
+        const dates=Array.from(new Set((scheduleDates||[])
+          .map(normalizeDateInput)
+          .filter(date=>date&&state.weekDates.includes(date))))
+          .sort();
+
+        if(!dates.length){
+          alert("전송할 일자를 하나 이상 선택해주세요.");
+          return;
+        }
+        if(!window.XLSX){
+          alert("엑셀 생성 라이브러리를 불러오지 못했습니다.");
+          return;
+        }
+        if(state.metaUploadBusy)return;
+
+        const preview=dates.map(date=>{
+          const metaDate=metaUploadDateForScheduleDate(date);
+          const count=countMetaRowsForScheduleDate(date);
+          return `${dateLabel(date)} · Meta ${mdLabel(metaDate)} · 출근 ${count}명`;
+        }).join("\n");
+
+        const ok=confirm(
+          `${state.camp} / ${waveLabel(state.wave)}\n\n`+
+          `선택한 ${dates.length}개 일자를 순서대로 전송합니다.\n`+
+          `각 일자마다 기존 MetaAdmin 등록자를 전부 휴무 처리한 뒤 현재 마루웰 스케줄을 다시 등록합니다.\n\n`+
+          preview+
+          `\n\n계속할까요?`
+        );
+        if(!ok){
+          setStatus("메타어드민 전송 취소");
+          return;
+        }
+
+        state.metaUploadBusy=true;
+        if(els.btnMetaUpload)els.btnMetaUpload.disabled=true;
+        if(els.btnMetaUploadDateRun)els.btnMetaUploadDateRun.disabled=true;
+        closeMetaUploadDatePicker();
+
+        const results=[];
+        try{
+          for(let i=0;i<dates.length;i++){
+            setStatus(`(${i+1}/${dates.length}) ${dateLabel(dates[i])} 메타어드민 전송 중...`);
+            const result=await uploadMetaScheduleForDate(dates[i],{batch:true,index:i+1,total:dates.length});
+            if(result)results.push(result);
+          }
+
+          const lines=results.map(r=>`${dateLabel(r.selectedDate)} · 기존 ${r.resetCount}명 휴무 → 출근 ${r.actualCount}명 등록`);
+          setStatus(`메타어드민 일괄 전송 완료: ${results.length}/${dates.length}일`);
+          alert(`메타어드민 전송이 완료되었습니다.\n\n${lines.join("\n")}`);
+        }catch(e){
+          console.error("[meta batch upload]",e);
+          const done=results.length?`\n\n완료된 일자: ${results.map(r=>dateLabel(r.selectedDate)).join(", ")}`:"";
+          setStatus(`메타어드민 일괄 전송 실패: ${e?.message||e}`);
+          alert(`메타어드민 전송 실패\n\n${e?.message||e}${done}`);
         }finally{
           state.metaUploadBusy=false;
           if(els.btnMetaUpload)els.btnMetaUpload.disabled=false;
@@ -4619,7 +4684,7 @@
         els.btnExcelDateGenerate?.addEventListener("click",()=>exportMetaExcelForDates(selectedExcelDates()));
         els.btnExcelDateClose?.addEventListener("click",closeExcelDatePicker);
         els.excelDateModal?.addEventListener("click",e=>{if(e.target===els.excelDateModal)closeExcelDatePicker()});
-        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const date=selectedMetaUploadDate();if(!date){alert("전송할 일자를 선택해주세요.");return;}uploadMetaScheduleForDate(date)});
+        els.btnMetaUploadDateRun?.addEventListener("click",()=>{const dates=selectedMetaUploadDates();if(!dates.length){alert("전송할 일자를 하나 이상 선택해주세요.");return;}uploadMetaSchedulesForDates(dates)});
         els.btnMetaUploadDateClose?.addEventListener("click",closeMetaUploadDatePicker);
         els.metaUploadDateModal?.addEventListener("click",e=>{if(e.target===els.metaUploadDateModal)closeMetaUploadDatePicker()});
         els.btnLogout?.addEventListener("click",async()=>{try{await supabase.auth.signOut()}catch{} location.href=LOGIN_PATH});

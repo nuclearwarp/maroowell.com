@@ -210,6 +210,16 @@ export default {
         }, 200, cors);
       }
 
+      if (url.pathname === "/schedule/meta/continue" && request.method === "POST") {
+        requireWrite(auth);
+        const body = await readJson(request);
+        const workflowId = clean(body?.workflow_id || body?.workflowId);
+        if (!workflowId) throw httpError(400, "workflow_id_required");
+
+        const result = await continueMetaScheduleUpload(env, workflowId);
+        return json({ ok:true, ...result }, 200, cors);
+      }
+
       return json({
         ok: false,
         error: "not_found",
@@ -1402,6 +1412,21 @@ async function uploadMetaScheduleExcel(env, { camp, wave, metaDate, phase, file 
     camp_code: codes[0],
     workflow_id: workflowId,
     accepted: true
+  };
+}
+
+async function continueMetaScheduleUpload(env, workflowId) {
+  const id = clean(workflowId);
+  const result = await metaRequest(env, "/v1/schedules/upload-workflow/signal", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workflowId:id, status:"CONTINUE" })
+  });
+
+  return {
+    workflow_id:id,
+    continued:true,
+    response:result.body
   };
 }
 

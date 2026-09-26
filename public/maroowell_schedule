@@ -4304,10 +4304,28 @@
       async function pollMetaWorkflow(workflowId){
         const id=clean(workflowId);
         if(!id)throw new Error("메타어드민 workflowId가 없습니다.");
-        for(let i=0;i<90;i++){
+
+        let continued=false;
+        for(let i=0;i<120;i++){
           const result=await apiFetch("/schedule/meta/workflow?workflow_id="+encodeURIComponent(id));
           const status=clean(result?.status).toUpperCase();
-          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING"].includes(status))return result;
+
+          if(status==="WAIT_FOR_DOWNLOAD"){
+            if(!continued){
+              setStatus("메타어드민 업로드 검증 완료 · 실제 반영 단계 진행 중...");
+              await apiFetch("/schedule/meta/continue",{
+                method:"POST",
+                body:JSON.stringify({workflow_id:id})
+              });
+              continued=true;
+            }
+            await sleep(1000);
+            continue;
+          }
+
+          if(status && !["RUNNING","PENDING","QUEUED","WAIT_FOR_UPLOAD","WAIT_FOR_VALIDATION","PROCESSING","DOWNLOAD_READY"].includes(status)){
+            return result;
+          }
           await sleep(1000);
         }
         throw new Error("메타어드민 처리 시간이 너무 오래 걸립니다. 잠시 후 다시 확인해주세요.");
@@ -4315,9 +4333,43 @@
 
       function metaWorkflowSucceeded(result){
         const status=clean(result?.status).toUpperCase();
-        return status==="SUCCESS" || status==="COMPLETED" || status==="WAIT_FOR_DOWNLOAD" || status==="DOWNLOAD_READY";
+        return status==="SUCCESS" || status==="COMPLETED";
       }
 
+      async function verifyMetaScheduleState({camp,wave,metaDate,rows}){
+        const expected=(rows||[]).map(row=>({
+          id:keyOf(row?.id),
+          name:keyOf(row?.name)
+        })).filter(row=>row.id||row.name);
+
+        let last=null;
+        for(let attempt=0;attempt<8;attempt++){
+          if(attempt>0)await sleep(1200);
+          const qs=new URLSearchParams({camp,wave,date:metaDate});
+          last=await apiFetch("/schedule/meta/current?"+qs.toString());
+
+          const current=Array.isArray(last?.registered_people)?last.registered_people:[];
+          const currentIds=new Set(current.map(person=>keyOf(person?.id)).filter(Boolean));
+          const currentNames=new Set(current.map(person=>keyOf(person?.name)).filter(Boolean));
+
+          if(!expected.length){
+            if(current.length===0)return {ok:true,current:last};
+            continue;
+          }
+
+          const missing=expected.filter(row=>
+            !((row.id&&currentIds.has(row.id)) || (row.name&&currentNames.has(row.name)))
+          );
+          if(!missing.length)return {ok:true,current:last};
+        }
+
+        const current=Array.isArray(last?.registered_people)?last.registered_people:[];
+        throw new Error(
+          expected.length
+            ? `메타어드민 업로드 처리는 끝났지만 실제 출근 스케줄 반영을 확인하지 못했습니다. 현재 등록 ${current.length}명`
+            : `메타어드민 휴무 처리는 끝났지만 실제 등록자가 ${current.length}명 남아 있습니다.`
+        );
+      }
       function metaWorkflowSummary(result){
         const d=result?.data||{};
         return `총 ${Number(d.totalRows||0).toLocaleString("ko-KR")} / 생성 ${Number(d.created||0).toLocaleString("ko-KR")} / 수정 ${Number(d.updated||0).toLocaleString("ko-KR")} / 변경 ${Number(d.modified||0).toLocaleString("ko-KR")}`;
@@ -4411,6 +4463,14 @@
             if(!metaWorkflowSucceeded(resetResult)){
               throw new Error("기존 메타 등록자 휴무 처리 실패\n"+metaWorkflowFailureText(resetResult,resetRows));
             }
+
+            setStatus("기존 등록자 휴무 실제 반영 확인 중...");
+            await verifyMetaScheduleState({
+              camp:state.camp,
+              wave:state.wave,
+              metaDate,
+              rows:[]
+            });
             resetCompleted=true;
           }
 
@@ -4434,6 +4494,14 @@
             const prefix=resetCompleted?"※ 기존 MetaAdmin 등록자 휴무 처리는 완료된 상태입니다. 새 스케줄 업로드 오류를 즉시 확인해주세요.\n\n":"";
             throw new Error(prefix+metaWorkflowFailureText(actualResult,actualRows));
           }
+
+          setStatus("새 스케줄 실제 반영 확인 중...");
+          await verifyMetaScheduleState({
+            camp:state.camp,
+            wave:state.wave,
+            metaDate,
+            rows:actualRows
+          });
 
           await advanceActualUpdateDate(metaDate);
           const summary=metaWorkflowSummary(actualResult);

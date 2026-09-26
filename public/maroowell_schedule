@@ -4799,6 +4799,41 @@
         window.addEventListener("beforeunload",e=>{if(state.dirty.size>0){e.preventDefault();e.returnValue=""}});
       }
 
+      async function applyAppMetaUploadPreset(){
+        const params=new URLSearchParams(location.search);
+        if(params.get("app_meta_upload")!=="1")return false;
+
+        const camp=clean(params.get("camp"));
+        const requestedWave=normalizeWave(params.get("wave"));
+        const date=normalizeDateInput(params.get("date"));
+        if(!camp)return false;
+
+        setToolbarHidden(false);
+        els.campInput.value=camp;
+        state.camp=camp;
+        state.wave=waveForCamp(camp)||requestedWave;
+        els.waveSelect.value=state.wave;
+
+        if(date){
+          applyWeekStart(sundayOf(date),false);
+        }
+
+        await loadAll();
+        openMetaUploadDatePicker();
+
+        if(date && state.weekDates.includes(date) && els.metaUploadDateList){
+          const btn=Array.from(els.metaUploadDateList.querySelectorAll("[data-date]"))
+            .find(el=>normalizeDateInput(el.getAttribute("data-date")||"")===date);
+          if(btn){
+            btn.classList.add("selected");
+            btn.setAttribute("aria-pressed","true");
+            updateMetaUploadRunButton();
+            try{btn.scrollIntoView({block:"nearest"})}catch{}
+          }
+        }
+        return true;
+      }
+
       async function boot(){
         bind();
         restoreToolbarState();
@@ -4817,7 +4852,10 @@
         document.documentElement.style.visibility="visible";
         setState("ok","READY");
         els.apiPill.textContent="API";
-        setStatus("캠프를 선택하면 주/야가 자동 선택되고 바로 조회됩니다.");
+        const appMetaUpload=await applyAppMetaUploadPreset();
+        if(!appMetaUpload){
+          setStatus("캠프를 선택하면 주/야가 자동 선택되고 바로 조회됩니다.");
+        }
       }
 
       boot().catch(e=>{

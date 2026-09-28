@@ -194,6 +194,11 @@
         return text(parent?.region) || text(row?.region);
       }
 
+      function effectiveArea(row, index=byId(), bases=baseByCamp()) {
+        const parent = inheritedParent(row,index,bases);
+        return text(parent?.area) || text(row?.area);
+      }
+
       function qrSource(row, index=byId(), bases=baseByCamp()) {
         const parent = inheritedParent(row,index,bases);
         return {
@@ -278,11 +283,15 @@
       }
 
       function areaSelectHtml(row) {
-        const value = text(row.area);
-        const disabled = !state.canEdit || row._deleted;
+        const parent = inheritedParent(row);
+        const value = text(parent ? effectiveArea(row) : row.area);
+        const disabled = !state.canEdit || row._deleted || !!parent;
+        const title = parent
+          ? `본캠프 ${text(parent.camp) || "-"} Area 상속 · ${value || "미지정"}`
+          : "";
         const options = [...AREA_OPTIONS];
         if (value && !options.includes(value)) options.push(value);
-        return `<select class="cellSelect center" data-field="area" ${disabled?"disabled":""}><option value="" ${value?"":"selected"}>선택</option>${options.map((v)=>`<option value="${esc(v)}" ${value===v?"selected":""}>${esc(v)} Area</option>`).join("")}</select>`;
+        return `<select class="cellSelect center" data-field="area" ${disabled?"disabled":""} ${title?`title="${esc(title)}"`:""}><option value="" ${value?"":"selected"}>선택</option>${options.map((v)=>`<option value="${esc(v)}" ${value===v?"selected":""}>${esc(v)} Area</option>`).join("")}</select>`;
       }
 
       function regionInputHtml(row) {
@@ -382,7 +391,7 @@
             (!f.sh || text(sh?.camp).toLowerCase().includes(f.sh)) &&
             (!f.address || text(row.address).toLowerCase().includes(f.address)) &&
             (!f.region || normalizedRegion(effectiveRegion(row,index,bases))===normalizedRegion(f.region)) &&
-            (!f.area || text(row.area).toLowerCase().includes(f.area)) &&
+            (!f.area || effectiveArea(row,index,bases).toLowerCase().includes(f.area)) &&
             (!f.code || text(row.code).toLowerCase().includes(f.code)) &&
             (!f.numbering || text(row.numbering_url).toLowerCase().includes(f.numbering)) &&
             (!f.lat || text(row.latitude).toLowerCase().includes(f.lat)) &&
@@ -508,7 +517,7 @@
 
       function payload(row) {
         return {
-          camp_type:text(row.camp_type)||null,camp:text(row.camp)||null,mb_camp:text(row.mb_camp)||null,parent_camp_id:nullableId(row.parent_camp_id),receiving_sh_id:nullableId(row.receiving_sh_id),address:text(row.address)||null,region:effectiveRegion(row)||null,area:text(row.area)||null,code:text(row.code)||null,numbering_url:text(row.numbering_url)||null,latitude:text(row.latitude)||null,longitude:text(row.longitude)||null,description:text(row.description)||null
+          camp_type:text(row.camp_type)||null,camp:text(row.camp)||null,mb_camp:text(row.mb_camp)||null,parent_camp_id:nullableId(row.parent_camp_id),receiving_sh_id:nullableId(row.receiving_sh_id),address:text(row.address)||null,region:effectiveRegion(row)||null,area:effectiveArea(row)||null,code:text(row.code)||null,numbering_url:text(row.numbering_url)||null,latitude:text(row.latitude)||null,longitude:text(row.longitude)||null,description:text(row.description)||null
         };
       }
 
@@ -532,7 +541,7 @@
       function downloadCsv() {
         const index = byId(); const bases = baseByCamp(); const headers = ["구분","캠프명","MB캠프","본캠프","본캠프ID","받는SH","받는SHID","배정방식","주소","Region","Area","코드","채번URL","위도","경도","설명"];
         const lines = [headers.map(csvCell).join(",")];
-        for (const row of filterRows().filter((r)=>!r._deleted)) { const parent=currentParent(row,index,bases), resolved=resolveSh(row,index,bases); lines.push([row.camp_type,row.camp,row.mb_camp,parent?.camp||"",row.parent_camp_id||"",resolved.row?.camp||"",resolved.row?.id||"",resolved.type,row.address,effectiveRegion(row,index,bases),row.area,row.code,row.numbering_url,row.latitude,row.longitude,row.description].map(csvCell).join(",")); }
+        for (const row of filterRows().filter((r)=>!r._deleted)) { const parent=currentParent(row,index,bases), resolved=resolveSh(row,index,bases); lines.push([row.camp_type,row.camp,row.mb_camp,parent?.camp||"",row.parent_camp_id||"",resolved.row?.camp||"",resolved.row?.id||"",resolved.type,row.address,effectiveRegion(row,index,bases),effectiveArea(row,index,bases),row.code,row.numbering_url,row.latitude,row.longitude,row.description].map(csvCell).join(",")); }
         const blob = new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url;a.download=`coupang_camps_${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(url);
       }
 

@@ -1139,7 +1139,7 @@ async function handleCampsBatch(request, env) {
 
   const cleanPayload = (input = {}) => {
     const out = {};
-    const fields = ["camp_type","camp","mb_camp","parent_camp_id","receiving_sh_id","address","region","code","numbering_url","latitude","longitude","description"];
+    const fields = ["camp_type","camp","mb_camp","parent_camp_id","receiving_sh_id","address","region","area","code","numbering_url","latitude","longitude","description"];
     for (const key of fields) {
       if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
       if (key === "parent_camp_id" || key === "receiving_sh_id") out[key] = input[key] == null || input[key] === "" ? null : Number(input[key]);

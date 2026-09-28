@@ -397,7 +397,6 @@
     .deniedCard{width:min(460px,100%);padding:26px;border-radius:24px;background:#fff;border:1px solid #e2e8f0;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.35)}
     .deniedCard h2{margin:0 0 10px;font-size:22px}.deniedCard p{margin:0 0 18px;color:#64748b;line-height:1.6}.deniedCard .actions{display:flex;justify-content:center;gap:10px}
   </style>
-  <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
 </head>
 
 <body>
@@ -439,9 +438,13 @@
                 <select id="type" class="control"><option value="">전체</option></select>
               </div>
               <div class="field">
-                <label for="region">지역</label>
+                <label for="region">Region</label>
                 <select id="region" class="control"><option value="">전체</option></select>
               </div>
+            </div>
+            <div class="field">
+              <label for="area">Area</label>
+              <select id="area" class="control"><option value="">전체</option></select>
             </div>
             <div class="actions">
               <button id="reset" class="btn" type="button">필터 초기화</button>
@@ -458,6 +461,11 @@
             </div>
           </section>
 
+          <section id="missingCard" class="card" style="display:none">
+            <div class="head"><b>위치 확인 실패 목록</b><span id="missingCount">0건</span></div>
+            <div id="missingList" class="list"></div>
+          </section>
+
           <section class="card">
             <div class="head"><b>구분별 보기</b><span>클릭 필터</span></div>
             <div id="chips" class="chips"></div>
@@ -469,7 +477,8 @@
             <p id="dSub"></p>
             <div class="rows">
               <div class="row"><b>주소</b><span id="dAddress"></span></div>
-              <div class="row"><b>지역</b><span id="dRegion"></span></div>
+              <div class="row"><b>Region</b><span id="dRegion"></span></div>
+              <div class="row"><b>Area</b><span id="dArea"></span></div>
               <div class="row"><b>코드</b><span id="dCode"></span></div>
               <div class="row"><b>본캠프</b><span id="dParent"></span></div>
               <div class="row"><b>받는 SH</b><span id="dSh"></span></div>
@@ -536,6 +545,7 @@
         query: $("#q"),
         type: $("#type"),
         region: $("#region"),
+        area: $("#area"),
         reset: $("#reset"),
         fit: $("#fit"),
         chips: $("#chips"),
@@ -544,6 +554,9 @@
         visible: $("#visible"),
         total: $("#total"),
         missing: $("#missing"),
+        missingCard: $("#missingCard"),
+        missingCount: $("#missingCount"),
+        missingList: $("#missingList"),
         time: $("#time"),
         detail: $("#detail"),
         detailType: $("#dType"),
@@ -551,6 +564,7 @@
         detailSub: $("#dSub"),
         detailAddress: $("#dAddress"),
         detailRegion: $("#dRegion"),
+        detailArea: $("#dArea"),
         detailCode: $("#dCode"),
         detailParent: $("#dParent"),
         detailSh: $("#dSh"),
@@ -1805,6 +1819,8 @@
         const types = sortedTypes();
         const regions = [...new Set(state.rows.map(row => row.region).filter(Boolean))]
           .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+        const areas = [...new Set(state.rows.map(row => row.area).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
 
         state.selectedTypes = new Set(
           [...state.selectedTypes].filter(type => types.includes(type))
@@ -1812,6 +1828,7 @@
 
         updateSelectOptions(dom.type, types);
         updateSelectOptions(dom.region, regions);
+        updateSelectOptions(dom.area, areas);
         syncTypeSelect();
         renderTypeChips(types);
       }
@@ -1842,11 +1859,13 @@
       function applyFilters(fitBounds = true) {
         const query = lower(dom.query.value);
         const selectedRegion = dom.region.value;
+        const selectedArea = dom.area.value;
 
         state.filteredRows = state.rows.filter(row => {
           if (!row.hasValidCoordinates) return false;
           if (state.selectedTypes.size && !state.selectedTypes.has(row.camp_type)) return false;
           if (selectedRegion && row.region !== selectedRegion) return false;
+          if (selectedArea && row.area !== selectedArea) return false;
 
           if (query) {
             const haystack = [
@@ -1855,6 +1874,7 @@
               row.mb_camp,
               row.address,
               row.region,
+              row.area,
               row.code,
               row.parent_camp,
               row.receiving_sh,
@@ -2207,10 +2227,31 @@
           title.append(dot, document.createTextNode(campName(row)));
 
           const subtitle = document.createElement("span");
-          subtitle.textContent = [row.camp_type, row.region, row.receiving_sh ? `SH ${row.receiving_sh}` : "", row.address].filter(Boolean).join(" · ");
+          subtitle.textContent = [row.camp_type, row.region, row.area ? `${row.area} Area` : "", row.receiving_sh ? `SH ${row.receiving_sh}` : "", row.address].filter(Boolean).join(" · ");
 
           button.append(title, subtitle);
           dom.list.appendChild(button);
+        }
+      }
+
+      function renderMissingList() {
+        const rows = state.rows.filter(row => !row.hasValidCoordinates);
+        dom.missingCard.style.display = rows.length ? "" : "none";
+        dom.missingCount.textContent = `${rows.length.toLocaleString()}건`;
+        dom.missingList.replaceChildren();
+
+        for (const row of rows) {
+          const item = document.createElement("div");
+          item.className = "item";
+
+          const title = document.createElement("strong");
+          title.textContent = campName(row);
+
+          const meta = document.createElement("span");
+          meta.textContent = [row.mb_camp, row.code, row.address || "주소 없음", row.locationError || "위치 확인 불가"].filter(Boolean).join(" · ");
+
+          item.append(title, meta);
+          dom.missingList.appendChild(item);
         }
       }
 
@@ -2225,6 +2266,7 @@
           hour: "2-digit",
           minute: "2-digit"
         });
+        renderMissingList();
       }
 
       function makeInfoOverlay(row, position) {
@@ -2262,6 +2304,7 @@
           : "";
         dom.detailAddress.textContent = row.address || "-";
         dom.detailRegion.textContent = row.region || "-";
+        dom.detailArea.textContent = row.area ? `${row.area} Area` : "-";
         dom.detailCode.textContent = row.code || "-";
         dom.detailParent.textContent = row.parent_camp || "-";
         dom.detailSh.textContent = row.receiving_sh
@@ -2379,6 +2422,7 @@
           applyFilters(true);
         });
         dom.region.addEventListener("change", () => applyFilters(true));
+        dom.area.addEventListener("change", () => applyFilters(true));
 
         dom.chips.addEventListener("click", event => {
           const button = event.target.closest("[data-type]");
@@ -2407,6 +2451,7 @@
           state.selectedTypes.clear();
           dom.type.value = "";
           dom.region.value = "";
+          dom.area.value = "";
           applyFilters(true);
         });
 

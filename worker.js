@@ -1150,15 +1150,30 @@ async function handleCampsBatch(request, env) {
     return out;
   };
 
-  for (const item of inserts) {
-    const payload = cleanPayload(item);
-    delete payload.updated_at;
-    const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?select=*`, {
-      method: "POST",
+  // UNIQUE(code) 충돌 방지:
+  // 삭제로 코드 자리를 먼저 비우고, 기존 행의 코드 변경을 반영한 뒤 신규 행을 넣는다.
+  // 예: 기존 MB 행 SG16 -> MC176 수정 + 신규 본캠프 SG16 추가를 한 번에 저장 가능.
+  for (const rawId of deletes) {
+    const id = Number(rawId);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?id=eq.${id}&select=id`, {
+      method: "DELETE",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify(payload),
     });
-    inserted += Array.isArray(rows) ? rows.length : 0;
+    deleted += Array.isArray(rows) ? rows.length : 0;
+  }
+
+  // 기존 행끼리 코드 교환/재배치까지 처리할 수 있도록
+  // 수정 대상의 code 슬롯을 먼저 비운 뒤 실제 값을 적용한다.
+  for (const item of updates) {
+    const id = Number(item?.id);
+    if (!Number.isSafeInteger(id) || id <= 0) continue;
+    if (!Object.prototype.hasOwnProperty.call(item?.payload || {}, "code")) continue;
+    await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?id=eq.${id}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ code: null, updated_at: new Date().toISOString() }),
+    });
   }
 
   for (const item of updates) {
@@ -1172,14 +1187,15 @@ async function handleCampsBatch(request, env) {
     updated += Array.isArray(rows) ? rows.length : 0;
   }
 
-  for (const rawId of deletes) {
-    const id = Number(rawId);
-    if (!Number.isSafeInteger(id) || id <= 0) continue;
-    const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?id=eq.${id}&select=id`, {
-      method: "DELETE",
+  for (const item of inserts) {
+    const payload = cleanPayload(item);
+    delete payload.updated_at;
+    const rows = await supabaseFetch(env, `/rest/v1/${CAMPS_TABLE}?select=*`, {
+      method: "POST",
       headers: { Prefer: "return=representation" },
+      body: JSON.stringify(payload),
     });
-    deleted += Array.isArray(rows) ? rows.length : 0;
+    inserted += Array.isArray(rows) ? rows.length : 0;
   }
 
   return json({ ok: true, inserted, updated, deleted, numberingUrlSupported: true }, 200, { "Cache-Control": "no-store" });

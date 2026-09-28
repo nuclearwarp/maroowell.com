@@ -432,19 +432,19 @@
               <label for="q">검색</label>
               <input id="q" class="control" type="search" placeholder="캠프명, 주소, 코드, 설명">
             </div>
+            <div class="field">
+              <label for="type">구분</label>
+              <select id="type" class="control"><option value="">전체</option></select>
+            </div>
             <div class="cols">
-              <div class="field">
-                <label for="type">구분</label>
-                <select id="type" class="control"><option value="">전체</option></select>
-              </div>
               <div class="field">
                 <label for="region">Region</label>
                 <select id="region" class="control"><option value="">전체</option></select>
               </div>
-            </div>
-            <div class="field">
-              <label for="area">Area</label>
-              <select id="area" class="control"><option value="">전체</option></select>
+              <div class="field">
+                <label for="area">Area</label>
+                <select id="area" class="control"><option value="">전체</option></select>
+              </div>
             </div>
             <div class="actions">
               <button id="reset" class="btn" type="button">필터 초기화</button>
@@ -527,12 +527,19 @@
         CONFIG.BACKENDS?.coupangCamp ||
         CONFIG.COUPANG_CAMP_API ||
         "https://coupangcamp.brain-0f6.workers.dev";
+      const CAMP_DATA_API_BASE =
+        CONFIG.BACKENDS?.coupangCampEditor ||
+        "https://purple-river-0717.brain-0f6.workers.dev";
       const SUPABASE_URL = CONFIG.SUPABASE_URL || "";
       const SUPABASE_ANON_KEY = CONFIG.SUPABASE_ANON_KEY || CONFIG.SUPABASE_PUBLISHABLE_KEY || "";
 
       const MARKER_COLORS = [
         "#2563eb", "#16a34a", "#f97316", "#7c3aed", "#db2777",
         "#0891b2", "#ca8a04", "#475569", "#dc2626", "#0f766e"
+      ];
+      const AREA_OPTIONS = [
+        "강남", "강북", "강서", "고양", "광주", "김포", "남경기", "대구",
+        "대전", "동부산", "동인천", "북경기", "서경기", "서부산", "서인천"
       ];
 
       const $ = selector => document.querySelector(selector);
@@ -1819,8 +1826,9 @@
         const types = sortedTypes();
         const regions = [...new Set(state.rows.map(row => row.region).filter(Boolean))]
           .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
-        const areas = [...new Set(state.rows.map(row => row.area).filter(Boolean))]
-          .sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
+        const areas = AREA_OPTIONS.filter(area =>
+          state.rows.some(row => text(row.area) === area)
+        );
 
         state.selectedTypes = new Set(
           [...state.selectedTypes].filter(type => types.includes(type))
@@ -1828,7 +1836,12 @@
 
         updateSelectOptions(dom.type, types);
         updateSelectOptions(dom.region, regions);
-        updateSelectOptions(dom.area, areas);
+        const currentArea = dom.area.value;
+        dom.area.replaceChildren(new Option("전체", ""));
+        for (const area of areas) {
+          dom.area.add(new Option(`${area} Area`, area));
+        }
+        if (areas.includes(currentArea)) dom.area.value = currentArea;
         syncTypeSelect();
         renderTypeChips(types);
       }
@@ -2349,15 +2362,40 @@
         dom.loading.classList.remove("hide");
 
         try {
-          const response = await fetch(`${API_BASE}/camps`, { cache: "no-store" });
-          const data = await response.json();
+          const [relationResponse, dataResponse] = await Promise.all([
+            fetch(`${API_BASE}/camps`, { cache: "no-store" }),
+            fetch(`${CAMP_DATA_API_BASE}/camps`, { cache: "no-store" })
+          ]);
+          const [relationData, dataPayload] = await Promise.all([
+            relationResponse.json(),
+            dataResponse.json()
+          ]);
 
-          if (!response.ok) {
-            throw new Error(data?.error || data?.message || `HTTP ${response.status}`);
+          if (!relationResponse.ok) {
+            throw new Error(relationData?.error || relationData?.message || `관계 API HTTP ${relationResponse.status}`);
+          }
+          if (!dataResponse.ok) {
+            throw new Error(dataPayload?.error || dataPayload?.message || `캠프 데이터 API HTTP ${dataResponse.status}`);
           }
 
-          const rows = Array.isArray(data) ? data : (data?.rows || []);
-          state.rows = rows.map(normalizeRow);
+          const relationRows = Array.isArray(relationData) ? relationData : (relationData?.rows || []);
+          const dataRows = Array.isArray(dataPayload) ? dataPayload : (dataPayload?.rows || []);
+          const dataById = new Map(dataRows.map(row => [String(row?.id ?? ""), row]));
+          const mergedRows = relationRows.map(row => {
+            const latest = dataById.get(String(row?.id ?? "")) || {};
+            return {
+              ...row,
+              region: text(latest.region) || text(row.region),
+              area: text(latest.area) || "",
+              address: text(latest.address) || text(row.address),
+              code: text(latest.code) || text(row.code),
+              latitude: latest.latitude ?? row.latitude,
+              longitude: latest.longitude ?? row.longitude,
+              description: text(latest.description) || text(row.description)
+            };
+          });
+
+          state.rows = mergedRows.map(normalizeRow);
 
           const cachedCount = applyCachedGeocodeLocations(state.rows);
 

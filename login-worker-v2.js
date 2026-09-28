@@ -10,7 +10,7 @@ var login_worker_v2_default = {
 
       const path = url.pathname.replace(/\/+$/, "") || "/";
       if (path === "/coupang_camp") url.pathname = "/coupang_camp_v20260928_area";
-      else if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area";
+      else if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area2";
       const response = await env.ASSETS.fetch(new Request(url.toString(), request));
 
       const withNoStore = async (res, type) => {
@@ -80,6 +80,10 @@ var login_worker_v2_default = {
         headers.set("Pragma", "no-cache");
         headers.delete("Content-Length");
         return new Response(body, { status: response.status, headers });
+      }
+
+      if ((path === "/coupang_camp" || path === "/coupang_camp_map") && response.ok) {
+        return withNoStore(response, "text/html; charset=utf-8");
       }
 
       if (path === "/post_login" && response.ok) {

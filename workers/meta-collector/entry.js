@@ -302,6 +302,15 @@ async function loadCampCodes(env, camp) {
   const rows = await sbGet(env, `camps?select=code&camp=eq.${encodeURIComponent(camp)}&code=not.is.null`);
   return uniq((rows || []).map(r => String(r.code || "").toUpperCase())).sort();
 }
+async function loadBaseCampCode(env, camp, fallbackCodes = []) {
+  const rows = await sbGet(
+    env,
+    `camps?select=code&camp=eq.${encodeURIComponent(camp)}&mb_camp=eq.${encodeURIComponent("본캠프")}&code=not.is.null&limit=1`
+  );
+  const base = String(rows?.[0]?.code || "").trim().toUpperCase();
+  if (base) return base;
+  return String((fallbackCodes || [])[0] || "").trim().toUpperCase();
+}
 async function loadSchedule(env, date, wave, camp) {
   return await sbGet(env, `maroowell_schedule?select=route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,driver_account_type,row_order&schedule_date=eq.${date}&wave=eq.${wave}&camp=eq.${encodeURIComponent(camp)}&is_active=eq.true&order=row_order.asc`) || [];
 }
@@ -344,10 +353,18 @@ async function ensureBatches(env) {
     for (const camp of uniq((schedules || []).map(r => r.camp))) {
       const dbCodes = await loadCampCodes(env, camp), codes = metaCampCandidates(dbCodes);
       if (!codes.length) continue;
-      const campCode = dbCodes[0] || codes[0];
-      const found = await sbGet(env, `meta_realtime_batch?select=id,meta_camp_codes&schedule_date=eq.${t.date}&camp_code=eq.${encodeURIComponent(campCode)}&wave=eq.${t.wave}&limit=1`);
+      const campCode = await loadBaseCampCode(env, camp, dbCodes) || codes[0];
+      const found = await sbGet(
+        env,
+        `meta_realtime_batch?select=id,camp_code,meta_camp_codes&schedule_date=eq.${t.date}&camp_name=eq.${encodeURIComponent(camp)}&wave=eq.${t.wave}&order=started_at.asc&limit=1`
+      );
       if (found?.length) {
-        await sbPatch(env, `meta_realtime_batch?id=eq.${found[0].id}`, { meta_camp_codes: codes, updated_at: nowIso() });
+        await sbPatch(env, `meta_realtime_batch?id=eq.${found[0].id}`, {
+          camp_code: campCode,
+          camp_name: camp,
+          meta_camp_codes: codes,
+          updated_at: nowIso()
+        });
         continue;
       }
       await sbPost(env, "meta_realtime_batch", {

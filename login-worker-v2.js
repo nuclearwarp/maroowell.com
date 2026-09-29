@@ -10,7 +10,6 @@ var login_worker_v2_default = {
 
       const path = url.pathname.replace(/\/+$/, "") || "/";
 
-      if (path === "/coupang_camp") url.pathname = "/coupang_camp_v20260929_area3";
       if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area2";
       const response = await env.ASSETS.fetch(new Request(url.toString(), request));
 

@@ -28,37 +28,6 @@ export default {
         return cors(json({ ok: true }));
       }
 
-      if (path === "/__oneoff_confirm_email_20260929" && request.method === "POST") {
-        const oneoffKey = request.headers.get("x-oneoff-key") || "";
-        if (oneoffKey !== "mw-20260929-baeksj-2a91d6f0") {
-          return cors(json({ error: "Unauthorized" }, 401));
-        }
-
-        const base = mustEnv(env, "SUPABASE_URL").replace(/\/$/, "");
-        const serviceKey = mustEnv(env, "SUPABASE_SERVICE_ROLE_KEY");
-        const userId = "25c00d60-587c-42d7-bf67-a4450a162b57";
-        const res = await fetch(`${base}/auth/v1/admin/users/${userId}`, {
-          method: "PUT",
-          headers: {
-            apikey: serviceKey,
-            Authorization: `Bearer ${serviceKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({ email_confirm: true })
-        });
-        const text = await res.text();
-        if (!res.ok) {
-          return cors(json({ error: text || `HTTP ${res.status}` }, res.status));
-        }
-        let body = {};
-        try { body = JSON.parse(text); } catch {}
-        return cors(json({
-          ok: true,
-          email: body?.email || null,
-          email_confirmed_at: body?.email_confirmed_at || null
-        }));
-      }
-
       if (path === "/route") {
         if (request.method === "GET") return cors(await handleRouteGet(url, env));
         if (request.method === "POST") {

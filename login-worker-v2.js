@@ -10,6 +10,8 @@ var login_worker_v2_default = {
 
       const path = url.pathname.replace(/\/+$/, "") || "/";
 
+      // html_handling="none"에서는 / 가 index.html로 자동 매핑되지 않으므로 명시적으로 로그인 메인 파일을 연결한다.
+      if (path === "/") url.pathname = "/index.html";
       if (path === "/coupangRouteMap") url.pathname = "/coupangRouteMap.html";
       if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area2";
       const response = await env.ASSETS.fetch(new Request(url.toString(), request));

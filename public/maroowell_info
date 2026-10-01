@@ -484,6 +484,43 @@
       text-align:center;
     }
 
+    .inlineCheckCell{
+      min-height:34px;
+      display:flex;
+      align-items:center;
+      gap:7px;
+      padding:0 7px;
+    }
+    .inlineCheckCell.pk{justify-content:flex-end}
+    .inlineCheckCell.name{justify-content:space-between}
+    .inlineCheck{
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      flex:0 0 auto;
+      cursor:pointer;
+      user-select:none;
+      white-space:nowrap;
+      font-size:9px!important;
+      font-weight:500!important;
+      color:#475569;
+    }
+    .inlineCheck input{
+      width:15px;
+      height:15px;
+      margin:0;
+      accent-color:#2563eb;
+      cursor:pointer;
+    }
+    .inlineCheck.resigned input{accent-color:#dc2626}
+    .inlineNameInput{
+      min-width:0;
+      flex:1 1 auto;
+      width:auto!important;
+      padding-left:0!important;
+      padding-right:4px!important;
+    }
+
     .filterInput{
       width:100%;
       height:34px;
@@ -1301,12 +1338,8 @@
       ];
 
       const COLUMN_CONFIG = [
-        { key: "is_resigned", label: "퇴사", type: "select", options: ["false","true"], optionLabels: { "false":"미체크", "true":"체크" }, className: "center", width: 82 },
-        { key: "pk_id", label: "순번", type: "readonly", className: "right code center", width: 72 },
-        { key: "person_name", label: "이름", width: 112 },
-        { key: "is_two_person_team", label: "2인 1조", type: "select", options: ["false","true"], optionLabels: { "false":"미체크", "true":"체크" }, className: "center", width: 90 },
-        { key: "summer_vest_size", label: "조끼(하계)", className: "center", width: 105 },
-        { key: "winter_fleece_size", label: "후리스(동계)", className: "center", width: 105 },
+        { key: "pk_id", label: "순번", type: "readonly", className: "right code center", width: 94 },
+        { key: "person_name", label: "이름", width: 150 },
         { key: "documents", label: "서류", type: "documents", className: "center", width: 118 },
         { key: "contact_phone", label: "연락처", className: "code", width: 125 },
         { key: "position_title", label: "직책", className: "center", width: 100 },
@@ -1329,13 +1362,13 @@
         { key: "fixed_commission_amount", label: "고정 수수료", className: "right code", width: 120 },
         { key: "fixed_unit_price", label: "고정 단가", className: "right code", width: 120 },
         { key: "dragon_car_commission", label: "용차 수수료", className: "right code", width: 120 },
-        { key: "employment_accident_insurance", label: "고용산재", type: "select", options: ["", "O", "X"], className: "center", width: 90 }
+        { key: "employment_accident_insurance", label: "고용산재", type: "select", options: ["", "O", "X"], className: "center", width: 90 },
+        { key: "summer_vest_size", label: "조끼(하계)", className: "center", width: 105 },
+        { key: "winter_fleece_size", label: "후리스(동계)", className: "center", width: 105 }
       ];
 
       const FILTER_PLACEHOLDERS = {
-        is_resigned: "체크 / 미체크",
         person_name: "이름 / !이우람",
-        is_two_person_team: "체크 / 미체크",
         summer_vest_size: "조끼 사이즈",
         winter_fleece_size: "후리스 사이즈",
         contact_phone: "연락처",
@@ -1915,9 +1948,45 @@
 
         if (col.type === "readonly") {
           const displayValue = row.pk_id ?? "NEW";
+          if (col.key === "pk_id") {
+            const checked = String(row.is_resigned).toLowerCase() === "true" ? "checked" : "";
+            return `
+              <td data-col="pk_id" class="${classes.join(" ")}">
+                <div class="inlineCheckCell pk">
+                  <label class="inlineCheck resigned" title="퇴사 여부">
+                    <input type="checkbox" data-row-id="${escapeHtml(rid)}" data-key="is_resigned" ${checked}>
+                    <span>퇴사</span>
+                  </label>
+                  <span class="cellView right code center" style="padding:0;min-height:0">${escapeHtml(displayValue)}</span>
+                </div>
+              </td>
+            `;
+          }
           return `
             <td data-col="${escapeHtml(col.key)}" class="${classes.join(" ")}">
               <div class="cellView ${col.className || ""}">${escapeHtml(displayValue)}</div>
+            </td>
+          `;
+        }
+
+        if (col.key === "person_name") {
+          const checked = String(row.is_two_person_team).toLowerCase() === "true" ? "checked" : "";
+          return `
+            <td data-col="person_name" class="${classes.join(" ")}">
+              <div class="inlineCheckCell name">
+                <input
+                  class="cellInput inlineNameInput"
+                  type="text"
+                  value="${escapeHtml(value)}"
+                  data-row-id="${escapeHtml(rid)}"
+                  data-key="person_name"
+                  autocomplete="off"
+                />
+                <label class="inlineCheck" title="2인 1조 여부">
+                  <input type="checkbox" data-row-id="${escapeHtml(rid)}" data-key="is_two_person_team" ${checked}>
+                  <span>2인1조</span>
+                </label>
+              </div>
             </td>
           `;
         }
@@ -2474,9 +2543,12 @@
           const row = findRowById(rowIdValue);
           if (!row) return;
 
-          markRowDirty(row, key, target.value);
+          const nextValue = target instanceof HTMLInputElement && target.type === "checkbox"
+            ? (target.checked ? "true" : "false")
+            : target.value;
+          markRowDirty(row, key, nextValue);
 
-          if (key === "position_title" && !dom.toggleIncludeResigned.checked && isResigned(row)) {
+          if (key === "is_resigned" && !dom.toggleIncludeResigned.checked && isResigned(row)) {
             applyFilters();
             return;
           }
@@ -2495,9 +2567,12 @@
           const row = findRowById(rowIdValue);
           if (!row) return;
 
-          markRowDirty(row, key, target.value);
+          const nextValue = target instanceof HTMLInputElement && target.type === "checkbox"
+            ? (target.checked ? "true" : "false")
+            : target.value;
+          markRowDirty(row, key, nextValue);
 
-          if (key === "position_title" && !dom.toggleIncludeResigned.checked && isResigned(row)) {
+          if (key === "is_resigned" && !dom.toggleIncludeResigned.checked && isResigned(row)) {
             applyFilters();
             return;
           }

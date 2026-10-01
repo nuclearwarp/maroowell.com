@@ -62,8 +62,8 @@
         radial-gradient(circle at 86% 0%,rgba(14,165,233,.07),transparent 30%),
         linear-gradient(180deg,#ffffff 0%,#f6f8fc 100%);
       color:var(--txt);
-      -webkit-font-smoothing:antialiased;
-      text-rendering:geometricPrecision;
+      
+      
     }
 
     body{overflow:hidden}
@@ -386,6 +386,13 @@
       background:#fbcfe8;
       color:#86198f;
       border-color:#ec4899;
+    }
+    .hideColBtn{
+      font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",Roboto,Arial,sans-serif!important;
+      font-weight:700!important;
+      text-shadow:none!important;
+      opacity:1!important;
+      filter:none!important;
     }
 
     tbody td{
@@ -878,8 +885,7 @@
 
 
     /* ===== REALTIME TYPOGRAPHY SYNC - 2026-09-16 ===== */
-    html,body{font-synthesis:none!important;text-rendering:optimizeLegibility!important;-webkit-font-smoothing:antialiased!important}
-    body,button,input,select,textarea,table,thead,tbody,tr,th,td,div,span,small,b,label,.cellView,.cellInput,.cellInput.code,.cellView.code,.cellSelect,.filterInput,.btn,.pill,.helper,.hiddenChip,.hideColBtn,.rowActionBtn,.statusText,.toggle,.accessCard,.accessCard *{font-family:var(--font)!important;text-shadow:none!important;-webkit-text-stroke:0 transparent!important}
+    html,body{text-shadow:none!important;-webkit-text-stroke:0 transparent!important}
     body,button,input,select,textarea,div,span,small,label,.helper,.statusText{font-weight:500!important}
     .titleBox b{font-size:20px!important;font-weight:650!important;letter-spacing:-.02em!important}
     .titleBox small{font-size:11px!important;font-weight:500!important}
@@ -896,8 +902,8 @@
     .docDialog,
     .docDialog *{
       font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Noto Sans KR",Roboto,Arial,sans-serif!important;
-      -webkit-font-smoothing:antialiased!important;
-      text-rendering:optimizeLegibility!important;
+      
+      
       text-shadow:none!important;
     }
     .docCellBtn{
@@ -1265,9 +1271,14 @@
       const DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
 
       const DATA_COLUMNS = [
+        "is_resigned",
         "person_name",
+        "is_two_person_team",
+        "summer_vest_size",
+        "winter_fleece_size",
         "contact_phone",
         "position_title",
+        "resignation_scheduled_date",
         "camp_code",
         "wave",
         "coupang_id",
@@ -1290,11 +1301,16 @@
       ];
 
       const COLUMN_CONFIG = [
-        { key: "pk_id", label: "순번", type: "readonly", className: "right code center", width: 80 },
-        { key: "person_name", label: "이름", width: 120 },
-        { key: "documents", label: "서류", type: "documents", className: "center", width: 125 },
-        { key: "contact_phone", label: "연락처", className: "code", width: 130 },
-        { key: "position_title", label: "직책", className: "center", width: 110 },
+        { key: "is_resigned", label: "퇴사", type: "select", options: ["false","true"], optionLabels: { "false":"미체크", "true":"체크" }, className: "center", width: 82 },
+        { key: "pk_id", label: "순번", type: "readonly", className: "right code center", width: 72 },
+        { key: "person_name", label: "이름", width: 112 },
+        { key: "is_two_person_team", label: "2인 1조", type: "select", options: ["false","true"], optionLabels: { "false":"미체크", "true":"체크" }, className: "center", width: 90 },
+        { key: "summer_vest_size", label: "조끼(하계)", className: "center", width: 105 },
+        { key: "winter_fleece_size", label: "후리스(동계)", className: "center", width: 105 },
+        { key: "documents", label: "서류", type: "documents", className: "center", width: 118 },
+        { key: "contact_phone", label: "연락처", className: "code", width: 125 },
+        { key: "position_title", label: "직책", className: "center", width: 100 },
+        { key: "resignation_scheduled_date", label: "퇴사 예정일", type: "date", className: "center code", width: 130 },
         { key: "camp_code", label: "camp", className: "center", width: 100 },
         { key: "wave", label: "wave", type: "select", options: ["", "주간", "야간", "주/야"], className: "center", width: 90 },
         { key: "coupang_id", label: "coupang_id", className: "code", width: 120 },
@@ -1317,9 +1333,14 @@
       ];
 
       const FILTER_PLACEHOLDERS = {
+        is_resigned: "체크 / 미체크",
         person_name: "이름 / !이우람",
+        is_two_person_team: "체크 / 미체크",
+        summer_vest_size: "조끼 사이즈",
+        winter_fleece_size: "후리스 사이즈",
         contact_phone: "연락처",
-        position_title: "직책 / !퇴사",
+        position_title: "직책",
+        resignation_scheduled_date: "YYYY-MM-DD",
         camp_code: "camp",
         wave: "주간 / 야간 / !주간",
         coupang_id: "ID",
@@ -1564,7 +1585,10 @@
         for (const key of DATA_COLUMNS) {
           out[key] = out[key] == null ? "" : String(out[key]);
         }
+        out.is_resigned = String(row?.is_resigned === true);
+        out.is_two_person_team = String(row?.is_two_person_team === true);
         out.hire_date = formatDateForInput(out.hire_date);
+        out.resignation_scheduled_date = formatDateForInput(out.resignation_scheduled_date);
         out.safety_health_education_completion_date = formatDateForInput(out.safety_health_education_completion_date);
         out.__dirty = false;
         out.__isNew = false;
@@ -1577,7 +1601,7 @@
       }
 
       function isResigned(row) {
-        return normalizeText(row.position_title).includes("퇴사");
+        return String(row?.is_resigned).toLowerCase() === "true";
       }
 
       function isVehicleWarn(row) {
@@ -1592,6 +1616,8 @@
           __dirtyFields: {}
         };
         for (const key of DATA_COLUMNS) row[key] = "";
+        row.is_resigned = "false";
+        row.is_two_person_team = "false";
         return row;
       }
 
@@ -1601,8 +1627,9 @@
 
       function valueForSave(key, value) {
         const v = normalizeText(value);
+        if (key === "is_resigned" || key === "is_two_person_team") return String(v).toLowerCase() === "true";
         if (!v) return null;
-        if (key === "hire_date" || key === "safety_health_education_completion_date") return v;
+        if (key === "hire_date" || key === "resignation_scheduled_date" || key === "safety_health_education_completion_date") return v;
         return v;
       }
 
@@ -1898,7 +1925,7 @@
         if (col.type === "select") {
           const options = (col.options || []).map(opt => {
             const selected = String(opt) === String(value) ? "selected" : "";
-            const label = opt || "-";
+            const label = col.optionLabels?.[String(opt)] ?? (opt || "-");
             return `<option value="${escapeHtml(opt)}" ${selected}>${escapeHtml(label)}</option>`;
           }).join("");
 
@@ -2292,8 +2319,12 @@
           setLoading(true, "데이터 불러오는 중...");
           state.deletedIds.clear();
 
-          const result = await infoApi("/info/list", {});
-          const data = Array.isArray(result?.rows) ? result.rows : [];
+          const rowsRes = await supabase
+            .from("maroowell_info")
+            .select("*")
+            .order("pk_id", { ascending:true });
+          if (rowsRes.error) throw rowsRes.error;
+          const data = Array.isArray(rowsRes.data) ? rowsRes.data : [];
 
           state.rows = data.map(normalizeLoadedRow);
           try {
@@ -2331,14 +2362,28 @@
             return;
           }
 
-          const result = await infoApi("/info/save", {
-            deleteIds,
-            updateRows: updateRows.map(row => cleanPayload(row, true)),
-            newRows: newRows.map(row => cleanPayload(row, false))
-          });
+          if (!state.isSuperAdmin) throw new Error("최고관리자만 전체 인사정보를 수정할 수 있습니다.");
+
+          let deleted = 0, updated = 0, inserted = 0;
+          if (deleteIds.length) {
+            const del = await supabase.from("maroowell_info").delete().in("pk_id", deleteIds).select("pk_id");
+            if (del.error) throw del.error;
+            deleted = del.data?.length || 0;
+          }
+          for (const row of updateRows) {
+            const payload = cleanPayload(row, false);
+            const upd = await supabase.from("maroowell_info").update(payload).eq("pk_id", row.pk_id).select("pk_id").single();
+            if (upd.error) throw upd.error;
+            updated += 1;
+          }
+          for (const row of newRows) {
+            const ins = await supabase.from("maroowell_info").insert(cleanPayload(row, false)).select("pk_id").single();
+            if (ins.error) throw ins.error;
+            inserted += 1;
+          }
 
           await fetchRows();
-          setStatus(`저장 완료: 삭제 ${result.deleted || 0} / 수정 ${result.updated || 0} / 신규 ${result.inserted || 0}`, "ok");
+          setStatus(`저장 완료: 삭제 ${deleted} / 수정 ${updated} / 신규 ${inserted}`, "ok");
         } catch (e) {
           console.error(e);
           setStatus("저장 실패: " + (e?.message || String(e)), "err");

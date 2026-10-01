@@ -66,13 +66,13 @@ function canonicalIdentity(cid, name, fallback) {
 function rowIdentity(r) { return r?.driver_pk != null ? `pk:${Number(r.driver_pk)}` : canonicalIdentity(r?.coupang_id, r?.driver_name, r?.meta_worker_key); }
 function driverIdentity(driverPk, cid, name, fallback) { return driverPk != null ? `pk:${Number(driverPk)}` : canonicalIdentity(cid, name, fallback); }
 function infoWave(wave) { return String(wave || '').toUpperCase() === 'WAVE1' ? '야간' : String(wave || '').toUpperCase() === 'WAVE2' ? '주간' : String(wave || '').trim(); }
-async function loadDriverDirectory(env) { return await sbGet(env, 'maroowell_info?select=pk_id,person_name,coupang_id,camp_code,wave,position_title') || []; }
+async function loadDriverDirectory(env) { return await sbGet(env, 'maroowell_info?select=pk_id,person_name,coupang_id,camp_code,wave,position_title,is_resigned') || []; }
 function resolveDriverPk(directory, cid, name, camp, wave) {
   const id = String(cid || '').trim().toLowerCase();
   const dn = String(name || '').trim();
   const campName = String(camp || '').trim();
   const iw = infoWave(wave);
-  const active = r => String(r?.position_title || '').trim().toLowerCase() !== '퇴사';
+  const active = r => r?.is_resigned !== true;
   if (id) {
     const byId = (directory || []).filter(r => String(r?.coupang_id || '').trim().toLowerCase() === id);
     if (byId.length === 1) return Number(byId[0].pk_id);

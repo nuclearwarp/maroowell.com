@@ -25,7 +25,11 @@ export default {
       const path = url.pathname;
 
       if (path === "/health") {
-        return cors(json({ ok: true }));
+        return cors(json({ ok: true, externalApi: true, apiVersion: "v1" }));
+      }
+
+      if (path.startsWith("/api/v1/")) {
+        return cors(await handleExternalApi(request, url, env));
       }
 
       if (path === "/route") {
@@ -178,6 +182,218 @@ async function supabaseFetch(env, pathWithQuery, init = {}) {
   }
 }
 
+
+
+// MW_EXTERNAL_API_KEY_V1
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function externalApiRawKey(request) {
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.match(/^Bearer\s+(.+)$/i);
+  if (bearer && bearer[1]) return bearer[1].trim();
+  return String(request.headers.get("X-API-Key") || "").trim();
+}
+
+function apiScopeAllowed(scopes, requiredScope) {
+  const set = new Set(Array.isArray(scopes) ? scopes.map((v) => String(v || "").trim()) : []);
+  if (set.has("*") || set.has(requiredScope)) return true;
+  const resource = String(requiredScope || "").split(".")[0];
+  return !!resource && set.has(resource + ".*");
+}
+
+async function requireExternalApiKey(request, env, requiredScope) {
+  const rawKey = externalApiRawKey(request);
+  if (!rawKey) throw routeHttpError(401, "API key is required.");
+
+  const keyHash = await sha256Hex(rawKey);
+  const params = new URLSearchParams();
+  params.set("select", "id,client_code,name,environment,key_prefix,scopes,is_active,expires_at");
+  params.set("key_hash", "eq." + keyHash);
+  params.set("is_active", "eq.true");
+  params.set("limit", "1");
+
+  const rows = await supabaseFetch(env, "/rest/v1/api_keys?" + params.toString(), { method: "GET" });
+  const keyRow = Array.isArray(rows) && rows.length ? rows[0] : null;
+
+  if (!keyRow) throw routeHttpError(401, "Invalid API key.");
+  if (keyRow.expires_at && Date.parse(keyRow.expires_at) <= Date.now()) {
+    throw routeHttpError(401, "API key has expired.");
+  }
+  if (!apiScopeAllowed(keyRow.scopes, requiredScope)) {
+    throw routeHttpError(403, "API key scope '" + requiredScope + "' is required.");
+  }
+
+  supabaseFetch(env, "/rest/v1/api_keys?id=eq." + encodeURIComponent(keyRow.id), {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ last_used_at: new Date().toISOString() })
+  }).catch(() => {});
+
+  return keyRow;
+}
+
+async function apiAudit(env, keyRow, service, action, request, status, resourceId, metadata) {
+  if (!keyRow || !keyRow.id) return;
+  try {
+    const url = new URL(request.url);
+    await supabaseFetch(env, "/rest/v1/api_audit_log", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        api_key_id: keyRow.id,
+        client_code: keyRow.client_code || null,
+        service: service,
+        action: action,
+        method: request.method,
+        path: url.pathname,
+        resource_id: resourceId == null ? null : String(resourceId),
+        status: status || 200,
+        metadata: metadata && typeof metadata === "object" ? metadata : {}
+      })
+    });
+  } catch (error) {
+    console.warn("API audit write failed:", error && error.message ? error.message : String(error));
+  }
+}
+
+function apiCampPayload(input) {
+  input = input || {};
+  const out = {};
+  const fields = [
+    "camp_type","camp","mb_camp","parent_camp_id","receiving_sh_id",
+    "address","region","area","code","numbering_url",
+    "latitude","longitude","description"
+  ];
+
+  for (const key of fields) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+
+    if (key === "parent_camp_id" || key === "receiving_sh_id") {
+      const n = Number(input[key]);
+      out[key] = input[key] == null || input[key] === "" || !Number.isSafeInteger(n) || n <= 0 ? null : n;
+    } else if (key === "latitude" || key === "longitude") {
+      out[key] = parseMaybeNumber(input[key]);
+    } else {
+      out[key] = safeTrim(input[key]) || null;
+    }
+  }
+
+  return out;
+}
+
+async function handleApiCampPatch(request, env, id) {
+  const body = await readJson(request);
+  const patch = apiCampPayload(body);
+  if (!Object.keys(patch).length) return json({ error: "No supported fields to update" }, 400);
+
+  const rows = await supabaseFetch(env, "/rest/v1/" + CAMPS_TABLE + "?id=eq." + id + "&select=*", {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(patch)
+  });
+
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Camp not found" }, 404);
+  return json({ row: normalizeCampRow(row) }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleApiSubsubroutePatch(request, env, id) {
+  const currentRows = await supabaseFetch(env, "/rest/v1/" + ROUTE_TABLE + "?id=eq." + id + "&select=*&limit=1", { method: "GET" });
+  const current = Array.isArray(currentRows) && currentRows.length ? currentRows[0] : null;
+  if (!current) return json({ error: "Subsubroute not found" }, 404);
+
+  const body = await readJson(request);
+  const merged = Object.assign({}, current, body || {}, { id: Number(id) });
+  const camp = safeTrim(merged.camp);
+  const code = safeTrim(merged.code || merged.full_code);
+
+  if (!camp || !code) return json({ error: "camp and code are required" }, 400);
+
+  const patch = buildRoutePatch(Object.assign({}, merged, { camp: camp, code: code }));
+  const rows = await supabaseFetch(env, "/rest/v1/" + ROUTE_TABLE + "?id=eq." + id + "&select=*", {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(patch)
+  });
+
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Subsubroute not found" }, 404);
+
+  applyRouteDerivedFields(row);
+  await enrichRowsWithVendorNames([row], env);
+  await hydrateRouteRowsWithCamps([row], env);
+  return json({ row: row }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleExternalApi(request, url, env) {
+  const path = url.pathname;
+
+  if (path === "/api/v1/camps") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "camps.read");
+      const response = await handleCampsGet(url, env);
+      await apiAudit(env, key, "camps", "read", request, response.status);
+      return response;
+    }
+
+    if (request.method === "POST") {
+      const key = await requireExternalApiKey(request, env, "camps.write");
+      const response = await handleCampsPost(request, env);
+      await apiAudit(env, key, "camps", "write", request, response.status);
+      return response;
+    }
+
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  const campMatch = path.match(/^\/api\/v1\/camps\/(\d+)$/);
+  if (campMatch) {
+    if (request.method === "PATCH") {
+      const key = await requireExternalApiKey(request, env, "camps.write");
+      const response = await handleApiCampPatch(request, env, Number(campMatch[1]));
+      await apiAudit(env, key, "camps", "update", request, response.status, campMatch[1]);
+      return response;
+    }
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  if (path === "/api/v1/subsubroutes") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.read");
+      const response = await handleRouteGet(url, env);
+      await apiAudit(env, key, "subsubroutes", "read", request, response.status);
+      return response;
+    }
+
+    if (request.method === "POST") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.write");
+      const response = await handleRoutePost(request, env);
+      await apiAudit(env, key, "subsubroutes", "write", request, response.status);
+      return response;
+    }
+
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  const routeMatch = path.match(/^\/api\/v1\/subsubroutes\/(\d+)$/);
+  if (routeMatch) {
+    if (request.method === "PATCH") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.write");
+      const response = await handleApiSubsubroutePatch(request, env, Number(routeMatch[1]));
+      await apiAudit(env, key, "subsubroutes", "update", request, response.status, routeMatch[1]);
+      return response;
+    }
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  return json({ error: "Not Found" }, 404);
+}
 
 // MW_ROUTE_WRITE_AUTH_V1
 const ROUTE_WRITE_MIN_LEVEL = 60;

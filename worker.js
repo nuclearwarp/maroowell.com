@@ -357,6 +357,37 @@ async function handleApiSubsubroutePatch(request, env, id) {
 async function handleExternalApi(request, url, env) {
   const path = url.pathname;
 
+  if (path === "/api/v1/camps/batch") {
+    if (request.method === "POST") {
+      const body = await request.clone().json().catch(() => ({}));
+      const hasDeletes = Array.isArray(body?.deletes) && body.deletes.length > 0;
+
+      const writeKey = await requireExternalApiKey(request, env, "camps.write");
+      if (hasDeletes) {
+        await requireExternalApiKey(request, env, "camps.delete");
+      }
+
+      const response = await handleCampsBatch(request, env);
+      await apiAudit(
+        env,
+        writeKey,
+        "camps",
+        hasDeletes ? "batch_write_delete" : "batch_write",
+        request,
+        response.status,
+        null,
+        {
+          inserts: Array.isArray(body?.inserts) ? body.inserts.length : 0,
+          updates: Array.isArray(body?.updates) ? body.updates.length : 0,
+          deletes: Array.isArray(body?.deletes) ? body.deletes.length : 0
+        }
+      );
+      return response;
+    }
+
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
   if (path === "/api/v1/camps") {
     if (request.method === "GET") {
       const key = await requireExternalApiKey(request, env, "camps.read");

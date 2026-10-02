@@ -121,7 +121,7 @@ export default {
 function cors(res) {
   const h = new Headers(res.headers || {});
   h.set("Access-Control-Allow-Origin", "*");
-  h.set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  h.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
   h.set("Access-Control-Max-Age", "86400");
   return new Response(res.body, { status: res.status, headers: h });
@@ -303,6 +303,29 @@ async function handleApiCampPatch(request, env, id) {
   return json({ row: normalizeCampRow(row) }, 200, { "Cache-Control": "no-store" });
 }
 
+
+async function handleApiCampDelete(request, env, id) {
+  const rows = await supabaseFetch(env, "/rest/v1/" + CAMPS_TABLE + "?id=eq." + id + "&select=*", {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" }
+  });
+
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Camp not found" }, 404);
+  return json({ row: normalizeCampRow(row), deleted: true }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleApiSubsubrouteDelete(request, env, id) {
+  const rows = await supabaseFetch(env, "/rest/v1/" + ROUTE_TABLE + "?id=eq." + id + "&select=*", {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" }
+  });
+
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Subsubroute not found" }, 404);
+  return json({ row: row, deleted: true }, 200, { "Cache-Control": "no-store" });
+}
+
 async function handleApiSubsubroutePatch(request, env, id) {
   const currentRows = await supabaseFetch(env, "/rest/v1/" + ROUTE_TABLE + "?id=eq." + id + "&select=*&limit=1", { method: "GET" });
   const current = Array.isArray(currentRows) && currentRows.length ? currentRows[0] : null;
@@ -360,6 +383,12 @@ async function handleExternalApi(request, url, env) {
       await apiAudit(env, key, "camps", "update", request, response.status, campMatch[1]);
       return response;
     }
+    if (request.method === "DELETE") {
+      const key = await requireExternalApiKey(request, env, "camps.delete");
+      const response = await handleApiCampDelete(request, env, Number(campMatch[1]));
+      await apiAudit(env, key, "camps", "delete", request, response.status, campMatch[1]);
+      return response;
+    }
     return json({ error: "Method Not Allowed" }, 405);
   }
 
@@ -387,6 +416,12 @@ async function handleExternalApi(request, url, env) {
       const key = await requireExternalApiKey(request, env, "subsubroutes.write");
       const response = await handleApiSubsubroutePatch(request, env, Number(routeMatch[1]));
       await apiAudit(env, key, "subsubroutes", "update", request, response.status, routeMatch[1]);
+      return response;
+    }
+    if (request.method === "DELETE") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.delete");
+      const response = await handleApiSubsubrouteDelete(request, env, Number(routeMatch[1]));
+      await apiAudit(env, key, "subsubroutes", "delete", request, response.status, routeMatch[1]);
       return response;
     }
     return json({ error: "Method Not Allowed" }, 405);

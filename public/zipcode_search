@@ -2163,6 +2163,9 @@
       // 경계의 작은 조각까지 20개를 넘기면 Worker subrequest 한도를 쉽게 초과한다.
       const BUILDING_MAX_LEGAL_DONG_CODES = 12;
       const MERGE_SNAP_METERS = 35;
+      // 병합 표시용 외곽선에서 우편번호 경계의 미세 오차/겹침 때문에
+      // 내부 경계선이 남아 보이는 현상만 제거한다. 저장 지오메트리는 건드리지 않는다.
+      const MERGE_DISPLAY_SEAM_METERS = 1.5;
       const MIN_COMPONENT_AREA_SQM = 800;
       const ZIP_FETCH_TIMEOUT_MS = 15000;
 
@@ -5832,6 +5835,55 @@
         return outRings.length ? outRings : [outer];
       }
 
+      function buildMergedDisplayOutlineRings(polys) {
+        const inputs = (Array.isArray(polys) ? polys : [])
+          .map(stabilizeFeature)
+          .filter(Boolean);
+
+        if (!inputs.length) return [];
+
+        let displayFeature = null;
+
+        try {
+          // 실제 저장용 결과와 분리된 표시 전용 geometry.
+          // 1~2m 수준의 미세 경계 오차만 닫았다가 같은 거리만큼 되돌려
+          // 인접 우편번호 사이 내부 seam은 없애고 외곽선 위치 변화는 최소화한다.
+          let closed = mergeFeaturesWithSnap(inputs, MERGE_DISPLAY_SEAM_METERS);
+
+          if (closed && MERGE_DISPLAY_SEAM_METERS > 0) {
+            const restored = safeBuffer(closed, -MERGE_DISPLAY_SEAM_METERS);
+            if (restored) closed = restored;
+          }
+
+          displayFeature = stabilizeFeature(closed);
+        } catch (e) {
+          console.warn("[merge] display outline cleanup failed", e);
+        }
+
+        if (!displayFeature) {
+          displayFeature = inputs[0] || null;
+          for (let i = 1; i < inputs.length && displayFeature; i++) {
+            displayFeature =
+              stabilizeFeature(safeUnion(displayFeature, inputs[i])) ||
+              displayFeature;
+          }
+        }
+
+        const outlineRings = [];
+
+        for (const pf of flattenToPolygonFeatures(displayFeature)) {
+          const coords = pf?.geometry?.coordinates;
+          if (!Array.isArray(coords) || !coords.length) continue;
+
+          for (const ring of coords) {
+            const rr = _closeRingCopy(ring);
+            if (rr) outlineRings.push(rr);
+          }
+        }
+
+        return outlineRings;
+      }
+
       async function computeMergedResult() {
         await drawSelected();
 
@@ -5858,16 +5910,10 @@
         });
 
         const fillRings = [];
-        const outlineRings = [];
 
         for (const pf of polys) {
           const coords = pf?.geometry?.coordinates;
           if (!Array.isArray(coords) || !coords.length) continue;
-
-          for (const ring of coords) {
-            const rr = _closeRingCopy(ring);
-            if (rr) outlineRings.push(rr);
-          }
 
           // DB 저장용 병합 결과는 각 Polygon의 외곽 링만 유지한다.
           // 기존 _deholeToFillRings()는 내부 홀을 외곽선에 절개선으로 연결해
@@ -5878,7 +5924,11 @@
           if (outerRing && outerRing.length >= 4) fillRings.push(outerRing);
         }
 
-        return fillRings.length ? { fillRings, outlineRings } : null;
+        const outlineRings = buildMergedDisplayOutlineRings(polys);
+        return fillRings.length ? {
+          fillRings,
+          outlineRings: outlineRings.length ? outlineRings : fillRings
+        } : null;
       }
 
       function _ringToLatLngs(ring) {

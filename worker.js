@@ -458,6 +458,31 @@ async function handleExternalApi(request, url, env) {
     return json({ error: "Method Not Allowed" }, 405);
   }
 
+  if (path === "/api/v1/route-master") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.read");
+      const response = await handleRouteMasterGet(url, env);
+      await apiAudit(env, key, "route-master", "read", request, response.status);
+      return response;
+    }
+
+    if (request.method === "POST") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.write");
+      const response = await handleRouteMasterPost(request, env, { userId: null, externalApiKeyId: key.id });
+      await apiAudit(env, key, "route-master", "update", request, response.status);
+      return response;
+    }
+
+    if (request.method === "DELETE") {
+      const key = await requireExternalApiKey(request, env, "subsubroutes.delete");
+      const response = await handleRouteMasterDelete(request, env, { userId: null, externalApiKeyId: key.id });
+      await apiAudit(env, key, "route-master", "delete", request, response.status);
+      return response;
+    }
+
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
   return json({ error: "Not Found" }, 404);
 }
 

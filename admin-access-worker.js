@@ -34,6 +34,42 @@ export default {
         return cors(await handleAccessSet(request, env));
       }
 
+      if (path === "/admin/access/directory" && request.method === "GET") {
+        return cors(await handleDirectory(request, env));
+      }
+
+      if (path === "/admin/access/schedule" && request.method === "GET") {
+        return cors(await handleScheduleList(request, env));
+      }
+
+      if (path === "/admin/access/schedule" && request.method === "POST") {
+        return cors(await handleScheduleSet(request, env));
+      }
+
+      if (path === "/admin/access/clhi" && request.method === "GET") {
+        return cors(await handleClhiList(request, env));
+      }
+
+      if (path === "/admin/access/clhi" && request.method === "POST") {
+        return cors(await handleClhiSet(request, env));
+      }
+
+      if (path === "/admin/accounts/pending" && request.method === "GET") {
+        return cors(await handlePendingAccounts(request, env, url));
+      }
+
+      if (path === "/admin/accounts/search" && request.method === "GET") {
+        return cors(await handleAccountSearch(request, env, url));
+      }
+
+      if (path === "/admin/accounts/info-matches" && request.method === "GET") {
+        return cors(await handleInfoMatches(request, env, url));
+      }
+
+      if (path === "/admin/accounts/state" && request.method === "POST") {
+        return cors(await handleAccountState(request, env));
+      }
+
       if (path === "/admin/db-introspect" && request.method === "GET") {
         return cors(await handleAdminDbIntrospect(request, env));
       }
@@ -201,6 +237,92 @@ async function handleAccessSet(request, env) {
   });
   const row = Array.isArray(rows) ? rows[0] : rows;
   return json({ ok: true, row });
+}
+
+
+async function handleDirectory(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const rows = await rpc(env, token, "mw_admin_user_directory", {});
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleScheduleList(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const rows = await rpc(env, token, "mw_admin_list_schedule_write_access", {});
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleScheduleSet(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const body = await readJson(request);
+  const email = String(body?.email || "").trim().toLowerCase();
+  if (!email) throw httpError(400, "email is required");
+  const rows = await rpc(env, token, "mw_admin_set_schedule_write_access", {
+    p_email: email,
+    p_can_write: body?.can_write === true,
+    p_memo: body?.memo == null ? null : String(body.memo)
+  });
+  return json({ ok: true, row: Array.isArray(rows) ? rows[0] : rows });
+}
+
+async function handleClhiList(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const rows = await rpc(env, token, "mw_admin_list_clhi_access", {});
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleClhiSet(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const body = await readJson(request);
+  const target = String(body?.target || body?.email || "").trim();
+  if (!target) throw httpError(400, "target is required");
+  const rows = await rpc(env, token, "mw_admin_set_clhi_access", {
+    p_target: target,
+    p_can_select: body?.can_select === true,
+    p_memo: body?.memo == null ? null : String(body.memo)
+  });
+  return json({ ok: true, row: Array.isArray(rows) ? rows[0] : rows });
+}
+
+async function handlePendingAccounts(request, env, url) {
+  const { token } = await requireSuperAdmin(request, env);
+  const q = String(url.searchParams.get("q") || "").trim();
+  const rows = await rpc(env, token, "mw_admin_pending_users", { p_query: q });
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleAccountSearch(request, env, url) {
+  const { token } = await requireSuperAdmin(request, env);
+  const q = String(url.searchParams.get("q") || "").trim();
+  if (!q) throw httpError(400, "q is required");
+  const rows = await rpc(env, token, "mw_admin_search_accounts", { p_query: q });
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleInfoMatches(request, env, url) {
+  const { token } = await requireSuperAdmin(request, env);
+  const name = String(url.searchParams.get("name") || "").trim();
+  if (!name) throw httpError(400, "name is required");
+  const rows = await rpc(env, token, "mw_admin_find_maroowell_info_matches", { p_name: name });
+  return json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+}
+
+async function handleAccountState(request, env) {
+  const { token } = await requireSuperAdmin(request, env);
+  const body = await readJson(request);
+  const userId = String(body?.user_id || "").trim();
+  if (!userId) throw httpError(400, "user_id is required");
+  const approvalStatus = String(body?.approval_status || "").trim();
+  if (!["pending","approved","rejected"].includes(approvalStatus)) {
+    throw httpError(400, "approval_status is invalid");
+  }
+  const result = await rpc(env, token, "mw_admin_set_account_state", {
+    p_user_id: userId,
+    p_approval_status: approvalStatus,
+    p_app_only: body?.app_only === true,
+    p_maroowell_info_id: body?.maroowell_info_id == null ? null : Number(body.maroowell_info_id)
+  });
+  return json({ ok: true, row: Array.isArray(result) ? result[0] : result });
 }
 
 async function handleAdminDbIntrospect(request, env) {

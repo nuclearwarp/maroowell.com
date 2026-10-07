@@ -1,0 +1,54 @@
+name: Deploy admin access worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-access-worker.js'
+      - 'admin-access-wrangler.toml'
+      - '.github/workflows/deploy-admin-access-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-admin-access-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check admin-access-worker.js
+          grep -Fq 'admin-access-api' admin-access-wrangler.toml
+          grep -Fq '/admin/access/users' admin-access-worker.js
+          grep -Fq '/admin/access/set' admin-access-worker.js
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config admin-access-wrangler.toml
+
+      - name: Verify live endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://admin-access.maroowell.com'
+          sleep 3
+          health=$(curl -sS -o /tmp/health -w '%{http_code}' "$BASE/health")
+          cat /tmp/health
+          test "$health" = '200'
+
+          me=$(curl -sS -o /tmp/me -w '%{http_code}' "$BASE/admin/me")
+          cat /tmp/me
+          test "$me" = '401'

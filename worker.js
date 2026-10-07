@@ -900,8 +900,12 @@ async function hydrateRouteRowsWithCamps(rows, env) {
 
   for (const row of rows) {
     const deliveryName = safeTrim(row?.delivery_location_name);
-    if (deliveryName) row.delivery_location_address = null;
     if (!deliveryName) continue;
+
+    // subsubroutes에 직접 저장된 주소가 있으면 그것을 우선 보존한다.
+    // 저장 주소가 없을 때만 camps의 입차지 주소로 보완한다.
+    const existingAddress = safeTrim(row?.delivery_location_address);
+    if (existingAddress) continue;
 
     const routeCamp = safeTrim(row?.camp);
     const key = normalizeCampKey(deliveryName);
@@ -980,6 +984,9 @@ function buildRoutePatch(body) {
 
   if (Object.prototype.hasOwnProperty.call(body, "delivery_location_name")) {
     patch.delivery_location_name = body.delivery_location_name ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "delivery_location_address")) {
+    patch.delivery_location_address = body.delivery_location_address ?? null;
   }
   if (Object.prototype.hasOwnProperty.call(body, "delivery_location_lat")) {
     patch.delivery_location_lat = parseMaybeNumber(body.delivery_location_lat);
@@ -1134,6 +1141,7 @@ async function handleRouteMasterGet(url, env) {
   const polygonIds = new Set((Array.isArray(polyRows) ? polyRows : []).map(r => String(r.id)));
   for (const row of out) row.has_polygon = polygonIds.has(String(row.id));
   await enrichMasterVendorNames(out, env);
+  await hydrateRouteRowsWithCamps(out, env);
   return json({ rows: out }, 200, { "Cache-Control": "no-store" });
 }
 

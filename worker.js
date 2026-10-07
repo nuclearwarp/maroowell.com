@@ -97,6 +97,24 @@ export default {
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
+      const vendorMatch = path.match(/^\/vendors\/([0-9a-fA-F-]{36})$/);
+      if (vendorMatch) {
+        const vendorId = vendorMatch[1];
+        if (request.method === "GET") {
+          await requireRouteWriteAccess(request, env);
+          return cors(await handleVendorGetById(url, env, vendorId));
+        }
+        if (request.method === "PATCH") {
+          await requireVendorAdminAccess(request, env);
+          return cors(await handleVendorPatch(request, env, vendorId));
+        }
+        if (request.method === "DELETE") {
+          await requireVendorAdminAccess(request, env);
+          return cors(await handleVendorDelete(request, env, vendorId));
+        }
+        return cors(json({ error: "Method Not Allowed" }, 405));
+      }
+
       if (path === "/osm" && request.method === "GET") {
         return cors(await handleOsmGet(url));
       }
@@ -517,7 +535,31 @@ async function handleExternalApi(request, url, env) {
     if (request.method === "POST") {
       const key = await requireExternalApiKey(request, env, "vendors.write");
       const response = await handleVendorCreate(request, env);
-      await apiAudit(env, key, "vendors", "write", request, response.status);
+      await apiAudit(env, key, "vendors", "create", request, response.status);
+      return response;
+    }
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  const vendorApiMatch = path.match(/^\/api\/v1\/vendors\/([0-9a-fA-F-]{36})$/);
+  if (vendorApiMatch) {
+    const vendorId = vendorApiMatch[1];
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "vendors.read");
+      const response = await handleVendorGetById(url, env, vendorId);
+      await apiAudit(env, key, "vendors", "read_one", request, response.status, vendorId);
+      return response;
+    }
+    if (request.method === "PATCH") {
+      const key = await requireExternalApiKey(request, env, "vendors.write");
+      const response = await handleVendorPatch(request, env, vendorId);
+      await apiAudit(env, key, "vendors", "update", request, response.status, vendorId);
+      return response;
+    }
+    if (request.method === "DELETE") {
+      const key = await requireExternalApiKey(request, env, "vendors.delete");
+      const response = await handleVendorDelete(request, env, vendorId);
+      await apiAudit(env, key, "vendors", "delete", request, response.status, vendorId);
       return response;
     }
     return json({ error: "Method Not Allowed" }, 405);
@@ -621,6 +663,14 @@ async function requireRouteWriteAccess(request, env) {
     throw routeHttpError(403, "라우트 수정 권한이 없습니다.");
   }
   return { userId: user.id, roleLevel, isAdmin: access?.is_admin === true };
+}
+
+async function requireVendorAdminAccess(request, env) {
+  const access = await requireRouteWriteAccess(request, env);
+  if (!access.isAdmin && Number(access.roleLevel || 0) < 90) {
+    throw routeHttpError(403, "벤더 수정·삭제는 관리자 권한이 필요합니다.");
+  }
+  return access;
 }
 
 function safeTrim(v) {
@@ -1122,14 +1172,22 @@ async function handleRouteMasterDelete(request, env, access) {
 // ---------- /vendors ----------
 function scoreVendorSearch(row, qLower) {
   const name = safeTrim(row?.name).toLowerCase();
+  const nickname = safeTrim(row?.nickname).toLowerCase();
   const bn = safeTrim(row?.business_number).toLowerCase();
+  const code = safeTrim(row?.vendor_code).toLowerCase();
   if (!qLower) return 0;
-  if (name === qLower) return 120;
-  if (bn === qLower) return 115;
-  if (name.startsWith(qLower)) return 100;
+  if (name === qLower) return 130;
+  if (nickname === qLower) return 125;
+  if (bn === qLower) return 120;
+  if (code === qLower) return 115;
+  if (name.startsWith(qLower)) return 105;
+  if (nickname.startsWith(qLower)) return 100;
   if (bn.startsWith(qLower)) return 95;
-  if (name.includes(qLower)) return 80;
-  if (bn.includes(qLower)) return 75;
+  if (code.startsWith(qLower)) return 90;
+  if (name.includes(qLower)) return 85;
+  if (nickname.includes(qLower)) return 82;
+  if (bn.includes(qLower)) return 80;
+  if (code.includes(qLower)) return 78;
   return 0;
 }
 
@@ -1160,9 +1218,13 @@ async function handleVendorsGet(url, env) {
 
   const queries = [
     ["name", `eq.${q}`],
+    ["nickname", `eq.${q}`],
     ["business_number", `eq.${q}`],
+    ["vendor_code", `eq.${q}`],
     ["name", `ilike.${wildcard}`],
+    ["nickname", `ilike.${wildcard}`],
     ["business_number", `ilike.${wildcard}`],
+    ["vendor_code", `ilike.${wildcard}`],
   ];
 
   const merged = new Map();
@@ -1196,8 +1258,9 @@ async function handleVendorCreate(request, env) {
   const vendorCodeInput = safeTrim(body.vendor_code);
 
   if (!name) return json({ error: "name is required" }, 400);
-  if (!digitsOnly(businessNumber)) return json({ error: "business_number is required" }, 400);
-  const vendorCode = buildVendorCodeFromBusinessNumber(businessNumber) || vendorCodeInput || null;
+  if (digitsOnly(businessNumber).length !== 10) return json({ error: "business_number must contain 10 digits" }, 400);
+  const vendorCode = vendorCodeInput || buildVendorCodeFromBusinessNumber(businessNumber) || null;
+  const nickname = safeTrim(body.nickname) || null;
 
   const tryFindByBusinessNumber = async (bn) => {
     const q = new URLSearchParams();
@@ -1213,7 +1276,7 @@ async function handleVendorCreate(request, env) {
     existing = await tryFindByBusinessNumber(rawBusinessNumber);
   }
 
-  const patch = { name, business_number: businessNumber };
+  const patch = { name, business_number: businessNumber, nickname };
   if (vendorCode || Object.prototype.hasOwnProperty.call(body, "vendor_code")) {
     patch.vendor_code = vendorCode;
   }
@@ -1243,6 +1306,143 @@ async function handleVendorCreate(request, env) {
   }
 
   return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+const VENDOR_REFERENCE_SPECS = [
+  ["vendor_members", "vendor_id", "소속 사용자"],
+  ["profiles", "default_vendor_id", "기본 벤더 프로필"],
+  ["subsubroutes", "vendor_id", "라우트"],
+  ["app_user_camps", "vendor_id", "앱 사용자 캠프"],
+  ["app_notices", "vendor_id", "앱 공지"],
+  ["app_notice_recipients", "vendor_id", "공지 수신자"],
+  ["cleansing_history", "vendor_id", "클렌징 이력"],
+  ["dragon_car", "vendor_id", "용차 데이터"],
+  ["polygon_building_stats", "vendor_id", "건물 분석 데이터"],
+  ["zipcode_terrain", "vendor_id", "지형 데이터"],
+];
+
+async function vendorReferenceUsage(env, vendorId) {
+  const references = [];
+  for (const [table, column, label] of VENDOR_REFERENCE_SPECS) {
+    try {
+      const params = new URLSearchParams();
+      params.set("select", column);
+      params.set(column, `eq.${vendorId}`);
+      params.set("limit", "1");
+      const rows = await supabaseFetch(env, `/rest/v1/${table}?${params.toString()}`, { method: "GET" });
+      if (Array.isArray(rows) && rows.length) references.push({ table, column, label });
+    } catch (error) {
+      console.warn("vendor reference check failed:", table, error?.message || String(error));
+    }
+  }
+  return references;
+}
+
+async function findVendorById(env, vendorId) {
+  const params = new URLSearchParams();
+  params.set("select", "*");
+  params.set("id", `eq.${vendorId}`);
+  params.set("limit", "1");
+  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function handleVendorGetById(url, env, vendorId) {
+  const row = await findVendorById(env, vendorId);
+  if (!row) return json({ error: "Vendor not found" }, 404);
+  const includeUsage = url.searchParams.get("usage") !== "0";
+  const references = includeUsage ? await vendorReferenceUsage(env, vendorId) : [];
+  return json({ row, references, deletable: references.length === 0 }, 200, { "Cache-Control": "no-store" });
+}
+
+async function ensureVendorUniqueFields(env, vendorId, patch) {
+  for (const field of ["business_number", "vendor_code"]) {
+    if (!patch[field]) continue;
+    const params = new URLSearchParams();
+    params.set("select", "id");
+    params.set(field, `eq.${patch[field]}`);
+    params.set("id", `neq.${vendorId}`);
+    params.set("limit", "1");
+    const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, { method: "GET" });
+    if (Array.isArray(rows) && rows.length) {
+      throw routeHttpError(409, field === "business_number" ? "이미 등록된 사업자번호입니다." : "이미 사용 중인 vendor_code입니다.");
+    }
+  }
+}
+
+async function handleVendorPatch(request, env, vendorId) {
+  const current = await findVendorById(env, vendorId);
+  if (!current) return json({ error: "Vendor not found" }, 404);
+
+  const body = await readJson(request);
+  const patch = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, "name")) {
+    const name = safeTrim(body.name);
+    if (!name) return json({ error: "name cannot be empty" }, 400);
+    patch.name = name;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "nickname")) {
+    patch.nickname = safeTrim(body.nickname) || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "business_number")) {
+    const businessNumber = normalizeBusinessNumber(body.business_number);
+    if (digitsOnly(businessNumber).length !== 10) {
+      return json({ error: "business_number must contain 10 digits" }, 400);
+    }
+    patch.business_number = businessNumber;
+    if (!Object.prototype.hasOwnProperty.call(body, "vendor_code")) {
+      patch.vendor_code = buildVendorCodeFromBusinessNumber(businessNumber);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "vendor_code")) {
+    const code = safeTrim(body.vendor_code);
+    patch.vendor_code = code || buildVendorCodeFromBusinessNumber(patch.business_number || current.business_number);
+  }
+
+  if (!Object.keys(patch).length) return json({ error: "No supported fields to update" }, 400);
+  await ensureVendorUniqueFields(env, vendorId, patch);
+
+  const params = new URLSearchParams();
+  params.set("id", `eq.${vendorId}`);
+  params.set("select", "*");
+  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(patch),
+  });
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Vendor not found" }, 404);
+  return json({ row }, 200, { "Cache-Control": "no-store" });
+}
+
+async function handleVendorDelete(request, env, vendorId) {
+  const current = await findVendorById(env, vendorId);
+  if (!current) return json({ error: "Vendor not found" }, 404);
+
+  const references = await vendorReferenceUsage(env, vendorId);
+  if (references.length) {
+    return json({
+      error: "연결된 데이터가 있어 벤더를 삭제할 수 없습니다.",
+      row: current,
+      references,
+      deletable: false,
+    }, 409, { "Cache-Control": "no-store" });
+  }
+
+  const params = new URLSearchParams();
+  params.set("id", `eq.${vendorId}`);
+  params.set("select", "*");
+  const rows = await supabaseFetch(env, `/rest/v1/${VENDORS_TABLE}?${params.toString()}`, {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" },
+  });
+  const row = Array.isArray(rows) ? rows[0] : rows;
+  if (!row) return json({ error: "Vendor not found" }, 404);
+  return json({ row, deleted: true }, 200, { "Cache-Control": "no-store" });
 }
 
 // ---------- /addresses ----------

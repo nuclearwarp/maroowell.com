@@ -194,12 +194,10 @@ function scanActivity(prev, d) {
     || d.assigned > Number(prev.delivery_assigned || 0);
 }
 function deliveryActivity(prev, d) {
-  // "배송 시작"은 배송 자체의 실적 변화만 의미한다.
-  // 반품/프백 변화는 progress 판단에는 쓰지만 배송 시작시각을 만들지 않는다.
-  if (!prev) return (d.completed + d.impossible + d.pdd) > 0;
-  return d.completed > Number(prev.delivery_completed || 0)
-    || d.impossible > Number(prev.delivery_impossible || 0)
-    || d.pdd > Number(prev.delivery_pdd_miss || 0);
+  // "첫배송/배송 시작"은 실제 배송완료(completed)가 발생한 시점만 의미한다.
+  // 취소/미배송(impossible), PDD miss는 배송 시작으로 보지 않는다.
+  if (!prev) return d.completed > 0;
+  return d.completed > Number(prev.delivery_completed || 0);
 }
 function roundFields(prev, round) {
   return {
@@ -475,7 +473,7 @@ async function processBatch(env, cookies, batch) {
     const rounds = {1:roundFields(prev,1),2:roundFields(prev,2),3:roundFields(prev,3)};
     const reopenedByScan = !!prev?.work_completed_at && scanMoved;
 
-    if (!rounds[1].scan && (d.scanned > 0 || d.completed > 0 || d.impossible > 0 || d.pdd > 0)) rounds[1].scan = now;
+    if (!rounds[1].scan && (d.scanned > 0 || d.completed > 0)) rounds[1].scan = now;
     if (!rounds[currentRound].delivery && deliveryMoved) rounds[currentRound].delivery = now;
 
     if (rounds[currentRound].completed && currentRound < expRounds && scanMoved) {
@@ -503,7 +501,7 @@ async function processBatch(env, cookies, batch) {
     const returnRemaining = batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0);
     const freshbagRemaining = Math.max(0, fb.pending || 0);
     const totalRemaining = deliveryRemaining + returnRemaining + freshbagRemaining;
-    const hadDeliveryActivity = !!(prev?.delivery_started_at || rounds[1].delivery || d.completed > 0 || d.impossible > 0 || d.pdd > 0);
+    const hadDeliveryActivity = !!(prev?.delivery_started_at || rounds[1].delivery || d.completed > 0);
     const exactCandidate = !reopenedByScan && exactDone && hadDeliveryActivity ? (prev?.exact_complete_candidate_at || now) : null;
     const exactConfirmed = !reopenedByScan && exactDone && hadDeliveryActivity && !!prev?.exact_complete_candidate_at;
     const finalRoundReady = currentRound >= expRounds && !!rounds[currentRound].delivery;

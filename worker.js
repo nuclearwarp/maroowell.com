@@ -122,7 +122,7 @@ function cors(res) {
   const h = new Headers(res.headers || {});
   h.set("Access-Control-Allow-Origin", "*");
   h.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
-  h.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  h.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key");
   h.set("Access-Control-Max-Age", "86400");
   return new Response(res.body, { status: res.status, headers: h });
 }
@@ -480,6 +480,46 @@ async function handleExternalApi(request, url, env) {
       return response;
     }
 
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  // CHUNWOO_EXTERNAL_HELPERS_V1
+  // API-key wrappers for shared zipcode/coupangRouteMap supporting data.
+  if (path === "/api/v1/zipcode") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "zipcode.read");
+      const zipcode = (url.searchParams.get("zipcode") || "").trim();
+      if (!zipcode) return json({ error: "zipcode query parameter is required" }, 400);
+      const response = await handleZipGet(zipcode);
+      await apiAudit(env, key, "zipcode", "read", request, response.status, zipcode);
+      return response;
+    }
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  if (path === "/api/v1/addresses") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "addresses.read");
+      const response = await handleAddressesGet(url, env);
+      await apiAudit(env, key, "addresses", "read", request, response.status);
+      return response;
+    }
+    return json({ error: "Method Not Allowed" }, 405);
+  }
+
+  if (path === "/api/v1/vendors") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "vendors.read");
+      const response = await handleVendorsGet(url, env);
+      await apiAudit(env, key, "vendors", "read", request, response.status);
+      return response;
+    }
+    if (request.method === "POST") {
+      const key = await requireExternalApiKey(request, env, "vendors.write");
+      const response = await handleVendorCreate(request, env);
+      await apiAudit(env, key, "vendors", "write", request, response.status);
+      return response;
+    }
     return json({ error: "Method Not Allowed" }, 405);
   }
 

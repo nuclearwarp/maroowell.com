@@ -935,6 +935,78 @@ async function testDb(env) {
 
 
 
+async function autoRecover(env) {
+  const state = await supabaseGetState(env);
+  const jar = jarFromStoredState(state || {});
+
+  // 1) Current server-side session may still be recoverable through normal META query.
+  let meta = await queryMeta(jar);
+  if (meta.success) {
+    await replaceBackendSession(env, jar, 200);
+    return { ok: true, stage: "existing-session", mfaRequired: false };
+  }
+
+  // 2) Re-enter the OAuth flow with the existing cookie jar. If Keycloak still
+  // trusts the active server-side identity this can renew without user action.
+  let first;
+  try {
+    first = await follow(jar, AUTH_START);
+    meta = await queryMeta(jar);
+    if (meta.success) {
+      await replaceBackendSession(env, jar, 200);
+      return { ok: true, stage: "silent-oauth-renew", mfaRequired: false };
+    }
+  } catch (_) {}
+
+  // 3) Fall back to stored META credentials. Do not auto-submit or auto-send MFA.
+  // If credentials alone are enough, persist the renewed session immediately.
+  try {
+    const cred = await credentialSubmit(env, jar);
+    meta = await queryMeta(jar);
+    if (meta.success) {
+      await replaceBackendSession(env, jar, 200);
+      return { ok: true, stage: "credential-renew", mfaRequired: false };
+    }
+
+    const forms = parseForms(cred.html || "", cred.url || AUTH_START);
+    const mfaForm = chooseMfaTypeForm(forms);
+    const otpForm = chooseOtpForm(forms);
+    const loginForm = chooseLoginForm(forms);
+    return {
+      ok: false,
+      stage: "reauth-required",
+      mfaRequired: Boolean(mfaForm || otpForm),
+      loginRequired: Boolean(loginForm),
+      status: cred.response?.status || meta.response?.status || 0,
+      title: pageDiagnostics(cred.html || "", cred.url || AUTH_START).title || null
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      stage: "credential-recover-error",
+      mfaRequired: false,
+      error: String(e?.message || e).slice(0, 220)
+    };
+  }
+}
+
+async function silentRenew(env) {
+  const state = await supabaseGetState(env);
+  const jar = jarFromStoredState(state || {});
+  try {
+    const first = await follow(jar, AUTH_START);
+    const meta = await queryMeta(jar);
+    if (!meta.success) {
+      return { ok: false, stage: "silent-renew-failed", status: meta.response.status };
+    }
+    await replaceBackendSession(env, jar, 200);
+    return { ok: true, stage: "silent-renew" };
+  } catch (e) {
+    return { ok: false, stage: "silent-renew-error", error: String(e?.message || e).slice(0,180) };
+  }
+}
+
+
 async function loginOtpInspect(env) {
   const mfa = await sendMfaCode(env);
   if (!mfa.ok) return out({ ok: false, stage: "mfa-send", ...mfa }, 422);
@@ -993,6 +1065,14 @@ export default {
 
       if (path === "/test-db") {
         return await testDb(env);
+      }
+
+      if (path === "/auto-recover") {
+        return out(await autoRecover(env));
+      }
+
+      if (path === "/silent-renew") {
+        return out(await silentRenew(env));
       }
 
       return out({

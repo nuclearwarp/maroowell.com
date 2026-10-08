@@ -1,0 +1,33 @@
+name: Recover META collector now
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-meta-now.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Force collector run
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 90 'https://meta-direct-poc.brain-0f6.workers.dev/collector/run' | tee /tmp/collector.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open('/tmp/collector.json'))
+          print(json.dumps({
+            'ok':d.get('ok'),
+            'due':d.get('due'),
+            'successful':d.get('successful'),
+            'skipped':d.get('skipped'),
+            'errors':[x.get('error') for x in d.get('results',[]) if x.get('error')],
+            'heartbeat':next((x.get('heartbeat') for x in d.get('results',[]) if x.get('heartbeat')),None)
+          },ensure_ascii=False))
+          PY

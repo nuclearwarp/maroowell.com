@@ -738,6 +738,26 @@ async function processBatch(env, cookies, batch) {
   return { camp: batch.camp_name, wave: batch.wave, workers: stateRows.length, complete: campComplete, stable, collecting_after_completion: campComplete, codes };
 }
 
+async function authJson(env, path) {
+  const req = new Request(`https://internal.meta${path}`, { method: "GET" });
+  const response = await authWorker.fetch(req, env);
+  let data = null;
+  try { data = await response.clone().json(); } catch {}
+  return { response, data };
+}
+
+async function maybeSilentRenew(env, state) {
+  const last = state?.session_renewed_at ? Date.parse(state.session_renewed_at) : 0;
+  if (last && Date.now() - last < 20 * 60 * 1000) return { ok:true, skipped:"recently-renewed" };
+  const { data } = await authJson(env, "/silent-renew");
+  return data || { ok:false, stage:"silent-renew-no-json" };
+}
+
+async function tryAutoRecover(env) {
+  const { data } = await authJson(env, "/auto-recover");
+  return data || { ok:false, stage:"auto-recover-no-json" };
+}
+
 async function heartbeat(env, cookies, expectedGeneration = null) {
   const rows = await sbGet(env, "camps?select=code&code=not.is.null&limit=30");
   const codes = metaCampCandidates((rows || []).map(r => r.code));
@@ -752,10 +772,30 @@ async function runCollector(env, force = false) {
   const runClaimed = await sbPost(env, "rpc/meta_claim_collector_run", { p_token: runToken, p_lease_seconds: 150 });
   if (!runClaimed) return { ok:false, skipped:"collector_run_locked" };
   try {
-    const state = await sessionState(env);
-    if (state?.collector_paused === true) return { ok: false, paused: true };
+    let state = await sessionState(env);
     if (!state?.cookie_bundle && !state?.cookie_jar) return { ok: false, error: "META_SESSION_MISSING" };
-    if (state.status === "expired" && !force) return { ok: false, error: "META_AUTH_REQUIRED", status: "expired" };
+
+    // Always-on collector: ignore stale pause flags and proactively renew the OAuth session.
+    if (state?.collector_paused === true) {
+      await sbPatch(env, "meta_backend_state?id=eq.1", {
+        collector_paused: false,
+        collector_paused_at: null,
+        collector_paused_by: null,
+        updated_at: new Date().toISOString()
+      });
+      state = { ...state, collector_paused: false };
+    }
+
+    if (state.status === "expired") {
+      const recovered = await tryAutoRecover(env);
+      if (!recovered?.ok) {
+        return { ok:false, error:"META_AUTH_REQUIRED", status:"expired", recovery:recovered };
+      }
+      state = await sessionState(env);
+    } else {
+      const renew = await maybeSilentRenew(env, state);
+      if (renew?.ok && !renew?.skipped) state = await sessionState(env);
+    }
 
     const cookies = cookieJarFromState(state);
     cookies.generation = Number(state.session_generation || 0);
@@ -795,9 +835,13 @@ async function runCollector(env, force = false) {
       }
     }
 
+    let recovery = null;
     if (failure) {
       const expired = failure.metaAuthRequired || /META (401|403|302)/.test(String(failure.message));
       await saveSession(env, cookies, expired ? "expired" : "error", failure.metaHttpStatus || 500, String(failure.message).slice(0,250), cookies.generation);
+      if (expired) {
+        recovery = await tryAutoRecover(env);
+      }
     } else if (successes > 0) {
       await saveSession(env, cookies, "active", 200, null, cookies.generation);
     } else if (!due.length && (force || kstParts().minute % 5 === 0)) {
@@ -806,7 +850,7 @@ async function runCollector(env, force = false) {
       if (!health.ok) return { ok:false, at:nowIso(), due:0, results };
     }
 
-    return { ok: !failure, at: nowIso(), due: due.length, successful: successes, results };
+    return { ok: !failure, at: nowIso(), due: due.length, successful: successes, recovery, results };
   } finally {
     try { await sbPost(env, "rpc/meta_release_collector_run", { p_token: runToken }); } catch {}
   }
@@ -821,7 +865,7 @@ export default {
         const batches = await sbGet(env, "meta_realtime_batch?select=*&order=schedule_date.desc,started_at.desc&limit=50");
         return json({ ok: true, batches });
       }
-      if (path.startsWith("/login-") || path === "/test-db") {
+      if (path.startsWith("/login-") || path === "/test-db" || path === "/auto-recover" || path === "/silent-renew") {
         const response = await authWorker.fetch(request, env);
         if (path === "/login-submit-code" && request.method === "POST" && response.ok) {
           const resume = runCollector(env, true).catch(e => console.error("META resume failed:", e?.message));

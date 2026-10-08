@@ -1,0 +1,24 @@
+name: Inspect META worker topology
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/inspect-meta-workers.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: List worker names
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request
+          u='https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46/workers/scripts'
+          req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['CF_TOKEN']})
+          with urllib.request.urlopen(req,timeout=30) as r:
+              d=json.load(r)
+          print(json.dumps([x.get('id') for x in d.get('result',[])],ensure_ascii=False))
+          PY

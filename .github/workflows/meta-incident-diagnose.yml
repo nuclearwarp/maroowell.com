@@ -9,61 +9,27 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-      - name: Inspect deployed script and request failure
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify META login entry (one request)
         run: |
           python3 - <<'PY'
-          import os,json,re,urllib.request,urllib.error,hashlib,pathlib
-          root='https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46'
-          def read(url,headers=None):
-              try:
-                  with urllib.request.urlopen(urllib.request.Request(url,headers=headers or {}),timeout=35) as r:
-                      return r.status,r.headers,r.read().decode('utf-8','replace')
-              except urllib.error.HTTPError as e:
-                  return e.code,e.headers,e.read().decode('utf-8','replace')
-          def safe(s):
-              s=re.sub(r'(?:eyJ|sb_secret_|sb_publishable_)[A-Za-z0-9_.-]+','[REDACTED]',str(s))
-              return re.sub(r'(?i)(cookie|password|token)\s*[=:]\s*[^\s;,]+',r'\1=[REDACTED]',s)[:800]
-          h={'Authorization':'Bearer '+os.environ['CF_TOKEN']}
-          status,headers,text=read(root+'/workers/scripts/meta-direct-poc',h)
-          print('DEPLOYED_SCRIPT',json.dumps({'status':status,'content_type':headers.get('Content-Type'),'has_main_state':'meta_backend_state' in text,'has_foreign_tenant':bool(re.search(r'chunwoo|heroes',text,re.I)),'has_login_route':'/login-send-code' in text}))
-          if status==200:
-              lines=text.splitlines()
-              indices=[i for i,l in enumerate(lines) if re.search(r'Forbidden|status:\s*403|status:\s*401|fetch\(request|ALLOWED_|x-api|x-admin|login-send-code',l,re.I)]
-              for i in indices[:16]:
-                  print('DEPLOYED_GUARD',i+1,safe('\n'.join(lines[max(0,i-3):i+5])))
-          for suffix in ['/subdomain','/deployments']:
-              status,headers,text=read(root+'/workers/scripts/meta-direct-poc'+suffix,h)
-              if status==200:
-                  result=json.loads(text).get('result')
-                  if suffix=='/subdomain': print('SUBDOMAIN_STATE',json.dumps(result))
-                  else: print('DEPLOYMENT_META',safe(json.dumps(result)))
-          base='https://meta-direct-poc.brain-0f6.workers.dev'
-          for path in ['/','/test-db']:
-              status,headers,text=read(base+path,{'User-Agent':'Mozilla/5.0','Accept':'application/json,text/html'})
-              summary={'path':path,'status':status,'type':headers.get('content-type'),'server':headers.get('server'),'cf_mitigated':headers.get('cf-mitigated')}
-              if 'text/plain' in (headers.get('content-type') or ''): summary['body']=safe(text)
-              else:
-                  try:
-                      data=json.loads(text)
-                      summary.update({k:safe(data[k]) for k in ['ok','error','stage','metaHttpStatus','dbStatus'] if k in data})
-                  except ValueError: summary['title']=re.findall(r'<title[^>]*>(.*?)</title>',text,re.I|re.S)[:1]
-              print('PROBE',json.dumps(summary,ensure_ascii=False))
+          import json,re,urllib.request,urllib.error
+          req=urllib.request.Request('https://meta-direct-poc.brain-0f6.workers.dev/login-send-code',headers={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/json'})
+          try:
+              r=urllib.request.urlopen(req,timeout=90)
+          except urllib.error.HTTPError as e:
+              r=e
+          text=r.read().decode('utf-8','replace')
+          summary={'http':r.status,'otp_form':'name="code"' in text and 'name="state"' in text,'title':re.findall(r'<title[^>]*>(.*?)</title>',text,re.I|re.S)[:1]}
+          try:
+              d=json.loads(text)
+              summary.update({k:d[k] for k in ['ok','error','stage','status'] if k in d})
+              diag=d.get('diagnostics') or {}
+              summary['page_title']=diag.get('title')
+              summary['page_text']=re.sub(r'\b\d{4,}\b','[redacted]',diag.get('visibleText',''))[:450]
+              summary['form_fields']=[[i.get('name') for i in f.get('inputs',[])] for f in diag.get('forms',[])]
+          except ValueError:
+              if 'text/plain' in (r.headers.get('content-type') or ''):summary['text']=text[:200]
+          print('LOGIN_RESULT',json.dumps(summary,ensure_ascii=False))
           PY
-      - name: Source snapshot for regression testing
-        uses: actions/upload-artifact@v4
-        with:
-          name: maroowell-meta-incident-source
-          path: |
-            workers/meta-collector/
-            public/home
-            public/realtime
-            public/home-admin.js
-            login-worker-v2.js
-            wrangler.login.toml
-            .github/workflows/deploy-login-worker.yml
-          retention-days: 1

@@ -1,0 +1,57 @@
+name: Diagnose Maroowell META outage
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/meta-incident-diagnose.yml']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deployed Maroowell authentication and session health
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,json,re,urllib.request,urllib.error,hashlib
+          account='0f644373a9db40f2b36e4ffece348c46'
+          root='https://api.cloudflare.com/client/v4/accounts/'+account
+          def read(url,headers=None):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers=headers or {}),timeout=40) as r:
+                      return r.status,r.headers,r.read().decode('utf-8','replace')
+              except urllib.error.HTTPError as e:
+                  return e.code,e.headers,e.read().decode('utf-8','replace')
+          h={'Authorization':'Bearer '+os.environ['CF_TOKEN']}
+          status,_,text=read(root+'/workers/subdomain',h)
+          data=json.loads(text)
+          sub=(data.get('result') or {}).get('subdomain')
+          if not sub: raise RuntimeError('Cannot resolve Workers subdomain: HTTP '+str(status))
+          print('WORKERS_SUBDOMAIN',sub)
+          status,_,text=read(root+'/workers/scripts/meta-direct-poc/settings',h)
+          data=json.loads(text)
+          bindings=(data.get('result') or {}).get('bindings',[])
+          print('META_BINDING_NAMES',json.dumps([{'name':b.get('name'),'type':b.get('type')} for b in bindings]))
+          status,_,text=read(root+'/workers/scripts/meta-direct-poc/content',h)
+          print('DEPLOYED_META',json.dumps({'status':status,'sha256':hashlib.sha256(text.encode()).hexdigest(),'has_main_state':'meta_backend_state' in text,'has_foreign_tenant':bool(re.search(r'chunwoo|heroes',text,re.I)),'has_mfa_route':'/login-send-code' in text,'has_false_active_path':'else if (due.length)' in text}))
+          base='https://meta-direct-poc.'+sub+'.workers.dev'
+          for path in ['/test-db','/login-send-code']:
+              status,headers,text=read(base+path)
+              title=re.search(r'<title[^>]*>(.*?)</title>',text,re.I|re.S)
+              summary={'path':path,'status':status,'type':headers.get('content-type'),'title':title.group(1) if title else None,'otp_form':'name="code"' in text and 'name="state"' in text,'access_denied':bool(re.search(r'Access denied',text,re.I))}
+              try:
+                  data=json.loads(text)
+                  for key in ['ok','stage','error','metaHttpStatus','metaMessage','dbStatus']:
+                      if key in data: summary[key]=str(data[key])[:200]
+                  diag=data.get('diagnostics') or {}
+                  if diag:
+                      summary['diagnostic_title']=diag.get('title')
+                      summary['diagnostic_text']=re.sub(r'\b\d{4,}\b','[redacted]',diag.get('visibleText',''))[:400]
+                      summary['form_fields']=[[i.get('name') for i in f.get('inputs',[])] for f in diag.get('forms',[])]
+              except (ValueError,TypeError): pass
+              print('PROBE',json.dumps(summary,ensure_ascii=False))
+          PY

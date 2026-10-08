@@ -702,8 +702,8 @@ async function logout(){
 
 function renderCollectorState(){
   const b=$("collectorBtn");
-  b.disabled=true;
-  b.style.pointerEvents="none";
+  b.disabled=!S.isAdmin;
+  b.style.pointerEvents=S.isAdmin ? "auto" : "none";
   if(["error","expired","missing"].includes(S.collectorState?.status)){
     b.className="btn collectorError";
     b.textContent="자동 복구 중";
@@ -711,7 +711,7 @@ function renderCollectorState(){
   }else{
     b.className="btn collectorOk";
     b.textContent="자동 수집 ON";
-    b.title="백엔드 자동 수집은 항상 켜져 있습니다.";
+    b.title=S.isAdmin?"연결 상태 확인 및 META 문자 인증창 열기":"백엔드 자동 수집 상태입니다.";
   }
 }
 async function loadCollectorState(){
@@ -727,11 +727,11 @@ async function loadCollectorState(){
   renderCollectorState();
 }
 async function toggleCollector(){
-  // Always-on collector. Manual pause is intentionally disabled.
-  if(S.collectorPaused){
-    try{await S.sb.rpc("mw_set_meta_collector_paused",{p_paused:false})}catch{}
-    await loadCollectorState();
-  }
+  // Admin-only authentication/connection check; never pause the collector.
+  if(!S.isAdmin)return;
+  const url="https://meta-direct-poc.brain-0f6.workers.dev/login-send-code";
+  const popup=window.open(url,"mwMetaVerification","popup=yes,width=620,height=780,scrollbars=yes,resizable=yes");
+  if(!popup)location.assign(url);else popup.focus();
 }
 
 function buildFreshMaps(freshRows){
@@ -1002,6 +1002,6 @@ async function boot(){
 boot();
 })();
 </script>
-<script src="/meta-connection.js?v=20261008-session2" defer></script>
+<script src="/meta-connection.js?v=20261008-session3" defer></script>
 </body>
 </html>

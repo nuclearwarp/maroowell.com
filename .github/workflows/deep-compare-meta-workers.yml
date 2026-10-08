@@ -1,0 +1,66 @@
+name: Deep compare META workers
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/deep-compare-meta-workers.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect deployed workers safely
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,re,json,urllib.request,urllib.error
+          account='0f644373a9db40f2b36e4ffece348c46'
+          H={'Authorization':'Bearer '+os.environ['CF_TOKEN']}
+          base=f'https://api.cloudflare.com/client/v4/accounts/{account}'
+          def get(url):
+              req=urllib.request.Request(url,headers=H)
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return r.headers, r.read()
+          _, raw=get(base+'/workers/scripts')
+          workers=[x.get('id') for x in json.loads(raw).get('result',[])]
+          print('WORKERS',json.dumps(workers,ensure_ascii=False))
+          for name in workers:
+              try:
+                  headers,raw=get(base+'/workers/scripts/'+name)
+              except Exception as e:
+                  print('ERR',name,type(e).__name__); continue
+              text=raw.decode('utf-8','replace')
+              low=text.lower()
+              feats={
+                'bytes':len(raw),
+                'meta': any(k in low for k in ['realtime-dashboard','fly.coupang.com','web-gateway-session']),
+                'set_cookie': 'set-cookie' in low or 'getsetcookie' in low,
+                'cookie_bundle':'cookie_bundle' in low,
+                'cookie_jar':'cookie_jar' in low,
+                'scheduled':'scheduled(' in low or 'cron' in low,
+                'login':'login-send-code' in low or 'mfa' in low or 'otp' in low,
+                'refresh':any(k in low for k in ['refresh_token','keepalive','heartbeat','renew']),
+                'tenant_words':[k for k in ['chunwoo','cheonwoo','천우','maroowell','heroes'] if k in low or k in text]
+              }
+              if feats['meta'] or feats['tenant_words']:
+                  print('FEATURE',name,json.dumps(feats,ensure_ascii=False))
+                  for pat in ['realtime-dashboard','set-cookie','getSetCookie','WEB-GATEWAY-SESSION','cookie_bundle','cookie_jar','refresh_token','heartbeat','keepAlive','scheduled(']:
+                      m=re.search(re.escape(pat),text,re.I)
+                      if not m: continue
+                      s=max(0,m.start()-900);e=min(len(text),m.start()+2600)
+                      sn=text[s:e]
+                      sn=re.sub(r'(?i)(authorization|apikey|token|password|secret|service_role_key|META_ID|META_PW)(\\s*[:=]\\s*)[\x22\x27][^\x22\x27\\n]+[\x22\x27]',r'\\1\\2"[REDACTED]"',sn)
+                      sn=re.sub(r'eyJ[A-Za-z0-9_.-]{20,}','[REDACTED_JWT]',sn)
+                      sn=re.sub(r'(?i)(cookie\\s*[:=]\\s*)[\x22\x27][^\x22\x27\\n]+[\x22\x27]',r'\\1"[REDACTED_COOKIE]"',sn)
+                      print('SNIP',name,pat,re.sub(r'\\s+',' ',sn)[:2500])
+          try:
+              _,raw=get(base+'/workers/routes')
+              print('ROUTES',json.dumps(json.loads(raw).get('result',[]),ensure_ascii=False)[:12000])
+          except Exception as e:
+              print('ROUTES_ERR',type(e).__name__)
+          PY

@@ -470,7 +470,13 @@ async function purgeStaleRealtimeRows(env) {
 async function dueBatches(env, force = false) {
   const now = encodeURIComponent(nowIso());
   const rows = await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)${force ? "" : `&or=(next_poll_at.is.null,next_poll_at.lte.${now})`}&order=started_at.asc`) || [];
-  return rows.filter(isActiveBatchDate);
+  // An active WAVE1 (night) must never wait behind all previous WAVE2 batches.
+  // Keep each batch eligible at the next cron tick, not 60 seconds after an
+  // already-delayed poll, which effectively halves the collection frequency.
+  return rows.filter(isActiveBatchDate).sort((a,b) =>
+    Number(b.wave === "WAVE1") - Number(a.wave === "WAVE1") ||
+    String(a.next_poll_at || "").localeCompare(String(b.next_poll_at || ""))
+  );
 }
 async function storeFreshRows(env, batch, schedule, directory, fresh, now) {
   if (batch.wave !== "WAVE2" || !fresh?.success) return [];
@@ -718,7 +724,7 @@ async function processBatch(env, cookies, batch) {
     completion_method: campComplete ? (batch.completion_method || batchMethod) : null,
     completion_detected_at: campComplete ? (batch.completion_detected_at || now) : null,
     completion_candidate_at: campComplete ? (batch.completion_candidate_at || now) : null,
-    poll_interval_seconds: 60, next_poll_at: kstIsoAt(Date.now() + 60000), last_error: null, updated_at: now
+    poll_interval_seconds: 60, next_poll_at: now, last_error: null, updated_at: now
   };
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
 

@@ -1,0 +1,57 @@
+name: Compare deployed META worker logic
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/compare-deployed-meta-workers.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Compare sanitized worker features
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,re,json,urllib.request,email,email.policy
+          root='https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46/workers/scripts/'
+          H={'Authorization':'Bearer '+os.environ['CF_TOKEN']}
+          workers=['purple-resonance-61ea','purple-river-0717','meta-direct-poc','schedule','home-system']
+          def fetch(name):
+              req=urllib.request.Request(root+name,headers=H)
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  raw=r.read(); ct=r.headers.get('content-type','')
+              if 'multipart/' in ct:
+                  msg=email.message_from_bytes(('Content-Type: '+ct+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+raw,policy=email.policy.default)
+                  return '\n'.join((p.get_payload(decode=True) or b'').decode('utf-8','replace') for p in msg.iter_parts() if 'javascript' in p.get_content_type())
+              return raw.decode('utf-8','replace')
+          for name in workers:
+              try:text=fetch(name)
+              except Exception as e:
+                  print('WORKER',name,'ERROR',type(e).__name__);continue
+              low=text.lower()
+              features={
+                'chunwoo':'chunwoo' in low or '천우' in text,
+                'heroes':'heroes' in low,
+                'realtime_dashboard':'realtime-dashboard' in text,
+                'web_gateway':'WEB-GATEWAY-SESSION' in text,
+                'set_cookie':'set-cookie' in low or 'getsetcookie' in low,
+                'cookie_bundle':'cookie_bundle' in text,
+                'cookie_jar':'cookie_jar' in text,
+                'path_cookie':bool(re.search(r'\bpath\b.*cookie|cookie.*\bpath\b',text,re.I|re.S)),
+                'durable_object':'DurableObject' in text or 'durable_objects' in text,
+                'kv':'.get(' in text and '.put(' in text,
+                'refresh':'refresh' in low or 'keepalive' in low or 'heartbeat' in low,
+              }
+              print('FEATURE',name,json.dumps(features,ensure_ascii=False))
+              for pat in ['cookie_bundle','getSetCookie','set-cookie','WEB-GATEWAY-SESSION','realtime-dashboard','heartbeat','keepAlive']:
+                  m=re.search(pat,text,re.I)
+                  if not m: continue
+                  s=max(0,m.start()-500);e=min(len(text),m.start()+1800)
+                  snippet=text[s:e]
+                  snippet=re.sub(r'(?i)(authorization|apikey|token|password|secret)(\s*[:=]\s*)["\x27][^"\x27\n]+["\x27]',r'\1\2"[REDACTED]"',snippet)
+                  snippet=re.sub(r'\beyJ[A-Za-z0-9_.-]+','[REDACTED_JWT]',snippet)
+                  print('SNIP',name,pat,re.sub(r'\s+',' ',snippet)[:1800])
+          PY

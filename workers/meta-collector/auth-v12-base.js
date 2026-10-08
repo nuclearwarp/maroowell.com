@@ -939,53 +939,63 @@ async function autoRecover(env) {
   const state = await supabaseGetState(env);
   const jar = jarFromStoredState(state || {});
 
-  // 1) Current server-side session may still be recoverable through normal META query.
+  // 1) Existing session.
   let meta = await queryMeta(jar);
   if (meta.success) {
     await replaceBackendSession(env, jar, 200);
-    return { ok: true, stage: "existing-session", mfaRequired: false };
+    return { ok:true, stage:"existing-session", mfaRequired:false };
   }
 
-  // 2) Re-enter the OAuth flow with the existing cookie jar. If Keycloak still
-  // trusts the active server-side identity this can renew without user action.
-  let first;
+  // 2) Silent OAuth renewal using the current trusted cookies.
   try {
-    first = await follow(jar, AUTH_START);
+    const first = await follow(jar, AUTH_START);
     meta = await queryMeta(jar);
     if (meta.success) {
       await replaceBackendSession(env, jar, 200);
-      return { ok: true, stage: "silent-oauth-renew", mfaRequired: false };
+      return { ok:true, stage:"silent-oauth-renew", mfaRequired:false };
+    }
+
+    const forms = parseForms(first.text || "", first.url || AUTH_START);
+    if (chooseMfaTypeForm(forms) || chooseOtpForm(forms)) {
+      return {
+        ok:false, stage:"mfa-required-existing-session", mfaRequired:true,
+        status:first.response?.status || 0,
+        title:pageDiagnostics(first.text || "", first.url || AUTH_START).title || null
+      };
     }
   } catch (_) {}
 
-  // 3) Fall back to stored META credentials. Do not auto-submit or auto-send MFA.
-  // If credentials alone are enough, persist the renewed session immediately.
+  // 3) Old bot/security cookies may themselves be invalid. Start from a clean
+  // browser-equivalent cookie jar and submit the stored ID/PW.
+  const freshJar = new CookieJar();
   try {
-    const cred = await credentialSubmit(env, jar);
-    meta = await queryMeta(jar);
+    const cred = await credentialSubmit(env, freshJar);
+    meta = await queryMeta(freshJar);
     if (meta.success) {
-      await replaceBackendSession(env, jar, 200);
-      return { ok: true, stage: "credential-renew", mfaRequired: false };
+      await replaceBackendSession(env, freshJar, 200);
+      return { ok:true, stage:"fresh-credential-renew", mfaRequired:false };
     }
 
     const forms = parseForms(cred.html || "", cred.url || AUTH_START);
+    const diag = pageDiagnostics(cred.html || "", cred.url || AUTH_START);
     const mfaForm = chooseMfaTypeForm(forms);
     const otpForm = chooseOtpForm(forms);
     const loginForm = chooseLoginForm(forms);
     return {
-      ok: false,
-      stage: "reauth-required",
-      mfaRequired: Boolean(mfaForm || otpForm),
-      loginRequired: Boolean(loginForm),
-      status: cred.response?.status || meta.response?.status || 0,
-      title: pageDiagnostics(cred.html || "", cred.url || AUTH_START).title || null
+      ok:false,
+      stage:(mfaForm || otpForm) ? "mfa-required" : "fresh-login-incomplete",
+      mfaRequired:Boolean(mfaForm || otpForm),
+      loginRequired:Boolean(loginForm),
+      status:cred.response?.status || meta.response?.status || 0,
+      title:diag.title || null,
+      accessDenied:/access denied|접근.*거부/i.test(diag.visibleText || "")
     };
   } catch (e) {
     return {
-      ok: false,
-      stage: "credential-recover-error",
-      mfaRequired: false,
-      error: String(e?.message || e).slice(0, 220)
+      ok:false,
+      stage:"fresh-credential-recover-error",
+      mfaRequired:false,
+      error:String(e?.message || e).slice(0,220)
     };
   }
 }

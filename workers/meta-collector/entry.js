@@ -241,44 +241,102 @@ const sbUpsert = (env, path, body, conflict) => sb(env, `${path}?on_conflict=${e
   method: "POST", headers: { prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(body)
 });
 
-function parseCookieBundle(bundle) {
-  const map = new Map();
-  for (const part of String(bundle || "").split(/;\s*/)) {
-    const i = part.indexOf("=");
-    if (i > 0) map.set(part.slice(0, i), part.slice(i + 1));
+class MetaCookieJar {
+  constructor(items = []) {
+    this.items = new Map();
+    for (const item of items || []) {
+      if (!item?.name || !item?.domain) continue;
+      const c = {
+        name: String(item.name),
+        value: String(item.value ?? ""),
+        domain: String(item.domain).replace(/^\./,"").toLowerCase(),
+        path: String(item.path || "/"),
+        hostOnly: item.hostOnly !== false,
+        secure: item.secure !== false
+      };
+      this.items.set(this.key(c), c);
+    }
   }
-  return map;
+  key(c) { return `${c.domain}|${c.path || "/"}|${c.name}`; }
+  dump() { return [...this.items.values()].map(x => ({...x})); }
+  header(url) {
+    const u = new URL(url), host = u.hostname.toLowerCase(), path = u.pathname || "/";
+    const matched = [...this.items.values()].filter(c => {
+      const domainOk = c.hostOnly ? host === c.domain : host === c.domain || host.endsWith("." + c.domain);
+      const pathOk = path.startsWith(c.path || "/");
+      const secureOk = !c.secure || u.protocol === "https:";
+      return domainOk && pathOk && secureOk;
+    });
+    matched.sort((a,b)=>(b.path||"/").length-(a.path||"/").length);
+    const seen=new Set(), out=[];
+    for(const x of matched){
+      if(seen.has(x.name)) continue;
+      seen.add(x.name);
+      out.push(`${x.name}=${x.value}`);
+    }
+    return out.join("; ");
+  }
+  absorb(response, requestUrl) {
+    const u = new URL(requestUrl);
+    const lines = typeof response.headers.getSetCookie === "function"
+      ? response.headers.getSetCookie()
+      : splitSetCookie(response.headers.get("set-cookie"));
+    for (const line of lines) {
+      if (!line) continue;
+      const parts=String(line).split(";").map(x=>x.trim());
+      const i=parts[0].indexOf("="); if(i<=0) continue;
+      const x={name:parts[0].slice(0,i),value:parts[0].slice(i+1),domain:u.hostname.toLowerCase(),path:"/",hostOnly:true,secure:false};
+      let expired=false;
+      for(const p of parts.slice(1)){
+        const j=p.indexOf("="), k=(j>=0?p.slice(0,j):p).trim().toLowerCase(), v=j>=0?p.slice(j+1).trim():"";
+        if(k==="domain"&&v){x.domain=v.replace(/^\./,"").toLowerCase();x.hostOnly=false}
+        else if(k==="path"&&v)x.path=v;
+        else if(k==="secure")x.secure=true;
+        else if(k==="max-age"&&Number(v)<=0)expired=true;
+        else if(k==="expires"){const t=Date.parse(v);if(Number.isFinite(t)&&t<=Date.now())expired=true}
+      }
+      const key=this.key(x);
+      if(expired||x.value==="")this.items.delete(key);else this.items.set(key,x);
+    }
+  }
 }
-function cookieHeader(map) { return [...map.entries()].map(([k, v]) => `${k}=${v}`).join("; "); }
 function splitSetCookie(raw) {
   if (!raw) return [];
   return String(raw).split(/,(?=[^;,]+=)/g);
 }
-function absorbSetCookies(map, response) {
-  const lines = typeof response.headers.getSetCookie === "function"
-    ? response.headers.getSetCookie()
-    : splitSetCookie(response.headers.get("set-cookie"));
-  for (const line of lines) {
-    const first = String(line || "").split(";", 1)[0];
-    const i = first.indexOf("=");
-    if (i <= 0) continue;
-    const name = first.slice(0, i), value = first.slice(i + 1);
-    const expired = /(?:^|;)\s*Max-Age=0(?:;|$)/i.test(line) || value === "";
-    if (expired) map.delete(name); else map.set(name, value);
+function cookieJarFromState(state) {
+  if (Array.isArray(state?.cookie_jar) && state.cookie_jar.length) return new MetaCookieJar(state.cookie_jar);
+  const items=[];
+  for(const part of String(state?.cookie_bundle||"").split(/;\s*/)){
+    const i=part.indexOf("="); if(i<=0) continue;
+    items.push({name:part.slice(0,i),value:part.slice(i+1),domain:"fly.coupang.com",path:"/",hostOnly:true,secure:true});
   }
+  return new MetaCookieJar(items);
 }
-async function metaPost(cookies, url, payload) {
+function cookieHeader(jar, url = META_WORKER_URL) { return jar?.header ? jar.header(url) : ""; }
+async function persistCookieRotation(env, jar, generation) {
+  if (!jar?.dump) return;
+  const patch={
+    cookie_bundle: cookieHeader(jar, META_WORKER_URL),
+    cookie_jar: jar.dump(),
+    updated_at: new Date().toISOString()
+  };
+  const version = generation != null ? `&session_generation=eq.${encodeURIComponent(generation)}` : "";
+  await sbPatch(env, `meta_backend_state?id=eq.1${version}`, patch);
+}
+async function metaPost(env, jar, url, payload, generation = null) {
   const r = await fetch(url, {
     method: "POST", redirect: "manual",
     headers: {
       accept: "application/json", "accept-language": "ko-KR",
       "content-type": "application/json;charset=UTF-8", origin: "https://fly.coupang.com",
       referer: FLY_REALTIME, "user-agent": UA, "x-coupang-accept-language": "ko-KR",
-      "x-requested-with": "XMLHttpRequest", cookie: cookieHeader(cookies)
+      "x-requested-with": "XMLHttpRequest", cookie: cookieHeader(jar, url)
     },
     body: JSON.stringify(payload)
   });
-  absorbSetCookies(cookies, r);
+  jar.absorb(r, url);
+  await persistCookieRotation(env, jar, generation);
   const text = await r.text(); let body = null;
   try { body = JSON.parse(text); } catch {}
   return { status: r.status, text, body, success: r.status === 200 && (body?.message === "SUCCESS" || Array.isArray(body?.data?.content) || Array.isArray(body?.content) || Array.isArray(body?.data?.data?.content)) };
@@ -291,15 +349,16 @@ async function sessionState(env) {
   const rows = await sbGet(env, "meta_backend_state?id=eq.1&select=*");
   return rows?.[0] || null;
 }
-// MW_META_RECOVERY_20261008: preserve newer login sessions and real failure state.
-async function saveSession(env, cookies, status = "active", http = 200, error = null, expectedUpdatedAt = null) {
+// MW_META_SESSION_V2_20261008: preserve complete path/domain cookie jar and block stale collectors.
+async function saveSession(env, jar, status = "active", http = 200, error = null, expectedGeneration = null) {
   const utcNow = new Date().toISOString();
   const patch = { status, last_http_status: http, last_error: error, updated_at: utcNow };
   if (status === "active" && !error) {
-    patch.cookie_bundle = cookieHeader(cookies);
+    patch.cookie_bundle = cookieHeader(jar, META_WORKER_URL);
+    patch.cookie_jar = jar?.dump ? jar.dump() : null;
     patch.last_success_at = utcNow;
   }
-  const version = expectedUpdatedAt ? `&updated_at=eq.${encodeURIComponent(expectedUpdatedAt)}` : "";
+  const version = expectedGeneration != null ? `&session_generation=eq.${encodeURIComponent(expectedGeneration)}` : "";
   await sbPatch(env, `meta_backend_state?id=eq.1${version}`, patch);
 }
 function metaRequestError(result) {
@@ -441,10 +500,10 @@ async function processBatch(env, cookies, batch) {
   const dbCodes = await loadCampCodes(env, batch.camp_name);
   const codes = uniq(batch.meta_camp_codes?.length ? batch.meta_camp_codes : metaCampCandidates(dbCodes));
   if (!codes.length) throw new Error(`캠프 코드 없음: ${batch.camp_name}`);
-  const main = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date));
+  const main = await metaPost(env, cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date), cookies.generation);
   if (!main.success) throw metaRequestError(main);
   let fresh = null;
-  if (batch.wave === "WAVE2") fresh = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date, "20:00"));
+  if (batch.wave === "WAVE2") fresh = await metaPost(env, cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date, "20:00"), cookies.generation);
 
   const schedule = await loadSchedule(env, batch.schedule_date, batch.wave, batch.camp_name);
   const directory = await loadDriverDirectory(env);
@@ -679,65 +738,78 @@ async function processBatch(env, cookies, batch) {
   return { camp: batch.camp_name, wave: batch.wave, workers: stateRows.length, complete: campComplete, stable, collecting_after_completion: campComplete, codes };
 }
 
-async function heartbeat(env, cookies, expectedUpdatedAt = null) {
+async function heartbeat(env, cookies, expectedGeneration = null) {
   const rows = await sbGet(env, "camps?select=code&code=not.is.null&limit=30");
   const codes = metaCampCandidates((rows || []).map(r => r.code));
   const kp = kstParts();
-  const r = await metaPost(cookies, META_CAMP_URL, workerPayload(codes, "WAVE2", kp.date));
+  const r = await metaPost(env, cookies, META_CAMP_URL, workerPayload(codes, "WAVE2", kp.date), cookies.generation);
   const error = r.success ? null : metaRequestError(r);
-  await saveSession(env, cookies, r.success ? "active" : error.metaAuthRequired ? "expired" : "error", r.status, error?.message || null, expectedUpdatedAt);
+  await saveSession(env, cookies, r.success ? "active" : error.metaAuthRequired ? "expired" : "error", r.status, error?.message || null, expectedGeneration);
   return { ok: r.success, status: r.status };
 }
 async function runCollector(env, force = false) {
-  const state = await sessionState(env);
-  if (state?.collector_paused === true) return { ok: false, paused: true };
-  if (!state?.cookie_bundle) return { ok: false, error: "META_SESSION_MISSING" };
-  if (state.status === "expired" && !force) return { ok: false, error: "META_AUTH_REQUIRED", status: "expired" };
-  const cookies = parseCookieBundle(state.cookie_bundle);
-  await purgeStaleRealtimeRows(env);
-  await ensureBatches(env);
-  const due = await dueBatches(env, force), results = [];
-  let successes = 0, failure = null;
-  for (const batch of due) {
-    const lockToken = crypto.randomUUID();
-    let claimed = false;
-    try {
-      claimed = await sbPost(env, "rpc/meta_claim_realtime_batch", {
-        p_batch_id: batch.id, p_token: lockToken, p_lease_seconds: 120
-      });
-      if (!claimed) {
-        results.push({ camp: batch.camp_name, wave: batch.wave, skipped: "collector_locked" });
-        continue;
-      }
-      results.push(await processBatch(env, cookies, batch));
-      successes += 1;
-    } catch (e) {
-      const msg = String(e?.message || e);
-      failure = e;
-      results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
-      if (claimed) {
-        await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
-          status: "error", last_error: msg.slice(0,500), next_poll_at: kstIsoAt(Date.now()+300000), updated_at: nowIso()
+  const runToken = crypto.randomUUID();
+  const runClaimed = await sbPost(env, "rpc/meta_claim_collector_run", { p_token: runToken, p_lease_seconds: 150 });
+  if (!runClaimed) return { ok:false, skipped:"collector_run_locked" };
+  try {
+    const state = await sessionState(env);
+    if (state?.collector_paused === true) return { ok: false, paused: true };
+    if (!state?.cookie_bundle && !state?.cookie_jar) return { ok: false, error: "META_SESSION_MISSING" };
+    if (state.status === "expired" && !force) return { ok: false, error: "META_AUTH_REQUIRED", status: "expired" };
+
+    const cookies = cookieJarFromState(state);
+    cookies.generation = Number(state.session_generation || 0);
+
+    await purgeStaleRealtimeRows(env);
+    await ensureBatches(env);
+    const due = await dueBatches(env, force), results = [];
+    let successes = 0, failure = null;
+
+    for (const batch of due) {
+      const lockToken = crypto.randomUUID();
+      let claimed = false;
+      try {
+        claimed = await sbPost(env, "rpc/meta_claim_realtime_batch", {
+          p_batch_id: batch.id, p_token: lockToken, p_lease_seconds: 120
         });
-      }
-      if (e.metaAuthRequired || /META (401|403|302)/.test(msg)) break;
-    } finally {
-      if (claimed) {
-        try { await sbPost(env, "rpc/meta_release_realtime_batch", { p_batch_id: batch.id, p_token: lockToken }); } catch {}
+        if (!claimed) {
+          results.push({ camp: batch.camp_name, wave: batch.wave, skipped: "collector_locked" });
+          continue;
+        }
+        results.push(await processBatch(env, cookies, batch));
+        successes += 1;
+      } catch (e) {
+        const msg = String(e?.message || e);
+        failure = e;
+        results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
+        if (claimed) {
+          await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
+            status: "error", last_error: msg.slice(0,500), next_poll_at: kstIsoAt(Date.now()+60000), updated_at: nowIso()
+          });
+        }
+        if (e.metaAuthRequired || /META (401|403|302)/.test(msg)) break;
+      } finally {
+        if (claimed) {
+          try { await sbPost(env, "rpc/meta_release_realtime_batch", { p_batch_id: batch.id, p_token: lockToken }); } catch {}
+        }
       }
     }
+
+    if (failure) {
+      const expired = failure.metaAuthRequired || /META (401|403|302)/.test(String(failure.message));
+      await saveSession(env, cookies, expired ? "expired" : "error", failure.metaHttpStatus || 500, String(failure.message).slice(0,250), cookies.generation);
+    } else if (successes > 0) {
+      await saveSession(env, cookies, "active", 200, null, cookies.generation);
+    } else if (!due.length && (force || kstParts().minute % 5 === 0)) {
+      const health = await heartbeat(env, cookies, cookies.generation);
+      results.push({ heartbeat: health });
+      if (!health.ok) return { ok:false, at:nowIso(), due:0, results };
+    }
+
+    return { ok: !failure, at: nowIso(), due: due.length, successful: successes, results };
+  } finally {
+    try { await sbPost(env, "rpc/meta_release_collector_run", { p_token: runToken }); } catch {}
   }
-  if (failure) {
-    const expired = failure.metaAuthRequired || /META (401|403|302)/.test(String(failure.message));
-    await saveSession(env, cookies, expired ? "expired" : "error", failure.metaHttpStatus || 500, String(failure.message).slice(0,250), state.updated_at);
-  } else if (successes > 0) {
-    await saveSession(env, cookies, "active", 200, null, state.updated_at);
-  } else if (!due.length && (force || kstParts().minute % 5 === 0)) {
-    const health = await heartbeat(env, cookies, state.updated_at);
-    results.push({ heartbeat: health });
-    if (!health.ok) return { ok:false, at:nowIso(), due:0, results };
-  }
-  return { ok: !failure, at: nowIso(), due: due.length, successful: successes, results };
 }
 
 export default {

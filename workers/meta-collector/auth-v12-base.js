@@ -205,6 +205,21 @@ class CookieJar {
   }
 }
 
+function effectiveCookieBundle(jar, url) {
+  const header = jar.header(url);
+  const seen = new Set();
+  const out = [];
+  for (const part of String(header || "").split(/;\s*/)) {
+    const i = part.indexOf("=");
+    if (i <= 0) continue;
+    const name = part.slice(0, i);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(part);
+  }
+  return out.join("; ");
+}
+
 async function requestWithJar(jar, url, init = {}) {
   const headers = new Headers(init.headers || {});
   const cookie = jar.header(url);
@@ -533,7 +548,7 @@ async function supabaseGetState(env) {
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY 없음");
 
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/meta_backend_state?id=eq.1&select=cookie_bundle,status,last_success_at,last_http_status`, {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/meta_backend_state?id=eq.1&select=cookie_bundle,cookie_jar,session_generation,status,last_success_at,last_http_status`, {
     headers: {
       apikey: key,
       authorization: `Bearer ${key}`
@@ -545,9 +560,12 @@ async function supabaseGetState(env) {
   return rows?.[0] || null;
 }
 
-function jarFromFlyBundle(bundle) {
+function jarFromStoredState(state) {
+  if (Array.isArray(state?.cookie_jar) && state.cookie_jar.length) {
+    return new CookieJar(state.cookie_jar);
+  }
   const items = [];
-  for (const part of String(bundle || "").split(/;\s*/)) {
+  for (const part of String(state?.cookie_bundle || "").split(/;\s*/)) {
     const eq = part.indexOf("=");
     if (eq <= 0) continue;
     items.push({
@@ -578,6 +596,28 @@ async function supabasePatch(env, patch) {
   });
 
   if (!r.ok) throw new Error(`Supabase ${r.status}: ${(await r.text()).slice(0, 300)}`);
+}
+
+async function replaceBackendSession(env, jar, httpStatus = 200) {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY 없음");
+  const cookieBundle = effectiveCookieBundle(jar, META_SEARCH_URL);
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/meta_replace_backend_session`, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      authorization: `Bearer ${key}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      p_cookie_bundle: cookieBundle,
+      p_cookie_jar: jar.dump(),
+      p_http_status: httpStatus
+    })
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Supabase ${r.status}: ${text.slice(0, 300)}`);
+  return text ? JSON.parse(text) : null;
 }
 
 function bytesToB64Url(bytes) {
@@ -848,16 +888,9 @@ async function loginSubmitCode(request, env) {
 </body></html>`, 422);
   }
 
-  const cookieBundle = jar.header(FLY_REALTIME);
-  await supabasePatch(env, {
-    cookie_bundle: cookieBundle,
-    status: "active",
-    last_success_at: new Date().toISOString(),
-    last_http_status: 200,
-    last_error: null
-  });
+  await replaceBackendSession(env, jar, 200);
 
-  const names = jar.namesFor(FLY_REALTIME);
+  const names = jar.namesFor(META_SEARCH_URL);
   return page(`<!doctype html><html lang="ko"><meta charset="utf-8"><title>META 성공</title>
 <body style="font-family:Arial;background:#f5f6f8;padding:40px 18px">
 <div style="max-width:650px;margin:auto;background:white;padding:28px;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,.08)">
@@ -877,15 +910,12 @@ async function testDb(env) {
     return out({ ok: false, stage: "db-cookie", error: "DB cookie_bundle 비어 있음" }, 422);
   }
 
-  const jar = jarFromFlyBundle(state.cookie_bundle);
+  const jar = jarFromStoredState(state);
   const meta = await queryMeta(jar);
 
-  await supabasePatch(env, meta.success ? {
-    status: "active",
-    last_success_at: new Date().toISOString(),
-    last_http_status: 200,
-    last_error: null
-  } : {
+  if (meta.success) {
+    await replaceBackendSession(env, jar, 200);
+  } else await supabasePatch(env, {
     status: "expired",
     last_http_status: meta.response.status,
     last_error: `DB cookie META ${meta.response.status}: ${meta.text.slice(0, 250)}`

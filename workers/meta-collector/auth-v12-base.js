@@ -754,7 +754,7 @@ button{width:100%;margin-top:14px;border:0;border-radius:12px;padding:15px;font-
 <h1>META 문자 인증</h1>
 <div class="sub">${esc(masked || "등록된 휴대폰")}으로 새 인증번호가 발송됐음.<br>방금 받은 <b>최신 6자리 코드</b> 입력하면 됨.</div>
 <form method="post" action="/login-submit-code" autocomplete="off">
-<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus placeholder="000000">
+<input name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus placeholder="000000">
 <input type="hidden" name="state" value="${esc(token)}">
 <button type="submit">인증하고 META 접속 테스트</button>
 </form>
@@ -866,8 +866,8 @@ async function loginSubmitCode(request, env) {
 <p><b>message:</b> ${esc(meta.json?.message || "SUCCESS")}</p>
 <p><b>DB 저장:</b> meta_backend_state.cookie_bundle 갱신 완료</p>
 <p><b>FLY 쿠키:</b> ${esc(names.join(", "))}</p>
-<p>이제 DB에 저장된 새 세션으로 서버 수집을 계속 테스트하면 됨.</p>
-<p><a href="/test-db">DB 쿠키만으로 META 재조회 테스트</a></p>
+<p>Login verified. Realtime collection restart requested.</p>
+<p><a href="https://maroowell.com/realtime">Return to MAROOWELL realtime</a></p>
 </div></body></html>`);
 }
 

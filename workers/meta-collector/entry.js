@@ -291,10 +291,25 @@ async function sessionState(env) {
   const rows = await sbGet(env, "meta_backend_state?id=eq.1&select=*");
   return rows?.[0] || null;
 }
-async function saveSession(env, cookies, status = "active", http = 200, error = null) {
-  const patch = { cookie_bundle: cookieHeader(cookies), status, last_http_status: http, last_error: error, updated_at: nowIso() };
-  if (!error) patch.last_success_at = nowIso();
-  await sbPatch(env, "meta_backend_state?id=eq.1", patch);
+// MW_META_RECOVERY_20261008: preserve newer login sessions and real failure state.
+async function saveSession(env, cookies, status = "active", http = 200, error = null, expectedUpdatedAt = null) {
+  const utcNow = new Date().toISOString();
+  const patch = { status, last_http_status: http, last_error: error, updated_at: utcNow };
+  if (status === "active" && !error) {
+    patch.cookie_bundle = cookieHeader(cookies);
+    patch.last_success_at = utcNow;
+  }
+  const version = expectedUpdatedAt ? `&updated_at=eq.${encodeURIComponent(expectedUpdatedAt)}` : "";
+  await sbPatch(env, `meta_backend_state?id=eq.1${version}`, patch);
+}
+function metaRequestError(result) {
+  const authRequired = [401,403,302,303,307,308].includes(Number(result.status)) || /^\s*</.test(String(result.text || ""));
+  const error = new Error(authRequired
+    ? `META_AUTH_REQUIRED (HTTP ${result.status}): Please sign in to META again.`
+    : `META_REQUEST_FAILED (HTTP ${result.status})`);
+  error.metaAuthRequired = authRequired;
+  error.metaHttpStatus = Number(result.status) || 500;
+  return error;
 }
 async function loadCampCodes(env, camp) {
   const rows = await sbGet(env, `camps?select=code&camp=eq.${encodeURIComponent(camp)}&code=not.is.null`);
@@ -393,9 +408,9 @@ async function purgeStaleRealtimeRows(env) {
   }
   return stale.length;
 }
-async function dueBatches(env) {
+async function dueBatches(env, force = false) {
   const now = encodeURIComponent(nowIso());
-  const rows = await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)&or=(next_poll_at.is.null,next_poll_at.lte.${now})&order=started_at.asc`) || [];
+  const rows = await sbGet(env, `meta_realtime_batch?select=*&status=in.(collecting,completion_candidate,overdue,error)${force ? "" : `&or=(next_poll_at.is.null,next_poll_at.lte.${now})`}&order=started_at.asc`) || [];
   return rows.filter(isActiveBatchDate);
 }
 async function storeFreshRows(env, batch, schedule, directory, fresh, now) {
@@ -427,7 +442,7 @@ async function processBatch(env, cookies, batch) {
   const codes = uniq(batch.meta_camp_codes?.length ? batch.meta_camp_codes : metaCampCandidates(dbCodes));
   if (!codes.length) throw new Error(`캠프 코드 없음: ${batch.camp_name}`);
   const main = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date));
-  if (!main.success) throw new Error(`META ${main.status}: ${main.text.slice(0, 240)}`);
+  if (!main.success) throw metaRequestError(main);
   let fresh = null;
   if (batch.wave === "WAVE2") fresh = await metaPost(cookies, META_WORKER_URL, workerPayload(codes, batch.wave, batch.meta_work_date, "20:00"));
 
@@ -664,60 +679,69 @@ async function processBatch(env, cookies, batch) {
   return { camp: batch.camp_name, wave: batch.wave, workers: stateRows.length, complete: campComplete, stable, collecting_after_completion: campComplete, codes };
 }
 
-async function heartbeat(env, cookies) {
+async function heartbeat(env, cookies, expectedUpdatedAt = null) {
   const rows = await sbGet(env, "camps?select=code&code=not.is.null&limit=30");
   const codes = metaCampCandidates((rows || []).map(r => r.code));
   const kp = kstParts();
   const r = await metaPost(cookies, META_CAMP_URL, workerPayload(codes, "WAVE2", kp.date));
-  await saveSession(env, cookies, r.success ? "active" : "expired", r.status, r.success ? null : `heartbeat ${r.status}`);
+  const error = r.success ? null : metaRequestError(r);
+  await saveSession(env, cookies, r.success ? "active" : error.metaAuthRequired ? "expired" : "error", r.status, error?.message || null, expectedUpdatedAt);
   return { ok: r.success, status: r.status };
 }
 async function runCollector(env, force = false) {
   const state = await sessionState(env);
-  if (!state?.cookie_bundle) return { ok: false, error: "META DB session 없음" };
+  if (state?.collector_paused === true) return { ok: false, paused: true };
+  if (!state?.cookie_bundle) return { ok: false, error: "META_SESSION_MISSING" };
+  if (state.status === "expired" && !force) return { ok: false, error: "META_AUTH_REQUIRED", status: "expired" };
   const cookies = parseCookieBundle(state.cookie_bundle);
   await purgeStaleRealtimeRows(env);
   await ensureBatches(env);
-  const due = await dueBatches(env), results = [];
+  const due = await dueBatches(env, force), results = [];
+  let successes = 0, failure = null;
   for (const batch of due) {
     const lockToken = crypto.randomUUID();
     let claimed = false;
     try {
       claimed = await sbPost(env, "rpc/meta_claim_realtime_batch", {
-        p_batch_id: batch.id,
-        p_token: lockToken,
-        p_lease_seconds: 120
+        p_batch_id: batch.id, p_token: lockToken, p_lease_seconds: 120
       });
       if (!claimed) {
         results.push({ camp: batch.camp_name, wave: batch.wave, skipped: "collector_locked" });
         continue;
       }
       results.push(await processBatch(env, cookies, batch));
+      successes += 1;
     } catch (e) {
       const msg = String(e?.message || e);
+      failure = e;
       results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
       if (claimed) {
         await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
-          status: "error", last_error: msg.slice(0, 500), next_poll_at: kstIsoAt(Date.now() + 300000), updated_at: nowIso()
+          status: "error", last_error: msg.slice(0,500), next_poll_at: kstIsoAt(Date.now()+300000), updated_at: nowIso()
         });
       }
-      if (/META (401|403|302)/.test(msg)) { await saveSession(env, cookies, "expired", Number(msg.match(/META (\d+)/)?.[1] || 401), msg.slice(0, 250)); break; }
+      if (e.metaAuthRequired || /META (401|403|302)/.test(msg)) break;
     } finally {
       if (claimed) {
-        try {
-          await sbPost(env, "rpc/meta_release_realtime_batch", { p_batch_id: batch.id, p_token: lockToken });
-        } catch {}
+        try { await sbPost(env, "rpc/meta_release_realtime_batch", { p_batch_id: batch.id, p_token: lockToken }); } catch {}
       }
     }
   }
-  const kp = kstParts();
-  if (!due.length && (force || kp.minute % 5 === 0)) results.push({ heartbeat: await heartbeat(env, cookies) });
-  else if (due.length) await saveSession(env, cookies, "active", 200, null);
-  return { ok: true, at: nowIso(), due: due.length, results };
+  if (failure) {
+    const expired = failure.metaAuthRequired || /META (401|403|302)/.test(String(failure.message));
+    await saveSession(env, cookies, expired ? "expired" : "error", failure.metaHttpStatus || 500, String(failure.message).slice(0,250), state.updated_at);
+  } else if (successes > 0) {
+    await saveSession(env, cookies, "active", 200, null, state.updated_at);
+  } else if (!due.length && (force || kstParts().minute % 5 === 0)) {
+    const health = await heartbeat(env, cookies, state.updated_at);
+    results.push({ heartbeat: health });
+    if (!health.ok) return { ok:false, at:nowIso(), due:0, results };
+  }
+  return { ok: !failure, at: nowIso(), due: due.length, successful: successes, results };
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
     try {
       if (path === "/collector/run") return json(await runCollector(env, true));
@@ -725,14 +749,21 @@ export default {
         const batches = await sbGet(env, "meta_realtime_batch?select=*&order=schedule_date.desc,started_at.desc&limit=50");
         return json({ ok: true, batches });
       }
-      if (path.startsWith("/login-") || path === "/test-db") return authWorker.fetch(request, env);
+      if (path.startsWith("/login-") || path === "/test-db") {
+        const response = await authWorker.fetch(request, env);
+        if (path === "/login-submit-code" && request.method === "POST" && response.ok) {
+          const resume = runCollector(env, true).catch(e => console.error("META resume failed:", e?.message));
+          if (ctx?.waitUntil) ctx.waitUntil(resume); else await resume;
+        }
+        return response;
+      }
       return json({ ok: true, message: "Maroowell META collector", endpoints: ["/collector/run", "/collector/status", "/login-send-code", "/test-db"] });
     } catch (e) { return json({ ok: false, error: String(e?.message || e) }, 500); }
   },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runCollector(env).catch(async e => {
       try {
-        await sbPatch(env, "meta_backend_state?id=eq.1", { status: "error", last_error: `collector cron: ${String(e?.message || e).slice(0, 300)}`, updated_at: nowIso() });
+        await sbPatch(env, "meta_backend_state?id=eq.1", { status: "error", last_error: `collector cron: ${String(e?.message || e).slice(0, 300)}`, updated_at: new Date().toISOString() });
       } catch {}
     }));
   }

@@ -85,6 +85,12 @@ var login_worker_v2_default = {
         return new Response(body, { status: response.status, headers });
       }
 
+      if (["/realtime", "/realtime.html", "/public/realtime"].includes(path) && response.ok) {
+        return withNoStore(response, "text/html; charset=utf-8");
+      }
+      if (path === "/meta-connection.js" && response.ok) {
+        return withNoStore(response, "application/javascript; charset=utf-8");
+      }
       if ((path === "/coupang_camp" || path === "/coupang_camp_map") && response.ok) {
         return withNoStore(response, "text/html; charset=utf-8");
       }

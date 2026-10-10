@@ -1,0 +1,43 @@
+name: Inspect admin access Worker bindings
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/inspect-admin-access-bindings.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect metadata without exposing any secret values
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, json, urllib.request, urllib.error
+          token = os.environ.get("CF_TOKEN")
+          print("GITHUB_CLOUDFLARE_TOKEN_PRESENT:", bool(token))
+          print("GITHUB_SUPABASE_SERVICE_ROLE_KEY_PRESENT:", bool(os.environ.get("GH_SUPABASE_SERVICE_ROLE_KEY")))
+          if not token:
+              raise RuntimeError("Missing Cloudflare GitHub Actions token")
+          root = "https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46/workers/scripts"
+          for worker in ("admin-access-api", "purple-river-0717", "cleansinghistory"):
+              req=urllib.request.Request(root + "/" + worker + "/settings", headers={"Authorization":"Bearer "+token})
+              try:
+                  with urllib.request.urlopen(req, timeout=25) as r:
+                      d=json.load(r)
+                  if not d.get("success"):
+                      print(worker, "API_FAILED")
+                      continue
+                  bindings=((d.get("result") or {}).get("bindings") or [])
+                  print(worker, json.dumps([{"name":b.get("name"),"type":b.get("type")} for b in bindings], ensure_ascii=False))
+              except urllib.error.HTTPError as e:
+                  print(worker, "HTTP_"+str(e.code))
+          PY

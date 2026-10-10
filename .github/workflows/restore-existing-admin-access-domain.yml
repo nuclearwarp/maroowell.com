@@ -1,0 +1,46 @@
+name: Restore existing admin-access custom domain
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/restore-existing-admin-access-domain.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reattach domain to existing admin-access Worker with stored secrets
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os,json,urllib.request,urllib.error,sys
+          base='https://api.cloudflare.com/client/v4'
+          account='0f644373a9db40f2b36e4ffece348c46'
+          headers={'Authorization':'Bearer '+os.environ['CF_TOKEN'],'Content-Type':'application/json'}
+          def api(path,method='GET',payload=None):
+              data=None if payload is None else json.dumps(payload).encode()
+              request=urllib.request.Request(base+path,data=data,headers=headers,method=method)
+              try:
+                  with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+              except urllib.error.HTTPError as e:
+                  raise RuntimeError(str(e.code)+': '+e.read().decode('utf-8','replace')[:400])
+          p='/accounts/'+account+'/workers/domains'
+          existing=api(p+'?hostname=admin-access.maroowell.com')
+          row=next((x for x in existing.get('result',[]) if x.get('hostname')=='admin-access.maroowell.com'),None)
+          if not row:raise RuntimeError('Domain not found')
+          print('BEFORE',json.dumps({'hostname':row.get('hostname'),'service':row.get('service'),'zone_name':row.get('zone_name')},ensure_ascii=False))
+          if row['service']!='admin-access':
+              payload={'hostname':row['hostname'],'service':'admin-access','zone_id':row['zone_id'],'zone_name':row['zone_name']}
+              updated=api(p,'PUT',payload)
+              if not updated.get('success'):raise RuntimeError('Domain update rejected')
+          after=api(p+'?hostname=admin-access.maroowell.com')
+          final=next((x for x in after.get('result',[]) if x.get('hostname')=='admin-access.maroowell.com'),None)
+          print('AFTER',json.dumps({'hostname':final.get('hostname'),'service':final.get('service'),'zone_name':final.get('zone_name')},ensure_ascii=False))
+          if final['service']!='admin-access':raise RuntimeError('Custom domain still points to wrong Worker')
+          PY

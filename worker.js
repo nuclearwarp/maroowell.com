@@ -1231,7 +1231,7 @@ async function saveVendorDetails(env, vendorId, body) {
   const values={};
   for(const field of VENDOR_DETAIL_FIELDS)if(Object.prototype.hasOwnProperty.call(body,field))values[field]=safeTrim(body[field])||null;
   if(!Object.keys(values).length)return;
-  if(values.email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(values.email))throw routeHttpError(400,"올바른 이메일을 입력해주세요.");
+  if(values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email))throw routeHttpError(400,"올바른 이메일을 입력해주세요.");
   await supabaseFetch(env,"/rest/v1/vendor_details?on_conflict=vendor_id",{
     method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},
     body:JSON.stringify({vendor_id:vendorId,...values,updated_at:new Date().toISOString()})

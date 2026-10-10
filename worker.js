@@ -93,7 +93,7 @@ export default {
         if(request.method==="POST")return cors(await handleVendorAdminCreate(request,env));
         return cors(json({error:"Method Not Allowed"},405));
       }
-      const vendorAdminMatch=path.match(/^\\/vendors\\/admin\\/([0-9a-fA-F-]{36})$/);
+      const vendorAdminMatch=path.match(/^\/vendors\/admin\/([0-9a-fA-F-]{36})$/);
       if(vendorAdminMatch){
         const id=vendorAdminMatch[1];
         if(request.method==="GET")return cors(await handleVendorAdminDetail(request,url,env,id));

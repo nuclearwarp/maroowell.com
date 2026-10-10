@@ -88,6 +88,18 @@ export default {
         }
       }
 
+      if(path === "/vendors/admin"){
+        if(request.method==="GET")return cors(await handleVendorsAdminGet(request,url,env));
+        if(request.method==="POST")return cors(await handleVendorAdminCreate(request,env));
+        return cors(json({error:"Method Not Allowed"},405));
+      }
+      const vendorAdminMatch=path.match(/^\\/vendors\\/admin\\/([0-9a-fA-F-]{36})$/);
+      if(vendorAdminMatch){
+        const id=vendorAdminMatch[1];
+        if(request.method==="GET")return cors(await handleVendorAdminDetail(request,url,env,id));
+        if(request.method==="PATCH")return cors(await handleVendorAdminPatch(request,env,id));
+        return cors(json({error:"Method Not Allowed"},405));
+      }
       if (path === "/vendors") {
         if (request.method === "GET") return cors(await handleVendorsGet(url, env));
         if (request.method === "POST") {
@@ -1202,6 +1214,64 @@ function scoreVendorSearch(row, qLower) {
 function vendorDedupeKey(row) {
   if (row?.id != null) return `id:${row.id}`;
   return `key:${safeTrim(row?.business_number)}|${safeTrim(row?.name)}`;
+}
+
+const VENDOR_DETAIL_FIELDS = ["vendor_contact","business_type","business_category","representative_name","email","company_address","memo"];
+async function getVendorDetails(env, ids) {
+  if (!ids.length) return new Map();
+  const q=new URLSearchParams({select:"*",vendor_id:"in.("+ids.join(",")+")",limit:String(Math.min(ids.length,1000))});
+  const rows=await supabaseFetch(env,"/rest/v1/vendor_details?"+q,{method:"GET"});
+  return new Map((rows||[]).map(v=>[v.vendor_id,v]));
+}
+async function vendorAdminRows(env, rows) {
+  const details=await getVendorDetails(env,rows.map(x=>x.id).filter(Boolean));
+  return rows.map(row=>({...row,...(details.get(row.id)||{}),vendor_id:undefined}));
+}
+async function saveVendorDetails(env, vendorId, body) {
+  const values={};
+  for(const field of VENDOR_DETAIL_FIELDS)if(Object.prototype.hasOwnProperty.call(body,field))values[field]=safeTrim(body[field])||null;
+  if(!Object.keys(values).length)return;
+  if(values.email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(values.email))throw routeHttpError(400,"올바른 이메일을 입력해주세요.");
+  await supabaseFetch(env,"/rest/v1/vendor_details?on_conflict=vendor_id",{
+    method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},
+    body:JSON.stringify({vendor_id:vendorId,...values,updated_at:new Date().toISOString()})
+  });
+}
+async function handleVendorsAdminGet(request,url,env) {
+  await requireVendorAdminAccess(request,env);
+  const r=await handleVendorsGet(url,env);
+  const j=await r.json();
+  return json({rows:await vendorAdminRows(env,j.rows||[])},200,{"Cache-Control":"no-store"});
+}
+async function handleVendorAdminDetail(request,url,env,id){
+  await requireVendorAdminAccess(request,env);
+  const r=await handleVendorGetById(url,env,id);
+  if(r.status!==200)return r;
+  const j=await r.json();
+  const rows=await vendorAdminRows(env,[j.row]);
+  return json({...j,row:rows[0]});
+}
+async function handleVendorAdminCreate(request,env){
+  await requireVendorAdminAccess(request,env);
+  const body=await readJson(request);
+  const res=await handleVendorCreate(new Request(request.url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),env);
+  if(!res.ok)return res;
+  const j=await res.json();
+  if(j.row?.id)await saveVendorDetails(env,j.row.id,body);
+  return json({row:(await vendorAdminRows(env,[j.row]))[0]});
+}
+async function handleVendorAdminPatch(request,env,id){
+  await requireVendorAdminAccess(request,env);
+  const body=await readJson(request);
+  const base={};
+  for(const key of ["name","nickname","business_number","vendor_code"])if(Object.prototype.hasOwnProperty.call(body,key))base[key]=body[key];
+  if(Object.keys(base).length){
+    const res=await handleVendorPatch(new Request(request.url,{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(base)}),env,id);
+    if(!res.ok)return res;
+  }else if(!await findVendorById(env,id))return json({error:"Vendor not found"},404);
+  await saveVendorDetails(env,id,body);
+  const row=await findVendorById(env,id);
+  return json({row:(await vendorAdminRows(env,[row]))[0]});
 }
 
 async function handleVendorsGet(url, env) {

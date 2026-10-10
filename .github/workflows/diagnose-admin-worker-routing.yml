@@ -1,0 +1,44 @@
+name: Diagnose admin Worker route and bindings
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnose-admin-worker-routing.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect Worker routes and secret NAMES only
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import urllib.request, urllib.error, json, os
+          base='https://api.cloudflare.com/client/v4/accounts/0f644373a9db40f2b36e4ffece348c46'
+          hdr={'Authorization': 'Bearer '+os.environ['CF_TOKEN']}
+          def get(path):
+              req=urllib.request.Request(base+path,headers=hdr)
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as res: return json.load(res)
+              except urllib.error.HTTPError as e:
+                  return {'status':e.code,'message':'HTTP error'}
+          domains=get('/workers/domains?hostname=admin-access.maroowell.com')
+          print('DOMAIN_RESULTS',json.dumps({'success':domains.get('success'),'result':[{k:r.get(k) for k in ['hostname','service','environment','enabled','zone_name']} for r in domains.get('result',[])]},ensure_ascii=False))
+          for name in ['admin-access','admin-access-api']:
+              settings=get('/workers/scripts/'+name+'/settings')
+              bindings=(settings.get('result') or {}).get('bindings',[])
+              print('SCRIPT',name,'GET_STATUS',settings.get('status',200),'NAMES',json.dumps([{'name':b.get('name'),'type':b.get('type')} for b in bindings]))
+              # Detect public admin endpoint handlers without printing source or secrets
+              request=urllib.request.Request(base+'/workers/scripts/'+name+'/content',headers=hdr)
+              try:
+                  with urllib.request.urlopen(request,timeout=25) as res:
+                      raw=res.read().decode('utf-8','replace')
+                  print('SCRIPT_FEATURES',name,json.dumps({'has_admin_me':'/admin/me' in raw,'has_users':'/admin/access/users' in raw,'has_set':'/admin/access/set' in raw,'has_admin_prefix':'/admin/access/' in raw,'has_health':'/health' in raw,'byte_count':len(raw)}))
+              except urllib.error.HTTPError as e: print('SCRIPT_FEATURES',name,'HTTP',e.code)
+          PY

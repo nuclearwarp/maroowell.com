@@ -1216,7 +1216,7 @@ function vendorDedupeKey(row) {
   return `key:${safeTrim(row?.business_number)}|${safeTrim(row?.name)}`;
 }
 
-const VENDOR_DETAIL_FIELDS = ["vendor_contact","business_type","business_category","representative_name","email","company_address","memo"];
+const VENDOR_DETAIL_FIELDS = ["vendor_representative","business_type","business_category","representative_name","email","company_address","memo"];
 async function getVendorDetails(env, ids) {
   if (!ids.length) return new Map();
   const q=new URLSearchParams({select:"*",vendor_id:"in.("+ids.join(",")+")",limit:String(Math.min(ids.length,1000))});
@@ -1225,11 +1225,14 @@ async function getVendorDetails(env, ids) {
 }
 async function vendorAdminRows(env, rows) {
   const details=await getVendorDetails(env,rows.map(x=>x.id).filter(Boolean));
-  return rows.map(row=>({...row,...(details.get(row.id)||{}),vendor_id:undefined}));
+  return rows.map(row=>{const detail=details.get(row.id)||{};return {...row,...detail,vendor_contact:detail.vendor_representative??null,vendor_id:undefined};});
 }
 async function saveVendorDetails(env, vendorId, body) {
   const values={};
-  for(const field of VENDOR_DETAIL_FIELDS)if(Object.prototype.hasOwnProperty.call(body,field))values[field]=safeTrim(body[field])||null;
+  for(const field of VENDOR_DETAIL_FIELDS){
+    const source=field==="vendor_representative" && Object.prototype.hasOwnProperty.call(body,"vendor_contact")?"vendor_contact":field;
+    if(Object.prototype.hasOwnProperty.call(body,source))values[field]=safeTrim(body[source])||null;
+  }
   if(!Object.keys(values).length)return;
   if(values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email))throw routeHttpError(400,"올바른 이메일을 입력해주세요.");
   await supabaseFetch(env,"/rest/v1/vendor_details?on_conflict=vendor_id",{

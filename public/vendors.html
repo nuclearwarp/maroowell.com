@@ -20,6 +20,37 @@ dialog{border-radius:18px}
 #editor .dialoghead{background:linear-gradient(180deg,#fff,#fbfdff)}
 @media(max-width:1460px){main{padding:16px 14px 42px}.mw-topbar{margin:8px 10px 0}}
 @media(max-width:650px){.mw-brandtext p{display:none}.mw-menuchip{display:none}.mw-topbar{gap:6px}.mw-topbar button{padding:8px 10px}.mw-brandtext h1{font-size:17px}.mw-brand img{width:36px;height:36px}}
+/* Full-width vendor workspace, independent vertical table scrolling and fixed headers. */
+:root{--vendor-page-gutter:clamp(10px,1.1vw,24px)}
+.mw-topbar{width:calc(100% - 2 * var(--vendor-page-gutter));max-width:none;margin:8px var(--vendor-page-gutter) 0}
+main{width:100%;max-width:none;margin:0;padding:14px var(--vendor-page-gutter) 24px}
+main>.card{width:100%;min-width:0;padding:14px 16px}
+.tablewrap{width:100%;height:clamp(400px,calc(100dvh - 336px),1200px);overflow-x:auto;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;border:1px solid #e4eaf2;border-radius:11px}
+.tablewrap table{width:100%;min-width:1570px;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:12.5px}
+.tablewrap th,.tablewrap td{height:53px;padding:10px 9px;border-bottom:1px solid #e9eef5;text-align:left;vertical-align:middle;white-space:normal;line-height:1.45}
+.tablewrap thead th{position:sticky;top:0;z-index:4;height:46px;background:#f2f6fb;color:#4c6075;font-weight:800;white-space:nowrap;box-shadow:0 1px 0 #dfe6ef}
+.tablewrap tbody td{background:#fff}
+.tablewrap tbody tr:hover td{background:#f7faff}
+.tablewrap th:first-child,.tablewrap td:first-child{position:sticky;left:0;z-index:3;background:#fff;box-shadow:1px 0 0 #e4eaf2}
+.tablewrap thead th:first-child{z-index:7;background:#f2f6fb}
+.tablewrap th:last-child,.tablewrap td:last-child{position:sticky;right:0;z-index:3;background:#fff;box-shadow:-1px 0 0 #e4eaf2;text-align:center}
+.tablewrap thead th:last-child{z-index:7;background:#f2f6fb}
+.tablewrap tbody tr:hover td:first-child,.tablewrap tbody tr:hover td:last-child{background:#f7faff}
+.tablewrap thead th:nth-child(1){width:17%}
+.tablewrap thead th:nth-child(2){width:9%}
+.tablewrap thead th:nth-child(3){width:10%}
+.tablewrap thead th:nth-child(4){width:8%}
+.tablewrap thead th:nth-child(5){width:6.5%}
+.tablewrap thead th:nth-child(6){width:6.5%}
+.tablewrap thead th:nth-child(7){width:7%}
+.tablewrap thead th:nth-child(8){width:11%}
+.tablewrap thead th:nth-child(9){width:12%}
+.tablewrap thead th:nth-child(10){width:9%}
+.tablewrap thead th:nth-child(11){width:4%}
+.tablewrap .cell-value{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.tablewrap .cell-value.cell-multiline{white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2}
+.tablewrap td button{display:inline-flex;align-items:center;justify-content:center;min-width:50px;padding:7px 9px;border-color:#bfcede;font-size:12px}
+@media(max-width:850px){.tablewrap{height:clamp(350px,calc(100dvh - 340px),900px)}main>.card{padding:12px}.tablewrap table{min-width:1550px}}
 </style></head><body>
 <header class="mw-topbar"><a href="#" id="mwBoardMenuToggle" class="mw-brand" title="마루웰 메뉴 열기"><img src="/favicon.ico?v=2" alt="MW"><div class="mw-brandtext"><h1>벤더 관리</h1><p>업체 기본정보 · 담당자 · 업태/업종 · 주소 · 메모</p></div><span class="mw-menuchip">메뉴</span></a><div class="mw-grow"></div><button id="back" class="mw-home">Home</button><button id="logout" class="mw-logout">로그아웃</button></header>
 <main><section class="card toolbar"><input id="search" placeholder="상호명 / 별칭 / 사업자번호 검색"><button id="refresh">조회</button><button id="add" class="primary">+ 벤더 추가</button><span id="count" class="sub"></span></section><section class="card"><div id="status" class="status">로그인 및 권한 확인 중...</div><div class="tablewrap"><table><thead><tr><th>상호명 (가나다순)</th><th>별칭</th><th>사업자번호</th><th>벤더 대표</th><th>업태</th><th>업종</th><th>대표자</th><th>메일주소</th><th>회사주소</th><th>메모</th><th>관리</th></tr></thead><tbody id="rows"></tbody></table></div></section></main>
@@ -38,7 +69,7 @@ const $=id=>document.getElementById(id), esc=s=>String(s??"").replace(/[&<>"']/g
 let sb,rows=[],editId=null,loading=false;
 const status=(m,bad=false)=>{ $("status").textContent=m;$("status").classList.toggle("red",bad);};
 async function api(path,opt={}){const {data,error}=await sb.auth.getSession();if(error)throw error;if(!data?.session?.access_token)throw Error("로그인 세션이 필요합니다.");const res=await fetch("https://route.maroowell.com/vendors/admin"+path,{...opt,headers:{"Authorization":"Bearer "+data.session.access_token,"Content-Type":"application/json",...opt.headers},cache:"no-store"});const json=await res.json().catch(()=>({}));if(!res.ok)throw Error(json.error||"HTTP "+res.status);return json;}
-function render(){const q=$("search").value.toLowerCase().trim(),selected=rows.filter(v=>!q||["name","nickname","business_number"].some(k=>String(v[k]||"").toLowerCase().includes(q)));$("count").textContent="전체 "+rows.length+"개 / 표시 "+selected.length+"개";$("rows").innerHTML=selected.map(v=>'<tr>'+["name","nickname","business_number","vendor_contact","business_type","business_category","representative_name","email","company_address","memo"].map(k=>'<td class="'+(k==="memo"?"memo":"")+'">'+esc(v[k]||"-")+'</td>').join("")+'<td><button data-edit="'+esc(v.id)+'">수정</button></td></tr>').join("")||'<tr><td colspan="11" class="muted">조회된 벤더가 없습니다.</td></tr>';}
+function render(){const q=$("search").value.toLowerCase().trim(),selected=rows.filter(v=>!q||["name","nickname","business_number"].some(k=>String(v[k]||"").toLowerCase().includes(q)));$("count").textContent="전체 "+rows.length+"개 / 표시 "+selected.length+"개";$("rows").innerHTML=selected.map(v=>'<tr>'+["name","nickname","business_number","vendor_contact","business_type","business_category","representative_name","email","company_address","memo"].map(k=>'<td class="'+(k==="memo"?"memo":"")+'"><span class="cell-value'+((k==="memo"||k==="company_address")?" cell-multiline":"")+'" title="'+esc(v[k]||"-")+'">'+esc(v[k]||"-")+'</span></td>').join("")+'<td><button data-edit="'+esc(v.id)+'">수정</button></td></tr>').join("")||'<tr><td colspan="11" class="muted">조회된 벤더가 없습니다.</td></tr>';}
 async function load(){if(loading)return;loading=true;$("refresh").disabled=true;status("벤더를 불러오는 중...");try{const out=await api("?limit=1000");rows=(out.rows||[]).sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"ko-KR",{sensitivity:"base",numeric:true})||String(a.nickname||"").localeCompare(String(b.nickname||""),"ko-KR"));render();status("벤더 정보 "+rows.length+"건 조회 완료 · 상호 가나다순");}catch(e){status("조회 실패: "+e.message,true);}finally{loading=false;$("refresh").disabled=false;}}
 function open(id){editId=id||null;$("form").reset();$("saveState").textContent="";$("dialogTitle").textContent=editId?"벤더 수정":"벤더 추가";if(editId){const v=rows.find(x=>x.id===editId);if(!v)return;for(const k of fields){if($("form").elements[k])$("form").elements[k].value=v[k]??""}}$("editor").showModal();}
 async function save(e){e.preventDefault();const submit=$("save");submit.disabled=true;$("saveState").textContent="저장 중...";try{const o={};for(const k of fields)o[k]=String($("form").elements[k]?.value||"").trim();if(!o.name)throw Error("상호명은 필수입니다.");if(o.business_number.replace(/\D/g,"").length!==10)throw Error("사업자번호는 숫자 10자리입니다.");if(editId){const original=rows.find(v=>v.id===editId);if(original){for(const k of ["name","nickname","business_number"]){if(o[k]===String(original[k]??"").trim())delete o[k];}}}await api(editId?"/"+encodeURIComponent(editId):"",{method:editId?"PATCH":"POST",body:JSON.stringify(o)});$("editor").close();await load();}catch(err){$("saveState").textContent=err.message;}finally{submit.disabled=false;}}

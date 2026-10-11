@@ -42,8 +42,11 @@ def main():
             raise RuntimeError('Worker marker mismatch, manual review required')
         print('V75.2 already deployed; nothing to change')
         return
-    if old_hash!=BASE_SHA256:
-        raise RuntimeError('Live Worker differs from audited V75.1 code: deployment safely cancelled')
+    if old_hash!=BASE_SHA256 and not (
+        before.startswith('async function decodeTerrariumRgbPng(') and
+        hashlib.sha256(('\\n\\n'+before).encode('utf-8')).hexdigest()==BASE_SHA256
+    ):
+        raise RuntimeError('Live Worker differs beyond the two leading blank lines; deployment cancelled')
     after=patch(before)
     next_hash=hashlib.sha256(after.encode('utf-8')).hexdigest()
     with tempfile.TemporaryDirectory() as tmp:

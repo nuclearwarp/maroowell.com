@@ -2357,7 +2357,7 @@
   const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
   // 실제 계산은 Cloudflare Queue에서도 최대 3개로 제한한다.
   // 프론트도 3개까지만 동시에 제출/상태조회하여 공공데이터 원천 burst를 과도하게 만들지 않는다.
-  const BUILDING_CALC_CONCURRENCY = 3;
+  const BUILDING_CALC_CONCURRENCY = 1; // Stop launching more routes after a source outage.
   const BUILDING_FRONT_DISCOVERY_VERSION = "V74_NO_MANUAL_APARTMENT_OVERRIDES";
 
   const BUILDING_GEOCODE_CONCURRENCY = 3;
@@ -4947,6 +4947,13 @@
       let message=String(progress.message||"백그라운드에서 세대수를 계산하고 있습니다.");
       if(total>0)message+=` · ${Math.min(processed,total).toLocaleString("ko-KR")}/${total.toLocaleString("ko-KR")}`;
       updateMessage?.(message);
+      // A queued job with a confirmed upstream failure must not be polled indefinitely.
+      // It remains visible as an error until the operator requests another analysis.
+      if(status==="queued" && Number(data?.progress?.nextRetryAt ? Date.parse(data.progress.nextRetryAt) : 0)>Date.now() && data?.error){
+        const err=new Error("원천 API 장애로 자동 조회를 중단했습니다. 수동 새로고침으로 다시 요청해 주세요.");
+        err.sourceUnavailable=true;
+        throw err;
+      }
 
       if(status==="completed"){
         if(!data?.result?.buildingStats)throw new Error("백그라운드 분석 결과가 비어 있습니다.");
@@ -5091,6 +5098,7 @@
     try{
       const accessToken=await getTerrainAccessToken();
       const jobs=packs.map((pack,index)=>({pack,index,routeKey:terrainPackRouteKey(pack,index)}));
+      let sourceUnavailable=false;
 
       for(const job of jobs){
         const previous=buildingResultByRouteKey.get(job.routeKey);
@@ -5159,6 +5167,7 @@
       let calcCursor=0,calcDone=0;
       async function calcWorker(){
         while(true){
+          if(sourceUnavailable)return;
           const i=calcCursor++;
           if(i>=calcJobs.length)return;
           if(requestSeq!==buildingRequestSeq)return;
@@ -5181,6 +5190,7 @@
             }
             if(error?.name==="AbortError")message="캐시 확인 요청이 시간초과되었습니다. 백그라운드 계산으로 전환해 다시 시도해 주세요.";
             buildingResultByRouteKey.set(job.routeKey,{status:"error",error:message});
+            if(error?.sourceUnavailable || /원천 API 장애|원천 응답|Building HUB|공공데이터 제공기관|XML HTTP 200 empty|upstream JSON HTTP 200 empty/i.test(message)) sourceUnavailable=true;
             errorCount++;
           }
           calcDone++;
@@ -5194,7 +5204,8 @@
       await Promise.all(Array.from({length:Math.min(BUILDING_CALC_CONCURRENCY,calcJobs.length)},calcWorker));
 
       if(requestSeq!==buildingRequestSeq)return;
-      if(errorCount===0)setBuildingStatus(`${successCount}개 세부 구역의 배송호수·엘리베이터 분석이 완료되었습니다.`,"idle");
+      if(sourceUnavailable)setBuildingStatus("원천 API 장애로 남은 신규 분석을 중지했습니다. 기존 결과는 유지됩니다.","warn");
+      else if(errorCount===0)setBuildingStatus(`${successCount}개 세부 구역의 배송호수·엘리베이터 분석이 완료되었습니다.`,"idle");
       else if(successCount>0)setBuildingStatus(`${successCount}개 완료 · ${errorCount}개 실패`,"warn");
       else setBuildingStatus(`세부 구역 ${errorCount}개의 배송호수·엘리베이터 조회에 실패했습니다.`,"error");
     }finally{

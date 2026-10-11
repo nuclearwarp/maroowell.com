@@ -1,0 +1,47 @@
+name: Building source control V75.4
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.diagnostics/building_v754/**'
+      - '.github/workflows/deploy-building-v754.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.diagnostics/building_v754/**'
+      - '.github/workflows/deploy-building-v754.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: building-source-v754-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify-and-deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python and JavaScript source
+        run: |
+          python -m py_compile .diagnostics/building_v754/patch_v754.py .diagnostics/building_v754/deploy_v754.py
+          node --check .diagnostics/building_v754/provider_transport.js
+      - name: Full Worker regression validation and guarded deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CHECK_ONLY: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+        run: |
+          if [ "$CHECK_ONLY" = "true" ]; then
+            python .diagnostics/building_v754/deploy_v754.py --check
+          else
+            python .diagnostics/building_v754/deploy_v754.py
+          fi
+      - name: Keep validation results and rollback snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: building-v754-validation
+          path: /tmp/building-v754/
+          retention-days: 3
+          if-no-files-found: ignore

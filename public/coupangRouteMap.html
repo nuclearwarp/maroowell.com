@@ -6278,7 +6278,20 @@
         if(!roadviewWalkerV64) syncRoadviewWalkerV64();
         roadviewWalkerV64?.setPosition(position);
         if(roadviewOn) roadviewWalkerV64?.setMap(map);
-        map.setCenter(position);
+        syncRoadviewMapLayout(position);
+      });
+    }
+    // Recalculate the Kakao projection after the split view changes widths.
+    function syncRoadviewMapLayout(target){
+      if(!map) return;
+      const center=target || map.getCenter?.();
+      map.relayout?.();
+      if(center) map.setCenter(center);
+    }
+    function scheduleRoadviewMapLayout(target){
+      requestAnimationFrame(()=>{
+        syncRoadviewMapLayout(target);
+        if(mapWrapEl.classList.contains("roadview-open")) roadview?.relayout?.();
       });
     }
     function setRoadviewAt(latlng){
@@ -6286,6 +6299,7 @@
       roadviewClient.getNearestPanoId(latlng, 200, (panoId)=>{
         if (!panoId){ alert("근처 로드뷰가 없습니다."); return; }
         mapWrapEl.classList.add("roadview-open");
+        scheduleRoadviewMapLayout(latlng);
         roadview.setPanoId(panoId, latlng);
         roadviewHintEl.style.display = "none";
       });
@@ -6297,6 +6311,7 @@
       roadviewHintEl.style.display = roadviewOn ? "inline-flex" : "none";
       if (!roadviewOn){
         mapWrapEl.classList.remove("roadview-open");
+        scheduleRoadviewMapLayout();
         try { map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW); } catch {}
         roadviewWalkerV64?.setMap(null);
         if (rvClick) kakao.maps.event.removeListener(map, "click", rvClick);

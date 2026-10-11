@@ -32,10 +32,15 @@ jobs:
         run: |
           python - <<'PY'
           import requests
-          r=requests.get('https://purple-resonance-61ea.brain-0f6.workers.dev/health',timeout=20)
-          r.raise_for_status()
-          data=r.json()
-          assert data.get('ok') is True, data
-          assert data.get('buildingHubFallbackMode')=='JSON_EMPTY_200_XML_ONCE_V75_2', data
-          print('Confirmed safe JSON empty 200 XML fallback in live Worker')
+          import time
+          endpoint='https://purple-resonance-61ea.brain-0f6.workers.dev/health'
+          for attempt in range(8):
+              r=requests.get(endpoint,params={'v':'752'},headers={'Cache-Control':'no-cache'},timeout=20)
+              r.raise_for_status()
+              data=r.json()
+              if data.get('ok') is True and data.get('buildingHubFallbackMode')=='JSON_EMPTY_200_XML_ONCE_V75_2':
+                  print('Confirmed safe JSON empty 200 XML fallback in live Worker')
+                  break
+              if attempt==7: raise RuntimeError('V75.2 health marker not propagated')
+              time.sleep(3)
           PY

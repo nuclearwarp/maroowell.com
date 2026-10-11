@@ -1,0 +1,41 @@
+name: Deploy Building HUB V75.2 empty HTTP 200 recovery
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.diagnostics/patch_building_v752.py'
+      - '.diagnostics/deploy_building_v752.py'
+      - '.github/workflows/deploy-building-v752.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check syntax
+        run: python -m py_compile .diagnostics/patch_building_v752.py .diagnostics/deploy_building_v752.py
+      - name: Deploy only if live Worker matches audited V75.1
+        run: |
+          pip install requests
+          python .diagnostics/deploy_building_v752.py
+      - name: Verify public health marker
+        run: |
+          python - <<'PY'
+          import requests
+          r=requests.get('https://purple-resonance-61ea.brain-0f6.workers.dev/health',timeout=20)
+          r.raise_for_status()
+          data=r.json()
+          assert data.get('ok') is True, data
+          assert data.get('buildingHubFallbackMode')=='JSON_EMPTY_200_XML_ONCE_V75_2', data
+          print('Confirmed safe JSON empty 200 XML fallback in live Worker')
+          PY

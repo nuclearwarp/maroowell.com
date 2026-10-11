@@ -42,8 +42,15 @@ async function v752FetchBuildingHubXml(url, params, env, label, timeoutMs) {
 def patch(source: str) -> str:
     if PATCH_MARKER in source:
         raise ValueError('V75.2 already applied')
-    if hashlib.sha256(source.encode('utf-8')).hexdigest()!=BASE_SHA256:
-        raise ValueError('Refusing to deploy: live Worker differs from expected V75.1 SHA-256')
+    # Cloudflare module export removes exactly two original leading newline characters.
+    # Accept only that byte-identical normalization; reject all substantive differences.
+    digest=hashlib.sha256(source.encode('utf-8')).hexdigest()
+    equivalent=digest==BASE_SHA256 or (
+        source.startswith('async function decodeTerrariumRgbPng(') and
+        hashlib.sha256(('\n\n'+source).encode('utf-8')).hexdigest()==BASE_SHA256
+    )
+    if not equivalent:
+        raise ValueError('Refusing to deploy: live Worker differs from audited V75.1 source')
     if 'V75_1_PAGED_VERIFIED_SOURCE' not in source:
         raise ValueError('V75.1 source is not present')
     src=source

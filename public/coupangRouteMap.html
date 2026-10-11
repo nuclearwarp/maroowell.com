@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <script src="/config.js"></script>
+  <script src="/building-job-monitor.js?v=1"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="referrer" content="origin" />
@@ -2357,7 +2358,7 @@
   const BUILDING_CACHE_PROBE_CONCURRENCY = 4;
   // 실제 계산은 Cloudflare Queue에서도 최대 3개로 제한한다.
   // 프론트도 3개까지만 동시에 제출/상태조회하여 공공데이터 원천 burst를 과도하게 만들지 않는다.
-  const BUILDING_CALC_CONCURRENCY = 1; // Stop launching more routes after a source outage.
+  const BUILDING_CALC_CONCURRENCY = 3; // Independent jobs may wait without blocking other routes.
   const BUILDING_FRONT_DISCOVERY_VERSION = "V74_NO_MANUAL_APARTMENT_OVERRIDES";
 
   const BUILDING_GEOCODE_CONCURRENCY = 3;
@@ -2727,6 +2728,14 @@
 
   let buildingRequestSeq = 0;
   const buildingResultByRouteKey = new Map();
+  const buildingTaskByRouteKey = new Map();
+  const buildingJobIdByRouteKey = new Map();
+  const buildingJobMonitor = window.MWBuildingJobMonitor.create({
+    pollMs: BUILDING_JOB_POLL_MS,
+    activeBudgetMs: BUILDING_JOB_CLIENT_WAIT_MS,
+    fetchStatus: (jobId,signal) => buildingJobFetch("",`${BUILDING_JOB_ENDPOINT}/${encodeURIComponent(jobId)}`,{method:"GET",signal})
+  });
+  window.addEventListener("pagehide",()=>buildingJobMonitor.cancelAll());
   const buildingLocationCache = new Map();
   const buildingScopeParcelsByRouteKey = new Map();
   const buildingReverseAddressCache = new Map();
@@ -4899,7 +4908,9 @@
   }
 
   async function buildingJobFetch(accessToken,url,options={}){
+    if(options.signal?.aborted)throw new DOMException("Cancelled","AbortError");
     let token=await getTerrainAccessToken(false).catch(()=>accessToken||"");
+    if(options.signal?.aborted)throw new DOMException("Cancelled","AbortError");
     if(!token)throw new Error("로그인이 만료되었습니다.");
     const run=async currentToken=>{
       const response=await fetch(url,{
@@ -4936,48 +4947,53 @@
   }
 
   async function pollBuildingJob(accessToken,jobId,updateMessage){
-    const started=Date.now();
-    while(true){
-      const data=await buildingJobFetch(accessToken,`${BUILDING_JOB_ENDPOINT}/${encodeURIComponent(jobId)}`,{method:"GET"});
-      const status=String(data?.status||"");
-      const progress=data?.progress||{};
-      const processed=Number(progress.processedParcelCount||0);
-      const remaining=Number(progress.remainingParcelCount||0);
-      const total=Number(progress.totalParcelCount||processed+remaining||0);
-      let message=String(progress.message||"백그라운드에서 세대수를 계산하고 있습니다.");
-      if(total>0)message+=` · ${Math.min(processed,total).toLocaleString("ko-KR")}/${total.toLocaleString("ko-KR")}`;
-      updateMessage?.(message);
-      // A queued job with a confirmed upstream failure must not be polled indefinitely.
-      // It remains visible as an error until the operator requests another analysis.
-      if(status==="queued" && Number(data?.progress?.nextRetryAt ? Date.parse(data.progress.nextRetryAt) : 0)>Date.now() && data?.error){
-        const err=new Error("원천 API 장애로 자동 조회를 중단했습니다. 수동 새로고침으로 다시 요청해 주세요.");
-        err.sourceUnavailable=true;
-        throw err;
-      }
-
-      if(status==="completed"){
-        if(!data?.result?.buildingStats)throw new Error("백그라운드 분석 결과가 비어 있습니다.");
-        return data.result;
-      }
-      if(status==="error"||status==="cancelled"){
-        throw new Error(String(data?.error||"백그라운드 세대수 분석에 실패했습니다."));
-      }
-      if(Date.now()-started>BUILDING_JOB_CLIENT_WAIT_MS){
-        // 화면의 폴링만 중지한다. Queue 작업 자체는 서버에서 계속 진행된다.
-        throw new Error("분석은 백그라운드에서 계속 진행 중입니다. 잠시 후 다시 조회하면 완료된 캐시를 불러옵니다.");
-      }
-      await new Promise(resolve=>setTimeout(resolve,BUILDING_JOB_POLL_MS));
-    }
+    const outcome=await buildingJobMonitor.watch(jobId,state=>updateMessage?.(state.message,state));
+    if(outcome.state==="completed")return outcome.result;
+    if(outcome.state==="waiting")return {__mwJobPending:true,...outcome};
+    if(outcome.clientOnly)throw new DOMException("Cancelled","AbortError");
+    const error=new Error(String(outcome.error||outcome.message||"Building analysis failed"));
+    error.jobId=jobId;
+    throw error;
   }
 
-  async function runBuildingJob(accessToken,payload,updateMessage){
-    const created=await startBuildingJob(accessToken,payload);
-    const jobId=String(created?.jobId||"");
-    if(!jobId)throw new Error("백그라운드 분석 작업 ID를 받지 못했습니다.");
-    updateMessage?.(created?.reused===true
-      ? "기존 백그라운드 분석 작업을 이어서 확인합니다."
-      : "백그라운드 분석을 시작했습니다. 페이지를 닫아도 계속 진행됩니다.");
+  async function runBuildingJob(accessToken,payload,updateMessage,options={}){
+    let jobId=String(options.jobId||"");
+    if(!jobId){
+      const created=await startBuildingJob(accessToken,payload);
+      options.assertCurrent?.();
+      jobId=String(created?.jobId||"");
+      if(!jobId)throw new Error("Background analysis job ID missing");
+      options.onCreated?.(jobId);
+    }
     return await pollBuildingJob(accessToken,jobId,updateMessage);
+  }
+
+  function invalidateBuildingMonitors(clearIds=false){
+    buildingRequestSeq++;
+    buildingJobMonitor.cancelAll();
+    buildingTaskByRouteKey.clear();
+    if(clearIds)buildingJobIdByRouteKey.clear();
+    return buildingRequestSeq;
+  }
+
+  function updateBuildingSummary(){
+    const items=routePacksForTerrain().map((p,i)=>buildingResultByRouteKey.get(terrainPackRouteKey(p,i)));
+    const count=status=>items.filter(x=>x?.status===status).length;
+    const active=items.filter(x=>["checking","queued","loading"].includes(x?.status)).length;
+    const done=count("ok"),waiting=count("waiting"),failed=count("error");
+    const message=`${done}\uAC1C \uC644\uB8CC${active?` \u00b7 ${active}\uAC1C \uBD84\uC11D \uC911`:""}${waiting?` \u00b7 ${waiting}\uAC1C \uC7AC\uC2DC\uB3C4 \uB300\uAE30`:""}${failed?` \u00b7 ${failed}\uAC1C \uC624\uB958`:""}`;
+    setBuildingStatus(message,active?"loading":waiting||failed?"warn":"idle");
+  }
+
+  function buildingPreviousResult(item){
+    return item?.status==="ok"?item:(item?.previousResult||null);
+  }
+
+  function buildingWaitingMessage(state){
+    const retry=Date.parse(state?.nextRetryAt||"");
+    if(state.detached)return state.message||"\uC11C\uBC84 \uBD84\uC11D\uC740 \uC720\uC9C0\uB429\uB2C8\uB2E4. \uBC84\uD2BC\uC73C\uB85C \uC0C1\uD0DC\uB9CC \uB2E4\uC2DC \uD655\uC778\uD558\uC138\uC694.";
+    const time=Number.isFinite(retry)?new Date(retry).toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"";
+    return `\uC6D0\uCC9C \uC7AC\uC2DC\uB3C4 \uB300\uAE30${time?` \u00b7 ${time}\uC5D0 \uC790\uB3D9 \uC774\uC5B4\uBC1B\uAE30`:""}. \uB300\uAE30 \uC911\uC5D0\uB294 \uBC18\uBCF5 \uC870\uD68C\uD558\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.`;
   }
 
   function analysisScopePayload(target,geometry){
@@ -4997,7 +5013,7 @@
   }
 
   function clearBuildingDisplay(message="배송호수·엘리베이터 분석을 준비합니다."){
-    buildingRequestSeq+=1;
+    invalidateBuildingMonitors(true);
     buildingResultByRouteKey.clear();
     buildingScopeParcelsByRouteKey.clear();
     setBuildingStatus(message,"idle");
@@ -5020,194 +5036,134 @@
   }
 
   async function fetchBuildingStatsForPack(pack,accessToken,force=false,options={}){
-    if(!window.turf)throw new Error("Turf.js를 불러오지 못했습니다.");
-    if(!geocoder)throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
+    const routeKey=terrainPackRouteKey(pack);
+    const task=buildingTaskByRouteKey.get(routeKey);
+    if(task)return task;
+    const promise=fetchBuildingStatsForPackInternal(pack,accessToken,force,options);
+    buildingTaskByRouteKey.set(routeKey,promise);
+    try{return await promise;}
+    finally{if(buildingTaskByRouteKey.get(routeKey)===promise)buildingTaskByRouteKey.delete(routeKey);}
+  }
+
+  async function fetchBuildingStatsForPackInternal(pack,accessToken,force=false,options={}){
+    const requestSeq=buildingRequestSeq;
+    const assertCurrent=()=>{if(requestSeq!==buildingRequestSeq)throw new DOMException("Scope changed","AbortError");};
+    if(!window.turf)throw new Error("Turf.js unavailable");
     const geometry=terrainGeometryFromPack(pack);
-    if(!geometry)throw new Error("분석할 폴리곤이 없습니다.");
-    const feature=buildingFeatureFromGeometry(geometry);
-    const target=await buildTerrainTarget(pack,geometry);
+    if(!geometry)throw new Error("Analysis polygon missing");
+    const target=await buildTerrainTarget(pack,geometry);assertCurrent();
     const routeKey=terrainPackRouteKey(pack);
     const memoryKey=`${target.scopeType}:${target.scopeKey}:${target.geometryHash}`;
     const scopePayload=analysisScopePayload(target,geometry);
-
-    if(!force&&options.skipCacheProbe!==true){
-      const cacheProbe=await postBuildingStats(accessToken,{
-        ...scopePayload,forceRefresh:false,force_refresh:false,cacheOnly:true,cache_only:true
-      },{timeoutMs:BUILDING_CACHE_PROBE_TIMEOUT_MS,retryCount:0});
-      if(cacheProbe?.cached===true&&cacheProbe?.buildingStats){
-        return {status:"ok",data:cacheProbe,target,memoryKey};
-      }
-    }
-
-    const legalDongCodes=await resolveLegalDongCodesForFeature(feature);
-    if(!legalDongCodes.length)throw new Error("건축물 조회에 필요한 법정동 코드를 확인하지 못했습니다.");
-    const updateMessage=message=>{
+    const previousResult=buildingPreviousResult(buildingResultByRouteKey.get(routeKey));
+    const finalItem=data=>{
+      if(!data?.buildingStats || !(Number(data.buildingStats.deliveryUnitCount||data.buildingStats.delivery_unit_count)>0))throw new Error("Completed building result has no verified delivery units");
+      return {status:"ok",data,target,memoryKey};
+    };
+    const updateMessage=(message,state)=>{
+      if(requestSeq!==buildingRequestSeq)return;
       const current=buildingResultByRouteKey.get(routeKey)||{};
-      buildingResultByRouteKey.set(routeKey,{...current,status:"loading",message});
-      renderTerrainCards();
+      let item={...current,status:"loading",message,previousResult};
+      if(state?.jobId)item.jobId=state.jobId;
+      if(state?.state==="waiting")item={...item,status:"waiting",message:buildingWaitingMessage(state),nextRetryAt:state.nextRetryAt,detached:state.detached,progress:state.progress};
+      if(state?.state==="completed"){
+        buildingJobIdByRouteKey.delete(routeKey);
+        try{item=finalItem(state.result);}catch(error){item={status:"error",error:error.message,previousResult};}
+      }
+      if(state?.state==="error"||state?.state==="cancelled"){
+        buildingJobIdByRouteKey.delete(routeKey);
+        item={status:"error",error:String(state.error||state.message||"Analysis failed"),previousResult};
+      }
+      buildingResultByRouteKey.set(routeKey,item);renderTerrainCards();updateBuildingSummary();
     };
-
-    // zipcode_search V40과 동일하게 캐시 미스 뒤에는 폴리곤 내부 실제 필지를 먼저 확정한다.
-    // Worker의 requiresScopeDiscovery 응답은 zipcode scope에서만 자동 발생하므로,
-    // subsubroute는 프론트에서 선제 discovery 후 scopeParcels를 넘겨 directScopeMode로 진입시킨다.
-    updateMessage("폴리곤 내부 필지를 확인하고 있습니다.");
-    const scopeDiscovery=await discoverScopeParcelsForRoute(memoryKey,feature,force===true);
-    if(!scopeDiscovery.parcels.length){
-      const d=scopeDiscovery.diagnostics;
-      throw new Error(`폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${Number(d.sampleCount||0).toLocaleString("ko-KR")}개 / 역지오코딩 ${Number(d.reverseSuccessCount||0).toLocaleString("ko-KR")}건 / 법정동확인 ${Number(d.legalDongPointCount||0).toLocaleString("ko-KR")}건 / 필지키 ${Number(d.parcelKeyPointCount||0).toLocaleString("ko-KR")}건`);
+    let payload=null;
+    const existingJobId=buildingJobIdByRouteKey.get(routeKey);
+    if(!existingJobId){
+      if(!force&&options.skipCacheProbe!==true){
+        const cached=await postBuildingStats(accessToken,{...scopePayload,forceRefresh:false,force_refresh:false,cacheOnly:true,cache_only:true},{timeoutMs:BUILDING_CACHE_PROBE_TIMEOUT_MS,retryCount:0});
+        assertCurrent();
+        if(cached?.cached===true&&cached?.buildingStats)return finalItem(cached);
+      }
+      if(!geocoder)throw new Error("Address service unavailable");
+      const feature=buildingFeatureFromGeometry(geometry);
+      const legalDongCodes=await resolveLegalDongCodesForFeature(feature);assertCurrent();
+      if(!legalDongCodes.length)throw new Error("Verified legal-dong codes unavailable");
+      updateMessage("\uD3F4\uB9AC\uACE4 \uB0B4\uBD80 \uD544\uC9C0\uB97C \uD655\uC778\uD558\uACE0 \uC788\uC2B5\uB2C8\uB2E4.");
+      const discovery=await discoverScopeParcelsForRoute(memoryKey,feature,force===true);assertCurrent();
+      if(!discovery.parcels.length)throw new Error("No verified parcels in analysis polygon");
+      payload={...scopePayload,legalDongCodes,legalDongCodeCandidates:legalDongCodes,
+        forceRefresh:force===true,force_refresh:force===true,walkupMinGroundFloors:3,minCoveragePercent:95,
+        scopeMatchMode:"V32_PHASED_KAPT_DETAIL_BUDGET",scopeParcels:discovery.parcels,
+        scopeParcelDiscovery:discovery.diagnostics,locationSource:"KAKAO_POLYGON_REVERSE_PARCEL"};
     }
-
-    const basePayload={
-      ...scopePayload,
-      legalDongCodes,
-      legalDongCodeCandidates:legalDongCodes,
-      forceRefresh:force===true,
-      force_refresh:force===true,
-      walkupMinGroundFloors:3,
-      minCoveragePercent:95,
-      scopeMatchMode:"V32_PHASED_KAPT_DETAIL_BUDGET",
-      scopeParcels:scopeDiscovery.parcels,
-      scopeParcelDiscovery:scopeDiscovery.diagnostics,
-      locationSource:"KAKAO_POLYGON_REVERSE_PARCEL"
-    };
-
-    // 오래 걸리는 Building HUB/K-APT/전유부 continuation은 서버 Queue로 넘긴다.
-    // 최초 필지 탐색까지만 브라우저에서 하고, 이후 작업은 페이지 이탈과 무관하게 계속된다.
-    const data=await runBuildingJob(accessToken,basePayload,updateMessage);
-
-    if(!data?.buildingStats)throw new Error("배송 호수 분석 결과가 비어 있습니다.");
-
-    const deliveryCount=Number(data?.buildingStats?.deliveryUnitCount||data?.buildingStats?.delivery_unit_count||0);
-    if(deliveryCount===0){
-      const breakdown=data?.buildingStats?.breakdown||data?.diagnostics||{};
-      const kapt=breakdown?.kapt||{}, source=breakdown?.source||{}, unitDiagnostics=source?.unitDiagnostics||{};
-      const matchedRows=Number(breakdown?.matchedBuildingRows??source?.matchedTitleRowCount??data?.diagnostics?.matchedBuildingRows??0);
-      const detail=[`필지 ${Number(scopeDiscovery?.parcels?.length||0)}건`,`표제부 ${matchedRows}건`,`K-APT ${Number(kapt?.complexCount||0)}단지/${Number(kapt?.householdCount||0)}호`,`전유부 ${Number(unitDiagnostics?.exposRows||0)}건`,`전유공용 ${Number(unitDiagnostics?.areaRows||0)}건`].join(" · ");
-      throw new Error(data?.error||`배송호수 원천 연결 실패 (${detail}).`);
-    }
-    return {status:"ok",data,target,memoryKey};
+    assertCurrent();
+    const data=await runBuildingJob(accessToken,payload,updateMessage,{jobId:existingJobId,assertCurrent,
+      onCreated:jobId=>buildingJobIdByRouteKey.set(routeKey,jobId)});
+    assertCurrent();
+    if(data?.__mwJobPending)return {status:"waiting",jobId:data.jobId,nextRetryAt:data.nextRetryAt,
+      detached:data.detached,message:buildingWaitingMessage(data),progress:data.progress,previousResult,target,memoryKey};
+    return finalItem(data);
   }
 
   async function loadBuildingForCurrentScope(force=false){
     const packs=routePacksForTerrain();
-    if(!packs.length){clearBuildingDisplay("분석할 폴리곤이 없습니다.");return;}
-    const requestSeq=++buildingRequestSeq;
+    if(!packs.length){clearBuildingDisplay();return;}
+    const requestSeq=invalidateBuildingMonitors(false);
     if(buildingRefreshBtn)buildingRefreshBtn.disabled=true;
-
-    let successCount=0,errorCount=0,cacheHitCount=0;
     try{
-      const accessToken=await getTerrainAccessToken();
-      const jobs=packs.map((pack,index)=>({pack,index,routeKey:terrainPackRouteKey(pack,index)}));
-      let sourceUnavailable=false;
-
-      for(const job of jobs){
-        const previous=buildingResultByRouteKey.get(job.routeKey);
-        if(force){
-          buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"새 계산 대기 중입니다."});
-        }else if(!previous||previous.status==="error"){
-          buildingResultByRouteKey.set(job.routeKey,{status:"checking",message:"세대수 캐시를 확인하고 있습니다."});
-        }
-      }
-      renderTerrainCards(packs);
-
-      const calcJobs=[];
-      if(!force){
-        setBuildingStatus(`세대수 캐시를 병렬 확인하고 있습니다. (0/${jobs.length})`,"loading");
-        let cursor=0,checked=0;
-        async function cacheWorker(){
-          while(true){
-            const i=cursor++;
-            if(i>=jobs.length)return;
-            if(requestSeq!==buildingRequestSeq)return;
-            const job=jobs[i];
-            const previous=buildingResultByRouteKey.get(job.routeKey);
-            if(previous?.status==="ok"){
-              successCount++;
-              checked++;
-              continue;
-            }
-            try{
-              const probe=await probeBuildingCacheForPack(job.pack,accessToken);
-              if(requestSeq!==buildingRequestSeq)return;
-              if(probe.hit){
-                buildingResultByRouteKey.set(job.routeKey,probe.result);
-                cacheHitCount++;
-                successCount++;
-              }else{
-                buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"캐시 없음 · 새 계산 대기 중입니다."});
-                calcJobs.push(job);
-              }
-            }catch(error){
-              if(requestSeq!==buildingRequestSeq)return;
-              // cache probe 실패는 분석 실패가 아니므로 신규 계산 큐로 넘긴다.
-              buildingResultByRouteKey.set(job.routeKey,{status:"queued",message:"캐시 확인 지연 · 새 계산 대기 중입니다."});
-              calcJobs.push(job);
-            }
-            checked++;
-            renderTerrainCards(packs);
-            setBuildingStatus(`세대수 캐시 확인 중 (${Math.min(checked,jobs.length)}/${jobs.length})`,"loading");
-          }
-        }
-        await Promise.all(Array.from({length:Math.min(BUILDING_CACHE_PROBE_CONCURRENCY,jobs.length)},cacheWorker));
-      }else{
-        calcJobs.push(...jobs);
-      }
-
-      // V61: cache probe는 병렬이어도 실제 신규 분석은 화면의 라우트/서브라우트 정렬 순서를 지킨다.
-      // calcJobs.push()가 네트워크 응답 완료 순서로 실행되어 126C가 126A보다 먼저 계산되는 문제를 방지한다.
-      calcJobs.sort((a,b)=>a.index-b.index);
-
+      const token=await getTerrainAccessToken();
       if(requestSeq!==buildingRequestSeq)return;
-      if(!calcJobs.length){
-        setBuildingStatus(`${cacheHitCount}개 캐시 사용 · 배송호수·엘리베이터 확인 완료`,"idle");
-        return;
+      const jobs=packs.map((pack,index)=>({pack,index,routeKey:terrainPackRouteKey(pack,index)}));
+      const calcJobs=[];
+      for(const job of jobs){
+        const prev=buildingResultByRouteKey.get(job.routeKey);
+        if(!force&&prev?.status==="ok")continue;
+        buildingResultByRouteKey.set(job.routeKey,{status:"checking",previousResult:buildingPreviousResult(prev)});
       }
-
-      setBuildingStatus(`${calcJobs.length}개 라우트 새 계산 시작 · 동시 ${Math.min(BUILDING_CALC_CONCURRENCY,calcJobs.length)}개`,"loading");
-      let calcCursor=0,calcDone=0;
-      async function calcWorker(){
-        while(true){
-          if(sourceUnavailable)return;
-          const i=calcCursor++;
-          if(i>=calcJobs.length)return;
-          if(requestSeq!==buildingRequestSeq)return;
-          const job=calcJobs[i];
-          buildingResultByRouteKey.set(job.routeKey,{status:"loading",message:"새 세대수 계산을 시작합니다."});
-          renderTerrainCards(packs);
+      renderTerrainCards(packs);updateBuildingSummary();
+      let cursor=0;
+      async function cacheWorker(){
+        while(requestSeq===buildingRequestSeq){
+          const job=jobs[cursor++];if(!job)return;
+          const item=buildingResultByRouteKey.get(job.routeKey);
+          if(!force&&item?.status==="ok")continue;
+          if(force||buildingJobIdByRouteKey.has(job.routeKey)){calcJobs.push(job);continue;}
           try{
-            const result=await fetchBuildingStatsForPack(job.pack,accessToken,force,{skipCacheProbe:true});
+            const probe=await probeBuildingCacheForPack(job.pack,token);
             if(requestSeq!==buildingRequestSeq)return;
-            buildingResultByRouteKey.set(job.routeKey,result);
-            successCount++;
+            if(probe.hit)buildingResultByRouteKey.set(job.routeKey,probe.result);
+            else calcJobs.push(job);
           }catch(error){
             if(requestSeq!==buildingRequestSeq)return;
-            const responseData=error?.responseData||null;
-            let message=String(error?.message||error||"배송 호수 분석 실패");
-            const legal=responseData?.diagnostics?.legalDongCodes;
-            if(Array.isArray(legal)&&legal.length){
-              const text=legal.map(row=>typeof row==="string"?row:row?.legalDongCode).filter(Boolean).join(", ");
-              if(text)message+=` · 조회 법정동 ${text}`;
-            }
-            if(error?.name==="AbortError")message="캐시 확인 요청이 시간초과되었습니다. 백그라운드 계산으로 전환해 다시 시도해 주세요.";
-            buildingResultByRouteKey.set(job.routeKey,{status:"error",error:message});
-            if(error?.sourceUnavailable || /원천 API 장애|원천 응답|Building HUB|공공데이터 제공기관|XML HTTP 200 empty|upstream JSON HTTP 200 empty/i.test(message)) sourceUnavailable=true;
-            errorCount++;
+            buildingResultByRouteKey.set(job.routeKey,{status:"error",error:String(error.message||error),previousResult:buildingPreviousResult(item)});
           }
-          calcDone++;
-          renderTerrainCards(packs);
-          setBuildingStatus(
-            `신규 계산 ${calcDone}/${calcJobs.length} · 캐시 ${cacheHitCount} · 실패 ${errorCount}`,
-            calcDone<calcJobs.length?"loading":(errorCount?"warn":"idle")
-          );
+          renderTerrainCards(packs);updateBuildingSummary();
+        }
+      }
+      await Promise.all(Array.from({length:Math.min(BUILDING_CACHE_PROBE_CONCURRENCY,jobs.length)},cacheWorker));
+      calcJobs.sort((a,b)=>a.index-b.index);
+      if(requestSeq!==buildingRequestSeq)return;
+      let next=0;
+      async function calcWorker(){
+        while(requestSeq===buildingRequestSeq){
+          const job=calcJobs[next++];if(!job)return;
+          const previousResult=buildingPreviousResult(buildingResultByRouteKey.get(job.routeKey));
+          buildingResultByRouteKey.set(job.routeKey,{status:"loading",previousResult});
+          renderTerrainCards(packs);updateBuildingSummary();
+          try{
+            const result=await fetchBuildingStatsForPack(job.pack,token,force,{skipCacheProbe:true});
+            if(requestSeq!==buildingRequestSeq)return;
+            buildingResultByRouteKey.set(job.routeKey,result);
+          }catch(error){
+            if(requestSeq!==buildingRequestSeq)return;
+            buildingResultByRouteKey.set(job.routeKey,{status:"error",error:String(error.message||error),previousResult});
+          }
+          // A waiting job has its own timer; it releases this slot for the next route.
+          renderTerrainCards(packs);updateBuildingSummary();
         }
       }
       await Promise.all(Array.from({length:Math.min(BUILDING_CALC_CONCURRENCY,calcJobs.length)},calcWorker));
-
-      if(requestSeq!==buildingRequestSeq)return;
-      if(sourceUnavailable)setBuildingStatus("원천 API 장애로 남은 신규 분석을 중지했습니다. 기존 결과는 유지됩니다.","warn");
-      else if(errorCount===0)setBuildingStatus(`${successCount}개 세부 구역의 배송호수·엘리베이터 분석이 완료되었습니다.`,"idle");
-      else if(successCount>0)setBuildingStatus(`${successCount}개 완료 · ${errorCount}개 실패`,"warn");
-      else setBuildingStatus(`세부 구역 ${errorCount}개의 배송호수·엘리베이터 조회에 실패했습니다.`,"error");
+      if(requestSeq===buildingRequestSeq)updateBuildingSummary();
     }finally{
       if(requestSeq===buildingRequestSeq&&buildingRefreshBtn)buildingRefreshBtn.disabled=false;
     }
@@ -5232,16 +5188,31 @@
     const pack=matchedId!=null?overlayById.get(matchedId):null;
     if(!pack)return;
     const routeKey=terrainPackRouteKey(pack);
-    buildingResultByRouteKey.set(routeKey,{status:"loading",message:"새 세대수 계산을 시작합니다."}); renderTerrainCards();
+    const existing=buildingJobIdByRouteKey.get(routeKey);
+    if(existing&&buildingJobMonitor.refresh(existing))return;
+    if(buildingTaskByRouteKey.has(routeKey))return;
+    const requestSeq=buildingRequestSeq;
+    const previousResult=buildingPreviousResult(buildingResultByRouteKey.get(routeKey));
+    buildingResultByRouteKey.set(routeKey,{status:"loading",previousResult});renderTerrainCards();
     try{
       const token=await getTerrainAccessToken();
+      if(requestSeq!==buildingRequestSeq)return;
       const result=await fetchBuildingStatsForPack(pack,token,true);
+      if(requestSeq!==buildingRequestSeq)return;
       buildingResultByRouteKey.set(routeKey,result);
-    }catch(error){buildingResultByRouteKey.set(routeKey,{status:"error",error:String(error?.message||error||"배송 호수 분석 실패")});}
-    renderTerrainCards();
+    }catch(error){
+      if(requestSeq!==buildingRequestSeq)return;
+      buildingResultByRouteKey.set(routeKey,{status:"error",error:String(error.message||error),previousResult});
+    }
+    renderTerrainCards();updateBuildingSummary();
   }
 
   function buildingStatsHtml(item){
+    if(item?.status!=="ok"&&item?.previousResult){
+      const notice=String(item.message||item.error||"\uC0C8 \uBD84\uC11D \uC911\uC785\uB2C8\uB2E4. \uC9C1\uC804 \uACB0\uACFC\uB97C \uD45C\uC2DC\uD569\uB2C8\uB2E4.");
+      return `<div class="buildingStatsMessage">${escapeHtml(notice)}</div>`+buildingStatsHtml(item.previousResult);
+    }
+    if(item?.status==="waiting")return `<div class="buildingStatsMessage">${escapeHtml(item.message||"\uC7AC\uC2DC\uB3C4 \uB300\uAE30")}</div>`;
     if(!item)return '<div class="buildingStatsMessage">배송호수·엘리베이터 조회를 준비하고 있습니다.</div>';
     if(item.status==="checking"||item.status==="queued"||item.status==="loading")return `<div class="buildingStatsMessage">${escapeHtml(item.message||"세대수 데이터를 확인하고 있습니다.")}</div>`;
     if(item.status==="error")return `<div class="buildingStatsMessage error">${escapeHtml(item.error||"배송 호수 분석 실패")}</div>`;
@@ -5275,6 +5246,9 @@
     const isTerrain = type === "terrain";
     if (!item){
       return { kind:"idle", label:isTerrain ? "지형정보 준비" : "세대수 준비", disabled:false };
+    }
+    if (item.status === "waiting"){
+      return {kind:"idle",label:"\uC7AC\uC2DC\uB3C4 \uB300\uAE30",disabled:!item.detached};
     }
     if (item.status === "checking"){
       return { kind:"loading", label:isTerrain ? "지형정보 확인중.." : "캐시 확인중..", disabled:true };
@@ -5697,6 +5671,7 @@
     campDirty = false;
     codeDirty = false;
     terrainResultByRouteKey.clear();
+    invalidateBuildingMonitors(true);
     buildingResultByRouteKey.clear();
     buildingScopeParcelsByRouteKey.clear();
 
@@ -6211,7 +6186,6 @@
     loadTerrainForCurrentScope(true).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
   });
   buildingRefreshBtn?.addEventListener("click", ()=>{
-    buildingResultByRouteKey.clear();
     buildingScopeParcelsByRouteKey.clear();
     loadBuildingForCurrentScope(true).catch(e=>setBuildingStatus(`배송호수·엘리베이터 조회 실패: ${e.message}`, "error"));
   });

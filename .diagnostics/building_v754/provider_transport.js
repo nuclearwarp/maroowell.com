@@ -43,9 +43,11 @@ async function v754HubRequest(url,params,env,label,timeoutMs,format='json') {
     if(gateway){info.resultCode=String(gateway.code||'');throw publicDataGatewayHttpError(label,gateway);}
     if(!res.ok)throw v751Error('SOURCE_HTTP_ERROR',`${label}: upstream HTTP ${res.status}`);
     if(!text.trim())throw v751Error('BUILDING_HUB_EMPTY_HTTP_200',`${label}: upstream HTTP ${res.status} empty body`);
-    data=parseBuildingPublicDataJson(text);const parts=publicDataResponseParts(data,label);
-    info.resultCode=String(parts.header?.resultCode??'').trim();
-    const raw=parts.body?.totalCount;
+    data=parseBuildingPublicDataJson(text);
+    const envelope=data?.response??data?.Response??data,header=envelope?.header??envelope?.Header??{};
+    info.resultCode=String(publicDataField(header,'resultCode','result_code','code')??'').trim();
+    const parts=publicDataResponseParts(data,label);
+    const raw=publicDataField(parts.body,'totalCount','total_count');
     if(raw==null||String(raw).trim()===''||!Number.isSafeInteger(Number(raw))||Number(raw)<0)throw v751Error('SOURCE_MALFORMED',`${label}: missing or invalid totalCount`);
     if(!['0','00','000'].includes(info.resultCode))throw v751Error('SOURCE_MALFORMED',`${label}: unverified source result code`);
     if(parts.totalCount>0&&!parts.items.length)throw v751Error('SOURCE_INCOMPLETE',`${label}: source missing expected rows`);

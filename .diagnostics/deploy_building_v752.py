@@ -44,7 +44,7 @@ def main():
         return
     if old_hash!=BASE_SHA256 and not (
         before.startswith('async function decodeTerrariumRgbPng(') and
-        hashlib.sha256(('\\n\\n'+before).encode('utf-8')).hexdigest()==BASE_SHA256
+        hashlib.sha256(('\n\n'+before).encode('utf-8')).hexdigest()==BASE_SHA256
     ):
         raise RuntimeError('Live Worker differs beyond the two leading blank lines; deployment cancelled')
     after=patch(before)

@@ -269,6 +269,12 @@
     .row b{color:var(--muted)}
 
     .mapPane{position:relative;min-width:0;min-height:0}
+    .mapPane #mwRoadviewPanel{display:none;position:absolute;right:0;top:50%;bottom:0;width:100%;z-index:4;background:#111827}
+    .mapPane.mw-roadview-open #map{bottom:50%}
+    .mapPane.mw-roadview-open #mwRoadviewPanel{display:block}
+    .mapPane .tools{z-index:15}
+    @media(min-width:850px){.mapPane #mwRoadviewPanel{left:50%;top:0;bottom:0;width:50%}.mapPane.mw-roadview-open #map{right:50%;bottom:0}}
+    
     #map{position:absolute;inset:0}
     .tools{
       position:absolute;
@@ -397,6 +403,7 @@
     .deniedCard{width:min(460px,100%);padding:26px;border-radius:24px;background:#fff;border:1px solid #e2e8f0;text-align:center;box-shadow:0 28px 90px rgba(15,23,42,.35)}
     .deniedCard h2{margin:0 0 10px;font-size:22px}.deniedCard p{margin:0 0 18px;color:#64748b;line-height:1.6}.deniedCard .actions{display:flex;justify-content:center;gap:10px}
   </style>
+<script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
 </head>
 
 <body>
@@ -500,6 +507,7 @@
 
       <section class="mapPane">
         <div id="map"></div>
+        <div id="mwRoadviewPanel" aria-label="카카오 로드뷰"></div>
         <button
           id="sideToggle"
           class="btn sideToggle"
@@ -615,6 +623,7 @@
         isRoadmap: true,
         isRoadviewOn: false,
         roadviewOverlay: null,
+        roadview:null, roadviewClient:null, roadviewTracker:null,
         selectedTypes: new Set()
       };
 
@@ -2532,6 +2541,25 @@
           dom.mapType.textContent = state.isRoadmap ? "위성" : "일반지도";
         });
 
+        function ensureMwRoadview(){
+          if(state.roadview)return;
+          state.roadview=new kakao.maps.Roadview($("#mwRoadviewPanel"));
+          state.roadviewClient=new kakao.maps.RoadviewClient();
+          state.roadviewTracker=window.MWRoadviewTracker?.bind({map:state.map,roadview:state.roadview,isActive:()=>state.isRoadviewOn});
+        }
+        function openMwRoadview(latlng){
+          ensureMwRoadview();
+          state.roadviewClient.getNearestPanoId(latlng,300,panoId=>{
+            if(panoId==null){showToast("가까운 로드뷰가 없습니다.",true);return}
+            $(".mapPane").classList.add("mw-roadview-open");
+            state.map.relayout();
+            state.roadview.relayout?.();
+            state.roadview.setPanoId(panoId,latlng);
+          });
+        }
+        kakao.maps.event.addListener(state.map,"click",e=>{
+          if(state.isRoadviewOn && e?.latLng){openMwRoadview(e.latLng);state.ignoreMapClickUntil=Date.now()+300;}
+        });
         dom.roadview.addEventListener("click", () => {
           if (!state.map || !state.roadviewOverlay) {
             showToast("로드뷰 오버레이를 사용할 수 없습니다.", true);
@@ -2540,6 +2568,8 @@
 
           state.isRoadviewOn = !state.isRoadviewOn;
           state.roadviewOverlay.setMap(state.isRoadviewOn ? state.map : null);
+          if(!state.isRoadviewOn){$(".mapPane").classList.remove("mw-roadview-open");state.roadviewTracker?.hide();state.map.relayout();}else showToast("지도에서 파란 도로를 선택하면 로드뷰가 열립니다.");
+          dom.roadview.textContent=state.isRoadviewOn?"로드뷰 종료":"로드뷰";
           dom.roadview.classList.toggle("primary", state.isRoadviewOn);
           showToast(state.isRoadviewOn ? "로드뷰 도로 표시 ON" : "로드뷰 도로 표시 OFF");
         });

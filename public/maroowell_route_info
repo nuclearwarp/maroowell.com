@@ -113,11 +113,12 @@
       background:#eef4fb;
     }
 
-    #map{
-      position:absolute;
-      inset:0;
-      z-index:1;
-    }
+    #map{position:absolute;inset:0;z-index:1}
+    .mapPane #mwRoadviewPanel{display:none;position:absolute;left:0;right:0;bottom:0;top:50%;z-index:2;background:#111827}
+    .mapPane.mw-roadview-open #map{bottom:50%}
+    .mapPane.mw-roadview-open #mwRoadviewPanel{display:block}
+    @media(min-width:980px){.mapPane #mwRoadviewPanel{left:50%;top:0;bottom:0;right:0}.mapPane.mw-roadview-open #map{bottom:0;right:50%}}
+
 
     .title{
       display:flex;
@@ -1031,6 +1032,7 @@
     input,select,textarea{color:#0f172a !important}
 </style>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
+<script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
 </head>
 
 <body>
@@ -1095,6 +1097,7 @@
 
   <main class="mapPane">
     <div id="map"></div>
+    <div id="mwRoadviewPanel" aria-label="카카오 로드뷰"></div>
     <button id="openLeftBtn" type="button" class="floatingPaneToggle leftOpenBtn">좌측 열기</button>
     <button id="openRightBtn" type="button" class="floatingPaneToggle rightOpenBtn">우측 열기</button>
     <div class="mapControls">
@@ -1361,6 +1364,7 @@
   let isSatellite = false;
   let isRoadviewOn = false;
   let roadviewOverlay = null;
+  let mwRoadview=null,mwRoadviewClient=null,mwRoadviewTracker=null;
   let kakaoGeocoder = null;
   let kakaoPlaces = null;
 
@@ -1668,6 +1672,7 @@
         }
 
         kakao.maps.event.addListener(map, "click", e => {
+          if(isRoadviewOn && e?.latLng){openMwRoadview(e.latLng);return;}
           if (Date.now() - lastFeatureClickAt < 180) return;
 
           if (drawMode) {
@@ -2263,6 +2268,22 @@
     $("toggleMapTypeBtn").classList.toggle("active", isSatellite);
   }
 
+  function ensureMwRoadview(){
+    if(mwRoadview)return;
+    mwRoadview=new kakao.maps.Roadview($("mwRoadviewPanel"));
+    mwRoadviewClient=new kakao.maps.RoadviewClient();
+    mwRoadviewTracker=window.MWRoadviewTracker?.bind({map,roadview:mwRoadview,isActive:()=>isRoadviewOn});
+  }
+  function openMwRoadview(latlng){
+    ensureMwRoadview();
+    mwRoadviewClient.getNearestPanoId(latlng,300,panoId=>{
+      if(panoId==null){setStatus("해당 위치 근처 로드뷰가 없습니다.","bad");return;}
+      document.querySelector(".mapPane").classList.add("mw-roadview-open");
+      map.relayout();
+      mwRoadview.relayout?.();
+      mwRoadview.setPanoId(panoId,latlng);
+    });
+  }
   function toggleRoadviewOverlay() {
     if (!map || !roadviewOverlay) {
       setStatus("로드뷰 오버레이를 사용할 수 없습니다.", "bad");
@@ -2271,6 +2292,8 @@
 
     isRoadviewOn = !isRoadviewOn;
     roadviewOverlay.setMap(isRoadviewOn ? map : null);
+    if(!isRoadviewOn){document.querySelector(".mapPane").classList.remove("mw-roadview-open");mwRoadviewTracker?.hide();map.relayout();}
+    $("toggleRoadviewBtn").textContent=isRoadviewOn?"로드뷰 종료":"로드뷰";
     $("toggleRoadviewBtn").classList.toggle("active", isRoadviewOn);
     setStatus(isRoadviewOn ? "로드뷰 도로 표시 ON" : "로드뷰 도로 표시 OFF", isRoadviewOn ? "ok" : "warn");
   }

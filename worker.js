@@ -537,6 +537,21 @@ async function handleExternalApi(request, url, env) {
     return json({ error: "Method Not Allowed" }, 405);
   }
 
+  // Dedicated single-query canonical vendor lookup for authorized external consumers.
+  if (path === "/api/v1/vendors/quick-search") {
+    if (request.method !== "GET") return json({error:"Method Not Allowed"},405);
+    const key=await requireExternalApiKey(request,env,"vendors.read");
+    const q=safeTrim(url.searchParams.get("q"));
+    if(q.length>80)return json({error:"Search query too long"},400);
+    const limit=Math.min(20,Math.max(1,Number(url.searchParams.get("limit"))||12));
+    const rows = q ? await supabaseFetch(env,"/rest/v1/rpc/mw_vendor_quick_search",{
+      method:"POST",body:JSON.stringify({p_query:q,p_limit:limit})
+    }) : [];
+    const result=json({rows:(Array.isArray(rows)?rows:[]).map(v=>({id:v.id,name:v.name,nickname:v.nickname,business_number:v.business_number}))},200,{"Cache-Control":"no-store"});
+    await apiAudit(env,key,"vendors","quick_search",request,result.status);
+    return result;
+  }
+
   // External vendor API: shared canonical data in Maroowell vendors + vendor_details.
   if (path === "/api/v1/vendors") {
     if (request.method === "GET") {

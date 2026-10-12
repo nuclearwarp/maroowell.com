@@ -537,44 +537,95 @@ async function handleExternalApi(request, url, env) {
     return json({ error: "Method Not Allowed" }, 405);
   }
 
+  // Dedicated single-query canonical vendor lookup for authorized external consumers.
+  if (path === "/api/v1/vendors/quick-search") {
+    if (request.method !== "GET") return json({error:"Method Not Allowed"},405);
+    const key=await requireExternalApiKey(request,env,"vendors.read");
+    const q=safeTrim(url.searchParams.get("q"));
+    if(q.length>80)return json({error:"Search query too long"},400);
+    const limit=Math.min(20,Math.max(1,Number(url.searchParams.get("limit"))||12));
+    const rows = q ? await supabaseFetch(env,"/rest/v1/rpc/mw_vendor_quick_search",{
+      method:"POST",body:JSON.stringify({p_query:q,p_limit:limit})
+    }) : [];
+    const result=json({rows:(Array.isArray(rows)?rows:[]).map(v=>({id:v.id,name:v.name,nickname:v.nickname,business_number:v.business_number}))},200,{"Cache-Control":"no-store"});
+    await apiAudit(env,key,"vendors","quick_search",request,result.status);
+    return result;
+  }
+
+  // External vendor API: shared canonical data in Maroowell vendors + vendor_details.
   if (path === "/api/v1/vendors") {
     if (request.method === "GET") {
       const key = await requireExternalApiKey(request, env, "vendors.read");
       const response = await handleVendorsGet(url, env);
-      await apiAudit(env, key, "vendors", "read", request, response.status);
-      return response;
+      let result = response;
+      if (response.ok && url.searchParams.get("include_details") === "1") {
+        const obj = await response.json();
+        result = json({rows:await vendorAdminRows(env,obj.rows||[])},200,{"Cache-Control":"no-store"});
+      }
+      await apiAudit(env,key,"vendors","read",request,result.status);
+      return result;
     }
     if (request.method === "POST") {
       const key = await requireExternalApiKey(request, env, "vendors.write");
-      const response = await handleVendorCreate(request, env);
-      await apiAudit(env, key, "vendors", "create", request, response.status);
-      return response;
+      const body = await readJson(request);
+      const response = await handleVendorCreate(new Request(request.url,{
+        method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)
+      }),env);
+      let result=response;
+      if(response.ok) {
+        const data=await response.json();
+        if(data.row?.id) await saveVendorDetails(env,data.row.id,body);
+        result=json({row:(await vendorAdminRows(env,[data.row]))[0]},200,{"Cache-Control":"no-store"});
+      }
+      await apiAudit(env,key,"vendors","create",request,result.status);
+      return result;
     }
-    return json({ error: "Method Not Allowed" }, 405);
+    return json({error:"Method Not Allowed"},405);
   }
 
   const vendorApiMatch = path.match(/^\/api\/v1\/vendors\/([0-9a-fA-F-]{36})$/);
   if (vendorApiMatch) {
-    const vendorId = vendorApiMatch[1];
+    const vendorId=vendorApiMatch[1];
     if (request.method === "GET") {
-      const key = await requireExternalApiKey(request, env, "vendors.read");
-      const response = await handleVendorGetById(url, env, vendorId);
-      await apiAudit(env, key, "vendors", "read_one", request, response.status, vendorId);
-      return response;
+      const key=await requireExternalApiKey(request,env,"vendors.read");
+      const response=await handleVendorGetById(url,env,vendorId);
+      let result=response;
+      if(response.ok && url.searchParams.get("include_details")==="1") {
+        const data=await response.json();
+        if(data.row)result=json({...data,row:(await vendorAdminRows(env,[data.row]))[0]});
+      }
+      await apiAudit(env,key,"vendors","read_one",request,result.status,vendorId);
+      return result;
     }
     if (request.method === "PATCH") {
-      const key = await requireExternalApiKey(request, env, "vendors.write");
-      const response = await handleVendorPatch(request, env, vendorId);
-      await apiAudit(env, key, "vendors", "update", request, response.status, vendorId);
-      return response;
+      const key=await requireExternalApiKey(request,env,"vendors.write");
+      const body=await readJson(request);
+      const base={};
+      for(const k of ["name","nickname","business_number","vendor_code"])
+        if(Object.prototype.hasOwnProperty.call(body,k))base[k]=body[k];
+      let result;
+      if(Object.keys(base).length) {
+        result=await handleVendorPatch(new Request(request.url,{
+          method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify(base)
+        }),env,vendorId);
+        if(!result.ok){await apiAudit(env,key,"vendors","update",request,result.status,vendorId);return result;}
+      }
+      const row=await findVendorById(env,vendorId);
+      if(!row){result=json({error:"Vendor not found"},404);}
+      else {
+        await saveVendorDetails(env,vendorId,body);
+        result=json({row:(await vendorAdminRows(env,[row]))[0]},200);
+      }
+      await apiAudit(env,key,"vendors","update",request,result.status,vendorId);
+      return result;
     }
     if (request.method === "DELETE") {
-      const key = await requireExternalApiKey(request, env, "vendors.delete");
-      const response = await handleVendorDelete(request, env, vendorId);
-      await apiAudit(env, key, "vendors", "delete", request, response.status, vendorId);
+      const key=await requireExternalApiKey(request,env,"vendors.delete");
+      const response=await handleVendorDelete(request,env,vendorId);
+      await apiAudit(env,key,"vendors","delete",request,response.status,vendorId);
       return response;
     }
-    return json({ error: "Method Not Allowed" }, 405);
+    return json({error:"Method Not Allowed"},405);
   }
 
   return json({ error: "Not Found" }, 404);
@@ -1216,7 +1267,7 @@ function vendorDedupeKey(row) {
   return `key:${safeTrim(row?.business_number)}|${safeTrim(row?.name)}`;
 }
 
-const VENDOR_DETAIL_FIELDS = ["vendor_representative","business_type","business_category","representative_name","email","company_address","memo"];
+const VENDOR_DETAIL_FIELDS = ["vendor_representative","actual_representative_phone","business_type","business_category","representative_name","registered_representative_phone","email","company_address","memo"];
 async function getVendorDetails(env, ids) {
   if (!ids.length) return new Map();
   const q=new URLSearchParams({select:"*",vendor_id:"in.("+ids.join(",")+")",limit:String(Math.min(ids.length,1000))});
@@ -1225,12 +1276,14 @@ async function getVendorDetails(env, ids) {
 }
 async function vendorAdminRows(env, rows) {
   const details=await getVendorDetails(env,rows.map(x=>x.id).filter(Boolean));
-  return rows.map(row=>{const detail=details.get(row.id)||{};return {...row,...detail,vendor_contact:detail.vendor_representative??null,vendor_id:undefined};});
+  return rows.map(row=>{const detail=details.get(row.id)||{};return {...row,...detail,vendor_contact:detail.vendor_representative??null,actual_representative:detail.vendor_representative??null,registered_representative:detail.representative_name??null,actual_representative_phone:detail.actual_representative_phone??null,registered_representative_phone:detail.registered_representative_phone??null,vendor_id:undefined};});
 }
 async function saveVendorDetails(env, vendorId, body) {
   const values={};
   for(const field of VENDOR_DETAIL_FIELDS){
-    const source=field==="vendor_representative" && Object.prototype.hasOwnProperty.call(body,"vendor_contact")?"vendor_contact":field;
+    const source = field==="vendor_representative"
+      ? (Object.prototype.hasOwnProperty.call(body,"actual_representative") ? "actual_representative" : Object.prototype.hasOwnProperty.call(body,"vendor_contact") ? "vendor_contact" : field)
+      : field==="representative_name" && Object.prototype.hasOwnProperty.call(body,"registered_representative") ? "registered_representative" : field;
     if(Object.prototype.hasOwnProperty.call(body,source))values[field]=safeTrim(body[source])||null;
   }
   if(!Object.keys(values).length)return;

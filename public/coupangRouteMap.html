@@ -510,33 +510,7 @@
       }
     }
 
-    /* =========================================================
-       MAROOWELL WHITE DESIGN OVERRIDE
-       - 기능 JS/HTML 로직 유지
-       - 문경감홍사과체 적용
-       - 기존 font-size 기준 유지
-       ========================================================= */
-
-    @font-face{
-      font-family:"문경감홍사과체";
-      src:
-        url("/assets/fonts/MungyeongGamhong.woff2") format("woff2"),
-        url("/assets/fonts/MungyeongGamhong.woff") format("woff"),
-        url("/assets/fonts/MungyeongGamhong.ttf") format("truetype");
-      font-weight:400 1000;
-      font-style:normal;
-      font-display:swap;
-    }
-    @font-face{
-      font-family:"문경사과감홍체";
-      src:
-        url("/assets/fonts/MungyeongGamhong.woff2") format("woff2"),
-        url("/assets/fonts/MungyeongGamhong.woff") format("woff"),
-        url("/assets/fonts/MungyeongGamhong.ttf") format("truetype");
-      font-weight:400 1000;
-      font-style:normal;
-      font-display:swap;
-    }
+    /* MAROOWELL WHITE DESIGN OVERRIDE - native Korean fallback fonts. */
 
     :root{
       --bg:#ffffff;
@@ -549,7 +523,7 @@
       --ok:#ecfdf5;
       --warn:#fffbeb;
 
-      --mw-font:"문경감홍사과체","문경사과감홍체","Mungyeong Apple Gamhong","MungyeongGamhong","Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      --mw-font:"Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
       --mw-blue:#2563eb;
       --mw-blue-dark:#1d4ed8;
       --mw-red:#dc2626;
@@ -5736,32 +5710,24 @@
     const camp = campInput.value.trim();
     const code = codeInput.value.trim();
 
-    if (!camp){
+    if (!camp) {
       setStatus("캠프를 입력하세요.", "WARN");
       return;
     }
 
-    try{
+    const share = new URL("/share.html", "https://maroowell.com");
+    share.searchParams.set("camp", camp);
+    if (code) share.searchParams.set("code", code);
+    const shareUrl = share.toString();
+    try {
       setStatus("공유 링크 생성 중...", "OK");
-
-      const url = new URL(`${API_BASE}/share-link`);
-      url.searchParams.set("camp", camp);
-      if (code) url.searchParams.set("code", code);
-
-      const data = await apiGet(url.toString());
-      const shareUrl = String(data?.url || "").trim();
-
-      if (!shareUrl){
-        throw new Error("서명된 공유 링크를 받지 못했습니다.");
-      }
-
       await navigator.clipboard.writeText(shareUrl);
       setStatus("공유 링크 복사 완료", "OK");
       showToast("공유 링크가 복사되었습니다.");
-    }catch(e){
-      const msg = e?.message || "공유 링크 생성 실패";
-      setStatus(msg, "ERR");
-      showToast(msg);
+    } catch (e) {
+      // Clipboard can be blocked by the browser. Never discard a valid share URL.
+      setStatus("공유 주소를 복사할 수 없습니다. 표시된 주소를 복사해 주세요.", "WARN");
+      window.prompt("공유 링크를 복사해 주세요.", shareUrl);
     }
   }
 

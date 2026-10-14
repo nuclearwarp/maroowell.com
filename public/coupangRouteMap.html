@@ -2338,7 +2338,7 @@
   const BUILDING_GEOCODE_CONCURRENCY = 3;
   const BUILDING_GEOCODE_DELAY_MS = 70;
   const BUILDING_KAKAO_CALL_TIMEOUT_MS = 8000;
-  const BUILDING_REVERSE_RETRY_COUNT = 3;
+  const BUILDING_REVERSE_RETRY_COUNT = 1; // Quota failures must never be retried in a burst.
   const BUILDING_GEOCODE_MAX_ROUNDS = 5;
   const BUILDING_SCOPE_TITLE_CONTINUATION_MAX_ROUNDS = 32;
   const BUILDING_KAPT_INFO_CONTINUATION_MAX_ROUNDS = 32;
@@ -2714,6 +2714,33 @@
   const buildingScopeParcelsByRouteKey = new Map();
   const buildingReverseAddressCache = new Map();
   const buildingRegionCodeCache = new Map();
+  // Preserve server job identities within this browser tab. A refresh must not
+  // start another 900-point discovery for an already queued analysis.
+  const MW_JOB_SESSION_PREFIX = "mw-building-active-v1:";
+  function persistedJobId(key){
+    try{
+      const raw=sessionStorage.getItem(MW_JOB_SESSION_PREFIX+key);
+      if(!raw)return "";
+      const entry=JSON.parse(raw);
+      if(Date.now()-entry.savedAt>86400000 || !/^[0-9a-f-]{36}$/i.test(String(entry.id||""))) {
+        sessionStorage.removeItem(MW_JOB_SESSION_PREFIX+key);return "";
+      }
+      return entry.id;
+    }catch{return "";}
+  }
+  function storeJobId(key,id){
+    try{sessionStorage.setItem(MW_JOB_SESSION_PREFIX+key,JSON.stringify({id,savedAt:Date.now()}));}catch{}
+  }
+  function forgetJobId(key){
+    try{sessionStorage.removeItem(MW_JOB_SESSION_PREFIX+key);}catch{}
+  }
+  let kakaoReverseFailures=0;
+  let kakaoReverseBlockedUntil=0;
+  function noteKakaoReverseFailure(){
+    kakaoReverseFailures++;
+    if(kakaoReverseFailures>=3)kakaoReverseBlockedUntil=Date.now()+5*60*1000;
+  }
+  function kakaoReverseAllowed(){return Date.now()>=kakaoReverseBlockedUntil;}
 
   let campDirty=false, codeDirty=false;
   campInput.addEventListener("input", ()=>{ campDirty=true; });
@@ -4316,6 +4343,7 @@
     if (!Number.isFinite(x) || !Number.isFinite(y)) return Promise.resolve(null);
     const cacheKey = `${x.toFixed(6)},${y.toFixed(6)}`;
     if (buildingReverseAddressCache.has(cacheKey)) return Promise.resolve(buildingReverseAddressCache.get(cacheKey));
+    if (!kakaoReverseAllowed()) return Promise.resolve(null);
 
     return new Promise(resolve => {
       if (!geocoder) return resolve(null);
@@ -4327,7 +4355,8 @@
         if (settled) return;
         settled = true;
         if (callTimer) clearTimeout(callTimer);
-        buildingReverseAddressCache.set(cacheKey, value || null);
+        // Do not cache failed or rate-limited responses as an absent parcel.
+        if(value)buildingReverseAddressCache.set(cacheKey,value);
         resolve(value || null);
       };
 
@@ -4345,6 +4374,7 @@
             if (settled) return;
             if (callTimer) clearTimeout(callTimer);
             if (status !== kakao.maps.services.Status.OK || !Array.isArray(result) || !result[0]) {
+              noteKakaoReverseFailure();
               if (attempt < BUILDING_REVERSE_RETRY_COUNT) {
                 window.setTimeout(run, attempt === 1 ? 300 : 900);
                 return;
@@ -4352,6 +4382,7 @@
               finish(null);
               return;
             }
+            kakaoReverseFailures=0;
             const row = result[0];
             const address = row.address || {};
             const road = row.road_address || {};
@@ -4591,6 +4622,7 @@
       while(true){
         const index=cursor++;
         if(index>=plan.points.length) return;
+        if(!kakaoReverseAllowed()) throw new Error("카카오 주소 조회 요청 제한이 발생했습니다. 잠시 후 재시도해 주세요. 기존 분석은 보존됩니다.");
         const point=plan.points[index];
         const reverse=await reverseAddressMetaFromPoint(point.lng,point.lat).catch(()=>null);
         if(BUILDING_SCOPE_DISCOVERY_DELAY_MS>0) await new Promise(r=>setTimeout(r,BUILDING_SCOPE_DISCOVERY_DELAY_MS));
@@ -5042,16 +5074,19 @@
       if(state?.state==="waiting")item={...item,status:"waiting",message:buildingWaitingMessage(state),nextRetryAt:state.nextRetryAt,detached:state.detached,progress:state.progress};
       if(state?.state==="completed"){
         buildingJobIdByRouteKey.delete(routeKey);
+        forgetJobId(memoryKey);
         try{item=finalItem(state.result);}catch(error){item={status:"error",error:error.message,previousResult};}
       }
       if(state?.state==="error"||state?.state==="cancelled"){
         buildingJobIdByRouteKey.delete(routeKey);
+        forgetJobId(memoryKey);
         item={status:"error",error:String(state.error||state.message||"Analysis failed"),previousResult};
       }
       buildingResultByRouteKey.set(routeKey,item);renderTerrainCards();updateBuildingSummary();
     };
     let payload=null;
-    const existingJobId=buildingJobIdByRouteKey.get(routeKey);
+    const existingJobId=buildingJobIdByRouteKey.get(routeKey)||persistedJobId(memoryKey);
+    if(existingJobId)buildingJobIdByRouteKey.set(routeKey,existingJobId);
     if(!existingJobId){
       if(!force&&options.skipCacheProbe!==true){
         const cached=await postBuildingStats(accessToken,{...scopePayload,forceRefresh:false,force_refresh:false,cacheOnly:true,cache_only:true},{timeoutMs:BUILDING_CACHE_PROBE_TIMEOUT_MS,retryCount:0});
@@ -5059,6 +5094,7 @@
         if(cached?.cached===true&&cached?.buildingStats)return finalItem(cached);
       }
       if(!geocoder)throw new Error("Address service unavailable");
+      if(!kakaoReverseAllowed())throw new Error("카카오 주소 API 호출 제한으로 조회를 일시 중단했습니다. 기존 결과는 유지됩니다.");
       const feature=buildingFeatureFromGeometry(geometry);
       const legalDongCodes=await resolveLegalDongCodesForFeature(feature);assertCurrent();
       if(!legalDongCodes.length)throw new Error("Verified legal-dong codes unavailable");
@@ -5072,7 +5108,7 @@
     }
     assertCurrent();
     const data=await runBuildingJob(accessToken,payload,updateMessage,{jobId:existingJobId,assertCurrent,
-      onCreated:jobId=>buildingJobIdByRouteKey.set(routeKey,jobId)});
+      onCreated:jobId=>{buildingJobIdByRouteKey.set(routeKey,jobId);storeJobId(memoryKey,jobId);}});
     assertCurrent();
     if(data?.__mwJobPending)return {status:"waiting",jobId:data.jobId,nextRetryAt:data.nextRetryAt,
       detached:data.detached,message:buildingWaitingMessage(data),progress:data.progress,previousResult,target,memoryKey};

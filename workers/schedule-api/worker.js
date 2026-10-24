@@ -202,7 +202,7 @@ export default {
         }
         const expected = preview.actual_rows;
         const present = expected.filter(r=>currentIds.has(nativeMetaKey(r.id)));
-        const complete = present.length===expected.length && currentIds.size===expected.length;
+        const complete = present.length===expected.length;
         if (complete) {
           const last = await getUpdateStatus(env,{camp,wave});
           if (!last?.actual_update_date || date > clean(last.actual_update_date)) {
@@ -1881,7 +1881,7 @@ async function prepareNativeMetaTransfer(env,{camp,wave,date}){
     date:metaDate,name:clean(p.name)||clean(p.id),id:clean(p.id),routes:[]
   })).sort((a,b)=>a.id.localeCompare(b.id,"en"));
   const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(
-    JSON.stringify({camp,wave,date,reset:resetRows,actual:actualRows})
+    JSON.stringify({camp,wave,date,actual:actualRows})
   ));
   const fingerprint=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,"0")).join("");
   return {

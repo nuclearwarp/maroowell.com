@@ -2934,11 +2934,13 @@
 
           setState("ok","READY");
           setStatus(`조회 완료: 라우트 ${state.routeParents.filter(r=>!r.isOff).length}개 / 스케줄 ${state.schedules.length}개 / 계정 ${state.driverAccounts.length}개`);
+          return true;
         }catch(e){
           console.error(e);
           setState("err","ERROR");
           setStatus("불러오기 실패: "+(e?.message||e));
           alert("불러오기 실패: "+(e?.message||e));
+          return false;
         }finally{
           state.loading=false;
           els.btnLoad.disabled=false;
@@ -4815,23 +4817,46 @@
         state.wave=waveForCamp(camp)||requestedWave;
         els.waveSelect.value=state.wave;
 
-        if(date){
-          applyWeekStart(sundayOf(date),false);
+        if(date)applyWeekStart(sundayOf(date),false);
+
+        // Never reset MetaAdmin registrations if the shared schedule could not be loaded.
+        const loaded=await loadAll();
+        if(!loaded || !state.routeParents.some(route=>!route.isOff)){
+          setStatus("META 전송 중단: 서버 스케줄을 정상적으로 불러오지 못했습니다. 캠프/라우트를 확인해주세요.");
+          return true;
+        }
+        if(state.dirty.size>0){
+          setStatus("META 전송 중단: 미저장 변경사항이 있습니다. 먼저 서버에 저장해주세요.");
+          return true;
         }
 
-        await loadAll();
         openMetaUploadDatePicker();
-
-        if(date && state.weekDates.includes(date) && els.metaUploadDateList){
-          const btn=Array.from(els.metaUploadDateList.querySelectorAll("[data-date]"))
-            .find(el=>normalizeDateInput(el.getAttribute("data-date")||"")===date);
-          if(btn){
-            btn.classList.add("selected");
-            btn.setAttribute("aria-pressed","true");
-            updateMetaUploadRunButton();
-            try{btn.scrollIntoView({block:"nearest"})}catch{}
-          }
+        if(!date || !state.weekDates.includes(date) || !els.metaUploadDateList){
+          setStatus("META 전송 날짜를 확인한 뒤 전송 버튼을 눌러주세요.");
+          return true;
         }
+        const btn=Array.from(els.metaUploadDateList.querySelectorAll("[data-date]"))
+          .find(el=>normalizeDateInput(el.getAttribute("data-date")||"")===date);
+        if(!btn){
+          setStatus("META 전송 날짜를 선택하지 못했습니다. 직접 선택 후 전송해주세요.");
+          return true;
+        }
+        btn.classList.add("selected");
+        btn.setAttribute("aria-pressed","true");
+        updateMetaUploadRunButton();
+        try{btn.scrollIntoView({block:"nearest"})}catch{}
+
+        // App's "META auto send" button must start the existing, verified two-phase
+        // MetaAdmin workflow, not stop after preselecting the date. The batch function
+        // still asks for explicit confirmation before off-duty reset and re-apply.
+        // Clear the one-shot flag so a page refresh cannot send the same day again.
+        try{
+          const next=new URL(location.href);
+          next.searchParams.delete("app_meta_upload");
+          history.replaceState(history.state,"",next.pathname+next.search+next.hash);
+        }catch(e){console.warn("[app META preset] could not clear one-shot flag",e)}
+        setStatus(`${dateLabel(date)} META 전송 확인 대기 중...`);
+        await uploadMetaSchedulesForDates([date]);
         return true;
       }
 

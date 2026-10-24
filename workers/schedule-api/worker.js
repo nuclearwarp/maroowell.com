@@ -151,6 +151,74 @@ export default {
         }, 200, cors);
       }
 
+      // Native Android/iOS transfer: never open or render a web schedule page.
+      if (url.pathname === "/schedule/meta/native/preview" && request.method === "GET") {
+        requireWrite(auth);
+        const camp = clean(url.searchParams.get("camp"));
+        const wave = normalizeWave(url.searchParams.get("wave"));
+        const date = normalizeDate(url.searchParams.get("date"));
+        if (!camp || !date) throw httpError(400, "camp_or_date_required");
+        const preview = await prepareNativeMetaTransfer(env, { camp, wave, date });
+        return json({ ok:true, ...preview }, 200, cors);
+      }
+
+      if (url.pathname === "/schedule/meta/native/submit" && request.method === "POST") {
+        requireWrite(auth);
+        const body = await readJson(request);
+        const camp = clean(body.camp);
+        const wave = normalizeWave(body.wave);
+        const date = normalizeDate(body.date);
+        const phase = clean(body.phase);
+        if (!camp || !date || !["reset","apply"].includes(phase)) throw httpError(400, "invalid_native_meta_request");
+        const preview = await prepareNativeMetaTransfer(env, { camp, wave, date });
+        if (clean(body.fingerprint) !== preview.fingerprint) {
+          throw httpError(409, "schedule_or_meta_registrations_changed_reload_preview");
+        }
+        const rows = phase === "reset" ? preview.reset_rows : preview.actual_rows;
+        if (!rows.length) return json({ok:true,skipped:true,phase,workflow_id:null},200,cors);
+        const bytes = buildNativeMetaXlsx(rows, {camp,wave,phase});
+        const metaDate = preview.meta_date;
+        const filename = `${camp}_${wave}_${metaDate}_${phase}.xlsx`;
+        const blob = new File([bytes], filename, {
+          type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        });
+        const result = await uploadMetaScheduleExcel(env, {camp,wave,metaDate,phase,file:blob});
+        return json({ok:true,skipped:false, ...result},200,cors);
+      }
+
+      if (url.pathname === "/schedule/meta/native/verify" && request.method === "POST") {
+        requireWrite(auth);
+        const body = await readJson(request);
+        const camp = clean(body.camp);
+        const wave = normalizeWave(body.wave);
+        const date = normalizeDate(body.date);
+        const phase = clean(body.phase);
+        if (!camp || !date || !["reset","apply"].includes(phase)) throw httpError(400, "invalid_native_meta_verify");
+        const preview = await prepareNativeMetaTransfer(env, {camp,wave,date});
+        const currentIds = new Set(preview.reset_rows.map(r=>nativeMetaKey(r.id)));
+        // A reset is verified against a fresh MetaAdmin query. Never mark success just because the upload API accepted the workbook.
+        if (phase === "reset") {
+          return json({ok:currentIds.size===0,verified:currentIds.size===0,remaining:currentIds.size},200,cors);
+        }
+        const expected = preview.actual_rows;
+        const present = expected.filter(r=>currentIds.has(nativeMetaKey(r.id)));
+        const complete = present.length===expected.length && currentIds.size===expected.length;
+        if (complete) {
+          const last = await getUpdateStatus(env,{camp,wave});
+          if (!last?.actual_update_date || date > clean(last.actual_update_date)) {
+            await upsertUpdateStatus(env,{
+              camp,wave,actual_update_date:preview.meta_date,
+              fake_update_date:last?.fake_update_date||null
+            });
+          }
+        }
+        return json({
+          ok:complete,verified:complete,
+          expected:expected.length,present:present.length,registered:currentIds.size,
+          missing:expected.filter(r=>!currentIds.has(nativeMetaKey(r.id))).map(r=>r.name)
+        },200,cors);
+      }
+
       if (url.pathname === "/schedule/meta/current" && request.method === "GET") {
         requireWrite(auth);
 
@@ -1711,4 +1779,186 @@ async function saveScheduleRows(env, rows) {
       mode: "row_by_row_delete"
     };
   }
+}
+
+
+// Shared Android/iOS source-of-truth for the two-stage native MetaAdmin upload.
+// Only server-saved MAROOWELL assignments are exported: never trust an arbitrary client row list.
+function nativeMetaKey(value) {
+  return clean(value).replace(/\s+/g,"").toLowerCase();
+}
+function nativeMetaNormalizeRoute(value) {
+  return clean(value).replace(/[^0-9a-z가-힣]/gi,"").toUpperCase();
+}
+function nativeMetaAccountParts(raw,fallback="") {
+  const text = clean(raw);
+  const m = text.match(/^([^\s()]+)\s*[\[(（]([^)\]）]+)[)\]）]$/);
+  return {id:clean(m?m[1]:text).split(/\s+/)[0],name:clean(m?m[2]:fallback)};
+}
+function nativeMetaAccountIndex(infoRows) {
+  const map = new Map();
+  const add = (alias,id,name,prefer=false) => {
+    const key=nativeMetaKey(alias);
+    if (!key || !id || (map.has(key)&&!prefer)) return;
+    map.set(key,{id,name:name||alias});
+  };
+  for(const row of infoRows) {
+    const person=clean(row.person_name||row.name);
+    const mainId=nativeMetaAccountParts(row.coupang_id,person).id;
+    const mainName=clean(row.coupang_admin_name)||person;
+    for(const alias of [person,mainName,mainId]) add(alias,mainId,mainName);
+    let subs = Array.isArray(row.sub_accounts) ? row.sub_accounts : [];
+    if (!subs.length && row.sub_account_info) {
+      try {
+        const parsed=typeof row.sub_account_info==="string" ? JSON.parse(row.sub_account_info) : row.sub_account_info;
+        if(Array.isArray(parsed))subs=parsed;
+      }catch{}
+    }
+    subs.forEach((sub,i)=>{
+      if(typeof sub==="string")sub={id:sub};
+      if(!sub||typeof sub!=="object")return;
+      const raw=clean(sub.id||sub.account_id||sub.coupang_id||sub.login_id);
+      const parsed=nativeMetaAccountParts(raw,clean(sub.adminName||sub.name||sub.person_name));
+      const id=parsed.id;
+      const name=clean(sub.adminName||sub.name||sub.person_name||parsed.name)||person;
+      // A numbered alias always wins over the main account; no fallback to main ID for suffix 2+.
+      for(const alias of [person&&person+(i+2),name,id])add(alias,id,name,true);
+    });
+  }
+  return map;
+}
+function nativeMetaScheduleRows(schedules,routes,infoRows,date,metaDate){
+  const index=nativeMetaAccountIndex(infoRows);
+  const routeMap=new Map();
+  for(const r of routes){
+    if(r.is_active===false)continue;
+    const label=nativeMetaNormalizeRoute(r.route_label||[r.route,r.sub,r.sub_sub].join(""));
+    const parent=nativeMetaNormalizeRoute(r.parent_route_label||[r.route,r.sub].join(""));
+    if(label)routeMap.set(label,parent||label);
+  }
+  const assignments=(schedules||[]).filter(r=>
+    r.is_active!==false && clean(r.schedule_date)===date &&
+    nativeMetaNormalizeRoute(r.route_label)!=="휴무자" &&
+    !!clean(r.driver_display_name||r.driver_name)
+  );
+  const assignedLabels=new Set(assignments.map(r=>nativeMetaNormalizeRoute(r.route_label)));
+  const grouped=new Map();
+  const unresolved=[];
+  for(const r of assignments){
+    const label=nativeMetaNormalizeRoute(r.route_label);
+    const adminRoute=routeMap.get(label)||label;
+    if(!adminRoute)continue;
+    // Web schedule parent assignment takes priority over a child assignment.
+    if(adminRoute!==label && assignedLabels.has(adminRoute))continue;
+    const display=clean(r.driver_display_name||r.driver_name);
+    const direct=nativeMetaAccountParts(r.driver_coupang_id,clean(r.driver_export_name||display));
+    let account=index.get(nativeMetaKey(display)) || index.get(nativeMetaKey(r.driver_export_name));
+    const numbered=/^(.+?)(\d+)$/.exec(display);
+    if(numbered && Number(numbered[2])>=2 && !account && !direct.id){
+      unresolved.push(display);continue;
+    }
+    const id=clean(account?.id||direct.id);
+    const name=clean(account?.name||r.driver_export_name||direct.name||display);
+    if(!id || !name){unresolved.push(display);continue;}
+    const key=[metaDate,nativeMetaKey(id)].join("|");
+    if(!grouped.has(key))grouped.set(key,{date:metaDate,name,id,routes:[]});
+    const out=grouped.get(key);
+    if(!out.routes.includes(adminRoute))out.routes.push(adminRoute);
+  }
+  if(unresolved.length)throw httpError(422,"meta_account_mapping_required",{names:[...new Set(unresolved)]});
+  return [...grouped.values()].map(r=>({...r,routes:r.routes.sort()})).sort((a,b)=>a.name.localeCompare(b.name,"ko"));
+}
+async function prepareNativeMetaTransfer(env,{camp,wave,date}){
+  const metaDate=wave==="WAVE1"?addDays(date,1):date;
+  const [schedules,routes,accounts,current]=await Promise.all([
+    selectSchedules(env,{camp,wave,weekStart:date,weekEnd:date}),
+    selectRoutes(env,camp),
+    selectInfoAccounts(env),
+    getMetaCurrentSchedule(env,{camp,wave,date:metaDate})
+  ]);
+  const actualRows=nativeMetaScheduleRows(schedules,routes,accounts,date,metaDate);
+  const resetRows=(current.registered_people||[]).filter(p=>clean(p?.id)).map(p=>({
+    date:metaDate,name:clean(p.name)||clean(p.id),id:clean(p.id),routes:[]
+  })).sort((a,b)=>a.id.localeCompare(b.id,"en"));
+  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(
+    JSON.stringify({camp,wave,date,reset:resetRows,actual:actualRows})
+  ));
+  const fingerprint=[...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,"0")).join("");
+  return {
+    camp,wave,schedule_date:date,meta_date:metaDate,
+    reset_count:resetRows.length,apply_count:actualRows.length,
+    reset_people:resetRows.map(r=>r.name),apply_people:actualRows.map(r=>r.name),
+    reset_rows:resetRows,actual_rows:actualRows,fingerprint
+  };
+}
+
+// Builds a standards-compliant, uncompressed XLSX ZIP. The MetaAdmin importer
+// expects Excel date serials (A), numeric business registration (C), text elsewhere.
+function nativeMetaXml(value) {
+  return String(value??"").replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
+}
+function nativeMetaZip(files) {
+  const enc=new TextEncoder(),local=[],central=[];
+  let offset=0;
+  const crc32=(bytes)=>{
+    let c=0xffffffff;
+    for(let i=0;i<bytes.length;i++){
+      c^=bytes[i];
+      for(let j=0;j<8;j++)c=(c>>>1)^((c&1)?0xedb88320:0);
+    }
+    return (c^0xffffffff)>>>0;
+  };
+  const pack=(n)=>new Uint8Array(n);
+  const u16=(v,n,x)=>{v[n]=x&255;v[n+1]=(x>>>8)&255};
+  const u32=(v,n,x)=>{u16(v,n,x);u16(v,n+2,x>>>16)};
+  for(const [name,body] of Object.entries(files)){
+    const filename=enc.encode(name),bytes=enc.encode(body),crc=crc32(bytes);
+    const lh=pack(30+filename.length);
+    u32(lh,0,0x04034b50);u16(lh,4,20);u16(lh,8,0);u32(lh,14,crc);
+    u32(lh,18,bytes.length);u32(lh,22,bytes.length);u16(lh,26,filename.length);
+    lh.set(filename,30);local.push(lh,bytes);
+    const ch=pack(46+filename.length);
+    u32(ch,0,0x02014b50);u16(ch,4,20);u16(ch,6,20);u32(ch,16,crc);
+    u32(ch,20,bytes.length);u32(ch,24,bytes.length);u16(ch,28,filename.length);
+    u32(ch,42,offset);ch.set(filename,46);central.push(ch);
+    offset+=lh.length+bytes.length;
+  }
+  const centralSize=central.reduce((n,x)=>n+x.length,0),end=pack(22);
+  u32(end,0,0x06054b50);u16(end,8,Object.keys(files).length);
+  u16(end,10,Object.keys(files).length);u32(end,12,centralSize);u32(end,16,offset);
+  const all=[...local,...central,end],result=pack(all.reduce((n,x)=>n+x.length,0));
+  let pos=0;for(const part of all){result.set(part,pos);pos+=part.length;}
+  return result;
+}
+function buildNativeMetaXlsx(rows,{camp,wave,phase}){
+  const headers=["업무일","벤더명","사업자등록번호","캠프명","웨이브","이름","아이디","업무상태","회전","업무라우트"];
+  const campName=clean(camp).replace(/^([MV])_?(.+)$/i,(_,a,b)=>a.toUpperCase()+"_"+b);
+  const isOff=phase==="reset",status=isOff?"휴무":"출근";
+  const rotation=wave==="WAVE1"?"D1,D2,F3":"1회전,2회전";
+  const aoa=[headers,...rows.map(r=>[
+    r.date,"마루웰/MARUL",2591501828,campName,wave,r.name,r.id,status,
+    isOff?"":rotation,isOff?"":r.routes.join(",")
+  ])];
+  const rowXml=aoa.map((row,ridx)=>\`<row r="\${ridx+1}">\`+row.map((v,cidx)=>{
+    if(v===""||v==null)return "";
+    const col=String.fromCharCode(65+cidx),ref=col+(ridx+1);
+    if(ridx>0&&cidx===0){
+      const time=Date.parse(String(v)+"T00:00:00Z");
+      const serial=Math.round((time-Date.UTC(1899,11,30))/86400000);
+      return \`<c r="\${ref}" s="1"><v>\${serial}</v></c>\`;
+    }
+    if(ridx>0&&cidx===2)return \`<c r="\${ref}"><v>\${Number(v)}</v></c>\`;
+    return \`<c r="\${ref}" t="inlineStr"><is><t xml:space="preserve">\${nativeMetaXml(v)}</t></is></c>\`;
+  }).join("")+"</row>").join("");
+  const ns="http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  const files={
+    "[Content_Types].xml":'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>',
+    "_rels/.rels":'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+    "xl/workbook.xml":\`<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="\${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet0" sheetId="1" r:id="rId1"/></sheets></workbook>\`,
+    "xl/_rels/workbook.xml.rels":'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+    "xl/styles.xml":\`<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="\${ns}"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>\`,
+    "xl/worksheets/sheet1.xml":\`<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="\${ns}"><dimension ref="A1:J\${aoa.length}"/><sheetData>\${rowXml}</sheetData><autoFilter ref="A1:J\${aoa.length}"/></worksheet>\`
+  };
+  return nativeMetaZip(files);
 }

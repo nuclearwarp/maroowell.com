@@ -88,6 +88,10 @@ var login_worker_v2_default = {
       if (["/realtime", "/realtime.html", "/public/realtime"].includes(path) && response.ok) {
         return withNoStore(response, "text/html; charset=utf-8");
       }
+      // Navigation permission data must not remain cached after access changes.
+      if (path === "/board-menu.js" && response.ok) {
+        return withNoStore(response, "application/javascript; charset=utf-8");
+      }
       if (path === "/meta-connection.js" && response.ok) {
         return withNoStore(response, "application/javascript; charset=utf-8");
       }

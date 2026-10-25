@@ -28,6 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker.js
+          node tests/vendor-access-regression.mjs
           grep -Fq 'MW_ROUTE_WRITE_AUTH_V1' worker.js
           grep -Fq 'requireRouteWriteAccess(request, env)' worker.js
           grep -Fq 'ROUTE_WRITE_MIN_LEVEL = 60' worker.js
@@ -58,6 +59,28 @@ jobs:
           cat /tmp/vendor-read
           test "$vendor_read" = '200'
           grep -q '"rows"' /tmp/vendor-read
+
+          public_vendor=$(curl -sS -o /tmp/public-vendor -w '%{http_code}' "$BASE/vendors/view?limit=1")
+          cat /tmp/public-vendor
+          test "$public_vendor" = '200'
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const obj = JSON.parse(fs.readFileSync('/tmp/public-vendor', 'utf8'));
+          if (!Array.isArray(obj.rows) || !obj.rows.length) throw new Error('Public vendor list is empty');
+          for (const row of obj.rows) {
+            for (const secret of ['memo', 'email', 'vendor_contact', 'company_address', 'vendor_representative']) {
+              if (Object.prototype.hasOwnProperty.call(row, secret)) throw new Error('Public vendor list leaked ' + secret);
+            }
+          }
+          NODE
+
+          permission=$(curl -sS -o /tmp/vendor-permission -w '%{http_code}' "$BASE/vendors/permissions")
+          cat /tmp/vendor-permission
+          test "$permission" = '401'
+
+          private_vendor=$(curl -sS -o /tmp/private-vendor -w '%{http_code}' "$BASE/vendors/admin?limit=1")
+          cat /tmp/private-vendor
+          test "$private_vendor" = '401'
 
           vendor=$(curl -sS -o /tmp/vendor -w '%{http_code}' -X POST "$BASE/vendors" \
             -H 'Content-Type: application/json' --data '{}')

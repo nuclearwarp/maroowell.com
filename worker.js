@@ -88,6 +88,14 @@ export default {
         }
       }
 
+      if (path === "/vendors/permissions") {
+        if (request.method === "GET") return cors(await handleVendorPermissionGet(request, env));
+        return cors(json({error:"Method Not Allowed"},405));
+      }
+      if (path === "/vendors/view") {
+        if (request.method === "GET") return cors(await handleVendorsPublicView(url, env));
+        return cors(json({error:"Method Not Allowed"},405));
+      }
       if(path === "/vendors/admin"){
         if(request.method==="GET")return cors(await handleVendorsAdminGet(request,url,env));
         if(request.method==="POST")return cors(await handleVendorAdminCreate(request,env));
@@ -728,12 +736,67 @@ async function requireRouteWriteAccess(request, env) {
   return { userId: user.id, roleLevel, isAdmin: access?.is_admin === true };
 }
 
+// Vendor viewing is public; writes always require a verified Supabase user.
+// A CLHI read grant explicitly enables vendor edit/delete but NOT vendor creation.
+// The existing Maroowell admin privilege remains unchanged.
+async function vendorPermissionSnapshot(request, env) {
+  const user = await routeAuthUser(request, env);
+  const [profile, clhi, access, maroowellVendor] = await Promise.all([
+    routeFirstRow(env, "profiles", {
+      select: "approval_status,app_only",
+      user_id: `eq.${user.id}`,
+      limit: "1"
+    }),
+    routeFirstRow(env, "cleansing_history_access", {
+      select: "user_id,can_select",
+      user_id: `eq.${user.id}`,
+      limit: "1"
+    }),
+    routeFirstRow(env, "user_access", {
+      select: "is_maroowell,is_admin",
+      user_id: `eq.${user.id}`,
+      limit: "1"
+    }),
+    routeMaroowellVendor(env)
+  ]);
+  const approved = profile?.approval_status === "approved" && profile?.app_only !== true;
+  if (!approved) throw routeHttpError(403, "승인된 웹 계정만 벤더 정보를 변경할 수 있습니다.");
+  const member = maroowellVendor?.id
+    ? await routeFirstRow(env, "vendor_members", {
+        select: "role_level,is_active",
+        user_id: `eq.${user.id}`,
+        vendor_id: `eq.${maroowellVendor.id}`,
+        is_active: "eq.true",
+        order: "role_level.desc",
+        limit: "1"
+      })
+    : null;
+  const level = Number(member?.role_level || 0);
+  const isMaroowell = access?.is_maroowell === true || level > 0;
+  const originalAdmin = isMaroowell && (access?.is_admin === true || level >= 90);
+  const canClhi = clhi?.can_select === true;
+  const canEdit = originalAdmin || canClhi;
+  return {
+    userId: user.id,
+    canViewDetails: canEdit,
+    canCreate: originalAdmin,
+    canEdit,
+    canDelete: canEdit
+  };
+}
 async function requireVendorAdminAccess(request, env) {
-  const access = await requireRouteWriteAccess(request, env);
-  if (!access.isAdmin && Number(access.roleLevel || 0) < 90) {
-    throw routeHttpError(403, "벤더 수정·삭제는 관리자 권한이 필요합니다.");
-  }
-  return access;
+  const result = await vendorPermissionSnapshot(request, env);
+  if (!result.canEdit) throw routeHttpError(403, "벤더 수정·삭제 권한이 없습니다.");
+  return result;
+}
+async function requireVendorCreatorAccess(request, env) {
+  const result = await vendorPermissionSnapshot(request, env);
+  if (!result.canCreate) throw routeHttpError(403, "벤더 추가는 관리자 권한이 필요합니다.");
+  return result;
+}
+async function handleVendorPermissionGet(request, env) {
+  const {canCreate,canEdit,canDelete,canViewDetails} = await vendorPermissionSnapshot(request, env);
+  return json({canCreate,canEdit,canDelete,canViewDetails}, 200, {"Cache-Control":"no-store"});
 }
 
 function safeTrim(v) {
@@ -1293,6 +1356,27 @@ async function saveVendorDetails(env, vendorId, body) {
     body:JSON.stringify({vendor_id:vendorId,...values,updated_at:new Date().toISOString()})
   });
 }
+// Public list is deliberately reduced to business data only. Private notes,
+// contact names, personal phones, emails and addresses stay in guarded /admin.
+async function handleVendorsPublicView(url, env) {
+  const response = await handleVendorsGet(url, env);
+  if (!response.ok) return response;
+  const result = await response.json();
+  const baseRows = Array.isArray(result?.rows) ? result.rows : [];
+  const details = await getVendorDetails(env, baseRows.map(row => row.id).filter(Boolean));
+  const rows = baseRows.map(row => {
+    const detail = details.get(row.id) || {};
+    return {
+      id: row.id,
+      name: row.name,
+      nickname: row.nickname,
+      business_number: row.business_number,
+      business_type: detail.business_type || null,
+      business_category: detail.business_category || null
+    };
+  });
+  return json({rows},200,{"Cache-Control":"no-store"});
+}
 async function handleVendorsAdminGet(request,url,env) {
   await requireVendorAdminAccess(request,env);
   const r=await handleVendorsGet(url,env);
@@ -1308,7 +1392,7 @@ async function handleVendorAdminDetail(request,url,env,id){
   return json({...j,row:rows[0]});
 }
 async function handleVendorAdminCreate(request,env){
-  await requireVendorAdminAccess(request,env);
+  await requireVendorCreatorAccess(request,env);
   const body=await readJson(request);
   const res=await handleVendorCreate(new Request(request.url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}),env);
   if(!res.ok)return res;
@@ -1455,7 +1539,7 @@ const VENDOR_REFERENCE_SPECS = [
   ["zipcode_terrain", "vendor_id", "지형 데이터"],
 ];
 
-async function vendorReferenceUsage(env, vendorId) {
+async function vendorReferenceUsage(env, vendorId, strict = false) {
   const references = [];
   for (const [table, column, label] of VENDOR_REFERENCE_SPECS) {
     try {
@@ -1467,6 +1551,7 @@ async function vendorReferenceUsage(env, vendorId) {
       if (Array.isArray(rows) && rows.length) references.push({ table, column, label });
     } catch (error) {
       console.warn("vendor reference check failed:", table, error?.message || String(error));
+      if (strict) throw routeHttpError(503, "연결된 벤더 데이터 확인에 실패하여 삭제를 중단했습니다.");
     }
   }
   return references;
@@ -1557,7 +1642,7 @@ async function handleVendorDelete(request, env, vendorId) {
   const current = await findVendorById(env, vendorId);
   if (!current) return json({ error: "Vendor not found" }, 404);
 
-  const references = await vendorReferenceUsage(env, vendorId);
+  const references = await vendorReferenceUsage(env, vendorId, true);
   if (references.length) {
     return json({
       error: "연결된 데이터가 있어 벤더를 삭제할 수 없습니다.",

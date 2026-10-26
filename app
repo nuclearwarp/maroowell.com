@@ -8,7 +8,7 @@
   <title>마루웰 앱 테스트</title>
   <link rel="icon" href="/favicon.ico" />
   <style>
-    @font-face{font-family:"MW";src:url("/assets/fonts/MungyeongGamhong.woff2") format("woff2");font-style:normal;font-weight:400;font-display:swap}
+
     :root{--card:#fff;--line:#dbe3ef;--text:#172033;--muted:#6b7688;--blue:#2563eb;--blue2:#1d4ed8;--green:#16803d;--shadow:0 14px 34px rgba(15,23,42,.07)}
     *{box-sizing:border-box}
     html,body{margin:0;min-height:100%;background:linear-gradient(180deg,#f8faff,#f4f7fb);color:var(--text);font-family:"MW","Noto Sans KR",system-ui,-apple-system,sans-serif;font-weight:400}

@@ -26,7 +26,7 @@
 window.MARUWELL_CONFIG = {
   SUPABASE_URL: "https://rgqerimdxkthkcewqbbe.supabase.co",
   SUPABASE_ANON_KEY: ["sb_publishable_", "FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H"].join(""),
-  ADMIN_API_BASE: "https://admin-access-api.brain-0f6.workers.dev",
+  ADMIN_API_BASE: "https://admin-access.maroowell.com",
   CLEANSING_HISTORY_API_BASE: "https://cleansinghistory.maroowell.com",
   PATHS: {
     login: "/",

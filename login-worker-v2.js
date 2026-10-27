@@ -10,6 +10,21 @@ var login_worker_v2_default = {
 
       const path = url.pathname.replace(/\/+$/, "") || "/";
 
+      // All site HTML documents use extensionless public URLs. The source files
+      // remain unchanged; /foo transparently serves /foo.html from ASSETS.
+      // Do not affect extensionless application pages, API paths or Google's
+      // .html verification token.
+      const cleanHtmlPages = new Set(["admin_access", "coupangRouteMap", "coupangland", "naverSearch", "route-map-20260925", "route-map-v69-20260925", "route-map-v70-20260925", "route-map-v71-20260925", "route-map-v73-20260925", "share", "vendors", "zipcode_share"]);
+      const isHtmlDocument = (path) => path === "/index.html" || (
+        path.endsWith(".html") && cleanHtmlPages.has(path.slice(1, -5))
+      );
+      if ((request.method === "GET" || request.method === "HEAD") && isHtmlDocument(path)) {
+        const canonical = new URL(request.url);
+        canonical.pathname = path === "/index.html" ? "/" : path.slice(0, -5);
+        return Response.redirect(canonical.toString(), 308);
+      }
+      if (cleanHtmlPages.has(path.slice(1))) url.pathname = path + ".html";
+
       // html_handling="none"에서는 / 가 index.html로 자동 매핑되지 않으므로 명시적으로 로그인 메인 파일을 연결한다.
       if (path === "/") url.pathname = "/index.html";
       if (path === "/coupangRouteMap") url.pathname = "/coupangRouteMap.html";

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
-const code=fs.readFileSync("login-worker-v2.js","utf8");
+const code=fs.readFileSync(new URL("../login-worker-v2.js", import.meta.url),"utf8");
 const {default: worker}=await import("data:text/javascript;base64,"+Buffer.from(code).toString("base64"));
 const htmlPages=["admin_access","coupangRouteMap","coupangland","naverSearch","route-map-20260925","route-map-v69-20260925","route-map-v70-20260925","route-map-v71-20260925","route-map-v73-20260925","share","vendors","zipcode_share"];
 let calls=[];

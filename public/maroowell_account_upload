@@ -192,14 +192,15 @@
     .btn:disabled{opacity:.58;cursor:not-allowed;box-shadow:none}
 
     .main{
-      max-width:1680px;
-      margin:0 auto;
-      padding:16px 14px 44px;
+      width:100%;
+      max-width:none;
+      margin:0;
+      padding:12px clamp(8px,1vw,20px) 28px;
     }
 
     .layout{
       display:grid;
-      grid-template-columns:430px minmax(0,1fr);
+      grid-template-columns:clamp(320px,23vw,430px) minmax(0,1fr);
       gap:14px;
       align-items:start;
     }
@@ -711,6 +712,7 @@
 
       const REQUIRED_SHEET_NAME = "정산원천데이터";
       const LOSS_SHEET_NAME = "분실및파손";
+      const LOSS_SHEET_ALIASES = ["분실및파손","분실파손List","분실파손"];
       const UPLOAD_CHUNK_SIZE = 500;
       const MONEY_TOLERANCE = 1;
 
@@ -977,6 +979,9 @@
       function validateAmounts(data, meta){
         const classify = data.classify || "";
         const errors = [];
+        if(compact(data.id) === compact("영업점 수수료")){
+          return {hasError:false,exempt:true,errors,notes:["영업점 수수료: 검증 비대상 (정산금액은 업로드 유지)"],expectedDefault:null,expectedFreshbag:null,expectedTotal:null,defaultDiff:0,freshbagDiff:0,totalDiff:0};
+        }
         const notes = [];
         const qty = Number(data.parcel || 0) + Number(data["return"] || 0);
         const price = Number(data.price || 0);
@@ -1169,14 +1174,14 @@
           deliveryDate: findColumnContains(headers, ["날짜", "일자", "배송일자"], 0),
           camp: findColumnContains(headers, ["캠프", "캠프명", "Camp"], 1),
           id: findColumnContains(headers, ["ID", "아이디"], 2),
-          driverName: findColumnContains(headers, ["이름", "기사명", "성명"], 3),
-          lossType: findColumnContains(headers, ["유형", "타입", "분류"], 4),
-          lossDetail: findColumnContains(headers, ["상세", "상세유형", "내용"], 5),
-          lossCount: findColumnContains(headers, ["개수", "수량", "건수"], 6),
-          deductionPrice: findColumnContains(headers, ["차감금액", "차감액", "금액"], 7),
-          companyName: findColumnContains(headers, ["업체명", "업체", "Vendor"], 8),
-          trackingNumber: findColumnContains(headers, ["운송장번호", "운송장", "송장번호", "송장"], 9),
-          productName: findColumnContains(headers, ["상품명상세", "상품명", "상품", "상세상품"], 10)
+          driverName: findColumnContains(headers, ["이름", "기사명", "성명"], -1),
+          lossType: findColumnContains(headers, ["유형", "타입", "분류"], 3),
+          lossDetail: findColumnContains(headers, ["상세", "상세유형", "내용"], 4),
+          lossCount: findColumnContains(headers, ["개수", "수량", "건수"], 5),
+          deductionPrice: findColumnContains(headers, ["차감금액", "차감액", "금액"], 6),
+          companyName: findColumnContains(headers, ["업체명", "업체", "Vendor"], 7),
+          trackingNumber: findColumnContains(headers, ["운송장번호", "운송장", "송장번호", "송장"], 8),
+          productName: findColumnContains(headers, ["상품명상세", "상품명", "상품", "상세상품"], 9)
         };
       }
 
@@ -1270,7 +1275,7 @@
       }
 
       function appendLossDamageRows(workbook){
-        const sheetName = workbook.SheetNames.find(name => compact(name) === compact(LOSS_SHEET_NAME));
+        const sheetName = workbook.SheetNames.find(name => LOSS_SHEET_ALIASES.some(alias => compact(name) === compact(alias)));
         if(!sheetName) return { sheet:null, rows:0, skipped:0, columns:null, headers:null };
 
         const sheet = workbook.Sheets[sheetName];
@@ -1388,6 +1393,7 @@
         }
 
         const lossResult = appendLossDamageRows(workbook);
+        if(!lossResult.sheet) console.warn("[account-upload] 분실파손 시트가 없습니다. 손실 내역 없이 정산을 업로드합니다.");
 
         state.rows.sort((a,b) => {
           const ae = a.validation?.hasError ? 1 : 0;
@@ -1502,7 +1508,7 @@
 
         els.previewTable.querySelector("thead").innerHTML = `<tr>${headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr>`;
 
-        const shown = state.rows.slice(0, 500);
+        const shown = state.rows.filter(item => compact(item.data?.id) !== compact("영업점 수수료")).slice(0, 500);
 
         if(!shown.length){
           els.previewTable.querySelector("tbody").innerHTML = `<tr><td colspan="${headers.length}"><div class="emptyBox">아직 추출된 데이터가 없습니다.</div></td></tr>`;

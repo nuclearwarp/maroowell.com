@@ -1064,12 +1064,33 @@
         };
       }
 
+      // On Coupang's "재사용포장재 회수 인센티브" rows, the date is
+      // written under Route and the camp under 배송일자 (캠프명 is blank).
+      // Never persist these shifted values as normal Route/date/camp fields.
+      function normalizeReturnIncentiveColumns(classify, route, deliveryDate, camp, rawDateCell, rowNo){
+        if(compact(classify) !== compact("재사용포장재 회수 인센티브")){
+          return {route, deliveryDate, camp};
+        }
+        if(deliveryDate && camp){
+          return {route, deliveryDate, camp};
+        }
+        const dateInRoute = /^20\d{2}-\d{2}-\d{2}$/.test(route || "");
+        if(dateInRoute && !deliveryDate && !camp){
+          const recoveredDate = parseDateValue(route);
+          const recoveredCamp = clean(rawDateCell);
+          if(recoveredDate && recoveredCamp && !parseDateValue(recoveredCamp)){
+            return {route:"", deliveryDate:recoveredDate, camp:recoveredCamp};
+          }
+        }
+        throw new Error(`엑셀 ${rowNo}행: 재사용포장재 회수 인센티브의 날짜·캠프를 확인할 수 없습니다. Route/배송일자/캠프명 열을 확인하세요.`);
+      }
+
       function convertRow(row, col, rowNo){
         const classify = clean(col.classify >= 0 ? row[col.classify] : "");
         const driverId = clean(col.id >= 0 ? row[col.id] : "");
-        const route = clean(col.route >= 0 ? row[col.route] : "");
-        const deliveryDate = parseDateValue(col.deliveryDate >= 0 ? row[col.deliveryDate] : null);
-        const camp = clean(col.camp >= 0 ? row[col.camp] : "");
+        let route = clean(col.route >= 0 ? row[col.route] : "");
+        let deliveryDate = parseDateValue(col.deliveryDate >= 0 ? row[col.deliveryDate] : null);
+        let camp = clean(col.camp >= 0 ? row[col.camp] : "");
         const wave = clean(col.wave >= 0 ? row[col.wave] : "");
         const companyName = clean(col.vendor >= 0 ? row[col.vendor] : "");
         const driverName = clean(col.driverName >= 0 ? row[col.driverName] : "");
@@ -1081,6 +1102,11 @@
         const sourceFreshbagTotal = col.freshbagPrice >= 0 ? parseNumber(row[col.freshbagPrice]) : null;
         const freshbagReturn = col.freshbagReturn >= 0 ? parseNumber(row[col.freshbagReturn]) : 0;
         const totalPrice = parseNumber(col.totalPrice >= 0 ? row[col.totalPrice] : 0);
+
+        ({route, deliveryDate, camp} = normalizeReturnIncentiveColumns(
+          classify, route, deliveryDate, camp,
+          col.deliveryDate >= 0 ? row[col.deliveryDate] : null, rowNo
+        ));
 
         if(els.maroowellOnlyCheck.checked && companyName && companyName !== "마루웰"){
           return {

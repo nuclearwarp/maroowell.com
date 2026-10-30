@@ -532,7 +532,7 @@
     .locationSearchStatus[hidden]{display:none !important}
     .locationSearchLine{
       display:grid;
-      grid-template-columns:minmax(0,1fr) auto;
+      grid-template-columns:minmax(0,1fr) auto auto;
       gap:6px;
       margin-top:6px;
     }
@@ -557,6 +557,18 @@
       box-shadow:none;
       font-size:10.5px !important;
     }
+    #locationSearchClose{
+      min-height:34px;
+      height:34px;
+      padding:0 10px;
+      border-radius:9px;
+      color:#475569;
+      background:#fff;
+      border:1px solid #cbd5e1;
+      box-shadow:none;
+      font-size:10.5px !important;
+    }
+    #locationSearchClose:hover{background:#f1f5f9}
     .locationSearchStatus{
       margin:6px 2px 0;
       color:#64748b;
@@ -1757,6 +1769,7 @@
             <div class="locationSearchLine">
               <input id="locationSearchInput" type="search" autocomplete="off" placeholder="주소 · 장소 · 상호 검색" />
               <button id="locationSearchBtn" type="button">검색</button>
+              <button id="locationSearchClose" type="button" title="위치 검색 결과 및 지도 마커 제거">닫기</button>
             </div>
             <div id="locationSearchStatus" class="locationSearchStatus" hidden></div>
             <div id="locationSearchResults" class="locationSearchResults" hidden></div>
@@ -2337,6 +2350,7 @@
           }
 
           enableMobileMapInteractions();
+          if (state.roadviewOpen) scheduleRoadviewMapLayout();
         });
       }
 
@@ -2703,11 +2717,32 @@
         if (viewpoint) state.roadviewWalkerV64.setAngle(viewpoint.pan);
       }
 
+      // 화면의 나머지 지도 영역에 로드뷰 위치가 실제로 중앙 배치되도록
+      // flex 레이아웃 반영 후 지도 프로젝션을 다시 계산한다.
+      function syncRoadviewMapLayout(position) {
+        if (!state.map) return;
+        const center = position || state.roadview?.getPosition?.() || state.map.getCenter();
+        state.map.relayout();
+        if (center) state.map.setCenter(center);
+        enableMobileMapInteractions();
+      }
+      function scheduleRoadviewMapLayout(position) {
+        requestAnimationFrame(() => {
+          syncRoadviewMapLayout(position);
+          requestAnimationFrame(() => {
+            syncRoadviewMapLayout(position);
+            if (state.roadviewOpen) state.roadview?.relayout?.();
+          });
+        });
+      }
       function ensureRoadview() {
         if (state.roadview && state.roadviewClient) return;
         state.roadview = new kakao.maps.Roadview($("#roadview"));
         state.roadviewClient = new kakao.maps.RoadviewClient();
-        kakao.maps.event.addListener(state.roadview, "init", syncRoadviewWalkerV64);
+        kakao.maps.event.addListener(state.roadview, "init", () => {
+          syncRoadviewWalkerV64();
+          scheduleRoadviewMapLayout(state.roadview.getPosition?.());
+        });
         kakao.maps.event.addListener(state.roadview, "viewpoint_changed", () => {
           if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
           const viewpoint = state.roadview.getViewpoint?.();
@@ -2719,7 +2754,7 @@
           if (!state.roadviewWalkerV64) syncRoadviewWalkerV64();
           state.roadviewWalkerV64?.setPosition(position);
           if (state.roadviewOn) state.roadviewWalkerV64?.setMap(state.map);
-          state.map.setCenter(position);
+          scheduleRoadviewMapLayout(position);
         });
       }
 
@@ -2745,7 +2780,7 @@
 
             state.roadviewOpen = true;
             $("#mapWrap").classList.add("roadview-open");
-            setTimeout(() => state.roadview.relayout(), 0);
+            scheduleRoadviewMapLayout(latlng);
             state.roadview.setPanoId(panoId, latlng);
           });
         };
@@ -2761,13 +2796,7 @@
         $("#toggleRoadview").textContent = state.roadviewOn ? "로드뷰 종료" : "로드뷰";
 
         if (!state.roadviewOn) $("#mapWrap").classList.remove("roadview-open");
-
-        if (state.map) {
-          const c = state.map.getCenter();
-          state.map.relayout();
-          state.map.setCenter(c);
-          enableMobileMapInteractions();
-        }
+        scheduleRoadviewMapLayout();
 
         if (state.roadviewOn) {
           setRoadviewOverlay(true);
@@ -5416,6 +5445,21 @@
         box.hidden = true;
       }
 
+      // 검색 결과를 닫을 때 지도에 남아 있는 검색 마커까지 제거한다.
+      function closeLocationSearch() {
+        const body = $("#locationSearchBody");
+        const toggle = $("#locationSearchToggle");
+        if (body) body.hidden = true;
+        toggle?.setAttribute("aria-expanded", "false");
+        const label = $("#locationSearchToggleLabel");
+        if (label) label.textContent = "펼치기";
+        const input = $("#locationSearchInput");
+        if (input) input.value = "";
+        clearLocationSearchResults();
+        setLocationSearchStatus("");
+        state.locationSearchMarker?.setMap(null);
+      }
+
       function focusLocationSearchResult(item) {
         if (!state.map || !item) return;
         const lat = Number(item.lat);
@@ -6426,6 +6470,7 @@
           if (locationSearchToggleLabel) locationSearchToggleLabel.textContent = opening ? "접기" : "펼치기";
           if (opening) window.setTimeout(() => $("#locationSearchInput")?.focus(), 0);
         });
+        $("#locationSearchClose")?.addEventListener("click", closeLocationSearch);
         $("#locationSearchBtn")?.addEventListener("click", runLocationSearch);
         $("#locationSearchInput")?.addEventListener("keydown", (e) => {
           if (e.key !== "Enter") return;

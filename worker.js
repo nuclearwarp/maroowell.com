@@ -1330,7 +1330,7 @@ function vendorDedupeKey(row) {
   return `key:${safeTrim(row?.business_number)}|${safeTrim(row?.name)}`;
 }
 
-const VENDOR_DETAIL_FIELDS = ["vendor_representative","actual_representative_phone","business_type","business_category","representative_name","registered_representative_phone","email","company_address","memo"];
+const VENDOR_DETAIL_FIELDS = ["vendor_representative","actual_representative_phone","business_type","business_category","representative_name","registered_representative_phone","email","company_address","bank_name","bank_account_number","memo"];
 async function getVendorDetails(env, ids) {
   if (!ids.length) return new Map();
   const q=new URLSearchParams({select:"*",vendor_id:"in.("+ids.join(",")+")",limit:String(Math.min(ids.length,1000))});
@@ -1351,6 +1351,8 @@ async function saveVendorDetails(env, vendorId, body) {
   }
   if(!Object.keys(values).length)return;
   if(values.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email))throw routeHttpError(400,"올바른 이메일을 입력해주세요.");
+  if(values.bank_name && values.bank_name.length>80)throw routeHttpError(400,"은행명은 80자 이내로 입력해주세요.");
+  if(values.bank_account_number && (values.bank_account_number.length>80 || !/^[0-9 -]+$/.test(values.bank_account_number)))throw routeHttpError(400,"계좌번호에는 숫자, 하이픈, 공백만 입력할 수 있습니다.");
   await supabaseFetch(env,"/rest/v1/vendor_details?on_conflict=vendor_id",{
     method:"POST",headers:{Prefer:"resolution=merge-duplicates,return=minimal"},
     body:JSON.stringify({vendor_id:vendorId,...values,updated_at:new Date().toISOString()})

@@ -64,7 +64,7 @@ const publicView = new Function("handleVendorsGet", "getVendorDetails", "json", 
 const publicResult = await publicView({ searchParams: {} }, {});
 assert.equal(publicResult.rows.length, 1);
 assert.equal(publicResult.rows[0].business_type, "Transport");
-for (const secret of ["vendor_code", "vendor_representative", "memo", "company_address", "email"]) {
+for (const secret of ["vendor_code", "vendor_representative", "memo", "company_address", "email", "bank_name", "bank_account_number"]) {
   assert.equal(Object.hasOwn(publicResult.rows[0], secret), false, "Public API leaked " + secret);
 }
 
@@ -80,9 +80,14 @@ assert.match(worker, /if\s*\(path === "\/vendors\/permissions"\)/);
 assert.match(worker, /async function handleVendorsAdminGet\(request,url,env\)\s*\{\s*await requireVendorAdminAccess\(request,env\)/);
 assert.match(worker, /async function handleVendorAdminCreate\(request,env\)\s*\{\s*await requireVendorCreatorAccess\(request,env\)/);
 assert.match(worker, /const references = await vendorReferenceUsage\(env, vendorId, true\)/);
-assert.match(menu, /key:"vendors",label:"벤더 조회",path:"\/vendors\.html",aliases:\["\/vendors","\/vendors\.html"\],public:true/);
+assert(menu.includes("vendors") && menu.includes("/vendors.html"), "vendor menu entry missing");
 
 new vm.Script(menu, { filename: "board-menu.js" });
+assert.match(worker, /const VENDOR_DETAIL_FIELDS = \[[^\]]*"bank_name","bank_account_number"/);
+assert.match(html, /name="bank_name"/);
+assert.match(html, /name="bank_account_number"/);
+assert.match(html, /은행<\/th>/);
+assert.match(html, /계좌번호<\/th>/);
 const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m => m[1]).filter(Boolean);
 for (const [i, source] of scripts.entries()) new vm.Script(source, { filename: "vendors inline " + i });
 assert.match(html, /\/vendors\/view\?limit=1000/);

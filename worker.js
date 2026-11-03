@@ -222,6 +222,47 @@ async function supabaseFetch(env, pathWithQuery, init = {}) {
 
 
 
+// Accept vendor creation only with a short-lived, admin-minted Chunwoo onboarding claim.
+// This path never accepts browser-controlled metadata as authorization.
+const CW_VENDOR_AUTH_URL = "https://wgjnojzzrfrfiqcdffrf.supabase.co/auth/v1/user";
+const CW_VENDOR_PUBLIC_KEY = "sb_publishable_LGTwBfDk-Y5xK_rDn8U67A_nmy_OWE2";
+async function handleChunwooVendorOnboarding(request, env) {
+  if (request.method !== "POST") return json({error:"Method Not Allowed"},405);
+  const auth=String(request.headers.get("Authorization")||"");
+  if (!/^Bearer\s+\S{60,}$/.test(auth)) return json({error:"Chunwoo token required"},401);
+  const verified=await fetch(CW_VENDOR_AUTH_URL,{headers:{Authorization:auth,apikey:CW_VENDOR_PUBLIC_KEY,Accept:"application/json"},signal:AbortSignal.timeout(9000)});
+  if(!verified.ok) return json({error:"Chunwoo authentication failed"},401);
+  const cwUser=await verified.json();
+  const claim=cwUser?.app_metadata?.cw_vendor_onboarding;
+  const issued=Date.parse(claim?.issued_at||"");
+  if(!claim || !Number.isFinite(issued) || Date.now()<issued-15000 || Date.now()-issued>180000)
+    return json({error:"Vendor registration permission expired"},403);
+  const body=await readJson(request);
+  const name=safeTrim(body?.name);
+  const digits=digitsOnly(body?.business_number||"");
+  if(!name || digits.length!==10 || digitsOnly(claim?.business_number||"")!==digits ||
+     safeTrim(claim?.name)!==name || !claim?.nonce || typeof claim.nonce!=="string" || claim.nonce.length>100)
+    return json({error:"Invalid vendor registration claim"},403);
+  // Check both name and business number. An existing record must never be overwritten.
+  const matched=await supabaseFetch(env,"/rest/v1/rpc/mw_vendor_quick_search",{
+    method:"POST",body:JSON.stringify({p_query:digits,p_limit:20})
+  });
+  const existing=(Array.isArray(matched)?matched:[]).find(v=>digitsOnly(v.business_number||"")===digits);
+  if(existing){
+    if(String(existing.name||"").replace(/\s+/g,"")!==name.replace(/\s+/g,""))
+      return json({error:"Existing business number has a different company name"},409);
+    return json({ok:true,row:{id:existing.id,name:existing.name,business_number:existing.business_number},existing:true},200);
+  }
+  const created=await handleVendorCreate(new Request(request.url,{
+    method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({name,business_number:digits})
+  }),env);
+  if(!created.ok)return created;
+  const data=await created.json();
+  if(!data?.row?.id)return json({error:"Canonical vendor creation returned no identifier"},502);
+  return json({ok:true,row:{id:data.row.id,name:data.row.name,business_number:data.row.business_number},existing:false},201);
+}
+
 // MW_EXTERNAL_API_KEY_V1
 async function sha256Hex(value) {
   const bytes = new TextEncoder().encode(String(value || ""));
@@ -546,6 +587,11 @@ async function handleExternalApi(request, url, env) {
   }
 
   // Dedicated single-query canonical vendor lookup for authorized external consumers.
+  // Cross-project onboarding: authenticate the Chunwoo account with its issuer.
+  if (path === "/api/v1/chunwoo/vendor-onboarding") {
+    return handleChunwooVendorOnboarding(request, env);
+  }
+
   if (path === "/api/v1/vendors/quick-search") {
     if (request.method !== "GET") return json({error:"Method Not Allowed"},405);
     const key=await requireExternalApiKey(request,env,"vendors.read");

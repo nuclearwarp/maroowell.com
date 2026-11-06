@@ -111,6 +111,16 @@ export default {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
     if (origin && !ORIGINS.has(origin)) return respond({ok:false,error:"origin_not_allowed"},403,request);
+    if (url.pathname === "/health/session-store" && url.search === "") {
+      if (request.method !== "GET") return respond({ok:false,error:"method_not_allowed"},405,request);
+      try {
+        if (!env.SESSIONS) throw Error("missing_binding");
+        const ready = await env.SESSIONS.getByName("mw-security-health-v1").ping();
+        return respond({ok:ready===true,session_store:ready===true?"ready":"unavailable"},ready===true?200:503,request);
+      } catch {
+        return respond({ok:false,error:"session_store_unavailable"},503,request);
+      }
+    }
     if (url.pathname === HEALTH_PATH && url.search === "") {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return respond({ok:false,error:"method_not_allowed"},405,request);
@@ -136,3 +146,5 @@ export default {
     return respond({ok:true,identity:verified.identity},200,request);
   }
 };
+
+export { SessionStore } from "./session-store.js";

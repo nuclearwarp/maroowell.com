@@ -4,7 +4,9 @@ const src = readFileSync("workers/security/worker.js","utf8");
 assert(!src.includes("SUPABASE_SERVICE_ROLE_KEY"),"no service role allowed");
 assert(!src.includes("env.ASSETS"),"must not affect site assets");
 assert(!src.includes("api/supabase"),"no generic DB proxy");
-const {default:gateway}=await import("../workers/security/worker.js");
+const {default:gateway}=await import("data:text/javascript;base64,"+Buffer.from(
+  src.replace('export { SessionStore } from "./session-store.js";', '')
+).toString("base64"));
 const url="https://maroowell-security.test";
 const env={SUPABASE_URL:"https://rgqerimdxkthkcewqbbe.supabase.co",SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"};
 const make=(p,o={})=>new Request(url+p,o);
@@ -19,6 +21,12 @@ globalThis.fetch=async (u)=>{
 };
 try{
   let r=await gateway.fetch(make("/health"),env);
+  let doResult=await gateway.fetch(make("/health/session-store"),env);
+  assert.equal(doResult.status,503,"unconfigured session storage must fail closed");
+  env.SESSIONS={getByName:()=>({ping:async()=>true})};
+  doResult=await gateway.fetch(make("/health/session-store"),env);
+  assert.equal(doResult.status,200,"durable object binding works");
+  assert.equal((await doResult.json()).session_store,"ready");
   assert.equal(r.status,200);
   assert.equal((await r.json()).data_proxy,false);
   r=await gateway.fetch(make("/v1/auth/verify"),env);

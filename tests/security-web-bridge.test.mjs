@@ -3,6 +3,13 @@ import {readFileSync} from "node:fs";
 const bridge=readFileSync("public/mw-secure-web.js","utf8");
 const login=readFileSync("public/index.html","utf8");
 const worker=readFileSync("login-worker-v2.js","utf8");
+const postLogin=readFileSync("public/post_login","utf8");
+const postLoginScripts=[...postLogin.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+assert(postLoginScripts.some(match=>match[1].includes("mw_web_server_auth")),"server-cookie landing branch must exist");
+for(const match of postLoginScripts){if(match[1].trim())new Function(match[1]);}
+assert(postLogin.includes("fetch('/api/session/me'"),"server login landing verifies cookie with server");
+assert(postLogin.includes("user.max_role_level"),"server login landing checks server role");
+assert(postLogin.includes("superAdmin?'/home':'/zipcode_search'"),"server login landing retains role-specific routing");
 const menu=readFileSync("public/board-menu.js","utf8");
 new Function(menu);
 assert(menu.includes('sessionStorage.getItem("mw_web_server_auth")==="1"'));

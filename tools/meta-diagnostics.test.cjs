@@ -1,0 +1,17 @@
+"use strict";
+const fs=require("fs"),assert=require("assert");
+const src=fs.readFileSync("workers/meta-collector/entry.js","utf8");
+assert.match(src,/MW_META_DIAGNOSTICS_V1/);
+assert.match(src,/event_type:"meta_http_failure"/);
+assert.match(src,/event_type:"batch_poll_failure"/);
+assert.match(src,/event_type:"batch_completion_state"/);
+assert.match(src,/event_type:"batch_finalized"/);
+assert.match(src,/event_type:"collector_cron_failure"/);
+assert.match(src,/driver_reopened/);
+assert.match(src,/driver_round_changed/);
+assert.match(src,/driver_completed/);
+assert.match(src,/const allowedMetrics = \[/);
+assert.match(src,/return=minimal/);
+assert(!src.includes("metaPostWithRetry"),"No silent retry added");
+assert(src.includes('expected_rounds: 2'),"Do not silently rewrite historic round assumptions");
+console.log("META diagnostics safeguards verified");

@@ -241,6 +241,44 @@ const sbUpsert = (env, path, body, conflict) => sb(env, `${path}?on_conflict=${e
   method: "POST", headers: { prefer: "resolution=merge-duplicates,return=representation" }, body: JSON.stringify(body)
 });
 
+
+// MW_META_DIAGNOSTICS_V1: security-filtered, best-effort telemetry.
+// Never persist raw META payloads, cookies, Authorization, IDs/names or error texts.
+function metaDiagnosticCode(error) {
+  const value = String(error?.message || "");
+  if (error?.metaAuthRequired || /META_AUTH_REQUIRED|HTTP (401|403|302|303|307|308)/.test(value)) return "META_AUTH_REQUIRED";
+  if (/META_REQUEST_FAILED/.test(value)) return "META_REQUEST_FAILED";
+  if (/Supabase 4\d\d/.test(value)) return "SUPABASE_4XX";
+  if (/Supabase 5\d\d/.test(value)) return "SUPABASE_5XX";
+  if (/META_SESSION_MISSING/.test(value)) return "META_SESSION_MISSING";
+  return "COLLECTOR_UNCLASSIFIED";
+}
+async function recordMetaDiagnostic(env, event) {
+  // Only fixed allowlisted fields can reach persistent storage.
+  const fields = ["event_type","severity","run_id","batch_id","schedule_date",
+    "meta_work_date","camp_name","camp_code","wave","stage","http_status",
+    "error_code","session_generation","driver_pk","current_round","expected_rounds"];
+  const row = {};
+  for (const key of fields) if (event?.[key] !== undefined && event?.[key] !== null) row[key] = event[key];
+  const details = {};
+  const allowedMetrics = ["worker_count","expected_people","matched_people","completed_people",
+    "previous_completed","previous_round","delivery_scanned","delivery_completed",
+    "delivery_total","round1_done","round2_done","round3_done","camp_code_count","duration_ms"];
+  for (const key of allowedMetrics) {
+    const value = event?.details?.[key];
+    if (typeof value === "boolean") details[key] = value;
+    else if (Number.isFinite(Number(value)) && value !== null && value !== undefined && value !== "") details[key] = Number(value);
+  }
+  row.details = details;
+  if (!row.event_type) return;
+  try {
+    await sbPost(env, "meta_collector_diagnostics", row, "return=minimal");
+  } catch (error) {
+    // Diagnostics must never break normal polling or change completion decisions.
+    console.warn("META diagnostic write failed", metaDiagnosticCode(error));
+  }
+}
+
 class MetaCookieJar {
   constructor(items = []) {
     this.items = new Map();
@@ -325,6 +363,7 @@ async function persistCookieRotation(env, jar, generation) {
   await sbPatch(env, `meta_backend_state?id=eq.1${version}`, patch);
 }
 async function metaPost(env, jar, url, payload, generation = null) {
+  const requestStarted = Date.now();
   const r = await fetch(url, {
     method: "POST", redirect: "manual",
     headers: {
@@ -339,7 +378,16 @@ async function metaPost(env, jar, url, payload, generation = null) {
   await persistCookieRotation(env, jar, generation);
   const text = await r.text(); let body = null;
   try { body = JSON.parse(text); } catch {}
-  return { status: r.status, text, body, success: r.status === 200 && (body?.message === "SUCCESS" || Array.isArray(body?.data?.content) || Array.isArray(body?.content) || Array.isArray(body?.data?.data?.content)) };
+  const success = r.status === 200 && (body?.message === "SUCCESS" || Array.isArray(body?.data?.content) || Array.isArray(body?.content) || Array.isArray(body?.data?.data?.content));
+  if (!success) await recordMetaDiagnostic(env, {
+    event_type:"meta_http_failure",severity:"error",
+    wave:String(payload?.waveCode||""),meta_work_date:String(payload?.workDate||""),
+    stage:url===META_CAMP_URL?"camp_status":payload?.pddTime?"fresh_status":"worker_status",
+    http_status:r.status,error_code:r.status===200?"META_RESPONSE_UNEXPECTED":"META_HTTP_FAILURE",
+    session_generation:generation,
+    details:{camp_code_count:Array.isArray(payload?.campCodes)?payload.campCodes.length:0,duration_ms:Date.now()-requestStarted}
+  });
+  return {status:r.status,text,body,success};
 }
 function workerPayload(campCodes, wave, workDate, pddTime = null) {
   return { campCodes, page: 0, size: 100, sortDirection: "ASC", sortType: "DELIVERY_COMPLETED_RATIO", waveCode: wave, workDate, ...(pddTime ? { pddTime } : {}) };
@@ -651,6 +699,22 @@ async function processBatch(env, cookies, batch) {
       raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now, total_remaining: totalRemaining },
       updated_at: now
     };
+    // State transition events are infrequent; normal minute-by-minute samples stay in history.
+    if (currentRound !== Number(prev?.current_round||1) || (!!workCompletedAt !== !!prev?.work_completed_at) || (reopenedByScan && !!prev?.work_completed_at)) {
+      await recordMetaDiagnostic(env,{
+        event_type:reopenedByScan?"driver_reopened":workCompletedAt&&!prev?.work_completed_at?"driver_completed":"driver_round_changed",
+        severity:"info",batch_id:batch.id,schedule_date:batch.schedule_date,
+        meta_work_date:batch.meta_work_date,camp_name:batch.camp_name,camp_code:batch.camp_code,
+        wave:batch.wave,stage:"driver_progress",driver_pk:driverPk,
+        current_round:currentRound,expected_rounds:expRounds,
+        details:{
+          previous_round:Number(prev?.current_round||1),delivery_scanned:d.scanned,
+          delivery_completed:d.completed,delivery_total:d.total,
+          round1_done:!!rounds[1].completed,round2_done:!!rounds[2].completed,
+          round3_done:!!rounds[3].completed
+        }
+      });
+    }
     const old = byKey.get(key);
     if (!old || rec.delivery_total > old.delivery_total) byKey.set(key, rec);
     else {
@@ -727,10 +791,28 @@ async function processBatch(env, cookies, batch) {
     poll_interval_seconds: 60, next_poll_at: now, last_error: null, updated_at: now
   };
   await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, patch);
+  if (batch.status !== patch.status || Number(batch.completed_worker_count||0) !== completedCount) {
+    await recordMetaDiagnostic(env,{
+      event_type:"batch_completion_state",severity:"info",batch_id:batch.id,
+      schedule_date:batch.schedule_date,meta_work_date:batch.meta_work_date,
+      camp_name:batch.camp_name,camp_code:batch.camp_code,wave:batch.wave,
+      stage:"batch_completion",expected_rounds:expRounds,
+      details:{worker_count:stateRows.length,expected_people:expected.length,
+        matched_people:matched.length,completed_people:completedCount,
+        previous_completed:Number(batch.completed_worker_count||0)}
+    });
+  }
 
   if (shouldFinalize) {
     const freshFinal = await sbGet(env, `meta_realtime_fresh_current?select=*&batch_id=eq.${batch.id}`) || [];
     const finalized = await sbPost(env, "rpc/meta_finalize_realtime_batch", { p_batch_id: batch.id });
+    await recordMetaDiagnostic(env,{
+      event_type:"batch_finalized",severity:"info",batch_id:batch.id,
+      schedule_date:batch.schedule_date,meta_work_date:batch.meta_work_date,
+      camp_name:batch.camp_name,camp_code:batch.camp_code,wave:batch.wave,
+      stage:"finalization",expected_rounds:expRounds,
+      details:{worker_count:stateRows.length,completed_people:completedCount}
+    });
     for (const fr of freshFinal) {
       await sbPatch(env, `meta_realtime_final?batch_id=eq.${batch.id}&meta_worker_key=eq.${encodeURIComponent(fr.meta_worker_key)}`, {
         fresh_delivery_assigned:fr.delivery_assigned, fresh_delivery_scanned:fr.delivery_scanned, fresh_delivery_completed:fr.delivery_completed,
@@ -827,6 +909,14 @@ async function runCollector(env, force = false) {
       } catch (e) {
         const msg = String(e?.message || e);
         failure = e;
+        await recordMetaDiagnostic(env,{
+          event_type:"batch_poll_failure",severity:"error",run_id:runToken,
+          batch_id:batch.id,schedule_date:batch.schedule_date,meta_work_date:batch.meta_work_date,
+          camp_name:batch.camp_name,camp_code:batch.camp_code,wave:batch.wave,
+          stage:"poll_batch",http_status:e.metaHttpStatus||null,
+          error_code:metaDiagnosticCode(e),session_generation:cookies.generation,
+          expected_rounds:expectedRounds(batch)
+        });
         results.push({ camp: batch.camp_name, wave: batch.wave, error: msg });
         if (claimed) {
           await sbPatch(env, `meta_realtime_batch?id=eq.${batch.id}`, {
@@ -884,6 +974,8 @@ export default {
   },
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runCollector(env).catch(async e => {
+      await recordMetaDiagnostic(env,{event_type:"collector_cron_failure",severity:"error",
+        stage:"scheduled",error_code:metaDiagnosticCode(e)});
       try {
         await sbPatch(env, "meta_backend_state?id=eq.1", { status: "error", last_error: `collector cron: ${String(e?.message || e).slice(0, 300)}`, updated_at: new Date().toISOString() });
       } catch {}

@@ -18,6 +18,8 @@ for(const [mode,page] of [["home",home],["realtime",realtime]]){
   assert(page.includes('sessionStorage.getItem("mw_security_pilot_active")!=="1"'));
   assert(page.includes('fetch("/api/web/overview?mode='+mode+'"'));
   assert(page.includes('const secureData=await securityOverview()'));
+  assert(page.includes('await revokeSecurityPilotSession();'),"pilot logout must revoke cookie before Supabase logout");
+  assert(page.includes('sessionStorage.removeItem("mw_security_pilot_active")'));
   assert(page.includes(':await S.sb'),"legacy fallback must remain for native WebView");
   assert(!page.includes('fetch("/api/web/overview?mode='+mode+'",{method:"POST"'));
 }

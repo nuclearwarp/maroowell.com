@@ -722,9 +722,29 @@ async function auth(){
   $("userPill").textContent=a.email||session.user?.email||"마루웰";
   return true;
 }
+async function revokeSecurityPilotSession(){
+  try {
+    if(sessionStorage.getItem("mw_security_pilot_active")!=="1")return;
+    const current=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
+    if(current.ok){
+      const body=await current.json();
+      if(typeof body.csrf_token==="string"){
+        const out=await fetch("/api/session/logout",{
+          method:"POST",credentials:"same-origin",cache:"no-store",
+          headers:{"X-CSRF-Token":body.csrf_token}
+        });
+        if(!out.ok)console.warn("보안 세션 로그아웃 실패",out.status);
+      }
+    }
+  }catch(error){console.warn("보안 세션 종료 확인 실패",error?.name||"network")}
+  finally{try{sessionStorage.removeItem("mw_security_pilot_active")}catch{}}
+}
 async function logout(){
-  try{$("logoutBtn").disabled=true;await S.sb?.auth?.signOut()}
-  finally{location.replace("/")}
+  try {
+    $("logoutBtn").disabled=true;
+    await revokeSecurityPilotSession();
+    await S.sb?.auth?.signOut();
+  }finally{location.replace("/")}
 }
 
 function renderCollectorState(){

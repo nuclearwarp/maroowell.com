@@ -42,14 +42,14 @@ function readBearer(request) {
   const match = /^Bearer ([A-Za-z0-9._-]{12,8192})$/i.exec(auth);
   return match ? match[1] : null;
 }
-async function upstreamJson(url, init) {
+async function upstreamJson(url, init, maxLength = 100000) {
   const response = await fetch(url, {
     ...init,
     redirect: "error",
     signal: AbortSignal.timeout(8000)
   });
   const text = await response.text();
-  if (text.length > 100000) throw new Error("upstream_oversize");
+  if (text.length > maxLength) throw new Error("upstream_oversize");
   let body = null;
   try { body = text ? JSON.parse(text) : null; }
   catch { throw new Error("upstream_invalid_json"); }
@@ -306,12 +306,88 @@ async function sessionApi(request,env,url) {
   return sessionResponse({ok:true},200,request,"",true);
 }
 
+
+const OVERVIEW_FIELDS=Object.freeze({"batch":"id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,updated_at,completion_method,completion_detected_at,work_completed_at,visible_until,metrics_status,metrics_close_at,metrics_closed_at,finalized_at","current":"batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at","fresh":"batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss","final":"batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate","schedule":"schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active"});
+const OVERVIEW_TABLES=Object.freeze({
+  batch:"meta_realtime_batch",current:"meta_realtime_current",
+  fresh:"meta_realtime_fresh_current",final:"meta_realtime_final",
+  schedule:"maroowell_schedule"
+});
+async function readOverviewTable(env,token,type,query={}) {
+  const cfg=validConfig(env);
+  if(!cfg || !Object.hasOwn(OVERVIEW_TABLES,type))throw Error("overview_configuration");
+  const url=new URL("/rest/v1/"+OVERVIEW_TABLES[type],cfg.origin);
+  url.searchParams.set("select",OVERVIEW_FIELDS[type]);
+  for(const [k,v] of Object.entries(query))url.searchParams.set(k,v);
+  const result=await upstreamJson(url.toString(),{
+    method:"GET",
+    headers:{apikey:cfg.key,authorization:"Bearer "+token,accept:"application/json"}
+  },4000000);
+  if(!result.ok || !Array.isArray(result.body))throw Error("overview_upstream");
+  if(result.body.length>=1000)throw Error("overview_limit_exceeded");
+  return result.body;
+}
+async function overviewApi(request,env,url) {
+  if(url.pathname!=="/api/web/overview"||
+     !["home","realtime"].includes(url.searchParams.get("mode"))||
+     [...url.searchParams.keys()].some(k=>k!=="mode"))
+    return respond({ok:false,error:"not_found"},404,request);
+  if(request.method!=="GET")
+    return respond({ok:false,error:"method_not_allowed"},405,request);
+  const auth=await getBrowserSession(request,env);
+  if(!auth.ok){
+    return auth.clear?sessionResponse({ok:false,error:auth.error},auth.status,request,"",true)
+      :respond({ok:false,error:auth.error},auth.status,request);
+  }
+  const mode=url.searchParams.get("mode");
+  const minimum=mode==="home"?90:30;
+  if(auth.user.is_maroowell!==true ||
+      !Number.isFinite(Number(auth.user.max_role_level)) ||
+      Number(auth.user.max_role_level)<minimum ||
+      (mode==="home" && auth.user.is_admin!==true)) {
+    return respond({ok:false,error:"insufficient_role"},403,request);
+  }
+  const nowKst=Date.now()+9*3600000;
+  const cutoff=new Date(nowKst-3*86400000).toISOString().slice(0,10);
+  try{
+    const batches=await readOverviewTable(env,auth.row.accessToken,"batch",{
+      "schedule_date":"gte."+cutoff,
+      status:"in.(collecting,completion_candidate,overdue,error,paused,finalized)",
+      order:"updated_at.desc",limit:"400"
+    });
+    if(!batches.length) return respond({
+      ok:true,batches:[],current:[],fresh:[],final:[],schedule:[],
+      read_at:new Date().toISOString(),source:"server"},200,request);
+    const ids=[...new Set(batches.map(b=>b.id).filter(v=>/^[a-f0-9-]{36}$/i.test(String(v))))];
+    const dates=[...new Set(batches.map(b=>b.schedule_date).filter(v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v))))];
+    if(!ids.length||!dates.length)return respond({ok:false,error:"overview_invalid_batches"},503,request);
+    const idFilter="in.("+ids.join(",")+")";
+    const dateFilter="in.("+dates.join(",")+")";
+    const activeIds=batches.filter(b=>b.status!=="finalized").map(b=>b.id);
+    const finalIds=batches.filter(b=>b.status==="finalized").map(b=>b.id);
+    const activeFilter="in.("+activeIds.join(",")+")";
+    const finalFilter="in.("+finalIds.join(",")+")";
+    const [current,fresh,final,schedule]=await Promise.all([
+      activeIds.length?readOverviewTable(env,auth.row.accessToken,"current",{batch_id:activeFilter,limit:"1000"}):[],
+      activeIds.length?readOverviewTable(env,auth.row.accessToken,"fresh",{batch_id:activeFilter,limit:"1000"}):[],
+      finalIds.length&&mode==="realtime"?readOverviewTable(env,auth.row.accessToken,"final",{batch_id:finalFilter,limit:"1000"}):[],
+      readOverviewTable(env,auth.row.accessToken,"schedule",{schedule_date:dateFilter,is_active:"eq.true",limit:"1000"})
+    ]);
+    return respond({ok:true,batches,current,fresh,final,schedule,
+      read_at:new Date().toISOString(),source:"server"},200,request);
+  }catch(error){
+    console.warn("MW_OVERVIEW_READ_FAILED",error?.message==="overview_limit_exceeded"?"row_limit":"upstream");
+    return respond({ok:false,error:"overview_temporarily_unavailable"},503,request);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
     if (origin && !ORIGINS.has(origin)) return respond({ok:false,error:"origin_not_allowed"},403,request);
     if (url.pathname.startsWith("/api/session/")) return sessionApi(request,env,url);
+    if (url.pathname.startsWith("/api/web/")) return overviewApi(request,env,url);
     if (url.pathname === "/health/session-store" && url.search === "") {
       if (request.method !== "GET") return respond({ok:false,error:"method_not_allowed"},405,request);
       try {

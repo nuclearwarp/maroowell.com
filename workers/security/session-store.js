@@ -63,10 +63,11 @@ export class SessionStore extends DurableObject {
     if (url!=="https://rgqerimdxkthkcewqbbe.supabase.co"||
         !key.startsWith("sb_publishable_")) throw new Error("auth_configuration_invalid");
     const response=await fetch(url+"/auth/v1/token?grant_type=refresh_token",{
-      method:"POST",redirect:"error",signal:AbortSignal.timeout(8000),
+      method:"POST",redirect:"manual",signal:AbortSignal.timeout(8000),
       headers:{"apikey":key,"content-type":"application/json","accept":"application/json"},
       body:JSON.stringify({refresh_token:row.refreshToken})
     });
+    if(response.status>=300&&response.status<400)throw new Error("auth_refresh_redirect_denied");
     if([400,401,403].includes(response.status)) {
       await this.revoke();
       return null;

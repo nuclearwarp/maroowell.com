@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const src = readFileSync("workers/security/worker.js","utf8");
+for(const path of ["workers/security/worker.js","workers/security/session-store.js","workers/security/bff.js"]){
+  const source=readFileSync(path,"utf8");
+  assert(!source.includes('redirect:"error"') && !source.includes('redirect: "error",'),
+    "Cloudflare Workers do not implement redirect:error ("+path+")");
+}
+
 assert(!src.includes("SUPABASE_SERVICE_ROLE_KEY"),"no service role allowed");
 assert(!src.includes("env.ASSETS"),"must not affect site assets");
 assert(src.includes("handleBff(request,env"),"BFF must enforce authorization");

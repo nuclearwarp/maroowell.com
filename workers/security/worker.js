@@ -45,9 +45,11 @@ function readBearer(request) {
 async function upstreamJson(url, init, maxLength = 100000) {
   const response = await fetch(url, {
     ...init,
-    redirect: "error",
+    // Cloudflare Workers do not support redirect:"error". Reject 3xx explicitly.
+    redirect: "manual",
     signal: AbortSignal.timeout(8000)
   });
+  if (response.status >= 300 && response.status < 400) throw new Error("upstream_redirect_denied");
   const text = await response.text();
   if (text.length > maxLength) throw new Error("upstream_oversize");
   let body = null;

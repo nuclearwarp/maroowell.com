@@ -42,6 +42,7 @@ let logoutCalls=0;
 const originalFetch=globalThis.fetch;
 globalThis.fetch=async (url,init)=>{
   requestCount++;
+  assert.equal(init?.redirect,"manual","Cloudflare Workers subrequests must use redirect:manual");
   const u=String(url);
   if(u.includes("/auth/v1/token?grant_type=password")) {
     return credentialStatus===200
@@ -142,6 +143,10 @@ try{
   r=await gateway.fetch(login("https://maroowell.com","192.0.2.70"),env);
   assert.equal(r.status,503,"auth service failure must stay fail-closed");
   assert.equal((await r.json()).stage,"auth_http_503","safe diagnostic stage is available");
+  credentialStatus=302;
+  r=await gateway.fetch(login("https://maroowell.com","192.0.2.83"),env);
+  assert.equal(r.status,503,"a redirect at Auth must fail closed");
+  assert.equal((await r.json()).stage,"auth_request","redirect must not be followed");
   credentialStatus=401;
   r=await gateway.fetch(req("/api/supabase/rest/v1/private_table"),env);
   assert.equal(r.status,404,"arbitrary table proxy remains blocked");

@@ -147,10 +147,11 @@ async function dataAsBytes(request){
 }
 async function checkPayout(cfg,token){
   const r=await fetch(cfg.origin+"/rest/v1/rpc/mw_payout_can_access",{
-    method:"POST",redirect:"error",signal:AbortSignal.timeout(6000),
+    method:"POST",redirect:"manual",signal:AbortSignal.timeout(6000),
     headers:{apikey:cfg.key,authorization:"Bearer "+token,"content-type":"application/json"},
     body:"{}"
   });
+  if(r.status>=300&&r.status<400)return false;
   if(!r.ok)return false;
   const body=await r.json();
   return body===true||(Array.isArray(body)&&body[0]===true);

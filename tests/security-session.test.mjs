@@ -36,6 +36,8 @@ const env={
 let approval="approved";
 let credentialStatus=200;
 let requestCount=0;
+let refreshCalls=0;
+let logoutCalls=0;
 const originalFetch=globalThis.fetch;
 globalThis.fetch=async (url,init)=>{
   requestCount++;
@@ -45,11 +47,15 @@ globalThis.fetch=async (url,init)=>{
       ?Response.json({access_token:"test_access_token_00000000001",refresh_token:"test_refresh_token_00000000001",expires_in:3600})
       :Response.json({error:"invalid credentials"},{status:credentialStatus});
   }
-  if(u.includes("/auth/v1/token?grant_type=refresh_token"))return Response.json({access_token:"test_access_token_00000000002",refresh_token:"test_refresh_token_00000000002",expires_in:3600});
+  if(u.includes("/auth/v1/token?grant_type=refresh_token")){
+    refreshCalls++;
+    await new Promise(r=>setTimeout(r,5));
+    return Response.json({access_token:"test_access_token_00000000002",refresh_token:"test_refresh_token_00000000002",expires_in:3600});
+  }
   if(u.endsWith("/auth/v1/user"))return Response.json({id:"test-user-id"});
   if(u.endsWith("mw_my_access"))return Response.json([{user_id:"test-user-id",email:"test@example.test",is_maroowell:true,max_role_level:50,is_admin:false}]);
   if(u.endsWith("mw_my_account_state"))return Response.json([{user_id:"test-user-id",approval_status:approval,app_only:false}]);
-  if(u.includes("/auth/v1/logout"))return Response.json({});
+  if(u.includes("/auth/v1/logout")){logoutCalls++;return Response.json({});}
   throw Error("unexpected upstream "+u);
 };
 const req=(path,options={})=>new Request("https://maroowell.com"+path,options);
@@ -103,6 +109,23 @@ try{
   assert.equal(r.status,200,"attached server session must support revocation");
   r=await gateway.fetch(req("/api/session/me",{headers:{cookie:attachedCookie}}),env);
   assert.equal(r.status,401,"attached session cannot be replayed after revoke");
+  assert.equal(logoutCalls,1,"attached session logout must NOT sign out the original Supabase session");
+  assert.equal(refreshCalls,0,"attached session must NOT rotate the browser/native refresh token");
+  // Expire one attached session: the server must refuse it without refreshing the client token.
+  r=await gateway.fetch(attachRequest(),env);
+  assert.equal(r.status,200);
+  const expiredCookie=r.headers.get("set-cookie").split(";")[0];
+  const id=expiredCookie.split("=")[1];
+  const hash=await globalThis.crypto.subtle.digest("SHA-256",new TextEncoder().encode("s:"+id));
+  const key="mw-s-"+Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,"0")).join("");
+  const record=await instances.get(key).read();
+  await instances.get(key).replaceTokens(record.refreshToken,{
+    accessToken:record.accessToken,refreshToken:record.refreshToken,
+    expiresAt:Date.now()-1000
+  });
+  r=await gateway.fetch(req("/api/session/me",{headers:{cookie:expiredCookie}}),env);
+  assert.equal(r.status,401);
+  assert.equal(refreshCalls,0,"expired attached session never refreshes the shared credential");
   approval="pending";
   r=await gateway.fetch(login("https://maroowell.com","192.0.2.12"),env);
   assert.equal(r.status,403,"pending user cannot create session");

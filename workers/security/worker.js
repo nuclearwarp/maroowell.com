@@ -164,31 +164,8 @@ async function getBrowserSession(request,env) {
   let stub, row;
   try{
     stub=await stubFor(env,id);
-    row=await stub.read();
+    row=await stub.fresh();
     if(!row)return {ok:false,status:401,error:"session_expired",clear:true};
-    if(row.expiresAt < Date.now()+60000) {
-      const cfg=validConfig(env);
-      if(!cfg)return {ok:false,status:503,error:"auth_backend_unavailable"};
-      const refreshed=await upstreamJson(cfg.origin+"/auth/v1/token?grant_type=refresh_token",{
-        method:"POST",headers:{"apikey":cfg.key,"content-type":"application/json"},
-        body:JSON.stringify({refresh_token:row.refreshToken})
-      });
-      if(!refreshed.ok) {
-        if([400,401,403].includes(refreshed.status)) {
-          await stub.revoke();
-          return {ok:false,status:401,error:"session_expired",clear:true};
-        }
-        return {ok:false,status:503,error:"auth_backend_unavailable"};
-      }
-      if(!refreshed.body?.access_token || !refreshed.body?.refresh_token || !Number(refreshed.body?.expires_in))
-        return {ok:false,status:503,error:"auth_backend_unavailable"};
-      const replacement={accessToken:refreshed.body.access_token,
-        refreshToken:refreshed.body.refresh_token,expiresAt:Date.now()+Number(refreshed.body.expires_in)*1000};
-      if(!await stub.replaceTokens(row.refreshToken,replacement))
-        return {ok:false,status:503,error:"session_changed"};
-      row=await stub.read();
-      if(!row)return {ok:false,status:401,error:"session_expired",clear:true};
-    }
     const checked=await verifyIdentity(
       new Request("https://security.internal/v1/auth/verify",{headers:{Authorization:"Bearer "+row.accessToken}}),env);
     if(checked.status!==200 || checked.identity?.user_id!==row.userId) {
@@ -240,7 +217,7 @@ async function sessionApi(request,env,url) {
       const id=randomString();
       const stub=await stubFor(env,id);
       const issued=await stub.issue({userId:checked.identity.user_id,
-        accessToken,refreshToken,expiresAt,csrfToken:randomString()});
+        accessToken,refreshToken,expiresAt,csrfToken:randomString(),source:"attached"});
       if(!issued)return respond({ok:false,error:"session_service_unavailable"},503,request);
       if(oldId&&oldId!==id){
         try{await (await stubFor(env,oldId)).revoke()}catch{}
@@ -286,7 +263,7 @@ async function sessionApi(request,env,url) {
       const saved=await stub.issue({
         userId:checked.identity.user_id,
         accessToken:result.body.access_token,refreshToken:result.body.refresh_token,
-        expiresAt:now+Number(result.body.expires_in)*1000,csrfToken:randomString()
+        expiresAt:now+Number(result.body.expires_in)*1000,csrfToken:randomString(),source:"server"
       });
       if(!saved)return respond({ok:false,error:"session_service_unavailable"},503,request);
       await throttle.resetAttempts();
@@ -317,7 +294,9 @@ async function sessionApi(request,env,url) {
   }
   await session.stub.revoke();
   const cfg=validConfig(env);
-  if(cfg){
+  // Do NOT revoke the original Supabase session used by native WebViews or
+  // legacy browser login: only a dedicated server-origin session owns that token.
+  if(cfg&&session.row.source==="server"){
     try{
       await upstreamJson(cfg.origin+"/auth/v1/logout?scope=local",{
         method:"POST",headers:{"apikey":cfg.key,"Authorization":"Bearer "+session.row.accessToken},

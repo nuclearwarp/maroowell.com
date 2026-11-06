@@ -1,0 +1,34 @@
+name: Deploy MAROOWELL security gateway
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'workers/security/**'
+      - 'tests/security-gateway.test.mjs'
+      - '.github/workflows/deploy-security-gateway.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-maroowell-security-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: node --check workers/security/worker.js
+      - name: Security regression test
+        run: node tests/security-gateway.test.mjs
+      - name: Deploy isolated security gateway
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: '4'
+          command: deploy --config workers/security/wrangler.toml --keep-vars

@@ -672,6 +672,8 @@
   const FAIL_COUNT_PREFIX = "mw_login_fail_count:";
 
   const params = new URLSearchParams(location.search);
+  // Opt-in migration pilot. Leave regular login untouched until verified.
+  const mwSecurityPilot = params.get("mw_security_pilot") === "1";
   const rawNext = params.get("next") || DEFAULT_NEXT;
   const currentFlow = params.get("flow") || "";
 
@@ -1175,6 +1177,34 @@
     location.replace(next);
   }
 
+  async function attachSecurityPilotSession() {
+    if (!mwSecurityPilot) return;
+    const {data:{session},error}=await supabase.auth.getSession();
+    if(error||!session?.access_token||!session?.refresh_token)
+      throw new Error("보안 세션을 연결할 로그인 정보가 없습니다.");
+    const response=await fetch("/api/session/attach",{
+      method:"POST",credentials:"same-origin",cache:"no-store",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        access_token:session.access_token,
+        refresh_token:session.refresh_token,
+        expires_in:session.expires_in ||
+          Math.max(1,Math.floor((session.expires_at*1000-Date.now())/1000))
+      })
+    });
+    if(!response.ok)throw new Error("보안 세션 연결 실패 (HTTP "+response.status+")");
+    const result=await response.json();
+    if(result?.ok!==true || result?.user?.user_id!==session.user.id)
+      throw new Error("보안 세션 신원 검증 실패");
+    const verified=await fetch("/api/session/me",{
+      credentials:"same-origin",cache:"no-store"
+    });
+    if(!verified.ok)throw new Error("서버 세션 검증 실패 (HTTP "+verified.status+")");
+    const saved=await verified.json();
+    if(saved?.user?.user_id!==session.user.id)
+      throw new Error("서버 세션 사용자 불일치");
+  }
+
   async function signIn() {
     const em = normalizeEmail(email.value);
     try {
@@ -1185,9 +1215,11 @@
       if (!em) throw new Error("이메일을 입력하세요.");
       if (!pw) throw new Error("비밀번호를 입력하세요.");
 
+      if(mwSecurityPilot) suppressAutoRedirect = true;
       const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
       if (error) throw error;
       await enforceWebAccountState();
+      if(mwSecurityPilot)await attachSecurityPilotSession();
 
       try {
         if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
@@ -1201,6 +1233,7 @@
       setStatus("로그인 성공", "success");
       location.replace(next);
     } catch (e) {
+      if(mwSecurityPilot) suppressAutoRedirect = false;
       let extra = "";
       if (em && shouldCountLoginFailure(e)) {
         const count = bumpFailCount(em);

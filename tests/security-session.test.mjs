@@ -79,6 +79,30 @@ try{
   assert.match(r.headers.get("set-cookie"),/Max-Age=0/);
   r=await gateway.fetch(req("/api/session/me",{headers:{cookie:rawCookie}}),env);
   assert.equal(r.status,401,"revoked session cannot be replayed");
+  // Legacy login can attach an existing valid Supabase session only from same origin.
+  const attachRequest=(origin="https://maroowell.com")=>req("/api/session/attach",{
+    method:"POST",headers:{origin,"sec-fetch-site":"same-origin","content-type":"application/json"},
+    body:JSON.stringify({access_token:"test_access_token_00000000001",
+      refresh_token:"test_refresh_token_00000000001",expires_in:3600})
+  });
+  r=await gateway.fetch(attachRequest("https://attacker.example"),env);
+  assert.equal(r.status,403,"cross-origin attach must be denied");
+  r=await gateway.fetch(attachRequest(),env);
+  assert.equal(r.status,200,"valid existing session may be attached");
+  const attached=await r.json();
+  assert.equal(attached.user.user_id,"test-user-id");
+  assert(!JSON.stringify(attached).includes("test_access_token"));
+  assert(!JSON.stringify(attached).includes("test_refresh_token"));
+  const attachedCookie=r.headers.get("set-cookie").split(";")[0];
+  assert.match(attachedCookie,/^__Host-mw_session=[A-Za-z0-9_-]{43}$/);
+  r=await gateway.fetch(req("/api/session/me",{headers:{cookie:attachedCookie}}),env);
+  assert.equal(r.status,200);
+  r=await gateway.fetch(req("/api/session/logout",{method:"POST",
+    headers:{origin:"https://maroowell.com","sec-fetch-site":"same-origin",
+      cookie:attachedCookie,"x-csrf-token":attached.csrf_token}}),env);
+  assert.equal(r.status,200,"attached server session must support revocation");
+  r=await gateway.fetch(req("/api/session/me",{headers:{cookie:attachedCookie}}),env);
+  assert.equal(r.status,401,"attached session cannot be replayed after revoke");
   approval="pending";
   r=await gateway.fetch(login("https://maroowell.com","192.0.2.12"),env);
   assert.equal(r.status,403,"pending user cannot create session");

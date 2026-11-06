@@ -84,11 +84,13 @@ async function verifyIdentity(request, env) {
     if (!access || !state || access.user_id !== user.id || state.user_id !== user.id) {
       return {status:403,error:"access_denied"};
     }
-    if (access.is_maroowell !== true || state.approval_status !== "approved" || state.app_only === true) {
+    // Existing web access includes approved non-MAROOWELL vendors with no
+    // vendor_members role; being authenticated is NOT an admin grant.
+    if (state.approval_status !== "approved" || state.app_only === true) {
       return {status:403,error:"access_denied"};
     }
-    const roleLevel = Number(access.max_role_level || 0);
-    if (!Number.isFinite(roleLevel) || roleLevel <= 0) {
+    const roleLevel = Number(access.max_role_level ?? 0);
+    if (!Number.isSafeInteger(roleLevel) || roleLevel < 0 || roleLevel > 100) {
       return {status:403,error:"access_denied"};
     }
     return {
@@ -96,8 +98,8 @@ async function verifyIdentity(request, env) {
       identity:{
         user_id:user.id,
         email:typeof access.email === "string" ? access.email : "",
-        is_maroowell:true,
-        is_admin:access.is_admin === true,
+        is_maroowell:access.is_maroowell === true,
+        is_admin:access.is_maroowell === true && access.is_admin === true,
         max_role_level:roleLevel
       }
     };
@@ -206,13 +208,52 @@ function csrfValid(request,row){
 }
 async function sessionApi(request,env,url) {
   const endpoint=url.pathname;
-  const allowed=["/api/session/login","/api/session/me","/api/session/refresh","/api/session/logout"];
+  const allowed=["/api/session/login","/api/session/attach","/api/session/me","/api/session/refresh","/api/session/logout"];
   if(!allowed.includes(endpoint)||url.search)return respond({ok:false,error:"not_found"},404,request);
   const isRead=endpoint==="/api/session/me";
   if(request.method!==(isRead?"GET":"POST"))
     return respond({ok:false,error:"method_not_allowed"},405,request);
   if(!isRead&&!allowedMutation(request))
     return respond({ok:false,error:"origin_not_allowed"},403,request);
+  if(endpoint==="/api/session/attach"){
+    // Pilot bridge from the existing in-browser Supabase login. Tokens only
+    // travel over same-origin HTTPS and are never returned to the caller.
+    const body=await bodyJson(request);
+    const accessToken=body?.access_token;
+    const refreshToken=body?.refresh_token;
+    const expiresAt=Date.now()+Number(body?.expires_in||0)*1000;
+    if(typeof accessToken!=="string" || accessToken.length<20 || accessToken.length>6000
+      || typeof refreshToken!=="string" || refreshToken.length<20 || refreshToken.length>1000
+      || !Number.isFinite(expiresAt) || expiresAt<Date.now()+1000
+      || expiresAt>Date.now()+7200000) {
+      return respond({ok:false,error:"invalid_session_tokens"},400,request);
+    }
+    if(!env.SESSIONS || !validConfig(env))
+      return respond({ok:false,error:"session_service_unavailable"},503,request);
+    const checked=await verifyIdentity(
+      new Request("https://security.internal/v1/auth/verify",{headers:{Authorization:"Bearer "+accessToken}}),env);
+    if(checked.status!==200)
+      return respond({ok:false,error:checked.status===503?"authorization_service_unavailable":"access_denied"},
+        checked.status===503?503:403,request);
+    try {
+      const oldId=sessionId(request);
+      const id=randomString();
+      const stub=await stubFor(env,id);
+      const issued=await stub.issue({userId:checked.identity.user_id,
+        accessToken,refreshToken,expiresAt,csrfToken:randomString()});
+      if(!issued)return respond({ok:false,error:"session_service_unavailable"},503,request);
+      if(oldId&&oldId!==id){
+        try{await (await stubFor(env,oldId)).revoke()}catch{}
+      }
+      const row=await stub.read();
+      if(!row)return respond({ok:false,error:"session_service_unavailable"},503,request);
+      return sessionResponse({ok:true,user:checked.identity,csrf_token:row.csrfToken,
+        expires_at:new Date(row.absoluteExpiresAt).toISOString()},200,request,id);
+    }catch(error){
+      console.warn("MW_SESSION_ATTACH_FAILED",error?.name||"unknown");
+      return respond({ok:false,error:"session_service_unavailable"},503,request);
+    }
+  }
   if(endpoint==="/api/session/login"){
     const body=await bodyJson(request);
     const email=typeof body?.email==="string"?body.email.trim().toLowerCase():"";

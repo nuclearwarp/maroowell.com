@@ -46,6 +46,27 @@ try{
   assert.equal(r.status,200);
   assert.equal((await r.json()).identity.max_role_level,30);
   assert.equal(r.headers.get("cache-control").includes("no-store"),true);
+  // Approved external vendors are allowed to log in without privileged roles.
+  globalThis.fetch=async(u)=>{
+    if(u.endsWith("/auth/v1/user"))return Response.json({id:"test-user"});
+    if(u.endsWith("/rpc/mw_my_access"))return Response.json([{user_id:"test-user",is_maroowell:false,is_admin:false,max_role_level:0}]);
+    if(u.endsWith("/rpc/mw_my_account_state"))return Response.json([{user_id:"test-user",approval_status:"approved",app_only:false}]);
+    throw Error("Unexpected upstream");
+  };
+  r=await gateway.fetch(make("/v1/auth/verify",{headers:{authorization:"Bearer abcdabcdabcd"}}),env);
+  assert.equal(r.status,200,"approved external vendor access must be retained");
+  const vendor=await r.json();
+  assert.equal(vendor.identity.is_maroowell,false);
+  assert.equal(vendor.identity.is_admin,false);
+  assert.equal(vendor.identity.max_role_level,0);
+  globalThis.fetch=async(u)=>{
+    if(u.endsWith("/auth/v1/user"))return Response.json({id:"test-user"});
+    if(u.endsWith("/rpc/mw_my_access"))return Response.json([{user_id:"test-user",is_maroowell:true,max_role_level:90}]);
+    if(u.endsWith("/rpc/mw_my_account_state"))return Response.json([{user_id:"test-user",approval_status:"approved",app_only:true}]);
+    throw Error("Unexpected upstream");
+  };
+  r=await gateway.fetch(make("/v1/auth/verify",{headers:{authorization:"Bearer abcdabcdabcd"}}),env);
+  assert.equal(r.status,403,"app-only user cannot enter web sessions");
   globalThis.fetch=async(u)=>{
     if(u.endsWith("/auth/v1/user"))return Response.json({id:"test-user"});
     if(u.endsWith("/rpc/mw_my_access"))return Response.json([{user_id:"test-user",is_maroowell:true,max_role_level:90}]);

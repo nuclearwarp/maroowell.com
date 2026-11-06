@@ -25,7 +25,7 @@ try{
   let r=await gateway.fetch(make("/health"),env);
   let doResult=await gateway.fetch(make("/health/session-store"),env);
   assert.equal(doResult.status,503,"unconfigured session storage must fail closed");
-  env.SESSIONS={getByName:()=>({ping:async()=>true})};
+  env.SESSIONS={getByName:()=>({ping:async()=>true,attempt:async()=>({allowed:true}),resetAttempts:async()=>true})};
   doResult=await gateway.fetch(make("/health/session-store"),env);
   assert.equal(doResult.status,200,"durable object binding works");
   assert.equal((await doResult.json()).session_store,"ready");

@@ -397,9 +397,17 @@ export default {
       try {
         if (!env.SESSIONS) throw Error("missing_binding");
         const ready = await env.SESSIONS.getByName("mw-security-health-v1").ping();
-        return respond({ok:ready===true,session_store:ready===true?"ready":"unavailable"},ready===true?200:503,request);
-      } catch {
-        return respond({ok:false,error:"session_store_unavailable"},503,request);
+        if(ready!==true)return respond({ok:false,error:"session_store_unavailable",stage:"rpc"},503,request);
+        // Ping only proves the class loads; the actual login uses DO storage.
+        // Exercise that isolated rate-limit storage without touching user buckets.
+        const probe = await stubFor(env,"internal-health-probe-v1","rate");
+        const result = await probe.attempt();
+        if(result?.allowed!==true)return respond({ok:false,error:"rate_store_unavailable",stage:"attempt"},503,request);
+        await probe.resetAttempts();
+        return respond({ok:true,session_store:"ready",rate_store:"ready"},200,request);
+      } catch (err) {
+        console.warn("MW_SESSION_HEALTH",err?.name||"unknown");
+        return respond({ok:false,error:"rate_store_unavailable",stage:"storage"},503,request);
       }
     }
     if (url.pathname === HEALTH_PATH && url.search === "") {

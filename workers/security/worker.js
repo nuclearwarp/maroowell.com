@@ -201,7 +201,7 @@ async function sessionApi(request,env,url) {
     const refreshToken=body?.refresh_token;
     const expiresAt=Date.now()+Number(body?.expires_in||0)*1000;
     if(typeof accessToken!=="string" || accessToken.length<20 || accessToken.length>6000
-      || typeof refreshToken!=="string" || refreshToken.length<20 || refreshToken.length>1000
+      || typeof refreshToken!=="string" || refreshToken.length<8 || refreshToken.length>2048
       || !Number.isFinite(expiresAt) || expiresAt<Date.now()+1000
       || expiresAt>Date.now()+7200000) {
       return respond({ok:false,error:"invalid_session_tokens"},400,request);

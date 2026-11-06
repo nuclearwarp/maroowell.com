@@ -16,7 +16,7 @@ export class SessionStore extends DurableObject {
   async issue(record) {
     if (!record || typeof record.userId !== "string" || typeof record.accessToken !== "string" ||
         typeof record.refreshToken !== "string" || typeof record.csrfToken !== "string" ||
-        record.accessToken.length < 16 || record.refreshToken.length < 16 ||
+        record.accessToken.length < 16 || record.refreshToken.length < 8 || record.refreshToken.length > 2048 ||
         !Number.isSafeInteger(record.expiresAt) || record.expiresAt <= Date.now()) {
       return false;
     }

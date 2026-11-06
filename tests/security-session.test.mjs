@@ -45,13 +45,13 @@ globalThis.fetch=async (url,init)=>{
   const u=String(url);
   if(u.includes("/auth/v1/token?grant_type=password")) {
     return credentialStatus===200
-      ?Response.json({access_token:"test_access_token_00000000001",refresh_token:"test_refresh_token_00000000001",expires_in:3600})
+      ?Response.json({access_token:"test_access_token_00000000001",refresh_token:"rt_12chars01",expires_in:3600})
       :Response.json({error:"invalid credentials"},{status:credentialStatus});
   }
   if(u.includes("/auth/v1/token?grant_type=refresh_token")){
     refreshCalls++;
     await new Promise(r=>setTimeout(r,5));
-    return Response.json({access_token:"test_access_token_00000000002",refresh_token:"test_refresh_token_00000000002",expires_in:3600});
+    return Response.json({access_token:"test_access_token_00000000002",refresh_token:"rt_12chars02",expires_in:3600});
   }
   if(u.endsWith("/auth/v1/user"))return Response.json({id:"test-user-id"});
   if(u.endsWith("mw_my_access"))return Response.json([{user_id:"test-user-id",email:"test@example.test",is_maroowell:true,max_role_level:50,is_admin:false}]);
@@ -90,7 +90,7 @@ try{
   const attachRequest=(origin="https://maroowell.com")=>req("/api/session/attach",{
     method:"POST",headers:{origin,"sec-fetch-site":"same-origin","content-type":"application/json"},
     body:JSON.stringify({access_token:"test_access_token_00000000001",
-      refresh_token:"test_refresh_token_00000000001",expires_in:3600})
+      refresh_token:"rt_12chars01",expires_in:3600})
   });
   r=await gateway.fetch(attachRequest("https://attacker.example"),env);
   assert.equal(r.status,403,"cross-origin attach must be denied");

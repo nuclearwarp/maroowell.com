@@ -414,7 +414,7 @@ export default {
         const result = await probe.attempt();
         if(result?.allowed!==true)return respond({ok:false,error:"rate_store_unavailable",stage:"attempt"},503,request);
         await probe.resetAttempts();
-        return respond({ok:true,session_store:"ready",rate_store:"ready"},200,request);
+        return respond({ok:true,session_store:"ready",rate_store:"ready",auth_config:validConfig(env)?"ready":"invalid"},200,request);
       } catch (err) {
         console.warn("MW_SESSION_HEALTH",err?.name||"unknown");
         return respond({ok:false,error:"rate_store_unavailable",stage:"storage"},503,request);

@@ -226,9 +226,22 @@ const SUPA="https://rgqerimdxkthkcewqbbe.supabase.co";
 const KEY=["sb_publishable_","FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H"].join("");
 const $=id=>document.getElementById(id);
 
+const CAMP_FILTER_STORAGE="mwRealtimeCampSelectionV1";
+function restoreCampFilter(){
+  try {
+    const saved=JSON.parse(sessionStorage.getItem(CAMP_FILTER_STORAGE)||"null");
+    if(!saved || typeof saved!=="object")return{wave:"ALL",selected:[]};
+    return{
+      wave:["ALL","WAVE1","WAVE2"].includes(saved.wave)?saved.wave:"ALL",
+      selected:Array.isArray(saved.selected)?saved.selected.filter(k=>typeof k==="string"&&k.includes("|")).slice(0,40):[]
+    };
+  }catch{return{wave:"ALL",selected:[]}}
+}
+const restoredCampFilter=restoreCampFilter();
+
 const S={
   sb:null,
-  wave:"ALL",
+  wave:restoredCampFilter.wave,
   busy:false,
   auto:Number(localStorage.getItem("mwRealtimeAuto")||1),
   timer:null,
@@ -239,7 +252,7 @@ const S={
   sourceRows:[],
   scheduleRows:[],
   camps:[],
-  selected:new Set(),
+  selected:new Set(restoredCampFilter.selected),
   lastQueryAt:0
 };
 
@@ -556,6 +569,13 @@ function renderSummary(){
   $("summaryCaption").textContent=q?`${waveLabel(S.wave)} · ${q.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"조회 전";
 }
 
+
+function saveCampFilter(){
+  try{
+    sessionStorage.setItem(CAMP_FILTER_STORAGE,JSON.stringify({wave:S.wave,selected:[...S.selected]}));
+  }catch{}
+}
+
 function renderCamps(){
   const body=$("campBody");
   $("campCaption").textContent=`${S.camps.length}개 운행 단위 · 클릭해 기사 필터`;
@@ -594,6 +614,7 @@ function renderCamps(){
   body.querySelectorAll(".campCard").forEach(el=>el.addEventListener("click",()=>{
     const k=el.dataset.campKey;
     S.selected.has(k)?S.selected.delete(k):S.selected.add(k);
+    saveCampFilter();
     renderCamps();renderDrivers();
   }));
 }
@@ -666,7 +687,13 @@ function renderAll(){
 }
 function applyWaveFilter(){
   S.camps=buildCamps();
-  S.selected.clear();
+  // Preserve current selection across polling; discard keys for departed camps.
+  if(S.selected.size && S.camps.length){
+    const valid=new Set(S.camps.map(c=>c.key));
+    let changed=false;
+    for(const k of S.selected)if(!valid.has(k)){S.selected.delete(k);changed=true}
+    if(changed)saveCampFilter();
+  }
   renderAll();
 }
 
@@ -863,7 +890,7 @@ async function queryAll(){
 
     if(!S.batches.length){
       S.camps=[];
-      S.selected.clear();
+      // Temporary empty batches must not clear the selected camp.
       S.lastQueryAt=Date.now();
       renderAll();
       await loadCollectorState();
@@ -944,11 +971,16 @@ async function copySection(id,name,trigger){
 function bind(){
   $("scheduleDate").value=defaultDate();
 
-  document.querySelectorAll(".waveBtn").forEach(b=>b.addEventListener("click",()=>{
-    S.wave=b.dataset.wave;
-    document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===b));
-    applyWaveFilter();
-  }));
+  document.querySelectorAll(".waveBtn").forEach(b=>{
+    b.classList.toggle("active",b.dataset.wave===S.wave);
+    b.addEventListener("click",()=>{
+      if(S.wave!==b.dataset.wave)S.selected.clear();
+      S.wave=b.dataset.wave;
+      saveCampFilter();
+      document.querySelectorAll(".waveBtn").forEach(x=>x.classList.toggle("active",x===b));
+      applyWaveFilter();
+    });
+  });
 
   document.querySelectorAll(".autoBtn").forEach(b=>{
     const m=Number(b.dataset.min);
@@ -973,6 +1005,7 @@ function bind(){
   document.addEventListener("keydown",e=>{
     if(e.key==="Escape"&&S.selected.size){
       S.selected.clear();
+      saveCampFilter();
       renderCamps();renderDrivers();
       setStatus("캠프 선택을 모두 해제했습니다.");
     }

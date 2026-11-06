@@ -106,11 +106,192 @@ async function verifyIdentity(request, env) {
     return {status:503,error:"identity_service_unavailable"};
   }
 }
+
+const SESSION_COOKIE = "__Host-mw_session";
+const SESSION_MAX_AGE = 12 * 60 * 60;
+const HOST_ORIGIN = "https://maroowell.com";
+
+function randomString() {
+  const bytes=crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
+}
+function sessionId(request) {
+  const raw=request.headers.get("cookie")||"";
+  if(raw.length>12000)return null;
+  for(const entry of raw.split(";")){
+    const pair=entry.trim();
+    if(pair.startsWith(SESSION_COOKIE+"=")){
+      const id=pair.slice(SESSION_COOKIE.length+1);
+      return /^[a-zA-Z0-9_-]{43}$/.test(id)?id:null;
+    }
+  }
+  return null;
+}
+function sessionResponse(data,status,request,cookieId,clear=false) {
+  const response=respond(data,status,request);
+  if(cookieId!==undefined) {
+    const headers=new Headers(response.headers);
+    headers.append("set-cookie",SESSION_COOKIE+"="+(clear?"":cookieId)+
+      "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age="+(clear?0:SESSION_MAX_AGE));
+    return new Response(response.body,{status,headers});
+  }
+  return response;
+}
+function allowedMutation(request) {
+  const url=new URL(request.url);
+  return url.origin===HOST_ORIGIN
+    && request.headers.get("origin")===HOST_ORIGIN
+    && !["cross-site","same-site"].includes(request.headers.get("sec-fetch-site")||"");
+}
+async function bodyJson(request) {
+  if(!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type")||""))return null;
+  if(Number(request.headers.get("content-length")||"0")>4096)return null;
+  const raw=await request.text();
+  if(raw.length>4096)return null;
+  try{const body=JSON.parse(raw);return body&&typeof body==="object"&&!Array.isArray(body)?body:null}catch{return null}
+}
+async function stubFor(env,name,kind="s") {
+  if(!env.SESSIONS)throw new Error("session_store_unavailable");
+  const hash=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(kind+":"+name));
+  const key=Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,"0")).join("");
+  return env.SESSIONS.getByName("mw-"+kind+"-"+key);
+}
+async function getBrowserSession(request,env) {
+  const id=sessionId(request);
+  if(!id)return {ok:false,status:401,error:"authentication_required"};
+  let stub, row;
+  try{
+    stub=await stubFor(env,id);
+    row=await stub.read();
+    if(!row)return {ok:false,status:401,error:"session_expired",clear:true};
+    if(row.expiresAt < Date.now()+60000) {
+      const cfg=validConfig(env);
+      if(!cfg)return {ok:false,status:503,error:"auth_backend_unavailable"};
+      const refreshed=await upstreamJson(cfg.origin+"/auth/v1/token?grant_type=refresh_token",{
+        method:"POST",headers:{"apikey":cfg.key,"content-type":"application/json"},
+        body:JSON.stringify({refresh_token:row.refreshToken})
+      });
+      if(!refreshed.ok) {
+        if([400,401,403].includes(refreshed.status)) {
+          await stub.revoke();
+          return {ok:false,status:401,error:"session_expired",clear:true};
+        }
+        return {ok:false,status:503,error:"auth_backend_unavailable"};
+      }
+      if(!refreshed.body?.access_token || !refreshed.body?.refresh_token || !Number(refreshed.body?.expires_in))
+        return {ok:false,status:503,error:"auth_backend_unavailable"};
+      const replacement={accessToken:refreshed.body.access_token,
+        refreshToken:refreshed.body.refresh_token,expiresAt:Date.now()+Number(refreshed.body.expires_in)*1000};
+      if(!await stub.replaceTokens(row.refreshToken,replacement))
+        return {ok:false,status:503,error:"session_changed"};
+      row=await stub.read();
+      if(!row)return {ok:false,status:401,error:"session_expired",clear:true};
+    }
+    const checked=await verifyIdentity(
+      new Request("https://security.internal/v1/auth/verify",{headers:{Authorization:"Bearer "+row.accessToken}}),env);
+    if(checked.status!==200 || checked.identity?.user_id!==row.userId) {
+      if(checked.status===503)return {ok:false,status:503,error:"authorization_service_unavailable"};
+      await stub.revoke();
+      return {ok:false,status:403,error:"access_denied",clear:true};
+    }
+    return {ok:true,stub,row,user:checked.identity};
+  }catch(err){
+    console.warn("MW_SESSION_ERROR",err?.name||"unknown");
+    return {ok:false,status:503,error:"session_service_unavailable"};
+  }
+}
+function csrfValid(request,row){
+  const csrf=request.headers.get("x-csrf-token")||"";
+  return /^[a-zA-Z0-9_-]{43}$/.test(csrf)&&csrf===row?.csrfToken;
+}
+async function sessionApi(request,env,url) {
+  const endpoint=url.pathname;
+  const allowed=["/api/session/login","/api/session/me","/api/session/refresh","/api/session/logout"];
+  if(!allowed.includes(endpoint)||url.search)return respond({ok:false,error:"not_found"},404,request);
+  const isRead=endpoint==="/api/session/me";
+  if(request.method!==(isRead?"GET":"POST"))
+    return respond({ok:false,error:"method_not_allowed"},405,request);
+  if(!isRead&&!allowedMutation(request))
+    return respond({ok:false,error:"origin_not_allowed"},403,request);
+  if(endpoint==="/api/session/login"){
+    const body=await bodyJson(request);
+    const email=typeof body?.email==="string"?body.email.trim().toLowerCase():"";
+    const password=body?.password;
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254||
+      typeof password!=="string"||password.length<1||password.length>256)
+      return respond({ok:false,error:"invalid_credentials"},401,request);
+    const cfg=validConfig(env);
+    if(!cfg||!env.SESSIONS)return respond({ok:false,error:"session_service_unavailable"},503,request);
+    let throttle;
+    try{
+      const ip=request.headers.get("cf-connecting-ip")||"unknown";
+      throttle=await stubFor(env,ip,"rate");
+      const attempt=await throttle.attempt();
+      if(!attempt.allowed)return respond({ok:false,error:"rate_limited"},429,request);
+      const result=await upstreamJson(cfg.origin+"/auth/v1/token?grant_type=password",{
+        method:"POST",headers:{"apikey":cfg.key,"content-type":"application/json"},
+        body:JSON.stringify({email,password})
+      });
+      if(!result.ok)return respond({ok:false,error:[400,401,403,422].includes(result.status)?"invalid_credentials":"auth_backend_unavailable"},
+        [400,401,403,422].includes(result.status)?401:503,request);
+      if(!result.body?.access_token||!result.body?.refresh_token||!Number(result.body?.expires_in))
+        return respond({ok:false,error:"auth_backend_unavailable"},503,request);
+      const checked=await verifyIdentity(
+        new Request("https://security.internal/v1/auth/verify",{headers:{Authorization:"Bearer "+result.body.access_token}}),env);
+      if(checked.status!==200)return respond({ok:false,error:"access_denied"},checked.status===503?503:403,request);
+      const id=randomString();
+      const now=Date.now();
+      const stub=await stubFor(env,id);
+      const saved=await stub.issue({
+        userId:checked.identity.user_id,
+        accessToken:result.body.access_token,refreshToken:result.body.refresh_token,
+        expiresAt:now+Number(result.body.expires_in)*1000,csrfToken:randomString()
+      });
+      if(!saved)return respond({ok:false,error:"session_service_unavailable"},503,request);
+      await throttle.resetAttempts();
+      const row=await stub.read();
+      return sessionResponse({ok:true,user:checked.identity,csrf_token:row.csrfToken,
+        expires_at:new Date(row.absoluteExpiresAt).toISOString()},200,request,id);
+    }catch(err){
+      console.warn("MW_LOGIN_ERROR",err?.name||"unknown");
+      return respond({ok:false,error:"session_service_unavailable"},503,request);
+    }
+  }
+  const session=await getBrowserSession(request,env);
+  if(endpoint==="/api/session/logout" && !sessionId(request))
+    return sessionResponse({ok:true},200,request,"",true);
+  if(!session.ok){
+    if(endpoint==="/api/session/logout" && session.status!==503)
+      return sessionResponse({ok:true},200,request,"",true);
+    const r=respond({ok:false,error:session.error},session.status,request);
+    return session.clear?sessionResponse({ok:false,error:session.error},session.status,request,"",true):r;
+  }
+  if(isRead)return respond({ok:true,user:session.user,csrf_token:session.row.csrfToken,
+    expires_at:new Date(session.row.absoluteExpiresAt).toISOString()},200,request);
+  if(!csrfValid(request,session.row))
+    return respond({ok:false,error:"csrf_failed"},403,request);
+  if(endpoint==="/api/session/refresh"){
+    return respond({ok:true,user:session.user,csrf_token:session.row.csrfToken,
+      expires_at:new Date(session.row.absoluteExpiresAt).toISOString()},200,request);
+  }
+  await session.stub.revoke();
+  const cfg=validConfig(env);
+  if(cfg){
+    try{
+      await upstreamJson(cfg.origin+"/auth/v1/logout?scope=local",{
+        method:"POST",headers:{"apikey":cfg.key,"Authorization":"Bearer "+session.row.accessToken},
+      });
+    }catch{}
+  }
+  return sessionResponse({ok:true},200,request,"",true);
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const origin = request.headers.get("origin");
     if (origin && !ORIGINS.has(origin)) return respond({ok:false,error:"origin_not_allowed"},403,request);
+    if (url.pathname.startsWith("/api/session/")) return sessionApi(request,env,url);
     if (url.pathname === "/health/session-store" && url.search === "") {
       if (request.method !== "GET") return respond({ok:false,error:"method_not_allowed"},405,request);
       try {

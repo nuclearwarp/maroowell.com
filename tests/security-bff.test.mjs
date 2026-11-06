@@ -27,6 +27,10 @@ const call=(path,{method="GET",headers={},body}={})=>
     {},deps);
 try{
  assert.equal(policyFor("/api/supabase/rest/v1/maroowell_schedule","GET").rule,"team_or_dragon");
+ assert.equal(policyFor("/api/supabase/rest/v1/cleansing_history","GET").rule,"approved",
+  "RLS-authorized non-admin cleansing readers must be preserved");
+ assert.equal(policyFor("/api/supabase/rest/v1/cleansing_history","POST").rule,"admin",
+  "cleansing writes remain admin-only");
  assert.equal(policyFor("/api/supabase/rest/v1/rpc/mw_set_meta_collector_paused","POST").rule,"admin");
  assert.equal(policyFor("/api/supabase/rest/v1/meta_backend_state","GET"),null);
  assert.equal(policyFor("/api/worker/unknown/health","GET"),null);

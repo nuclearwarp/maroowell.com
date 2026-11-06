@@ -9,7 +9,7 @@ const TABLES = Object.freeze({
   vendor_members:["approved","admin"],vendors:["approved","admin"],
   camps:["approved","admin"],subsubroutes:["approved","admin"],
   coupang_freshbag:["approved","admin"],
-  cleansing_history:["admin","admin"],cleansing_history_access:["admin",null],
+  cleansing_history:["approved","admin"],cleansing_history_access:["approved",null],
   dragon_car:["team_or_dragon","dragon"],dragon_car_subtraction:["dragon","dragon"],
   maroowell_account:["team","admin"],maroowell_freshbag_ration:["mw","admin"],
   maroowell_freshbag_ration_month_total:["mw","admin"],

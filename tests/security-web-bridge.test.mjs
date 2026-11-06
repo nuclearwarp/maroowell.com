@@ -3,6 +3,13 @@ import {readFileSync} from "node:fs";
 const bridge=readFileSync("public/mw-secure-web.js","utf8");
 const login=readFileSync("public/index.html","utf8");
 const worker=readFileSync("login-worker-v2.js","utf8");
+const menu=readFileSync("public/board-menu.js","utf8");
+new Function(menu);
+assert(menu.includes('sessionStorage.getItem("mw_web_server_auth")==="1"'));
+assert(menu.includes('/api/supabase/rest/v1/rpc/'));
+assert(menu.includes('me.csrf_token'));
+assert(menu.includes('/api/supabase/rest/v1/cleansing_history_access'));
+
 new Function(bridge);
 assert(login.includes('fetch("/api/session/login"'),"pilot login must use server credentials");
 assert(login.includes('sessionStorage.setItem("mw_web_server_auth","1")'));

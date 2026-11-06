@@ -40,7 +40,44 @@ function badge(p){if(p.public)return '';if(p.requirePayout)return '\uc815\uc0b0 
 function styles(){if(document.getElementById('mw-board-menu-style'))return;const s=document.createElement('style');s.id='mw-board-menu-style';s.textContent='.mw-board-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:99990;display:none}.mw-board-backdrop.open{display:block}.mw-board-panel{position:fixed;top:18px;left:18px;width:min(380px,calc(100vw - 36px));max-height:min(80vh,760px);overflow:auto;border-radius:20px;background:#0d1727;box-shadow:0 22px 80px rgba(0,0,0,.45);z-index:99991;display:none;color:#fff}.mw-board-panel.open{display:block}.mw-board-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.1)}.mw-board-title{font-weight:900}.mw-board-close{height:34px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#fff;font-weight:900;cursor:pointer}.mw-board-body{padding:12px}.mw-board-list{display:grid;gap:9px}.mw-board-item{display:block;padding:13px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:rgba(255,255,255,.04);color:#fff;text-decoration:none}.mw-board-item:hover,.mw-board-item.current{background:rgba(59,130,246,.16);border-color:rgba(96,165,250,.5)}.mw-board-item-title{font-size:14px;font-weight:900}.mw-board-item-sub{margin-top:5px;color:#aebbd0;font-size:11px}.mw-board-badge{display:inline-flex;margin-left:7px;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.08);font-size:10px}.mw-denied{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;background:#09111e;color:#fff;padding:20px}.mw-denied>div{max-width:560px;padding:24px;border:1px solid rgba(255,255,255,.12);border-radius:20px;background:#101827}.mw-denied h2{margin:0 0 10px}.mw-denied p{color:#b8c3d9;line-height:1.6}.mw-denied button{height:40px;padding:0 14px;border:0;border-radius:999px;background:#17364a;color:#fff;font-weight:900;cursor:pointer}';document.head.appendChild(s);}
 function deny(title,msg){styles();if(document.querySelector('.mw-denied'))return;const d=document.createElement('div');d.className='mw-denied';d.innerHTML=`<div><h2>${esc(title)}</h2><p>${esc(msg)}</p><button id="mwLoginGo">\ub85c\uadf8\uc778</button></div>`;document.body.appendChild(d);document.getElementById('mwLoginGo').onclick=()=>location.href=`/?next=${encodeURIComponent(location.pathname+location.search)}`;}
 function findSession(){const ref=new URL(SUPA).hostname.split('.')[0],base=`sb-${ref}-auth-token`,vals=[];for(const st of [localStorage,sessionStorage]){try{let raw=st.getItem(base);if(raw){if(raw.startsWith('base64-')){let x=raw.slice(7).replace(/-/g,'+').replace(/_/g,'/');x+='='.repeat((4-x.length%4)%4);raw=new TextDecoder().decode(Uint8Array.from(atob(x),c=>c.charCodeAt(0)));}const p=JSON.parse(raw),s=p?.currentSession||p?.session||p;if(s?.access_token)vals.push(s);}}catch{}}return vals[0]||null;}
-async function loadAccess(){const session=findSession();if(!session?.access_token)return {signed_in:false,can_payout:false};
+async function loadAccess(){
+ if(sessionStorage.getItem("mw_web_server_auth")==="1"){
+  const meResp=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
+  if(meResp.status===401)return{signed_in:false,can_payout:false};
+  if(!meResp.ok)throw Error("보안 세션 확인 실패");
+  const me=await meResp.json();
+  if(!me?.ok||!me.user?.user_id||!me.csrf_token)throw Error("보안 세션 응답 오류");
+  const rpc=async name=>{
+   const response=await fetch("/api/supabase/rest/v1/rpc/"+name,{
+    method:"POST",credentials:"same-origin",cache:"no-store",
+    headers:{"content-type":"application/json","x-csrf-token":me.csrf_token},
+    body:"{}"
+   });
+   if(!response.ok)throw Error("서버 권한 확인 실패 ("+name+")");
+   const payload=await response.json();
+   return Array.isArray(payload)?payload[0]:payload;
+  };
+  const [a,b]=await Promise.all([rpc("mw_my_access"),rpc("mw_my_account_state")]);
+  const payout=await rpc("mw_payout_can_access").catch(()=>false);
+  const out={...(a||{}),signed_in:true,
+   approval_status:b?.approval_status||"pending",app_only:b?.app_only===true,
+   can_clhi:false,can_payout:payout===true};
+  out.can_clhi=isSuper(out);
+  if(!out.can_clhi){
+   try{
+    const id=encodeURIComponent(me.user.user_id);
+    const response=await fetch("/api/supabase/rest/v1/cleansing_history_access?select=can_select&user_id=eq."+id+"&can_select=eq.true&limit=1",{
+     credentials:"same-origin",cache:"no-store"
+    });
+    if(response.ok){
+      const records=await response.json();
+      out.can_clhi=Array.isArray(records)&&records.some(x=>x.can_select===true);
+    }
+   }catch{}
+  }
+  return out;
+ }
+ const session=findSession();if(!session?.access_token)return {signed_in:false,can_payout:false};
  const h={apikey:KEY,Authorization:`Bearer ${session.access_token}`,'Content-Type':'application/json'};
  // A failed payout RPC hides payout only. Existing pages keep their established policies.
  const payout=fetch(`${SUPA}/rest/v1/rpc/mw_payout_can_access`,{method:'POST',headers:h,body:'{}',cache:'no-store',signal:AbortSignal.timeout(12000)}).then(async r=>r.ok&&(await r.json())===true).catch(()=>false);

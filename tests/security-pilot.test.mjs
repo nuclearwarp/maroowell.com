@@ -10,7 +10,9 @@ for(const block of scriptBlocks){
 assert(html.includes('params.get("mw_security_pilot") === "1"'));
 assert(html.includes('if (!mwSecurityPilot) return;') || html.includes('if(!mwSecurityPilot) return;'));
 assert(html.includes('await attachSecurityPilotSession();'));
-assert(html.includes('if(mwSecurityPilot) suppressAutoRedirect = true;'));
+assert(html.includes('let suppressAutoRedirect = mwSecurityPilot;'));
+assert(html.includes('fetch("/api/session/login"'),"pilot uses cookie-based login");
+assert(html.includes('sessionStorage.setItem("mw_web_server_auth","1")'),"must activate secure cookie bridge");
 assert(html.includes('await fetch("/api/session/me"'));
 assert(!html.includes('localStorage.setItem("access_token"'));
 assert(worker.includes('endpoint==="/api/session/attach"'));

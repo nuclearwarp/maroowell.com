@@ -44,6 +44,9 @@ var login_worker_v2_default = {
           html = html.replace("</head>", '<script src="/mw-secure-web.js?v=20261106-a"></script></head>');
         }
         const headers = new Headers(response.headers);
+        // Extensionless HTML assets otherwise inherit application/octet-stream from ASSETS.
+        // Browsers then display the document source instead of rendering the page.
+        headers.set("Content-Type","text/html; charset=utf-8");
         headers.set("Cache-Control","no-store, no-cache, must-revalidate");
         headers.delete("Content-Length");
         response = new Response(request.method==="HEAD"?null:html,{status:response.status,headers});

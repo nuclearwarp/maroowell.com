@@ -21,6 +21,7 @@ new Function(bridge);
 assert(login.includes('fetch("/api/session/login"'),"pilot login must use server credentials");
 assert(login.includes('sessionStorage.setItem("mw_web_server_auth","1")'));
 assert(worker.includes('/mw-secure-web.js?v=20261106-a'));
+assert(worker.includes('headers.set("Content-Type","text/html; charset=utf-8")'),"extensionless HTML must be served as text/html to avoid source rendering");
 assert(!bridge.includes("service_role"),"do not ship elevated secrets");
 const data=new Map([["mw_web_server_auth","1"]]);
 const storage={

@@ -30,7 +30,21 @@ var login_worker_v2_default = {
       if (path === "/coupangRouteMap") url.pathname = "/coupangRouteMap.html";
       if (path === "/admin_access" || path === "/maroowell_access") url.pathname = "/admin_access.html";
       if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area2";
-      const response = await env.ASSETS.fetch(new Request(url.toString(), request));
+      let response = await env.ASSETS.fetch(new Request(url.toString(), request));
+      // A browser-only compatibility shim. It is inert unless an explicit
+      // server-cookie login is active in this tab. Native app WebViews retain
+      // their current Supabase session bridge.
+      if ((request.method === "GET" || request.method === "HEAD") && response.ok
+        && /text\/html/i.test(response.headers.get("content-type") || "")) {
+        let html = await response.text();
+        if (html.includes("</head>") && !html.includes("/mw-secure-web.js")) {
+          html = html.replace("</head>", '<script src="/mw-secure-web.js?v=20261106-a"></script></head>');
+        }
+        const headers = new Headers(response.headers);
+        headers.set("Cache-Control","no-store, no-cache, must-revalidate");
+        headers.delete("Content-Length");
+        response = new Response(request.method==="HEAD"?null:html,{status:response.status,headers});
+      }
 
       const withNoStore = async (res, type) => {
         const body = await res.text();

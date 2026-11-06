@@ -959,7 +959,7 @@
   const SIGNUP_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_SIGNUP_COMPLETE;
   const RECOVERY_REDIRECT_URL = EMAIL_REDIRECT_ORIGIN + LOGIN_PATH + "?flow=" + FLOW_RECOVERY;
 
-  let suppressAutoRedirect = false;
+  let suppressAutoRedirect = mwSecurityPilot;
   let handledSignupFlow = false;
   let handledRecoveryFlow = false;
 
@@ -1217,8 +1217,32 @@
       if (!em) throw new Error("이메일을 입력하세요.");
       if (!pw) throw new Error("비밀번호를 입력하세요.");
 
-      if(mwSecurityPilot) suppressAutoRedirect = true;
-      else sessionStorage.removeItem("mw_security_pilot_active");
+      if(mwSecurityPilot) {
+        const response=await fetch("/api/session/login",{
+          method:"POST",credentials:"same-origin",cache:"no-store",
+          headers:{"content-type":"application/json"},
+          body:JSON.stringify({email:em,password:pw})
+        });
+        if(!response.ok){
+          const details=await response.json().catch(()=>({}));
+          throw new Error(response.status===429?"로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.":
+            response.status===401?"이메일 또는 비밀번호가 올바르지 않습니다.":
+            response.status===403?"이용 권한이 없는 계정입니다.":
+            "보안 로그인 오류 (HTTP "+response.status+")");
+        }
+        const data=await response.json();
+        if(data?.ok!==true || !data.user?.user_id)
+          throw new Error("보안 서버에서 로그인 정보를 확인하지 못했습니다.");
+        sessionStorage.setItem("mw_web_server_auth","1");
+        sessionStorage.setItem("mw_security_pilot_active","1");
+        const verified=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
+        if(!verified.ok)throw new Error("보안 로그인 세션 확인 실패");
+        clearFailCount(em);
+        setStatus("서버 보안 로그인 성공","success");
+        location.replace(next);
+        return;
+      }
+      sessionStorage.removeItem("mw_security_pilot_active");
       const { error } = await supabase.auth.signInWithPassword({ email: em, password: pw });
       if (error) throw error;
       await enforceWebAccountState();
@@ -1458,6 +1482,18 @@
       return;
     }
 
+    if(mwSecurityPilot) {
+      try{
+        const response=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
+        if(response.ok){
+          sessionStorage.setItem("mw_web_server_auth","1");
+          sessionStorage.setItem("mw_security_pilot_active","1");
+          location.replace(next);
+          return;
+        }
+      }catch{}
+      return;
+    }
     await redirectIfLoggedIn();
   })();
 })();

@@ -138,6 +138,11 @@ try{
   }
   r=await gateway.fetch(login("https://maroowell.com","192.0.2.99"),env);
   assert.equal(r.status,429,"repeated bad credentials throttled");
+  credentialStatus=503;
+  r=await gateway.fetch(login("https://maroowell.com","192.0.2.70"),env);
+  assert.equal(r.status,503,"auth service failure must stay fail-closed");
+  assert.equal((await r.json()).stage,"auth_http_503","safe diagnostic stage is available");
+  credentialStatus=401;
   r=await gateway.fetch(req("/api/supabase/rest/v1/private_table"),env);
   assert.equal(r.status,404,"arbitrary table proxy remains blocked");
   console.log("PASS session security: login, cookie, approved user, CSRF, revoke, rate limit, deny by default");

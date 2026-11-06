@@ -242,22 +242,29 @@ async function sessionApi(request,env,url) {
     const cfg=validConfig(env);
     if(!cfg||!env.SESSIONS)return respond({ok:false,error:"session_service_unavailable"},503,request);
     let throttle;
+    let loginStage="rate_lookup";
     try{
       const ip=request.headers.get("cf-connecting-ip")||"unknown";
       throttle=await stubFor(env,ip,"rate");
+      loginStage="rate_attempt";
       const attempt=await throttle.attempt();
       if(!attempt.allowed)return respond({ok:false,error:"rate_limited"},429,request);
+      loginStage="auth_request";
       const result=await upstreamJson(cfg.origin+"/auth/v1/token?grant_type=password",{
         method:"POST",headers:{"apikey":cfg.key,"content-type":"application/json"},
         body:JSON.stringify({email,password})
       });
-      if(!result.ok)return respond({ok:false,error:[400,401,403,422].includes(result.status)?"invalid_credentials":"auth_backend_unavailable"},
-        [400,401,403,422].includes(result.status)?401:503,request);
+      if(!result.ok)return respond({ok:false,
+        error:[400,401,403,422].includes(result.status)?"invalid_credentials":"auth_backend_unavailable",
+        stage:"auth_http_"+result.status},[400,401,403,422].includes(result.status)?401:503,request);
+      loginStage="auth_response";
       if(!result.body?.access_token||!result.body?.refresh_token||!Number(result.body?.expires_in))
-        return respond({ok:false,error:"auth_backend_unavailable"},503,request);
+        return respond({ok:false,error:"auth_backend_unavailable",stage:loginStage},503,request);
+      loginStage="identity_check";
       const checked=await verifyIdentity(
         new Request("https://security.internal/v1/auth/verify",{headers:{Authorization:"Bearer "+result.body.access_token}}),env);
-      if(checked.status!==200)return respond({ok:false,error:"access_denied"},checked.status===503?503:403,request);
+      if(checked.status!==200)return respond({ok:false,error:checked.status===503?"identity_service_unavailable":"access_denied",stage:loginStage},checked.status===503?503:403,request);
+      loginStage="session_issue";
       const id=randomString();
       const now=Date.now();
       const stub=await stubFor(env,id);
@@ -266,14 +273,17 @@ async function sessionApi(request,env,url) {
         accessToken:result.body.access_token,refreshToken:result.body.refresh_token,
         expiresAt:now+Number(result.body.expires_in)*1000,csrfToken:randomString(),source:"server"
       });
-      if(!saved)return respond({ok:false,error:"session_service_unavailable"},503,request);
+      if(!saved)return respond({ok:false,error:"session_service_unavailable",stage:loginStage},503,request);
+      loginStage="rate_reset";
       await throttle.resetAttempts();
+      loginStage="session_read";
       const row=await stub.read();
       return sessionResponse({ok:true,user:checked.identity,csrf_token:row.csrfToken,
         expires_at:new Date(row.absoluteExpiresAt).toISOString()},200,request,id);
     }catch(err){
-      console.warn("MW_LOGIN_ERROR",err?.name||"unknown");
-      return respond({ok:false,error:"session_service_unavailable"},503,request);
+      // Deliberately no token, email, password or upstream response in logs.
+      console.warn("MW_LOGIN_ERROR",loginStage,err?.name||"unknown");
+      return respond({ok:false,error:"session_service_unavailable",stage:loginStage},503,request);
     }
   }
   const session=await getBrowserSession(request,env);

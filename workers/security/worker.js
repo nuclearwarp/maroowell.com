@@ -45,7 +45,7 @@ function readBearer(request) {
 async function upstreamJson(url, init, maxLength = 100000) {
   const response = await fetch(url, {
     ...init,
-    // Cloudflare Workers do not support redirect:"error". Reject 3xx explicitly.
+    // Disable automatic redirect following and reject 3xx responses explicitly.
     redirect: "manual",
     signal: AbortSignal.timeout(8000)
   });

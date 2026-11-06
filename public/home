@@ -657,6 +657,20 @@ function mergeFresh(rows,freshRows){
   });
 }
 
+async function securityOverview(){
+  // Only the opt-in security pilot uses the new cookie-backed API.
+  // Legacy native WebViews and ordinary browser tabs retain existing queries.
+  if(sessionStorage.getItem("mw_security_pilot_active")!=="1")return null;
+  const r=await fetch("/api/web/overview?mode=home",{
+    credentials:"same-origin",cache:"no-store"
+  });
+  if(!r.ok)throw new Error("보안 백엔드 조회 실패 (HTTP "+r.status+")");
+  const data=await r.json();
+  if(!data?.ok||!Array.isArray(data.batches)||!Array.isArray(data.current)||
+     !Array.isArray(data.fresh)||!Array.isArray(data.schedule))
+    throw new Error("보안 백엔드 응답 형식 오류");
+  return data;
+}
 async function queryAll(){
   if(S.busy)return;
   setBusy(true);
@@ -665,7 +679,10 @@ async function queryAll(){
     $("scheduleDate").value=today;
     const activeStatuses=["collecting","completion_candidate","overdue","error","paused"];
 
-    const {data:batches,error:be}=await S.sb
+    const secureData=await securityOverview();
+    const {data:batches,error:be}=secureData
+      ?{data:secureData.batches.filter(b=>activeStatuses.includes(b.status)),error:null}
+      :await S.sb
       .from("meta_realtime_batch")
       .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,updated_at")
       .in("status",activeStatuses)
@@ -687,7 +704,13 @@ async function queryAll(){
 
     const ids=S.batches.map(b=>b.id);
     const scheduleDates=uniq(S.batches.map(b=>String(b.schedule_date||"")).filter(Boolean));
-    const [currentRes,freshRes,scheduleRes]=await Promise.all([
+    const [currentRes,freshRes,scheduleRes]=secureData
+      ?[
+        {data:secureData.current.filter(r=>ids.includes(r.batch_id)),error:null},
+        {data:secureData.fresh.filter(r=>ids.includes(r.batch_id)),error:null},
+        {data:secureData.schedule.filter(r=>scheduleDates.includes(r.schedule_date)),error:null}
+      ]
+      :await Promise.all([
       S.sb.from("meta_realtime_current")
         .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
         .in("batch_id",ids),

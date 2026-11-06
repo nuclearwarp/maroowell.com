@@ -798,6 +798,20 @@ function mergeFresh(rows,freshRows){
   });
 }
 
+async function securityOverview(){
+  // This pilot is enabled only after the existing login has attached
+  // a validated server session. Native WebViews keep their existing path.
+  if(sessionStorage.getItem("mw_security_pilot_active")!=="1")return null;
+  const response=await fetch("/api/web/overview?mode=realtime",{
+    credentials:"same-origin",cache:"no-store"
+  });
+  if(!response.ok)throw new Error("보안 백엔드 조회 실패 (HTTP "+response.status+")");
+  const data=await response.json();
+  if(!data?.ok||!Array.isArray(data.batches)||!Array.isArray(data.current)||
+     !Array.isArray(data.fresh)||!Array.isArray(data.final)||
+     !Array.isArray(data.schedule))throw new Error("보안 백엔드 응답 형식 오류");
+  return data;
+}
 async function queryAll(){
   if(S.busy)return;
   setBusy(true);
@@ -807,7 +821,10 @@ async function queryAll(){
     const activeStatuses=["collecting","completion_candidate","overdue","error","paused"];
     const queryStatuses=[...activeStatuses,"finalized"];
 
-    const {data:batches,error:be}=await S.sb
+    const secureData=await securityOverview();
+    const {data:batches,error:be}=secureData
+      ?{data:secureData.batches.filter(b=>queryStatuses.includes(b.status)),error:null}
+      :await S.sb
       .from("meta_realtime_batch")
       .select("id,schedule_date,meta_work_date,camp_code,camp_name,wave,status,worker_count,last_polled_at,next_poll_at,last_error,completion_method,completion_detected_at,work_completed_at,visible_until,metrics_status,metrics_close_at,metrics_closed_at,finalized_at,updated_at")
       .in("status",queryStatuses)
@@ -821,26 +838,30 @@ async function queryAll(){
     const finalIds=finalizedBatches.map(b=>b.id);
 
     const currentQuery=activeIds.length
-      ? S.sb.from("meta_realtime_current")
+      ? secureData?Promise.resolve({data:secureData.current.filter(r=>activeIds.includes(r.batch_id)),error:null})
+        :S.sb.from("meta_realtime_current")
           .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload")
           .in("batch_id",activeIds)
       : Promise.resolve({data:[],error:null});
 
     const freshQuery=activeIds.length
-      ? S.sb.from("meta_realtime_fresh_current")
+      ? secureData?Promise.resolve({data:secureData.fresh.filter(r=>activeIds.includes(r.batch_id)),error:null})
+        :S.sb.from("meta_realtime_fresh_current")
           .select("batch_id,meta_worker_key,driver_pk,coupang_id,driver_name,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,fresh_miss")
           .in("batch_id",activeIds)
       : Promise.resolve({data:[],error:null});
 
     const finalQuery=finalIds.length
-      ? S.sb.from("meta_realtime_final")
+      ? secureData?Promise.resolve({data:secureData.final.filter(r=>finalIds.includes(r.batch_id)),error:null})
+        :S.sb.from("meta_realtime_final")
           .select("batch_id,meta_worker_key,driver_pk,camp_code,camp_name,wave,coupang_id,driver_name,scheduled_routes,actual_routes,extra_routes,delivery_assigned,delivery_scanned,delivery_completed,delivery_impossible,delivery_pdd_miss,delivery_total,delivery_complete_rate,return_pending,return_collected,return_uncollected,return_uncollected_raw,return_absent_raw,return_total,return_attempt_rate,return_collection_rate,freshbag_pending,freshbag_collected,freshbag_uncollected,freshbag_total,freshbag_attempt_rate,freshbag_collection_rate,scan_started_at,delivery_started_at,round1_delivery_started_at,round2_scan_started_at,round2_delivery_started_at,work_completed_at,all_completed_at,last_seen_at,all_done,dawn_miss,fresh_miss,raw_payload,fresh_delivery_assigned,fresh_delivery_scanned,fresh_delivery_completed,fresh_delivery_impossible,fresh_delivery_pdd_miss,fresh_delivery_total,fresh_delivery_complete_rate")
           .in("batch_id",finalIds)
       : Promise.resolve({data:[],error:null});
 
     const scheduleDates=uniq(shiftBatches.map(b=>String(b.schedule_date||"")).filter(Boolean));
     const scheduleQuery=scheduleDates.length
-      ? S.sb.from("maroowell_schedule")
+      ? secureData?Promise.resolve({data:secureData.schedule.filter(r=>scheduleDates.includes(r.schedule_date)),error:null})
+        :S.sb.from("maroowell_schedule")
           .select("schedule_date,camp,wave,route_label,driver_name,driver_display_name,driver_owner_name,driver_coupang_id,is_active")
           .in("schedule_date",scheduleDates)
           .eq("is_active",true)

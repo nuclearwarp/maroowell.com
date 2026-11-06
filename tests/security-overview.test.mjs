@@ -8,6 +8,7 @@ assert(!src.includes('url.searchParams.set("table"'));
 assert(src.includes("OVERVIEW_TABLES") && src.includes("readOverviewTable"));
 const {default:api}=await import("data:text/javascript;base64,"+Buffer.from(
   src.replace('export { SessionStore } from "./session-store.js";','')
+    .replace('import { handleBff } from "./bff.js";','const handleBff=async()=>Response.json({ok:false},{status:404});')
 ).toString("base64"));
 const id="A".repeat(43);
 const row={userId:"web-user",accessToken:"test-access-token-example",refreshToken:"test-refresh-token-example",

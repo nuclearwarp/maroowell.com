@@ -7,7 +7,8 @@ const storageSource=readFileSync("workers/security/session-store.js","utf8");
 assert(!workerSource.includes("SUPABASE_SERVICE_ROLE_KEY"));
 assert(!workerSource.includes('"/api/supabase"'));
 assert(workerSource.includes('"__Host-mw_session"'));
-const workerCode=workerSource.replace('export { SessionStore } from "./session-store.js";','');
+const workerCode=workerSource.replace('export { SessionStore } from "./session-store.js";','')
+  .replace('import { handleBff } from "./bff.js";','const handleBff=async()=>Response.json({ok:false},{status:404});');
 const {default:gateway}=await import("data:text/javascript;base64,"+Buffer.from(workerCode).toString("base64"));
 const storageCode=storageSource.replace(/import\s+\{\s*DurableObject\s*\}\s+from\s+"cloudflare:workers";/,'class DurableObject {constructor(ctx,env){this.ctx=ctx;this.env=env}}').replace("export class SessionStore","class SessionStore")+";globalThis.__SessionStore=SessionStore;";
 const storeFactory=new Function(storageCode);

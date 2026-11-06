@@ -100,6 +100,7 @@ async function verifyIdentity(request, env) {
         email:typeof access.email === "string" ? access.email : "",
         is_maroowell:access.is_maroowell === true,
         is_admin:access.is_maroowell === true && access.is_admin === true,
+        is_dragon_car_admin:access.is_dragon_car_admin === true,
         max_role_level:roleLevel
       }
     };
@@ -388,6 +389,9 @@ export default {
     if (origin && !ORIGINS.has(origin)) return respond({ok:false,error:"origin_not_allowed"},403,request);
     if (url.pathname.startsWith("/api/session/")) return sessionApi(request,env,url);
     if (url.pathname.startsWith("/api/web/")) return overviewApi(request,env,url);
+    if (url.pathname.startsWith("/api/supabase/") || url.pathname.startsWith("/api/worker/")) {
+      return handleBff(request,env,{respond,getBrowserSession,validConfig,allowedMutation,csrfValid,sessionResponse});
+    }
     if (url.pathname === "/health/session-store" && url.search === "") {
       if (request.method !== "GET") return respond({ok:false,error:"method_not_allowed"},405,request);
       try {
@@ -425,3 +429,4 @@ export default {
 };
 
 export { SessionStore } from "./session-store.js";
+import { handleBff } from "./bff.js";

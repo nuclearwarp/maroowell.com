@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 const src = readFileSync("workers/security/worker.js","utf8");
 assert(!src.includes("SUPABASE_SERVICE_ROLE_KEY"),"no service role allowed");
 assert(!src.includes("env.ASSETS"),"must not affect site assets");
-assert(!src.includes("api/supabase"),"no generic DB proxy");
+assert(src.includes("handleBff(request,env"),"BFF must enforce authorization");
+assert(readFileSync("workers/security/bff.js","utf8").includes("const TABLES = Object.freeze"),"explicit allowlist required");
 const {default:gateway}=await import("data:text/javascript;base64,"+Buffer.from(
   src.replace('export { SessionStore } from "./session-store.js";', '')
+     .replace('import { handleBff } from "./bff.js";','const handleBff=async()=>Response.json({ok:false},{status:404});')
 ).toString("base64"));
 const url="https://maroowell-security.test";
 const env={SUPABASE_URL:"https://rgqerimdxkthkcewqbbe.supabase.co",SUPABASE_PUBLISHABLE_KEY:"sb_publishable_test"};

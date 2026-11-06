@@ -34,8 +34,11 @@ var login_worker_v2_default = {
       // A browser-only compatibility shim. It is inert unless an explicit
       // server-cookie login is active in this tab. Native app WebViews retain
       // their current Supabase session bridge.
-      if ((request.method === "GET" || request.method === "HEAD") && response.ok
-        && /text\/html/i.test(response.headers.get("content-type") || "")) {
+      const securedHtmlPages = new Set(["/","/index.html","/post_login","/home","/realtime","/admin_access","/maroowell_access","/maroowell_payout","/maroowell_schedule","/maroowell_info","/maroowell_route","/maroowell_route_info","/maroowell_account","/maroowell_account_upload","/maroowell_freshbag_ratio","/maroowell_freshbag_ratio_upload","/dragon_car_index","/dragon_car_pay","/dragon_car_schedule","/cleansing_history","/coupangRouteMap","/coupang_camp","/coupang_camp_map","/coupang_freshbag","/coupang_freshbag_upload","/coupangland","/route_master","/vendors","/zipcode_search","/zipcode_share","/share","/privacy","/support","/app","/naverSearch"]);
+      const looksLikeWebHtml = securedHtmlPages.has(path) ||
+        (path.endsWith(".html") && securedHtmlPages.has(path.slice(0,-5))) ||
+        /text\/html/i.test(response.headers.get("content-type") || "");
+      if (request.method === "GET" && response.ok && looksLikeWebHtml) {
         let html = await response.text();
         if (html.includes("</head>") && !html.includes("/mw-secure-web.js")) {
           html = html.replace("</head>", '<script src="/mw-secure-web.js?v=20261106-a"></script></head>');

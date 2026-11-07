@@ -40,8 +40,20 @@ var login_worker_v2_default = {
         /text\/html/i.test(response.headers.get("content-type") || "");
       if (request.method === "GET" && response.ok && looksLikeWebHtml) {
         let html = await response.text();
-        if (html.includes("</head>") && !html.includes("/mw-secure-web.js")) {
-          html = html.replace("</head>", '<script src="/mw-secure-web.js?v=20261106-a"></script></head>');
+        // The secure adapter must run AFTER the Supabase SDK but BEFORE
+        // the page's inline application scripts. Extensionless pages often
+        // load Supabase at the end of <head>, so unconditional head injection
+        // leaves the adapter unable to wrap createClient().
+        if (!html.includes("/mw-secure-web.js")) {
+          const bridgeTag = '<script src="/mw-secure-web.js?v=20261106-a"></script>';
+          const sdkScript = /<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*supabase-js[^"']*\1[^>]*>\s*<\/script\s*>/i.exec(html);
+          if (sdkScript) {
+            const at = sdkScript.index + sdkScript[0].length;
+            html = html.slice(0, at) + bridgeTag + html.slice(at);
+          } else if (html.includes("</head>")) {
+            // Pages without the SDK still need fetch protection in pilot mode.
+            html = html.replace("</head>", bridgeTag + "</head>");
+          }
         }
         const headers = new Headers(response.headers);
         // Extensionless HTML assets otherwise inherit application/octet-stream from ASSETS.

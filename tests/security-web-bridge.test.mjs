@@ -71,3 +71,38 @@ r=await win.fetch("https://rgqerimdxkthkcewqbbe.supabase.co/rest/v1/maroowell_sc
 assert.equal(calls.at(-1).url,"https://rgqerimdxkthkcewqbbe.supabase.co/rest/v1/maroowell_schedule?select=*",
  "without server login, native/legacy requests remain unchanged");
 console.log("PASS web bridge: opaque auth, authenticated routing, CSRF, no unknown-worker bypass, logout");
+
+
+const {default:loginWorker}=await import("data:text/javascript;base64,"+Buffer.from(worker).toString("base64"));
+const pagePaths=[
+  "/","/post_login","/zipcode_search","/home","/realtime",
+  "/maroowell_schedule","/maroowell_info","/maroowell_payout",
+  "/dragon_car_index","/cleansing_history","/coupangRouteMap",
+  "/coupang_camp","/coupang_freshbag","/maroowell_account"
+];
+for(const path of pagePaths){
+  const filename=path==="/"?"/index.html":path==="/coupangRouteMap"?"/coupangRouteMap.html":path;
+  const original=readFileSync("public"+filename,"utf8");
+  const assets={fetch:async r=>Response.json(null)};
+  assets.fetch=async r=>{
+    const assetPath=new URL(r.url).pathname;
+    return new Response(readFileSync("public"+assetPath,"utf8"),{
+      status:200,headers:{"content-type":"application/octet-stream"}
+    });
+  };
+  const response=await loginWorker.fetch(new Request("https://maroowell.com"+path),{ASSETS:assets});
+  assert.equal(response.status,200,path+" should load");
+  assert.match(response.headers.get("content-type")||"",/^text\\/html/i,
+    path+" must render HTML, not source text");
+  const html=await response.text();
+  const sdk=/<script\\b[^>]*\\bsrc\\s*=\\s*(["'])[^"']*supabase-js[^"']*\\1[^>]*>\\s*<\\/script\\s*>/i.exec(html);
+  assert(sdk,path+" has Supabase SDK");
+  const bridgeIndex=html.indexOf('/mw-secure-web.js?v=20261106-a');
+  assert(bridgeIndex>=0,path+" missing secure bridge");
+  assert(bridgeIndex>sdk.index+sdk[0].length-1,
+    path+" must initialize secure bridge after Supabase SDK");
+  const nextScript=html.indexOf("<script",sdk.index+sdk[0].length);
+  assert(nextScript>=0 && html.slice(nextScript).startsWith('<script src="/mw-secure-web.js'),
+    path+" must install secure bridge before later application scripts");
+}
+console.log("PASS server-cookie bridge script order and HTML content-type for "+pagePaths.length+" pages");

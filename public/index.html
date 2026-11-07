@@ -672,10 +672,30 @@
   const FAIL_COUNT_PREFIX = "mw_login_fail_count:";
 
   const params = new URLSearchParams(location.search);
-  // Opt-in migration pilot. Leave regular login untouched until verified.
-  const mwSecurityPilot = params.get("mw_security_pilot") === "1";
-  const rawNext = params.get("next") || DEFAULT_NEXT;
   const currentFlow = params.get("flow") || "";
+  // Standard website logins use HttpOnly server cookies by default. Only the
+  // account recovery/verification flow and native app WebViews retain the
+  // original Supabase browser flow; the mobile apps use their own auth stack.
+  const legacyAuthFlow = currentFlow === FLOW_RECOVERY ||
+    currentFlow === FLOW_SIGNUP_COMPLETE || params.get("signup") === "1";
+  const ua = String(navigator.userAgent || "");
+  const nativeAppBridge = Boolean(window.ReactNativeWebView ||
+    window.MAROOWELL_NATIVE_APP || window.MAROOWELL_APP ||
+    window.Android?.postMessage || window.webkit?.messageHandlers?.maroowell) ||
+    /Maroowell(?:App|Android|IOS)|;\\s*wv[);]|\\bWebView\\b/i.test(ua) ||
+    (/(?:iPhone|iPad|iPod)/i.test(ua) && /AppleWebKit/i.test(ua) &&
+      !/(?:Safari|CriOS|FxiOS|EdgiOS)/i.test(ua));
+  const mwSecurityPilot = !legacyAuthFlow &&
+    (params.get("mw_security_pilot") === "1" || !nativeAppBridge);
+  // Recovery and sign-up must be able to handle real Supabase OTP sessions
+  // even if this tab previously used cookie auth.
+  if (legacyAuthFlow) {
+    try {
+      sessionStorage.removeItem("mw_web_server_auth");
+      sessionStorage.removeItem("mw_security_pilot_active");
+    } catch {}
+  }
+  const rawNext = params.get("next") || DEFAULT_NEXT;
 
   function getSupabaseProjectRef(url) {
     try {
@@ -1137,7 +1157,8 @@
 
   function shouldCountLoginFailure(err) {
     const msg = String(err?.message || "").toLowerCase();
-    return msg.includes("invalid login credentials") || msg.includes("invalid_credentials");
+    return msg.includes("invalid login credentials") || msg.includes("invalid_credentials") ||
+      msg.includes("이메일 또는 비밀번호가 올바르지 않습니다");
   }
 
   async function redirectToApp() {
@@ -1210,7 +1231,7 @@
   async function signIn() {
     const em = normalizeEmail(email.value);
     try {
-      if (!requireSupabase()) return;
+      if (!mwSecurityPilot && !requireSupabase()) return;
       setStatus("로그인 중...");
 
       const pw = password.value || "";
@@ -1238,8 +1259,18 @@
         sessionStorage.setItem("mw_web_server_auth","1");
         sessionStorage.setItem("mw_security_pilot_active","1");
         const verified=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
-        if(!verified.ok)throw new Error("보안 로그인 세션 확인 실패");
+        const identity=verified.ok?await verified.json().catch(()=>null):null;
+        if(!verified.ok||identity?.ok!==true||
+           identity?.user?.user_id!==data.user.user_id)
+          throw new Error("보안 로그인 세션 확인 실패");
+        try {
+          if (rememberEmail?.checked) window.localStorage.setItem(SAVED_EMAIL_KEY, em);
+          else window.localStorage.removeItem(SAVED_EMAIL_KEY);
+          window.localStorage.removeItem(LEGACY_SAVED_PASSWORD_KEY);
+        } catch {}
+        password.value = "";
         clearFailCount(em);
+        refreshForgotPasswordUi();
         setStatus("서버 보안 로그인 성공","success");
         location.replace(next);
         return;
@@ -1262,7 +1293,6 @@
       setStatus("로그인 성공", "success");
       location.replace(next);
     } catch (e) {
-      if(mwSecurityPilot) suppressAutoRedirect = false;
       let extra = "";
       if (em && shouldCountLoginFailure(e)) {
         const count = bumpFailCount(em);
@@ -1375,7 +1405,8 @@
       password.value = "";
       setStatus("비밀번호가 변경되었습니다. 새 비밀번호로 로그인하세요.", "success");
       showMessageModal("비밀번호 변경 완료", "비밀번호가 정상적으로 변경되었습니다.\n이제 새 비밀번호로 로그인하면 됩니다.", {
-        badge: "PASSWORD UPDATED"
+        badge: "PASSWORD UPDATED",
+        onPrimary: () => location.replace("/")
       });
     } catch (e) {
       setStatus("비밀번호 변경 실패: " + (e?.message || String(e)), "error");
@@ -1437,6 +1468,22 @@
   });
 
   (async () => {
+    if (mwSecurityPilot) {
+      try {
+        // A cookie may survive a tab close. Restore this tab's security
+        // adapter flag only after the server confirms the actual session.
+        const response = await fetch("/api/session/me",{
+          credentials:"same-origin",cache:"no-store"
+        });
+        const identity = response.ok ? await response.json().catch(()=>null) : null;
+        if (identity?.ok===true && identity.user?.user_id) {
+          sessionStorage.setItem("mw_web_server_auth","1");
+          sessionStorage.setItem("mw_security_pilot_active","1");
+          location.replace(next);
+        }
+      } catch {}
+      return;
+    }
     if (!requireSupabase()) return;
 
     supabase.auth.onAuthStateChange(async (event, session) => {
@@ -1484,18 +1531,6 @@
       return;
     }
 
-    if(mwSecurityPilot) {
-      try{
-        const response=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
-        if(response.ok){
-          sessionStorage.setItem("mw_web_server_auth","1");
-          sessionStorage.setItem("mw_security_pilot_active","1");
-          location.replace(next);
-          return;
-        }
-      }catch{}
-      return;
-    }
     await redirectIfLoggedIn();
   })();
 })();

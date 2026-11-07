@@ -20,6 +20,42 @@ assert(menu.includes('/api/supabase/rest/v1/cleansing_history_access'));
 new Function(bridge);
 assert(login.includes('fetch("/api/session/login"'),"pilot login must use server credentials");
 assert(login.includes('sessionStorage.setItem("mw_web_server_auth","1")'));
+
+const modeSource=login.slice(login.indexOf("  const params = new URLSearchParams(location.search);"),
+  login.indexOf("  function getSupabaseProjectRef(url)"));
+assert(modeSource.includes("const mwSecurityPilot"),"default web login mode must be defined");
+const loginMode=new Function("window","navigator","location","sessionStorage",
+  "const FLOW_RECOVERY='recovery'; const FLOW_SIGNUP_COMPLETE='signup-complete'; "+
+  "const DEFAULT_NEXT='/post_login';"+modeSource+"return mwSecurityPilot;");
+const mode=(search,ua="",bridge={})=>{
+  const records=new Map();
+  return loginMode(bridge,{userAgent:ua},{search},{
+    removeItem(key){records.delete(key);}
+  });
+};
+const desktopUa="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/129 Safari/537.36";
+assert.equal(mode("",desktopUa),true,"ordinary website must use cookie login");
+assert.equal(mode("?mw_security_pilot=1",desktopUa),true,"old pilot URL remains compatible");
+assert.equal(mode("?mw_security_pilot=0",desktopUa),true,"query must not downgrade browser login");
+assert.equal(mode("?flow=recovery",desktopUa),false,"password recovery needs original OTP flow");
+assert.equal(mode("?flow=signup-complete",desktopUa),false,"signup verification needs original OTP flow");
+assert.equal(mode("?signup=1",desktopUa),false,"account signup must remain available");
+assert.equal(mode("",desktopUa,{ReactNativeWebView:{postMessage(){}}}),false,
+  "React Native embedded app retains compatible login");
+assert.equal(mode("","Mozilla/5.0 (Linux; Android 15; Pixel; wv) AppleWebKit/537.36"),false,
+  "Android WebView retains native login flow");
+assert.equal(mode("","Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"),false,
+  "iOS WKWebView retains native login flow");
+assert.equal(mode("","Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"),true,
+  "iOS Safari must use secure web login");
+const loginScripts=[...login.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
+for(const match of loginScripts)if(match[1].trim())new Function(match[1]);
+assert(login.includes('if (!mwSecurityPilot && !requireSupabase()) return;'),
+  "server login must work without browser Supabase SDK");
+assert(login.includes('if (mwSecurityPilot) {\n      try {\n        // A cookie may survive'),
+  "existing cookie must be restored before legacy client auto redirect");
+console.log("PASS secure default website login and native/recovery compatibility");
+
 assert(worker.includes('/mw-secure-web.js?v=20261106-a'));
 assert(worker.includes('headers.set("Content-Type","text/html; charset=utf-8")'),"extensionless HTML must be served as text/html to avoid source rendering");
 assert(!bridge.includes("service_role"),"do not ship elevated secrets");

@@ -92,10 +92,10 @@ for(const path of pagePaths){
   };
   const response=await loginWorker.fetch(new Request("https://maroowell.com"+path),{ASSETS:assets});
   assert.equal(response.status,200,path+" should load");
-  assert.match(response.headers.get("content-type")||"",/^text\\/html/i,
+  assert.match(response.headers.get("content-type")||"",/^text\/html/i,
     path+" must render HTML, not source text");
   const html=await response.text();
-  const sdk=/<script\\b[^>]*\\bsrc\\s*=\\s*(["'])[^"']*supabase-js[^"']*\\1[^>]*>\\s*<\\/script\\s*>/i.exec(html);
+  const sdk=/<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*supabase-js[^"']*\1[^>]*>\s*<\/script\s*>/i.exec(html);
   assert(sdk,path+" has Supabase SDK");
   const bridgeIndex=html.indexOf('/mw-secure-web.js?v=20261106-a');
   assert(bridgeIndex>=0,path+" missing secure bridge");

@@ -38,7 +38,7 @@ globalThis.fetch=async (input,init={})=>{
   if(url.pathname==="/rest/v1/workflow_template_attachments"){
     if(method==="GET")return body(metadata?[metadata]:[]);
     if(method==="POST"){metadata={...JSON.parse(init.body),id:fileId};return body([metadata]);}
-    if(method==="DELETE"){metadata=null;return body([]);}
+    if(method==="DELETE"){const before=metadata;metadata=null;return body(before?[before]:[]);}
   }
   throw Error("Unexpected request: "+method+" "+url.pathname);
 };
@@ -90,12 +90,30 @@ assert.equal(r.status,403,"manager cannot delete reference");
 r=await call("workflow-templates/"+uuid+"/attachments/"+fileId,"ADMIN","DELETE");
 assert.equal(r.status,200,"admin can delete reference");
 assert.equal(deletions,1);
+// An attachment-only change must not generate a new process version.
+r=await call("workflow-templates/version","ADMIN","POST",
+ JSON.stringify({template_id:uuid,description:null,steps:[{title:"Step 1"}]}),
+ {"content-type":"application/json"});
+assert.equal(r.status,200);
+let unchanged=await r.json();
+assert.equal(unchanged.data.id,uuid,"identical process content keeps the version");
+assert.equal(unchanged.data.reused_version,true);
 // Regression: uploaded Korean filenames must be metadata only; Storage key ASCII.
 const koreanName="1. 택배용 화물자동차 운송사업 허가신청 확인서.pdf";
 r=await call("workflow-templates/"+uuid+"/attachments?name="+encodeURIComponent(koreanName),"ADMIN","POST","%PDF",{"content-type":"application/pdf"});
 assert.equal(r.status,200,"original Korean filename must upload using ASCII Storage key");
 assert.match(uploadedPath,/^workflow-templates\/[a-f0-9-]{36}\/[a-f0-9-]{36}\.pdf$/i);
 assert.equal(metadata.file_name,koreanName,"display and download use original Korean name");
+const uploadCountBeforeRetry=uploads;
+r=await call("workflow-templates/"+uuid+"/attachments?name="+encodeURIComponent(koreanName),
+ "ADMIN","POST","%PDF",{"content-type":"application/pdf"});
+assert.equal(r.status,200,"repeated upload of same content returns existing file");
+assert.equal((await r.json()).data.reused,true);
+assert.equal(uploads,uploadCountBeforeRetry,"no second Storage object is created");
+r=await call("workflow-templates/"+uuid+"/attachments?name="+encodeURIComponent(koreanName),
+ "ADMIN","POST","NEWD",{"content-type":"application/pdf"});
+assert.equal(r.status,409,"same name with different contents needs explicit replacement");
+assert.equal(uploads,uploadCountBeforeRetry);
 r=await call("workflow-templates/"+uuid+"/attachments/"+fileId+"/download","MANAGER");
 assert.equal(r.status,200);
 assert.match(r.headers.get("content-disposition"),/filename\*=UTF-8''/);

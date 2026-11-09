@@ -12,7 +12,52 @@ async function bootstrap(env,ctx){const [categories,tasks,issues,runs,templates,
 async function createNotice(env,ctx,b){const title=clean(b.title),body=clean(b.body);if(!title||!body)throw Object.assign(new Error("title_and_body_required"),{status:400});const scope=clean(b.target_scope)||"all",camps=Array.isArray(b.target_camps)?b.target_camps.map(clean).filter(Boolean):[],row={vendor_id:ctx.member.vendor_id||null,sender_user_id:ctx.user.id,sender_role_level:n(ctx.member.role_level),notice_type:clean(b.notice_type)||"normal",target_scope:scope,target_camps:camps,title,body,send_push:b.send_push===true,show_on_home:true,require_ack:b.require_ack===true,is_active:true,expires_at:b.expires_at||null},created=(await post(env,"app_notices",row))?.[0];if(!created)return null;const profiles=await get(env,"profiles?select=user_id,default_vendor_id,camp_code,approval_status&approval_status=eq.approved"),targets=(profiles||[]).filter(p=>scope==="all"||!camps.length||camps.includes(clean(p.camp_code)));if(targets.length){const recipients=targets.map(p=>({notice_id:created.id,user_id:p.user_id,vendor_id:p.default_vendor_id||ctx.member.vendor_id||null,camp:p.camp_code||null,push_status:b.send_push===true?"pending":"skipped"}));await post(env,"app_notice_recipients",recipients);await patch(env,`app_notices?id=eq.${created.id}`,{recipient_count:recipients.length});created.recipient_count=recipients.length;}return created;}
 async function createWorkflowTemplate(env,ctx,b){const name=clean(b.name),steps=Array.isArray(b.steps)?b.steps.map((x,i)=>({step_order:i+1,title:clean(x?.title||x),description:clean(x?.description)||null,step_type:"check",is_required:x?.is_required!==false,require_attachment:Boolean(x?.require_attachment),required_document_name:clean(x?.required_document_name)||null,created_by:ctx.user.id,updated_by:ctx.user.id})).filter(x=>x.title):[];if(!name||!steps.length)throw Object.assign(new Error("name_and_steps_required"),{status:400});const exists=await get(env,`workflow_templates?select=id&name=eq.${enc(name)}&is_active=eq.true&limit=1`);if(exists?.length)throw Object.assign(new Error("template_name_exists"),{status:409});const template=(await post(env,"workflow_templates",{category_id:b.category_id||null,name,description:clean(b.description)||null,version:1,is_active:true,created_by:ctx.user.id,updated_by:ctx.user.id}))?.[0];if(!template)throw new Error("template_create_failed");await post(env,"workflow_template_steps",steps.map(x=>({...x,template_id:template.id})));return template;}
 async function attachProcessToTask(env,ctx,task,templateId,subjectInfoId=null,subjectName=null){if(!task||!templateId)return task;const run=(await post(env,"workflow_runs",{template_id:templateId,subject_type:subjectInfoId?"person":"task",subject_info_id:subjectInfoId||null,subject_name:clean(subjectName)||task.title,assignee_info_id:task.assignee_info_id||null,assignee_name:task.assignee_name||null,camp_code:task.camp_code||null,wave:task.wave||null,status:task.status||"planned",started_on:task.start_date||new Date().toISOString().slice(0,10),due_date:task.due_date||null,related_task_id:task.id,notes:task.body||null,created_by:ctx.user.id,updated_by:ctx.user.id}))?.[0];if(!run)return task;return (await patch(env,`home_tasks?id=eq.${enc(task.id)}`,{process_template_id:templateId,process_run_id:run.id,updated_by:ctx.user.id}))?.[0]||task;}
-async function workflowTemplateVersion(env,ctx,b){const id=clean(b.template_id),steps=Array.isArray(b.steps)?b.steps.map((x,i)=>({step_order:i+1,title:clean(x?.title||x),description:clean(x?.description)||null,step_type:"check",is_required:x?.is_required!==false,require_attachment:Boolean(x?.require_attachment),required_document_name:clean(x?.required_document_name)||null,created_by:ctx.user.id,updated_by:ctx.user.id})).filter(x=>x.title):[];if(!id||!steps.length)throw Object.assign(new Error("template_and_steps_required"),{status:400});const old=(await get(env,`workflow_templates?select=*&id=eq.${enc(id)}&limit=1`))?.[0];if(!old)throw Object.assign(new Error("template_not_found"),{status:404});await patch(env,`workflow_templates?id=eq.${enc(id)}`,{is_active:false,updated_by:ctx.user.id});const fresh=(await post(env,"workflow_templates",{category_id:old.category_id||null,name:clean(b.name)||old.name,description:clean(b.description)||old.description||null,version:n(old.version)+1,is_active:true,created_by:ctx.user.id,updated_by:ctx.user.id}))?.[0];if(!fresh)throw new Error("template_create_failed");await post(env,"workflow_template_steps",steps.map(x=>({...x,template_id:fresh.id})));await templateAttachmentsCarryForward(env,ctx,id,fresh.id);return fresh;}
+function comparableWorkflowSteps(list){
+ return (list||[]).map(x=>({
+  title:clean(x.title||x),description:clean(x.description)
+ }));
+}
+async function sameWorkflowDefinition(env,template,steps,description){
+ if(clean(template.description)!==clean(description))return false;
+ const current=await get(env,"workflow_template_steps?select=step_order,title,description&template_id=eq."+enc(template.id)+"&order=step_order.asc");
+ return JSON.stringify(comparableWorkflowSteps(current))===JSON.stringify(comparableWorkflowSteps(steps));
+}
+async function workflowTemplateVersion(env,ctx,b){
+ const id=clean(b.template_id);
+ const steps=Array.isArray(b.steps)?b.steps.map((x,i)=>({
+  step_order:i+1,title:clean(x?.title||x),
+  description:clean(x?.description)||null,
+  step_type:"check",is_required:x?.is_required!==false,
+  require_attachment:Boolean(x?.require_attachment),
+  required_document_name:clean(x?.required_document_name)||null,
+  created_by:ctx.user.id,updated_by:ctx.user.id
+ })).filter(x=>x.title):[];
+ if(!workflowUuid(id)||!steps.length)throw workflowError("template_and_steps_required",400);
+ const old=(await get(env,"workflow_templates?select=*&id=eq."+enc(id)+"&limit=1"))?.[0];
+ if(!old)throw workflowError("template_not_found",404);
+ const description=Object.hasOwn(b,"description")?clean(b.description)||null:old.description||null;
+ if(old.is_active!==true){
+  // A previous save may already have created the next version, then failed
+  // while uploading files. Reuse it if the content matches; never create vN+1.
+  const active=(await get(env,"workflow_templates?select=*&name=eq."+enc(old.name)+"&is_active=eq.true&order=version.desc&limit=1"))?.[0];
+  if(active&&await sameWorkflowDefinition(env,active,steps,description))
+   return {...active,reused_version:true};
+  throw workflowError("template_version_changed_refresh",409);
+ }
+ // Attaching or removing files does not modify the process definition.
+ if(await sameWorkflowDefinition(env,old,steps,description))
+  return {...old,reused_version:true};
+ await patch(env,"workflow_templates?id=eq."+enc(id),{is_active:false,updated_by:ctx.user.id});
+ const fresh=(await post(env,"workflow_templates",{
+  category_id:old.category_id||null,name:clean(b.name)||old.name,
+  description,version:n(old.version)+1,is_active:true,
+  created_by:ctx.user.id,updated_by:ctx.user.id
+ }))?.[0];
+ if(!fresh)throw workflowError("template_create_failed",502);
+ await post(env,"workflow_template_steps",steps.map(x=>({...x,template_id:fresh.id})));
+ await templateAttachmentsCarryForward(env,ctx,id,fresh.id);
+ return fresh;
+}
 async function workflowDetail(env,id){const [run,steps]=await Promise.all([get(env,`workflow_runs?select=*&id=eq.${enc(id)}&limit=1`),get(env,`workflow_run_steps?select=*&run_id=eq.${enc(id)}&order=step_order.asc`)]);const current=run?.[0]||null;const attachments=current?await workflowFileRows(env,current.template_id):[];return{run:current,steps,attachments};}
 
 const WORKFLOW_BUCKET="home-workflow",WORKFLOW_MAX_SIZE=6*1024*1024;
@@ -60,6 +105,23 @@ async function uploadWorkflowAttachment(env,req,ctx,templateId,url){
  if(len>WORKFLOW_MAX_SIZE)throw workflowError("file_too_large",413);
  const raw=await req.arrayBuffer();
  if(!raw.byteLength||raw.byteLength>WORKFLOW_MAX_SIZE)throw workflowError("file_size_invalid",413);
+ // Only one reference with the same name may exist in a template version.
+ // For retries, compare actual file contents rather than guessing by size.
+ const existing=(await get(env,"workflow_template_attachments?select=*&template_id=eq."+enc(templateId)+"&file_name=eq."+enc(name)+"&limit=1"))?.[0];
+ if(existing){
+  if(Number(existing.size_bytes)!==raw.byteLength)
+   throw workflowError("attachment_name_exists_remove_first",409);
+  const previous=await workflowStorage(env,"GET",existing.storage_path);
+  if(!previous.ok)throw workflowError("existing_attachment_unavailable",502);
+  const oldBytes=await previous.arrayBuffer();
+  const [oldHash,newHash]=await Promise.all([
+   crypto.subtle.digest("SHA-256",oldBytes),crypto.subtle.digest("SHA-256",raw)
+  ]);
+  const left=new Uint8Array(oldHash),right=new Uint8Array(newHash);
+  if(left.length===right.length&&left.every((n,i)=>n===right[i]))
+   return {...existing,reused:true};
+  throw workflowError("attachment_name_exists_remove_first",409);
+ }
  // Supabase Storage keys disallow spaces and non-ASCII characters. Keep the
  // original Korean filename in file_name, not in the Storage object key.
  const extension=name.split(".").at(-1).toLowerCase();
@@ -93,7 +155,11 @@ async function deleteWorkflowAttachment(env,ctx,templateId,attachmentId){
  if(!workflowUuid(templateId)||!workflowUuid(attachmentId))throw workflowError("invalid_attachment_id");
  const row=await workflowFileMetadata(env,templateId,attachmentId);
  if(!row)throw workflowError("attachment_not_found",404);
- await del(env,"workflow_template_attachments?id=eq."+enc(row.id)+"&template_id=eq."+enc(templateId));
+ const deleted=await del(env,"workflow_template_attachments?id=eq."+enc(row.id)+"&template_id=eq."+enc(templateId));
+ if(!Array.isArray(deleted)||!deleted.some(x=>x.id===row.id))
+  throw workflowError("attachment_delete_not_confirmed",409);
+ const stillThere=await workflowFileMetadata(env,templateId,attachmentId);
+ if(stillThere)throw workflowError("attachment_delete_not_persisted",409);
  const refs=await get(env,"workflow_template_attachments?select=id&storage_bucket=eq."+WORKFLOW_BUCKET+"&storage_path=eq."+enc(row.storage_path)+"&limit=1");
  if(!refs?.length){
   const removed=await workflowStorage(env,"DELETE",row.storage_path);
@@ -103,7 +169,14 @@ async function deleteWorkflowAttachment(env,ctx,templateId,attachmentId){
 }
 async function templateAttachmentsCarryForward(env,ctx,oldId,newId){
  const refs=await get(env,"workflow_template_attachments?select=storage_bucket,storage_path,file_name,mime_type,size_bytes&template_id=eq."+enc(oldId));
- if(refs?.length)await post(env,"workflow_template_attachments",refs.map(r=>({
+ const previous=await workflowFileRows(env,newId);
+ const used=new Set((previous||[]).map(r=>clean(r.file_name).toLocaleLowerCase()));
+ const additions=(refs||[]).filter(r=>{
+  const key=clean(r.file_name).toLocaleLowerCase();
+  if(used.has(key))return false;
+  used.add(key);return true;
+ });
+ if(additions.length)await post(env,"workflow_template_attachments",additions.map(r=>({
   ...r,template_id:newId,uploaded_by:ctx.user.id
  })));
 }

@@ -123,7 +123,11 @@ function policyFor(path, method){
     // High-impact vendor modifications require administrative permission,
     // even though normal route reads are available to regular users.
     const vendorAdmin=match[1].startsWith("route")&&rest.startsWith("/vendors/admin");
-    return{upstream:rest,rule:vendorAdmin?"admin":target[write?"write":"read"],kind:"worker",base:target.base,worker:match[1]};
+    // These POST endpoints calculate/read analysis, not vendor configuration.
+    // Treat as approved-user computations; same-origin CSRF remains mandatory.
+    const zipAnalysis=match[1]==="zip"&&write&&method==="POST"&&
+      (rest==="/terrain"||rest==="/building/stats");
+    return{upstream:rest,rule:vendorAdmin?"admin":zipAnalysis?"approved":target[write?"write":"read"],kind:"worker",base:target.base,worker:match[1]};
   }
   return null;
 }

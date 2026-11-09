@@ -47,6 +47,7 @@ async function call(path,token,method="GET",body,headers={}){
 }
 
 let r=await call("bootstrap","MANAGER");
+if(r.status!==200)console.error("bootstrap failed",r.status,await r.clone().text());
 assert.equal(r.status,200);
 let j=await r.json();
 assert.equal(j.data.viewer.can_edit,false,"manager is read-only");

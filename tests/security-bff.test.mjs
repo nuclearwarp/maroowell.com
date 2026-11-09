@@ -22,9 +22,10 @@ globalThis.fetch=async (url,options)=>{
  if(String(url).includes("mw_payout_can_access"))return empty(false);
  return empty([{id:"123"}],200);
 };
+const runtimeEnv={};
 const call=(path,{method="GET",headers={},body}={})=>
   handleBff(new Request("https://maroowell.com"+path,{method,headers,body}),
-    {},deps);
+    runtimeEnv,deps);
 try{
  assert.equal(policyFor("/api/supabase/rest/v1/maroowell_schedule","GET").rule,"team_or_dragon");
  assert.equal(policyFor("/api/supabase/rest/v1/cleansing_history","GET").rule,"approved",
@@ -64,32 +65,33 @@ try{
  assert.equal(r.status,404,"path traversal must be rejected");
  assert(!JSON.stringify(await r.json()).includes("TEST_TOKEN"),"no token reflected");
 
-  // Protect ZIP analysis budget without lifting timeouts for other endpoints.
-  let capturedTimeoutMs=null;
-  const priorFetch=globalThis.fetch;
-  globalThis.fetch=async(url,options)=>{
-    if(String(url).includes("zip.maroowell.com")){
-      capturedTimeoutMs=null;
-      if(options.signal){
-        // AbortSignal.timeout exposes no duration; assert the policy expression
-        // in source and the authorized proxy target at the request boundary.
-        assert.equal(options.signal.aborted,false);
-      }
-      return empty({ok:true,terrain:{},building_count:0});
-    }
-    return empty([{id:"123"}]);
-  };
-  const zipResponse=await call("/api/worker/zip/terrain",{
-    method:"POST",headers:{"origin":"https://maroowell.com","x-csrf-token":csrf,"content-type":"application/json"},body:"{}"
-  });
-  assert.equal(zipResponse.status,200,"terrain proxy must remain available for approved sessions");
-  const buildingResponse=await call("/api/worker/zip/building/stats",{
-    method:"POST",headers:{"origin":"https://maroowell.com","x-csrf-token":csrf,"content-type":"application/json"},body:"{}"
-  });
-  assert.equal(buildingResponse.status,200,"building-stat proxy must remain available");
+  // ZIP analysis MUST use the internal service binding, never the public
+  // same-zone host; CSRF, identity and JWT forwarding remain mandatory.
+  const zipInput={method:"POST",headers:{"origin":"https://maroowell.com","x-csrf-token":csrf,"content-type":"application/json"},body:"{}"};
+  let rZip=await call("/api/worker/zip/terrain",zipInput);
+  assert.equal(rZip.status,503,"missing binding must fail closed, not public-route fallback");
+  assert.equal((await rZip.json()).error,"zip_binding_unavailable");
+  const boundRequests=[];
+  runtimeEnv.ZIP_ANALYSIS={fetch:async request=>{
+    boundRequests.push(request);
+    return empty({ok:true,terrain:{},building_count:0});
+  }};
+  rZip=await call("/api/worker/zip/terrain",zipInput);
+  assert.equal(rZip.status,200,"terrain analysis must use ZIP service binding");
+  assert.equal(boundRequests.length,1);
+  assert.equal(new URL(boundRequests[0].url).pathname,"/terrain");
+  assert.equal(boundRequests[0].headers.get("authorization"),"Bearer TEST_TOKEN");
+  assert.equal(boundRequests[0].headers.get("origin"),"https://maroowell.com");
+  rZip=await call("/api/worker/zip/building/stats",zipInput);
+  assert.equal(rZip.status,200,"building analysis must use ZIP service binding");
+  assert.equal(new URL(boundRequests[1].url).pathname,"/building/stats");
+  rZip=await call("/api/worker/zip/terrain",{method:"POST",headers:{"origin":"https://maroowell.com","content-type":"application/json"},body:"{}"});
+  assert.equal(rZip.status,403,"CSRF still mandatory for bound ZIP requests");
+  assert.equal(boundRequests.length,2,"CSRF failure must not invoke internal binding");
+  assert.equal(policyFor("/api/worker/zip/terrain","POST").rule,"approved");
   assert(raw.includes('policy.upstream==="/building/stats"?185000'),"building stats budget must accommodate 180-second frontend");
   assert(raw.includes('policy.upstream==="/terrain"?35000:20000'),"terrain budget must accommodate 30-second frontend");
-  globalThis.fetch=priorFetch;
+  delete runtimeEnv.ZIP_ANALYSIS;
 
  console.log("PASS BFF: fail-closed table/RPC/Worker policies, role gates, CSRF, no token reflection");
 }finally{globalThis.fetch=actualFetch;}

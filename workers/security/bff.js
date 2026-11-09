@@ -205,11 +205,20 @@ export async function handleBff(request,env,dependencies){
     ?(policy.upstream==="/building/stats"?185000:
       policy.upstream==="/terrain"?35000:20000)
     :20000;
+  // Calling a same-zone Worker through its public route can return 522.
+  // ZIP terrain/building calls must go directly through Cloudflare's service
+  // binding, keeping the original URL, user JWT, CSRF and allowlist checks.
+  const zipBound=policy.kind==="worker"&&policy.worker==="zip";
+  if(zipBound && (!env.ZIP_ANALYSIS || typeof env.ZIP_ANALYSIS.fetch!=="function"))
+    return respond({ok:false,error:"zip_binding_unavailable"},503,request);
   let upstream;
   try{
-    upstream=await fetch(target.toString(),{
+    const fetchOptions={
       method,headers:h,body,redirect:"manual",signal:AbortSignal.timeout(upstreamTimeoutMs)
-    });
+    };
+    upstream=zipBound
+      ?await env.ZIP_ANALYSIS.fetch(new Request(target.toString(),fetchOptions))
+      :await fetch(target.toString(),fetchOptions);
   }catch(error){
     console.warn("MW_BFF_UPSTREAM_ERROR",policy.kind,policy.worker||"supabase",error?.name||"unknown");
     return respond({ok:false,error:"upstream_unavailable"},503,request);

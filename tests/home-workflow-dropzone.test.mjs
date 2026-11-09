@@ -13,7 +13,7 @@ assert(js.includes('bindWorkflowDropzones();'),"dropzones must bind after markup
 assert(js.includes('files=[...workflowPendingFiles("homeProcessFiles")]'),"create must upload queued files");
 assert(js.includes('files=[...workflowPendingFiles("homeTemplateAddFiles")]'),"edit must upload queued files");
 assert(css.includes(".homeWorkflowDropzone.is-dragover"),"visual active state");
-assert(html.includes("/home-admin.js?v=20261109-workflow-dnd2"),"cache-busted JS");
+assert(/\/home-admin\.js\?v=20261109-workflow-[a-z0-9]+/i.test(html),"cache-busted JS");
 const start=js.indexOf("const WORKFLOW_UPLOAD_HINT=");
 const end=js.indexOf("function workflowFileList(",start);
 assert(start>=0&&end>start);

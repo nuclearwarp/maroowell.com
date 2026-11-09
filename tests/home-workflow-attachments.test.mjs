@@ -90,6 +90,10 @@ assert.equal(r.status,403,"manager cannot delete reference");
 r=await call("workflow-templates/"+uuid+"/attachments/"+fileId,"ADMIN","DELETE");
 assert.equal(r.status,200,"admin can delete reference");
 assert.equal(deletions,1);
+r=await call("workflow-templates/"+uuid+"/attachments/"+fileId,"ADMIN","DELETE");
+assert.equal(r.status,200,"repeated removal of an already-missing attachment must be idempotent");
+assert.equal((await r.json()).data.already_missing,true);
+assert.equal(deletions,1,"repeated deletion must not remove another Storage object");
 // An attachment-only change must not generate a new process version.
 r=await call("workflow-templates/version","ADMIN","POST",
  JSON.stringify({template_id:uuid,description:null,steps:[{title:"Step 1"}]}),

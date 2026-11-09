@@ -150,11 +150,19 @@ function workflowFileList(items,templateId,editable=false){
 function bindWorkflowFileControls(root=document){
  root.querySelectorAll(".homeWorkflowDownload").forEach(b=>b.onclick=async()=>{try{await downloadWorkflowFile(b.dataset.template,b.dataset.file)}catch(e){alert("파일 다운로드 실패: "+e.message)}});
  root.querySelectorAll(".homeWorkflowFileDelete").forEach(b=>b.onclick=async()=>{
-  if(!canEditWorkflow())return;
+  if(!canEditWorkflow()||b.disabled)return;
   if(!confirm("선택한 첨부파일을 제거할까요?"))return;
-  try{await api(`workflow-templates/${b.dataset.template}/attachments/${b.dataset.file}`,{method:"DELETE"});
-    await loadTemplateSteps();await refresh(true);
+  b.disabled=true;
+  const label=b.textContent;b.textContent="삭제 중...";
+  try{
+    const result=await api(`workflow-templates/${b.dataset.template}/attachments/${b.dataset.file}`,{method:"DELETE"});
+    if(result?.deleted===true||result?.already_missing===true){
+      b.closest(".homeWorkflowFileRow")?.remove();
+      await loadTemplateSteps();
+      await refresh(true);
+    }else throw new Error("삭제 완료를 확인하지 못했습니다.");
   }catch(e){alert("파일 삭제 실패: "+e.message)}
+  finally{b.disabled=false;b.textContent=label}
  });
 }
 async function downloadWorkflowFile(templateId,fileId){

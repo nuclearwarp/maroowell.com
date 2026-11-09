@@ -154,7 +154,7 @@ async function deleteWorkflowAttachment(env,ctx,templateId,attachmentId){
  if(!ctx.canEdit)throw workflowError("super_admin_required",403);
  if(!workflowUuid(templateId)||!workflowUuid(attachmentId))throw workflowError("invalid_attachment_id");
  const row=await workflowFileMetadata(env,templateId,attachmentId);
- if(!row)throw workflowError("attachment_not_found",404);
+ if(!row)return {deleted:false,already_missing:true};
  const deleted=await del(env,"workflow_template_attachments?id=eq."+enc(row.id)+"&template_id=eq."+enc(templateId));
  if(!Array.isArray(deleted)||!deleted.some(x=>x.id===row.id))
   throw workflowError("attachment_delete_not_confirmed",409);

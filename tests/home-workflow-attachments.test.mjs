@@ -8,7 +8,7 @@ const uuid="11111111-1111-4111-8111-111111111111";
 const fileId="22222222-2222-4222-8222-222222222222";
 const managerId="33333333-3333-4333-8333-333333333333";
 const adminId="44444444-4444-4444-8444-444444444444";
-let metadata=null,uploads=0,deletions=0,activeUserId=managerId;
+let metadata=null,uploads=0,deletions=0,activeUserId=managerId,uploadedPath=null;
 const requests=[];
 globalThis.fetch=async (input,init={})=>{
   const url=new URL(String(input));
@@ -21,10 +21,10 @@ globalThis.fetch=async (input,init={})=>{
   const userId=activeUserId;
   const body=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
   if(url.pathname==="/auth/v1/user")return body({id:userId});
-  if(url.pathname==="/storage/v1/object/home-workflow/workflow-templates/"+uuid+"/file.pdf"){
+  if(url.pathname.startsWith("/storage/v1/object/home-workflow/workflow-templates/"+uuid+"/")){
     if(method==="GET")return new Response(new Uint8Array([37,80,68,70]),{status:200});
     if(method==="DELETE"){deletions++;return body({ok:true});}
-    if(method==="POST"){uploads++;return body({ok:true});}
+    if(method==="POST"){uploads++;uploadedPath=decodeURIComponent(url.pathname.slice("/storage/v1/object/home-workflow/".length));return body({ok:true});}
   }
   if(url.pathname==="/rest/v1/user_access")return body([{is_maroowell:true,is_admin:!isManager}]);
   if(url.pathname==="/rest/v1/vendor_members")return body([{role_level:isManager?60:90,vendor_id:uuid,is_active:true}]);
@@ -36,7 +36,7 @@ globalThis.fetch=async (input,init={})=>{
   if(url.pathname==="/rest/v1/workflow_template_steps")return body([{title:"Step 1",step_order:1}]);
   if(url.pathname==="/rest/v1/workflow_template_attachments"){
     if(method==="GET")return body(metadata?[metadata]:[]);
-    if(method==="POST"){metadata={id:fileId,template_id:uuid,storage_path:"workflow-templates/"+uuid+"/file.pdf",storage_bucket:"home-workflow",file_name:"file.pdf",mime_type:"application/pdf",size_bytes:4};return body([metadata]);}
+    if(method==="POST"){metadata={id:fileId,template_id:uuid,storage_path:uploadedPath,storage_bucket:"home-workflow",file_name:"file.pdf",mime_type:"application/pdf",size_bytes:4};return body([metadata]);}
     if(method==="DELETE"){metadata=null;return body([]);}
   }
   throw Error("Unexpected request: "+method+" "+url.pathname);

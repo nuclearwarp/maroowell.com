@@ -55,7 +55,7 @@ const WORKERS = Object.freeze({
   route:{base:"https://route.maroowell.com",read:"approved",write:"manager"},
   route_legacy:{base:"https://purple-river-0717.brain-0f6.workers.dev",read:"approved",write:"manager"},
   schedule:{base:"https://schedule.maroowell.com",read:"team_or_dragon",write:"team_or_dragon"},
-  home:{base:"https://home-system.brain-0f6.workers.dev",read:"admin",write:"admin"},
+  home:{base:"https://home-system.brain-0f6.workers.dev",read:"manager",write:"admin"},
   info:{base:"https://maroowellinfo.brain-0f6.workers.dev",read:"manager",write:"manager"},
   route_price:{base:"https://maroowellroute.brain-0f6.workers.dev",read:"manager",write:"manager"},
   route_info:{base:"https://routeinfo.brain-0f6.workers.dev",read:"mw",write:"manager"},

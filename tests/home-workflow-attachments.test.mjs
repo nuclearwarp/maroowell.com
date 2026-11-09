@@ -22,6 +22,7 @@ globalThis.fetch=async (input,init={})=>{
   const body=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json"}});
   if(url.pathname==="/auth/v1/user")return body({id:userId});
   if(url.pathname.startsWith("/storage/v1/object/home-workflow/workflow-templates/"+uuid+"/")){
+    if(/[^a-zA-Z0-9._/-]/.test(decodeURIComponent(url.pathname)))return body({error:"InvalidKey"},400);
     if(method==="GET")return new Response(new Uint8Array([37,80,68,70]),{status:200});
     if(method==="DELETE"){deletions++;return body({ok:true});}
     if(method==="POST"){uploads++;uploadedPath=decodeURIComponent(url.pathname.slice("/storage/v1/object/home-workflow/".length));return body({ok:true});}
@@ -36,7 +37,7 @@ globalThis.fetch=async (input,init={})=>{
   if(url.pathname==="/rest/v1/workflow_template_steps")return body([{title:"Step 1",step_order:1}]);
   if(url.pathname==="/rest/v1/workflow_template_attachments"){
     if(method==="GET")return body(metadata?[metadata]:[]);
-    if(method==="POST"){metadata={id:fileId,template_id:uuid,storage_path:uploadedPath,storage_bucket:"home-workflow",file_name:"file.pdf",mime_type:"application/pdf",size_bytes:4};return body([metadata]);}
+    if(method==="POST"){metadata={...JSON.parse(init.body),id:fileId};return body([metadata]);}
     if(method==="DELETE"){metadata=null;return body([]);}
   }
   throw Error("Unexpected request: "+method+" "+url.pathname);
@@ -89,4 +90,14 @@ assert.equal(r.status,403,"manager cannot delete reference");
 r=await call("workflow-templates/"+uuid+"/attachments/"+fileId,"ADMIN","DELETE");
 assert.equal(r.status,200,"admin can delete reference");
 assert.equal(deletions,1);
+// Regression: uploaded Korean filenames must be metadata only; Storage key ASCII.
+const koreanName="1. 택배용 화물자동차 운송사업 허가신청 확인서.pdf";
+r=await call("workflow-templates/"+uuid+"/attachments?name="+encodeURIComponent(koreanName),"ADMIN","POST","%PDF",{"content-type":"application/pdf"});
+assert.equal(r.status,200,"original Korean filename must upload using ASCII Storage key");
+assert.match(uploadedPath,/^workflow-templates\/[a-f0-9-]{36}\/[a-f0-9-]{36}\.pdf$/i);
+assert.equal(metadata.file_name,koreanName,"display and download use original Korean name");
+r=await call("workflow-templates/"+uuid+"/attachments/"+fileId+"/download","MANAGER");
+assert.equal(r.status,200);
+assert.match(r.headers.get("content-disposition"),/filename\*=UTF-8''/);
+assert(r.headers.get("content-disposition").includes(encodeURIComponent(koreanName)));
 console.log("PASS: manager read-only / upload and delete denied / superadmin upload and delete / size and extension policies");

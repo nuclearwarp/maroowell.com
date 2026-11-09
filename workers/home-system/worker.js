@@ -60,7 +60,10 @@ async function uploadWorkflowAttachment(env,req,ctx,templateId,url){
  if(len>WORKFLOW_MAX_SIZE)throw workflowError("file_too_large",413);
  const raw=await req.arrayBuffer();
  if(!raw.byteLength||raw.byteLength>WORKFLOW_MAX_SIZE)throw workflowError("file_size_invalid",413);
- const storagePath="workflow-templates/"+templateId+"/"+crypto.randomUUID()+"-"+name;
+ // Supabase Storage keys disallow spaces and non-ASCII characters. Keep the
+ // original Korean filename in file_name, not in the Storage object key.
+ const extension=name.split(".").at(-1).toLowerCase();
+ const storagePath="workflow-templates/"+templateId+"/"+crypto.randomUUID()+"."+extension;
  const stored=await workflowStorage(env,"POST",storagePath,raw,mime);
  if(!stored.ok)throw workflowError("storage_upload_failed_"+stored.status,502);
  try{

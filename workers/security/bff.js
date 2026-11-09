@@ -194,10 +194,17 @@ export async function handleBff(request,env,dependencies){
   if(policy.kind==="supabase")h.set("apikey",cfg.key);
   if(policy.kind==="worker")h.set("origin","https://maroowell.com");
   if(!h.has("accept"))h.set("accept","application/json");
+  // Terrain and building statistics are expensive, resumable ZIP analyses.
+  // Match their browser-side budgets (30s and 180s) instead of aborting every
+  // authenticated Worker request at 20s. Keep the default limit elsewhere.
+  const upstreamTimeoutMs=policy.kind==="worker"&&policy.worker==="zip"
+    ?(policy.upstream==="/building/stats"?185000:
+      policy.upstream==="/terrain"?35000:20000)
+    :20000;
   let upstream;
   try{
     upstream=await fetch(target.toString(),{
-      method,headers:h,body,redirect:"manual",signal:AbortSignal.timeout(20000)
+      method,headers:h,body,redirect:"manual",signal:AbortSignal.timeout(upstreamTimeoutMs)
     });
   }catch(error){
     console.warn("MW_BFF_UPSTREAM_ERROR",policy.kind,policy.worker||"supabase",error?.name||"unknown");

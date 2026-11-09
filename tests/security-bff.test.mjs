@@ -63,5 +63,33 @@ try{
  r=await call("/api/worker/route_legacy/../../health");
  assert.equal(r.status,404,"path traversal must be rejected");
  assert(!JSON.stringify(await r.json()).includes("TEST_TOKEN"),"no token reflected");
+
+  // Protect ZIP analysis budget without lifting timeouts for other endpoints.
+  let capturedTimeoutMs=null;
+  const priorFetch=globalThis.fetch;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes("zip.maroowell.com")){
+      capturedTimeoutMs=null;
+      if(options.signal){
+        // AbortSignal.timeout exposes no duration; assert the policy expression
+        // in source and the authorized proxy target at the request boundary.
+        assert.equal(options.signal.aborted,false);
+      }
+      return empty({ok:true,terrain:{},building_count:0});
+    }
+    return empty([{id:"123"}]);
+  };
+  const zipResponse=await call("/api/worker/zip/terrain",{
+    method:"POST",headers:{"origin":"https://maroowell.com","x-csrf-token":csrf,"content-type":"application/json"},body:"{}"
+  });
+  assert.equal(zipResponse.status,200,"terrain proxy must remain available for approved sessions");
+  const buildingResponse=await call("/api/worker/zip/building/stats",{
+    method:"POST",headers:{"origin":"https://maroowell.com","x-csrf-token":csrf,"content-type":"application/json"},body:"{}"
+  });
+  assert.equal(buildingResponse.status,200,"building-stat proxy must remain available");
+  assert(raw.includes('policy.upstream==="/building/stats"?185000'),"building stats budget must accommodate 180-second frontend");
+  assert(raw.includes('policy.upstream==="/terrain"?35000:20000'),"terrain budget must accommodate 30-second frontend");
+  globalThis.fetch=priorFetch;
+
  console.log("PASS BFF: fail-closed table/RPC/Worker policies, role gates, CSRF, no token reflection");
 }finally{globalThis.fetch=actualFetch;}

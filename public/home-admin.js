@@ -170,7 +170,7 @@ async function downloadWorkflowFile(templateId,fileId){
  a.href=objectUrl;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
  setTimeout(()=>URL.revokeObjectURL(objectUrl),30000);
 }
-async function uploadWorkflowFiles(templateId,files){
+async function uploadWorkflowFiles(templateId,files,queueId=null){
  if(!canEditWorkflow())throw new Error("최고관리자만 업로드할 수 있습니다.");
  const entries=Array.from(files||[]);
  for(const file of entries){
@@ -181,7 +181,43 @@ async function uploadWorkflowFiles(templateId,files){
    authorization:"Bearer "+(H.session?.access_token||""),
    "content-type":file.type||"application/octet-stream"
   },body:file});
-  if(!res.ok){let d=await res.json().catch(()=>({}));throw new Error(file.name+": "+(d.error||"HTTP "+res.status))}
+  if(!res.ok){const d=await res.json().catch(()=>({}));
+   throw new Error(file.name+": "+(d.error||"HTTP "+res.status))}
+  // A completed upload is removed from the retry queue immediately. If a later
+  // file fails, pressing Register again will upload only the remaining files.
+  if(queueId){
+    const pending=workflowPendingFiles(queueId);
+    const fingerprint=workflowFileFingerprint(file);
+    const idx=pending.findIndex(f=>workflowFileFingerprint(f)===fingerprint);
+    if(idx>=0)pending.splice(idx,1);
+    renderWorkflowPendingFiles(queueId);
+    setWorkflowUploadHint(queueId,pending.length?pending.length+"개 파일 업로드 대기":WORKFLOW_UPLOAD_HINT);
+  }
+ }
+}
+// A previous Register click can create the template successfully and then
+// fail during attachment upload. Never create duplicate templates on retry.
+async function createOrResumeWorkflowTemplate(name,description,steps){
+ try{
+  const template=await api("workflow-templates",{method:"POST",body:JSON.stringify({name,description:description||null,steps})});
+  return {template,resumed:false};
+ }catch(error){
+  if(!/template_name_exists|HTTP 409/i.test(String(error?.message||"")))throw error;
+  const list=await api("bootstrap");
+  const existing=(list?.workflow_templates||[]).find(t=>String(t.name||"").trim()===String(name||"").trim());
+  if(!existing)throw new Error("이미 존재하는 프로세스입니다. 프로세스 목록에서 수정하세요.");
+  const details=await api(`workflow-templates/${existing.id}`);
+  const saved=details.template;
+  const normalize=list=>(list||[]).map(s=>({
+    title:String(s.title||"").trim(),
+    description:String(s.description||"").trim()
+  }));
+  const expected=normalize(steps);
+  const actual=normalize((details.steps||[]).slice().sort((a,b)=>Number(a.step_order)-Number(b.step_order)));
+  if(!saved||String(saved.description||"").trim()!==String(description||"").trim()||
+     JSON.stringify(expected)!==JSON.stringify(actual))
+    throw new Error("동일한 이름의 프로세스가 존재하지만 내용이 다릅니다. 기존 프로세스의 '수정' 메뉴에서 변경하세요.");
+  return {template:saved,resumed:true};
  }
 }
 async function openWorkflowViewer(id){
@@ -286,8 +322,20 @@ function openTaskDialog(task=null){const dlg=$("homeTaskDialog"),form=$("homeTas
 function bindForms(){$("homeVendorForm").onsubmit=saveVendor;$("homeNoticeForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form);o.target_camps=(o.target_camps||"").split(",").map(x=>x.trim()).filter(Boolean);o.require_ack=form.require_ack.checked;o.send_push=false;try{await api("notices",{method:"POST",body:JSON.stringify(o)});form.reset();$("homeNoticeDialog").close();await refresh(true)}catch(err){alert(err.message)}};
 $("homeTaskForm").onsubmit=async e=>{e.preventDefault();if(H.taskSaving)return;const form=e.currentTarget,submit=form.querySelector('button:not([type="button"])'),originalText=submit?.textContent||"저장",o=formObject(form),kind=o.kind||"",person=taskPerson(o.assignee_info_id);H.taskSaving=true;if(submit){submit.disabled=true;submit.textContent="저장 중..."}o.assignee_info_id=o.assignee_info_id?Number(o.assignee_info_id):null;o.assignee_name=person?.name||null;o.due_date=o.due_date||null;o.camp_code=o.camp_code||null;o.wave=o.wave||null;try{if(kind.startsWith("proc:")){const template_id=kind.slice(5),tpl=(H.data?.workflow_templates||[]).find(x=>x.id===template_id),p=personFromSearch($("homeTaskProcessPersonSearch").value),name=($("homeTaskProcessPersonName").value||"").trim()||p?.person_name||null,cat=(H.data?.categories||[]).find(x=>x.code==="operation")||(H.data?.categories||[])[0];await api("tasks",{method:"POST",body:JSON.stringify({category_id:cat?.id||null,title:`${tpl?.name||"프로세스"}${name?` · ${name}`:""}`,body:tpl?.description||null,status:"planned",priority:"normal",assignee_info_id:o.assignee_info_id,assignee_name:o.assignee_name,camp_code:o.camp_code,wave:o.wave,due_date:o.due_date,process_template_id:template_id,process_subject_info_id:p?.pk_id||null,process_subject_name:name})});form.reset();$("homeTaskDialog").close();await refresh(true);showView("dashboard");return}o.category_id=kind.startsWith("cat:")?kind.slice(4):null;o.target_version=o.target_version||null;delete o.kind;if(H.editTaskId)await api(`tasks/${H.editTaskId}`,{method:"PATCH",body:JSON.stringify(o)});else await api("tasks",{method:"POST",body:JSON.stringify(o)});form.reset();H.editTaskId=null;$("homeTaskDialog").close();await refresh(true)}catch(err){alert(err.message)}finally{H.taskSaving=false;if(submit){submit.disabled=false;submit.textContent=originalText}}};
 $("homeIssueForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form),p=personFromSearch($("homeIssuePersonSearch").value);o.person_info_id=p?.pk_id||null;o.person_name_snapshot=p?.person_name||($("homeIssuePersonSearch").value||"").trim()||null;o.camp_code=o.camp_code||null;o.wave=o.wave||null;if(isResignationIssue(o)||String(o.category_id||"")===String(resignationCategory()?.id||"")){o.resignation_notice_date=o.resignation_notice_date||null;o.resignation_last_work_date=resignationLastDate(o.resignation_notice_date,o.title,o.person_name_snapshot)||null;if(o.resignation_notice_date)o.occurred_at=`${o.resignation_notice_date}T00:00:00+09:00`}else{o.resignation_notice_date=null;o.resignation_last_work_date=null}try{if(H.editIssueId)await api(`issues/${H.editIssueId}`,{method:"PATCH",body:JSON.stringify(o)});else await api("issues",{method:"POST",body:JSON.stringify(o)});form.reset();H.editIssueId=null;$("homeIssueDialog").close();await refresh(true)}catch(err){alert(err.message)}};
-$("homeWorkflowForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form),steps=readProcessSteps("homeProcessSteps");if(!steps.length)return alert("단계를 하나 이상 입력하세요.");try{const created=await api("workflow-templates",{method:"POST",body:JSON.stringify({name:o.name,description:o.description||null,steps})});const files=[...workflowPendingFiles("homeProcessFiles")];if(files.length)await uploadWorkflowFiles(created.id,files);form.reset();resetProcessSteps();$("homeWorkflowDialog").close();await refresh(true);showView("workflow")}catch(err){alert(err.message)}};
-$("homeTemplateForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form),steps=readProcessSteps("homeTemplateSteps");if(!steps.length)return alert("단계를 하나 이상 입력하세요.");try{const version=await api("workflow-templates/version",{method:"POST",body:JSON.stringify({template_id:o.template_id,description:o.description||null,steps})});const files=[...workflowPendingFiles("homeTemplateAddFiles")];if(files.length)await uploadWorkflowFiles(version.id,files);form.reset();resetWorkflowPendingFiles("homeTemplateAddFiles");$("homeTemplateDialog").close();await refresh(true);alert("프로세스를 새 버전으로 저장했습니다. 기존 실행 체크 내역은 유지됩니다.")}catch(err){alert(err.message)}}}
+$("homeWorkflowForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form),steps=readProcessSteps("homeProcessSteps");if(!steps.length)return alert("단계를 하나 이상 입력하세요.");const submit=form.querySelector('button:not([type="button"])');if(submit?.disabled)return;if(submit)submit.disabled=true;
+ let template=null;
+ try{
+  const outcome=await createOrResumeWorkflowTemplate(o.name,o.description,steps);
+  template=outcome.template;
+  const files=[...workflowPendingFiles("homeProcessFiles")];
+  if(files.length)await uploadWorkflowFiles(template.id,files,"homeProcessFiles");
+  form.reset();resetProcessSteps();$("homeWorkflowDialog").close();await refresh(true);showView("workflow");
+  if(outcome.resumed)alert("기존에 저장된 프로세스를 확인하고 남은 파일 첨부를 완료했습니다.");
+ }catch(err){
+  alert((template?"프로세스 본문은 저장돼 있습니다. 파일만 다시 올릴 수 있으니 창을 닫지 말고 등록을 다시 눌러주세요.\n":"")+err.message);
+ }finally{if(submit)submit.disabled=false}
+};
+$("homeTemplateForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,o=formObject(form),steps=readProcessSteps("homeTemplateSteps");if(!steps.length)return alert("단계를 하나 이상 입력하세요.");try{const version=await api("workflow-templates/version",{method:"POST",body:JSON.stringify({template_id:o.template_id,description:o.description||null,steps})});const files=[...workflowPendingFiles("homeTemplateAddFiles")];if(files.length)await uploadWorkflowFiles(version.id,files,"homeTemplateAddFiles");form.reset();resetWorkflowPendingFiles("homeTemplateAddFiles");$("homeTemplateDialog").close();await refresh(true);alert("프로세스를 새 버전으로 저장했습니다. 기존 실행 체크 내역은 유지됩니다.")}catch(err){alert(err.message)}}}
 function bind(){document.querySelectorAll("[data-home-view]").forEach(b=>b.onclick=()=>showView(b.dataset.homeView));document.querySelectorAll("[data-home-open]").forEach(b=>b.onclick=()=>{if(b.dataset.homeOpen==="taskDialog")return openTaskDialog();if(b.dataset.homeOpen==="issueDialog")return openIssueDialog();if(b.dataset.homeOpen==="templateDialog")return openTemplateDialog();const id=`home${b.dataset.homeOpen[0].toUpperCase()+b.dataset.homeOpen.slice(1)}`,dlg=$(id);dlg?.querySelector("form")?.reset();dlg?.showModal()});document.querySelectorAll("[data-home-close]").forEach(b=>b.onclick=()=>{const dlg=b.closest("dialog");dlg?.querySelector("form")?.reset();if(dlg?.id==="homeWorkflowDialog")resetWorkflowPendingFiles("homeProcessFiles");if(dlg?.id==="homeTemplateDialog")resetWorkflowPendingFiles("homeTemplateAddFiles");dlg?.close()});
 ["homeTaskCategory","homeTaskStatus","homeTaskAssigneeFilter","homeTaskSearch"].forEach(id=>$(id)?.addEventListener(id.includes("Search")?"input":"change",renderTasks));$("homeTaskPreviewAssignee")?.addEventListener("change",renderDashboard);["homeIssueStatus","homeIssueSearch"].forEach(id=>$(id)?.addEventListener(id.includes("Search")?"input":"change",renderIssues));["homePeopleFilter","homePeopleSearch"].forEach(id=>$(id)?.addEventListener(id.includes("Search")?"input":"change",renderPeople));["homeCompletedType","homeCompletedCamp","homeCompletedSearch"].forEach(id=>$(id)?.addEventListener(id==="homeCompletedType"?"change":"input",renderCompleted));
 document.querySelectorAll('[data-home-open="workflowDialog"]').forEach(b=>b.addEventListener("click",()=>resetProcessSteps()));$("homeProcessAddStep")?.addEventListener("click",addProcessStep);$("homeTemplateAddStep")?.addEventListener("click",addTemplateStep);$("homeTaskKind")?.addEventListener("change",taskKindChanged);document.querySelector("#homeIssueForm [name=category_id]")?.addEventListener("change",syncResignationFields);$("homeResignationNoticeDate")?.addEventListener("change",syncResignationFields);document.querySelector("#homeIssueForm [name=title]")?.addEventListener("input",syncResignationFields);$("homeIssuePersonSearch")?.addEventListener("input",syncResignationFields);$("homeRefreshBtn")?.addEventListener("click",()=>refresh(false));$("homeMemoAdd")?.addEventListener("click",()=>openMemoComposer());$("homeMemoCancel")?.addEventListener("click",closeMemoComposer);$("homeMemoSave")?.addEventListener("click",saveMemo);$("homeTemplateBase")?.addEventListener("change",()=>{resetWorkflowPendingFiles("homeTemplateAddFiles");loadTemplateSteps()});$("homeVendorReload")?.addEventListener("click",loadVendors);$("homeVendorAdd")?.addEventListener("click",()=>openVendorDialog());$("homeVendorSearch")?.addEventListener("input",()=>{clearTimeout(H.vendorSearchTimer);H.vendorSearchTimer=setTimeout(loadVendors,250)});$("homeVersionReload")?.addEventListener("click",loadAppVersions);$("homePushReload")?.addEventListener("click",loadPush);$("homePushScope")?.addEventListener("change",()=>{clearNoticePreview();renderPush()});$("homePushType")?.addEventListener("change",clearNoticePreview);$("homePushAccountSearch")?.addEventListener("input",renderNoticeAccounts);$("homeNoticeSendPush")?.addEventListener("change",clearNoticePreview);$("homeNoticePopup")?.addEventListener("change",()=>{clearNoticePreview();renderPush()});$("homeNoticeDismiss")?.addEventListener("change",clearNoticePreview);$("homeNoticeAck")?.addEventListener("change",()=>{if($("homeNoticeAck").checked)$("homeNoticeDismiss").checked=false;clearNoticePreview();renderPush()});$("homeNoticeImage")?.addEventListener("change",noticeImageChanged);$("homePushTitle")?.addEventListener("input",clearNoticePreview);$("homePushBody")?.addEventListener("input",clearNoticePreview);$("homePushPreview")?.addEventListener("click",previewPush);$("homePushSend")?.addEventListener("click",sendPush);bindForms()}

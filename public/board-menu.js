@@ -2,7 +2,7 @@
 (()=>{'use strict';if(window.__MW_BOARD_MENU_INIT__)return;window.__MW_BOARD_MENU_INIT__=true;
 const BUILD='20261030-payout-v2',SUPA='https://rgqerimdxkthkcewqbbe.supabase.co',KEY=['sb_publishable_','FUFuH5JVyM-JLWWVeasgOw_Sk_LtD9H'].join('');
 const PAGES=[
- {key:'home',label:'Home',path:'/home',aliases:['/home','/home.html'],requireSuperAdmin:true,desc:'\uc5c5\ubb34 \u00b7 \uc774\uc288 \u00b7 \ud504\ub85c\uc138\uc2a4 \u00b7 \uacf5\uc9c0 \ud1b5\ud569 \uad00\ub9ac'},
+ {key:'home',label:'Home',path:'/home',aliases:['/home','/home.html'],requireRoleLevel:60,desc:'\uc5c5\ubb34 \u00b7 \uc774\uc288 \u00b7 \ud504\ub85c\uc138\uc2a4 \u00b7 \uacf5\uc9c0 \ud1b5\ud569 \uad00\ub9ac'},
  {key:'realtime',label:'\uc2e4\uc2dc\uac04 \ud604\ud669',path:'/realtime',aliases:['/realtime','/realtime.html'],requireRoleLevel:30,desc:'\uc804\uccb4 \ucea0\ud504 \uc2e4\uc2dc\uac04 \ubc30\uc1a1 \ud604\ud669'},
  {key:'mw-schedule',label:'\ub9c8\ub8e8\uc6f0 \uc785\ucc28 \uc2a4\ucf00\uc904',path:'/maroowell_schedule',aliases:['/maroowell_schedule','/maroowell_schedule.html'],requireRoleLevel:30,desc:'\ub9c8\ub8e8\uc6f0 \uc785\ucc28 \uc2a4\ucf00\uc904'},
  {key:'info',label:'\ub9c8\ub8e8\uc6f0 \uc815\ubcf4',path:'/maroowell_info',aliases:['/maroowell_info','/maroowell_info.html'],requireRoleLevel:60,desc:'\ub9c8\ub8e8\uc6f0 \uae30\ubcf8 \uc815\ubcf4'},

@@ -233,7 +233,7 @@ async function handlePermissionSave(request, env) {
     actual.schedule_can_write!==data.schedule ||
     actual.clhi_can_select!==data.clhi ||
     actual.is_maroowell!==(level>=30) ||
-    actual.is_admin!==(level>=60))
+    actual.is_admin!==(level>=90))
     throw httpError(409,"permission_saved_but_effective_state_mismatch");
   return json({ok:true,saved:true,user:actual,viewer:snapshot.viewer});
 }

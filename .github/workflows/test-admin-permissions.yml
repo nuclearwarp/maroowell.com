@@ -1,0 +1,32 @@
+name: Test admin permission management
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-access-worker.js'
+      - 'public/admin_access.html'
+      - 'workers/security/bff.js'
+      - 'workers/security/wrangler.toml'
+      - 'tests/admin-permissions.test.mjs'
+      - '.github/workflows/test-admin-permissions.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate worker and test syntax
+        run: |
+          node --check admin-access-worker.js
+          node --check workers/security/bff.js
+          node --check tests/admin-permissions.test.mjs
+      - name: Test permission flow
+        run: node tests/admin-permissions.test.mjs
+      - name: Validate client inline JavaScript
+        run: |
+          node -e "const s=require('fs').readFileSync('public/admin_access.html','utf8');for(const m of s.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)){if(m[1].trim())new Function(m[1])}"

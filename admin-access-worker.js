@@ -6,7 +6,7 @@
  *  - SUPABASE_SERVICE_ROLE_KEY
  */
 
-const API_VERSION = "2026-10-07-admin-access-v2";
+const API_VERSION = "2026-11-10-admin-access-v3";
 
 export default {
   async fetch(request, env) {
@@ -22,6 +22,12 @@ export default {
         return cors(json({ ok: true, service: "admin-access", version: API_VERSION }));
       }
 
+      if (path === "/admin/permissions/snapshot" && request.method === "GET") {
+        return cors(await handlePermissionSnapshot(request, env));
+      }
+      if (path === "/admin/permissions/save" && request.method === "POST") {
+        return cors(await handlePermissionSave(request, env));
+      }
       if (path === "/admin/me" && request.method === "GET") {
         return cors(await handleAdminMe(request, env));
       }
@@ -191,6 +197,45 @@ async function requireSuperAdmin(request, env) {
 
   if (!allowed) throw httpError(403, "최고관리자 권한이 필요합니다.");
   return { token, user, access: row };
+}
+
+
+async function handlePermissionSnapshot(request, env) {
+  const {token}=await requireUser(request,env);
+  const result=await rpc(env,token,"mw_admin_permissions_snapshot",{});
+  if(!result?.viewer||!Array.isArray(result?.users))throw httpError(502,"invalid_permission_snapshot");
+  return json({ok:true,...result});
+}
+async function handlePermissionSave(request, env) {
+  const {token,user}=await requireUser(request,env);
+  const data=await readJson(request);
+  const id=String(data?.user_id||"");
+  const level=Number(data?.role_level);
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+    throw httpError(400,"invalid_target_user");
+  if(id===user.id)throw httpError(403,"cannot_change_own_permissions");
+  if(![0,30,60,90].includes(level))throw httpError(400,"invalid_role_level");
+  for(const key of ["dragon","schedule","clhi"]){
+    if(typeof data[key]!=="boolean")throw httpError(400,"invalid_permission_"+key);
+  }
+  const result=await rpc(env,token,"mw_admin_permissions_save",{
+    p_target:id,p_role_level:level,p_dragon:data.dragon,
+    p_schedule:data.schedule,p_clhi:data.clhi,
+    p_memo:data.memo==null?null:String(data.memo).slice(0,300)
+  });
+  if(result?.saved!==true||result.user_id!==id)throw httpError(502,"permission_save_not_confirmed");
+  // Read back effective permissions, not just the RPC's optimistic result.
+  const snapshot=await rpc(env,token,"mw_admin_permissions_snapshot",{});
+  const actual=snapshot?.users?.find(x=>x.user_id===id);
+  if(!actual ||
+    Number(actual.role_level)!==level ||
+    actual.is_dragon_car_admin!==data.dragon ||
+    actual.schedule_can_write!==data.schedule ||
+    actual.clhi_can_select!==data.clhi ||
+    actual.is_maroowell!==(level>=30) ||
+    actual.is_admin!==(level>=60))
+    throw httpError(409,"permission_saved_but_effective_state_mismatch");
+  return json({ok:true,saved:true,user:actual,viewer:snapshot.viewer});
 }
 
 async function handleAdminMe(request, env) {

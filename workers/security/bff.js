@@ -123,11 +123,17 @@ function policyFor(path, method){
     // High-impact vendor modifications require administrative permission,
     // even though normal route reads are available to regular users.
     const vendorAdmin=match[1].startsWith("route")&&rest.startsWith("/vendors/admin");
+    // Manager-grade access only for the new, server-authorized permission API.
+    // Legacy admin endpoints retain their super-admin rule in the BFF.
+    const permissionV3=match[1]==="admin_access"&&(
+      (method==="GET"&&rest==="/admin/permissions/snapshot")||
+      (method==="POST"&&rest==="/admin/permissions/save")
+    );
     // These POST endpoints calculate/read analysis, not vendor configuration.
     // Treat as approved-user computations; same-origin CSRF remains mandatory.
     const zipAnalysis=match[1]==="zip"&&write&&method==="POST"&&
       (rest==="/terrain"||rest==="/building/stats");
-    return{upstream:rest,rule:vendorAdmin?"admin":zipAnalysis?"approved":target[write?"write":"read"],kind:"worker",base:target.base,worker:match[1]};
+    return{upstream:rest,rule:vendorAdmin?"admin":permissionV3?"manager":zipAnalysis?"approved":target[write?"write":"read"],kind:"worker",base:target.base,worker:match[1]};
   }
   return null;
 }

@@ -215,8 +215,11 @@ export async function handleBff(request,env,dependencies){
   // ZIP terrain/building calls must go directly through Cloudflare's service
   // binding, keeping the original URL, user JWT, CSRF and allowlist checks.
   const zipBound=policy.kind==="worker"&&policy.worker==="zip";
+  const adminBound=policy.kind==="worker"&&policy.worker==="admin_access";
   if(zipBound && (!env.ZIP_ANALYSIS || typeof env.ZIP_ANALYSIS.fetch!=="function"))
     return respond({ok:false,error:"zip_binding_unavailable"},503,request);
+  if(adminBound && (!env.ADMIN_ACCESS || typeof env.ADMIN_ACCESS.fetch!=="function"))
+    return respond({ok:false,error:"admin_access_binding_unavailable"},503,request);
   let upstream;
   try{
     const fetchOptions={
@@ -224,7 +227,9 @@ export async function handleBff(request,env,dependencies){
     };
     upstream=zipBound
       ?await env.ZIP_ANALYSIS.fetch(new Request(target.toString(),fetchOptions))
-      :await fetch(target.toString(),fetchOptions);
+      :adminBound
+        ?await env.ADMIN_ACCESS.fetch(new Request(target.toString(),fetchOptions))
+        :await fetch(target.toString(),fetchOptions);
   }catch(error){
     console.warn("MW_BFF_UPSTREAM_ERROR",policy.kind,policy.worker||"supabase",error?.name||"unknown");
     return respond({ok:false,error:"upstream_unavailable"},503,request);

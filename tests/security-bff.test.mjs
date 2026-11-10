@@ -36,6 +36,9 @@ try{
  assert.equal(policyFor("/api/supabase/rest/v1/meta_backend_state","GET"),null);
  assert.equal(policyFor("/api/worker/unknown/health","GET"),null);
  assert.equal(policyFor("/api/supabase/rest/v1/maroowell_route","POST").rule,"manager");
+ assert.equal(policyFor("/api/worker/admin_access/admin/permissions/snapshot","GET").rule,"manager");
+ assert.equal(policyFor("/api/worker/admin_access/admin/permissions/save","POST").rule,"manager");
+ assert.equal(policyFor("/api/worker/admin_access/admin/access/set","POST").rule,"admin");
  authenticated=false;
  let r=await call("/api/supabase/rest/v1/maroowell_schedule?select=schedule_date");
  assert.equal(r.status,401,"anonymous denied");

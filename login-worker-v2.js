@@ -14,7 +14,7 @@ var login_worker_v2_default = {
       // remain unchanged; /foo transparently serves /foo.html from ASSETS.
       // Do not affect extensionless application pages, API paths or Google's
       // .html verification token.
-      const cleanHtmlPages = new Set(["admin_access", "coupangRouteMap", "coupangland", "naverSearch", "route-map-20260925", "route-map-v69-20260925", "route-map-v70-20260925", "route-map-v71-20260925", "route-map-v73-20260925", "share", "vendors", "zipcode_share"]);
+      const cleanHtmlPages = new Set(["admin_access", "admin_access_legacy", "coupangRouteMap", "coupangland", "naverSearch", "route-map-20260925", "route-map-v69-20260925", "route-map-v70-20260925", "route-map-v71-20260925", "route-map-v73-20260925", "share", "vendors", "zipcode_share"]);
       const isHtmlDocument = (path) => path === "/index.html" || (
         path.endsWith(".html") && cleanHtmlPages.has(path.slice(1, -5))
       );
@@ -34,7 +34,7 @@ var login_worker_v2_default = {
       // A browser-only compatibility shim. It is inert unless an explicit
       // server-cookie login is active in this tab. Native app WebViews retain
       // their current Supabase session bridge.
-      const securedHtmlPages = new Set(["/","/index.html","/post_login","/home","/realtime","/admin_access","/maroowell_access","/maroowell_payout","/maroowell_schedule","/maroowell_info","/maroowell_route","/maroowell_route_info","/maroowell_account","/maroowell_account_upload","/maroowell_freshbag_ratio","/maroowell_freshbag_ratio_upload","/dragon_car_index","/dragon_car_pay","/dragon_car_schedule","/cleansing_history","/coupangRouteMap","/coupang_camp","/coupang_camp_map","/coupang_freshbag","/coupang_freshbag_upload","/coupangland","/route_master","/vendors","/zipcode_search","/zipcode_share","/share","/privacy","/support","/app","/naverSearch"]);
+      const securedHtmlPages = new Set(["/","/index.html","/post_login","/home","/realtime","/admin_access","/admin_access_legacy","/maroowell_access","/maroowell_payout","/maroowell_schedule","/maroowell_info","/maroowell_route","/maroowell_route_info","/maroowell_account","/maroowell_account_upload","/maroowell_freshbag_ratio","/maroowell_freshbag_ratio_upload","/dragon_car_index","/dragon_car_pay","/dragon_car_schedule","/cleansing_history","/coupangRouteMap","/coupang_camp","/coupang_camp_map","/coupang_freshbag","/coupang_freshbag_upload","/coupangland","/route_master","/vendors","/zipcode_search","/zipcode_share","/share","/privacy","/support","/app","/naverSearch"]);
       const looksLikeWebHtml = securedHtmlPages.has(path) ||
         (path.endsWith(".html") && securedHtmlPages.has(path.slice(0,-5))) ||
         /text\/html/i.test(response.headers.get("content-type") || "");

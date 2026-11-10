@@ -22,7 +22,7 @@ const PAGES=[
  {key:'dragon-schedule',label:'\uc6a9\ucc28 \uc2a4\ucf00\uc904',path:'/dragon_car_schedule',aliases:['/dragon_car_schedule','/dragon_car_schedule.html'],requireTeamOrDragonCarAdmin:true,desc:'\uc6a9\ucc28 \uae30\uc0ac \ucd9c\uadfc / \ud734\ubb34 \uc2a4\ucf00\uc904'},
  {key:'dragon-pay',label:'\uc6a9\ucc28 \uc815\uc0b0\uc11c',path:'/dragon_car_pay',aliases:['/dragon_car_pay','/dragon_car_pay.html'],requireDragonCarAdmin:true,desc:'\uc6a9\ucc28 \uc815\uc0b0\uc11c'},
  {key:'vendors',label:'\ubca4\ub354 \uc870\ud68c',path:'/vendors',aliases:['/vendors','/vendors.html'],public:true,desc:'\ubca4\ub354 \uae30\ubcf8\uc815\ubcf4 \uacf5\uac1c \uc870\ud68c \u00b7 \ud074\ud788 \uad8c\ud55c\uc790\ub294 \uc218\uc815\u00b7\uc0ad\uc81c \uac00\ub2a5'},
- {key:'admin-access',label:'\uad00\ub9ac\uc790 \uad8c\ud55c \uad00\ub9ac',path:'/admin_access',aliases:['/admin_access','/admin_access.html','/maroowell_access'],requireSuperAdmin:true,desc:'\uc0ac\uc6a9\uc790 / \uad00\ub9ac\uc790 \uad8c\ud55c \uad00\ub9ac'}
+ {key:'admin-access',label:'\uad00\ub9ac\uc790 \uad8c\ud55c \uad00\ub9ac',path:'/admin_access',aliases:['/admin_access','/admin_access.html','/maroowell_access'],requireRoleLevel:60,desc:'\uc0ac\uc6a9\uc790 / \uad00\ub9ac\uc790 \uad8c\ud55c \uad00\ub9ac'}
 ];
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=p=>{let s=String(p||'/').replace(/[?#].*$/,'');if(!s.startsWith('/'))s='/'+s;if(s.length>1&&s.endsWith('/'))s=s.slice(0,-1);return s;};

@@ -7,7 +7,7 @@ const id="00000000-0000-4000-8000-000000000002";
 let userMode="manager",writes=0,goodRead=true;
 const expected={
  user_id:id,email:"example@maroowell.com",display_name:"홍길동",role_level:60,
- is_maroowell:true,is_admin:true,is_dragon_car_admin:false,
+ is_maroowell:true,is_admin:false,is_dragon_car_admin:false,
  schedule_can_write:false,clhi_can_select:true,can_edit:true
 };
 globalThis.fetch=async (input,init={})=>{

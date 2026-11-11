@@ -96,5 +96,31 @@ try{
   assert(raw.includes('policy.upstream==="/terrain"?35000:20000'),"terrain budget must accommodate 30-second frontend");
   delete runtimeEnv.ZIP_ANALYSIS;
 
+  // Route/vendor Worker requests must not resolve through same-zone public hostname.
+  const routeRequests=[];
+  r=await call("/api/worker/route/vendors/view?limit=1");
+  assert.equal(r.status,503,"route binding is mandatory");
+  assert.equal((await r.json()).error,"route_binding_unavailable");
+  runtimeEnv.ROUTE_API={fetch:async req=>{
+    routeRequests.push(req);
+    if(new URL(req.url).pathname==="/vendors/view")return empty({rows:[{name:"Test Vendor"}]});
+    if(new URL(req.url).pathname==="/vendors/permissions")return empty({canCreate:false,canEdit:false});
+    return empty({ok:true});
+  }};
+  r=await call("/api/worker/route/vendors/view?limit=1");
+  assert.equal(r.status,200);
+  assert.deepEqual((await r.json()).rows.map(x=>x.name),["Test Vendor"]);
+  assert.equal(new URL(routeRequests[0].url).pathname,"/vendors/view");
+  assert.equal(new URL(routeRequests[0].url).search,"?limit=1");
+  assert.equal(routeRequests[0].headers.get("authorization"),"Bearer TEST_TOKEN");
+  r=await call("/api/worker/route/vendors/permissions");
+  assert.equal(r.status,200,"vendor permissions must use service binding");
+  r=await call("/api/worker/route_legacy/vendors/view?limit=1");
+  assert.equal(r.status,200);
+  r=await call("/api/worker/route/vendors/admin?limit=1");
+  assert.equal(r.status,403,"private data denied to non-admin");
+  assert.equal(routeRequests.length,3,"denied requests cannot reach origin");
+  delete runtimeEnv.ROUTE_API;
+
  console.log("PASS BFF: fail-closed table/RPC/Worker policies, role gates, CSRF, no token reflection");
 }finally{globalThis.fetch=actualFetch;}

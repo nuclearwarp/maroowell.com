@@ -216,10 +216,14 @@ export async function handleBff(request,env,dependencies){
   // binding, keeping the original URL, user JWT, CSRF and allowlist checks.
   const zipBound=policy.kind==="worker"&&policy.worker==="zip";
   const adminBound=policy.kind==="worker"&&policy.worker==="admin_access";
+  const routeBound=policy.kind==="worker"&&
+    (policy.worker==="route"||policy.worker==="route_legacy");
   if(zipBound && (!env.ZIP_ANALYSIS || typeof env.ZIP_ANALYSIS.fetch!=="function"))
     return respond({ok:false,error:"zip_binding_unavailable"},503,request);
   if(adminBound && (!env.ADMIN_ACCESS || typeof env.ADMIN_ACCESS.fetch!=="function"))
     return respond({ok:false,error:"admin_access_binding_unavailable"},503,request);
+  if(routeBound && (!env.ROUTE_API || typeof env.ROUTE_API.fetch!=="function"))
+    return respond({ok:false,error:"route_binding_unavailable"},503,request);
   let upstream;
   try{
     const fetchOptions={
@@ -229,7 +233,9 @@ export async function handleBff(request,env,dependencies){
       ?await env.ZIP_ANALYSIS.fetch(new Request(target.toString(),fetchOptions))
       :adminBound
         ?await env.ADMIN_ACCESS.fetch(new Request(target.toString(),fetchOptions))
-        :await fetch(target.toString(),fetchOptions);
+        :routeBound
+          ?await env.ROUTE_API.fetch(new Request(target.toString(),fetchOptions))
+          :await fetch(target.toString(),fetchOptions);
   }catch(error){
     console.warn("MW_BFF_UPSTREAM_ERROR",policy.kind,policy.worker||"supabase",error?.name||"unknown");
     return respond({ok:false,error:"upstream_unavailable"},503,request);

@@ -10,7 +10,7 @@
   <title>쿠팡 캠프 지도</title>
   <link rel="icon" href="/favicon.ico?v=2">
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=clusterer,services"></script>
 
   <style>
@@ -400,7 +400,7 @@
   <div id="denied" class="denied" aria-hidden="true">
     <div class="deniedCard">
       <h2>지도 조회 권한이 없습니다</h2>
-      <p>클렌징 히스토리를 조회할 수 있는 계정만 캠프 지도를 열 수 있습니다.</p>
+      <p>승인된 웹 계정은 클렌징 히스토리 권한 없이도 쿠팡 캠프 지도를 조회할 수 있습니다.</p>
       <div class="actions"><a class="btn primary" href="/coupang_camp">캠프 목록으로</a><a class="btn" href="/?next=%2Fcoupang_camp_map">로그인</a></div>
     </div>
   </div>
@@ -2629,24 +2629,51 @@
 
 
       async function loadMapAccess() {
+        // The Coupang camp map is NOT restricted by cleansing-history rights.
+        // Verify approved account state; preserve native/legacy login separately.
+        let cookieMode = false;
+        try { cookieMode = sessionStorage.getItem("mw_web_server_auth") === "1"; } catch {}
+        try {
+          const response = await fetch("/api/session/me", {
+            credentials: "same-origin", cache: "no-store"
+          });
+          if (response.ok) {
+            const identity = await response.json().catch(() => null);
+            if (identity?.ok !== true || typeof identity.user?.user_id !== "string") return false;
+            try { sessionStorage.setItem("mw_web_server_auth", "1"); } catch {}
+            if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase?.createClient) {
+              state.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                auth: { persistSession:false, autoRefreshToken:false, detectSessionInUrl:false }
+              });
+            }
+            state.accessToken = "MW_SERVER_COOKIE_ONLY";
+            return true;
+          }
+          if (cookieMode || response.status !== 401) return false;
+        } catch (error) {
+          console.warn("캠프 지도 보안 세션 확인 실패", error?.message || error);
+          if (cookieMode) return false;
+        }
         if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase?.createClient) return false;
         try {
           const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
             auth: { persistSession:true, storage:sessionStorage, autoRefreshToken:true, detectSessionInUrl:true }
           });
           state.supabaseClient = sb;
-          const { data } = await sb.auth.getSession();
-          const token = data?.session?.access_token || "";
-          if (!token) return false;
+          const [sessionResult,userResult] = await Promise.all([
+            sb.auth.getSession(), sb.auth.getUser()
+          ]);
+          const token = sessionResult?.data?.session?.access_token || "";
+          const user = userResult?.data?.user;
+          if (!token || userResult?.error || !user?.id) return false;
+          const { data: rows, error: accountError } = await sb.rpc("mw_my_account_state");
+          const account = Array.isArray(rows) ? rows[0] : rows;
+          if (accountError || account?.user_id !== user.id ||
+              account?.approval_status !== "approved" || account?.app_only === true) return false;
           state.accessToken = token;
-          const response = await fetch(`${API_BASE}/access`, {
-            headers: { Authorization:`Bearer ${token}` },
-            cache: "no-store"
-          });
-          const access = await response.json().catch(() => null);
-          return response.ok && (access?.canClhi === true || access?.access?.can_clhi === true);
+          return true;
         } catch (error) {
-          console.error(error);
+          console.error("캠프 지도 인증 확인 실패", error);
           return false;
         }
       }

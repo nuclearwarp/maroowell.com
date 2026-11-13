@@ -1,11 +1,11 @@
 # 마루웰 캠프 QR · 채번 설문 패턴 인식 가이드
 
-기준 소스: 마루웰 웹 §public/coupang_camp§, Android §NumberingActivity.kt§, iOS §NumberingView.swift§, Supabase §mw_my_numbering_context_v2§ (2026-11-13 확인).
+기준 소스: 마루웰 웹 `public/coupang_camp`, Android `NumberingActivity.kt`, iOS `NumberingView.swift`, Supabase `mw_my_numbering_context_v2` (2026-11-13 확인).
 API 범위와 인증은 [CAMPS_API.md](./CAMPS_API.md) 참조.
 
 ## 1. 캠프 코드 기반 QR 생성
 
-**QR 페이로드는 URL이나 JSON이 아니라 **§camps.code§ 텍스트 자체**입니다.
+**QR 페이로드는 URL이나 JSON이 아니라 `camps.code` 텍스트 자체입니다.**
 
 1. camps 목록 또는 API에서 대상 행을 조회합니다. `GET /api/v1/camps?camp=...`.
 2. 대상이 **서브/모바일 캠프**이고 본캠프가 지정되거나 추론되면, 본캠프의 `code`를 상속합니다. 반면 `SUB_HUB`이거나 본캠프 자체면 해당 행의 `code`를 그대로 사용합니다.

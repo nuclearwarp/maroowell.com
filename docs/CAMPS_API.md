@@ -1,5 +1,7 @@
 # Maroowell Camps Data API v1
 
+**추가 가이드:** [캠프 코드 QR 및 채번 Google Forms 패턴 인식](./CAMPS_QR_NUMBERING_GUIDE.md)
+
 운영 코드 `worker.js`의 `handleExternalApi` / `handleCampsGet` / `handleCampsPost` / `handleCampsBatch` 기준. 2026-11-13 확인.
 
 ## 1. 기본정보와 인증

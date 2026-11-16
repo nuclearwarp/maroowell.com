@@ -34,6 +34,10 @@ var login_worker_v2_default = {
       // A browser-only compatibility shim. It is inert unless an explicit
       // server-cookie login is active in this tab. Native app WebViews retain
       // their current Supabase session bridge.
+      // HTML here contains static application code, never user-specific data.
+      // A short browser-private cache avoids reparsing/fully downloading it on every navigation.
+      // /api/session/* and /api/supabase/* remain explicitly no-store in the gateway.
+      const HTML_BROWSER_CACHE = "private, max-age=60, must-revalidate";
       const securedHtmlPages = new Set(["/","/index.html","/post_login","/home","/realtime","/admin_access","/admin_access_legacy","/maroowell_access","/maroowell_payout","/maroowell_schedule","/maroowell_info","/maroowell_route","/maroowell_route_info","/maroowell_account","/maroowell_account_upload","/maroowell_freshbag_ratio","/maroowell_freshbag_ratio_upload","/dragon_car_index","/dragon_car_pay","/dragon_car_schedule","/cleansing_history","/coupangRouteMap","/coupang_camp","/coupang_camp_map","/coupang_freshbag","/coupang_freshbag_upload","/coupangland","/route_master","/vendors","/zipcode_search","/zipcode_share","/share","/privacy","/support","/app","/naverSearch"]);
       const looksLikeWebHtml = securedHtmlPages.has(path) ||
         (path.endsWith(".html") && securedHtmlPages.has(path.slice(0,-5))) ||
@@ -45,7 +49,7 @@ var login_worker_v2_default = {
         // load Supabase at the end of <head>, so unconditional head injection
         // leaves the adapter unable to wrap createClient().
         if (!html.includes("/mw-secure-web.js")) {
-          const bridgeTag = '<script src="/mw-secure-web.js?v=20261106-a"></script>';
+          const bridgeTag = '<script src="/mw-secure-web.js?v=20261116-perf1"></script>';
           const sdkScript = /<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*supabase-js[^"']*\1[^>]*>\s*<\/script\s*>/i.exec(html);
           if (sdkScript) {
             const at = sdkScript.index + sdkScript[0].length;
@@ -59,17 +63,17 @@ var login_worker_v2_default = {
         // Extensionless HTML assets otherwise inherit application/octet-stream from ASSETS.
         // Browsers then display the document source instead of rendering the page.
         headers.set("Content-Type","text/html; charset=utf-8");
-        headers.set("Cache-Control","no-store, no-cache, must-revalidate");
+        headers.set("Cache-Control",HTML_BROWSER_CACHE);
         headers.delete("Content-Length");
         response = new Response(request.method==="HEAD"?null:html,{status:response.status,headers});
       }
 
-      const withNoStore = async (res, type) => {
+      const withNoStore = async (res, type, staticHtml=false) => {
         const body = await res.text();
         const headers = new Headers(res.headers);
         if (type) headers.set("Content-Type", type);
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.set("Pragma", "no-cache");
+        headers.set("Cache-Control", staticHtml ? HTML_BROWSER_CACHE : "no-store, no-cache, must-revalidate");
+        if(staticHtml)headers.delete("Pragma");else headers.set("Pragma", "no-cache");
         headers.delete("Content-Length");
         return new Response(body, { status: res.status, headers });
       };
@@ -114,8 +118,8 @@ var login_worker_v2_default = {
 
         const headers = new Headers(response.headers);
         headers.set("Content-Type", "text/html; charset=utf-8");
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.set("Pragma", "no-cache");
+        headers.set("Cache-Control", HTML_BROWSER_CACHE);
+        headers.delete("Pragma");
         headers.delete("Content-Length");
         return new Response(body, { status: response.status, headers });
       }
@@ -127,14 +131,14 @@ var login_worker_v2_default = {
         }
         const headers = new Headers(response.headers);
         headers.set("Content-Type", "text/html; charset=utf-8");
-        headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
-        headers.set("Pragma", "no-cache");
+        headers.set("Cache-Control", HTML_BROWSER_CACHE);
+        headers.delete("Pragma");
         headers.delete("Content-Length");
         return new Response(body, { status: response.status, headers });
       }
 
       if (["/realtime", "/realtime.html", "/public/realtime"].includes(path) && response.ok) {
-        return withNoStore(response, "text/html; charset=utf-8");
+        return withNoStore(response, "text/html; charset=utf-8", true);
       }
       // Navigation permission data must not remain cached after access changes.
       if (path === "/board-menu.js" && response.ok) {
@@ -144,15 +148,15 @@ var login_worker_v2_default = {
         return withNoStore(response, "application/javascript; charset=utf-8");
       }
       if ((path === "/coupang_camp" || path === "/coupang_camp_map") && response.ok) {
-        return withNoStore(response, "text/html; charset=utf-8");
+        return withNoStore(response, "text/html; charset=utf-8", true);
       }
 
       if (path === "/post_login" && response.ok) {
-        return withNoStore(response, "text/html; charset=utf-8");
+        return withNoStore(response, "text/html; charset=utf-8", true);
       }
 
       if ((path === "/maroowell_schedule" || path === "/maroowell_schedule.html") && response.ok) {
-        return withNoStore(response, "text/html; charset=utf-8");
+        return withNoStore(response, "text/html; charset=utf-8", true);
       }
 
       return response;

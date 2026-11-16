@@ -56,8 +56,11 @@ assert(login.includes('if (mwSecurityPilot) {\n      try {\n        // A cookie 
   "existing cookie must be restored before legacy client auto redirect");
 console.log("PASS secure default website login and native/recovery compatibility");
 
-assert(worker.includes('/mw-secure-web.js?v=20261106-a'));
+assert(worker.includes('/mw-secure-web.js?v=20261116-perf1'));
 assert(worker.includes('headers.set("Content-Type","text/html; charset=utf-8")'),"extensionless HTML must be served as text/html to avoid source rendering");
+assert(worker.includes('private, max-age=60, must-revalidate'),"static page HTML has bounded private browser cache");
+assert(worker.includes('if(staticHtml)headers.delete("Pragma")'),"static pages must not inherit no-cache");
+assert(worker.includes('if (path === "/board-menu.js"'),"menu security code remains separate");
 assert(!bridge.includes("service_role"),"do not ship elevated secrets");
 const data=new Map([["mw_web_server_auth","1"]]);
 const storage={
@@ -133,7 +136,7 @@ for(const path of pagePaths){
   const html=await response.text();
   const sdk=/<script\b[^>]*\bsrc\s*=\s*(["'])[^"']*supabase-js[^"']*\1[^>]*>\s*<\/script\s*>/i.exec(html);
   assert(sdk,path+" has Supabase SDK");
-  const bridgeIndex=html.indexOf('/mw-secure-web.js?v=20261106-a');
+  const bridgeIndex=html.indexOf('/mw-secure-web.js?v=20261116-perf1');
   assert(bridgeIndex>=0,path+" missing secure bridge");
   assert(bridgeIndex>sdk.index+sdk[0].length-1,
     path+" must initialize secure bridge after Supabase SDK");

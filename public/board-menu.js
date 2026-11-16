@@ -42,39 +42,36 @@ function deny(title,msg){styles();if(document.querySelector('.mw-denied'))return
 function findSession(){const ref=new URL(SUPA).hostname.split('.')[0],base=`sb-${ref}-auth-token`,vals=[];for(const st of [localStorage,sessionStorage]){try{let raw=st.getItem(base);if(raw){if(raw.startsWith('base64-')){let x=raw.slice(7).replace(/-/g,'+').replace(/_/g,'/');x+='='.repeat((4-x.length%4)%4);raw=new TextDecoder().decode(Uint8Array.from(atob(x),c=>c.charCodeAt(0)));}const p=JSON.parse(raw),s=p?.currentSession||p?.session||p;if(s?.access_token)vals.push(s);}}catch{}}return vals[0]||null;}
 async function loadAccess(){
  if(sessionStorage.getItem("mw_web_server_auth")==="1"){
+  // Server /api/session/me already verifies user + role + approved account.
   const meResp=await fetch("/api/session/me",{credentials:"same-origin",cache:"no-store"});
   if(meResp.status===401)return{signed_in:false,can_payout:false};
   if(!meResp.ok)throw Error("보안 세션 확인 실패");
   const me=await meResp.json();
   if(!me?.ok||!me.user?.user_id||!me.csrf_token)throw Error("보안 세션 응답 오류");
-  const rpc=async name=>{
-   const response=await fetch("/api/supabase/rest/v1/rpc/"+name,{
-    method:"POST",credentials:"same-origin",cache:"no-store",
-    headers:{"content-type":"application/json","x-csrf-token":me.csrf_token},
-    body:"{}"
-   });
-   if(!response.ok)throw Error("서버 권한 확인 실패 ("+name+")");
-   const payload=await response.json();
-   return Array.isArray(payload)?payload[0]:payload;
-  };
-  const [a,b]=await Promise.all([rpc("mw_my_access"),rpc("mw_my_account_state")]);
-  const payout=await rpc("mw_payout_can_access").catch(()=>false);
-  const out={...(a||{}),signed_in:true,
-   approval_status:b?.approval_status||"pending",app_only:b?.app_only===true,
-   can_clhi:false,can_payout:payout===true};
+  const out={...me.user,signed_in:true,approval_status:"approved",app_only:false,can_clhi:false,can_payout:false};
   out.can_clhi=isSuper(out);
-  if(!out.can_clhi){
-   try{
-    const id=encodeURIComponent(me.user.user_id);
-    const response=await fetch("/api/supabase/rest/v1/cleansing_history_access?select=can_select&user_id=eq."+id+"&can_select=eq.true&limit=1",{
-     credentials:"same-origin",cache:"no-store"
-    });
-    if(response.ok){
-      const records=await response.json();
-      out.can_clhi=Array.isArray(records)&&records.some(x=>x.can_select===true);
-    }
-   }catch{}
-  }
+  out.__loadOptional=async()=>{
+   const tasks=[];
+   tasks.push((async()=>{
+    try{
+     const r=await fetch("/api/supabase/rest/v1/rpc/mw_payout_can_access",{
+      method:"POST",credentials:"same-origin",cache:"no-store",
+      headers:{"content-type":"application/json","x-csrf-token":me.csrf_token},body:"{}"
+     });
+     if(r.ok){const v=await r.json();out.can_payout=v===true||(Array.isArray(v)&&v[0]===true)}
+    }catch{}
+   })());
+   if(!out.can_clhi)tasks.push((async()=>{
+    try{
+     const id=encodeURIComponent(me.user.user_id);
+     const r=await fetch("/api/supabase/rest/v1/cleansing_history_access?select=can_select&user_id=eq."+id+"&can_select=eq.true&limit=1",{
+      credentials:"same-origin",cache:"no-store"
+     });
+     if(r.ok){const v=await r.json();out.can_clhi=Array.isArray(v)&&v.some(x=>x.can_select===true)}
+    }catch{}
+   })());
+   await Promise.all(tasks);return out;
+  };
   return out;
  }
  const session=findSession();if(!session?.access_token)return {signed_in:false,can_payout:false};
@@ -89,7 +86,15 @@ async function loadAccess(){
  return out;
 }
 function render(a){styles();document.querySelectorAll('.mw-board-backdrop,.mw-board-panel').forEach(x=>x.remove());const back=document.createElement('div'),panel=document.createElement('div'),cur=currentPage(),visible=PAGES.filter(p=>can(p,a));back.className='mw-board-backdrop';panel.className='mw-board-panel';panel.innerHTML=`<div class="mw-board-head"><div class="mw-board-title">\ub9c8\ub8e8\uc6f0 \uba54\ub274</div><button class="mw-board-close">\ub2eb\uae30</button></div><div class="mw-board-body"><div class="mw-board-list">${visible.map(p=>`<a class="mw-board-item ${cur?.key===p.key?'current':''}" href="${esc(p.path)}"><div class="mw-board-item-title">${esc(p.label)}${badge(p)?`<span class="mw-board-badge">${esc(badge(p))}</span>`:''}</div><div class="mw-board-item-sub">${esc(p.desc||'')}</div></a>`).join('')}</div></div>`;document.body.append(back,panel);const close=()=>{back.classList.remove('open');panel.classList.remove('open');},open=()=>{back.classList.add('open');panel.classList.add('open');};back.onclick=close;panel.querySelector('.mw-board-close').onclick=close;const t=document.getElementById('mwBoardMenuToggle');if(t)t.onclick=e=>{e.preventDefault();open();};}
-async function init(){console.info('[board-menu]',BUILD);try{const a=await loadAccess(),cur=currentPage();if(cur&&!cur.public&&!a.signed_in)return deny('\ub85c\uadf8\uc778\uc774 \ud544\uc694\ud569\ub2c8\ub2e4','\ub85c\uadf8\uc778 \ud6c4 \ub2e4\uc2dc \uc811\uc18d\ud574\uc8fc\uc138\uc694.');if(cur&&!can(cur,a))return deny('\uc811\uadfc \uad8c\ud55c \uc5c6\uc74c','\uc774 \ud398\uc774\uc9c0\ub294 \ud604\uc7ac \uacc4\uc815 \uad8c\ud55c\uc73c\ub85c \uc774\uc6a9\ud560 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4.');render(a);}catch(e){deny('\uad8c\ud55c \ud655\uc778 \uc2e4\ud328',e.message||String(e));}}
+async function init(){console.info('[board-menu]',BUILD);try{
+ const a=await loadAccess(),cur=currentPage();
+ const sensitive=cur?.requireClhi||cur?.requirePayout;
+ if(sensitive&&a.__loadOptional)await a.__loadOptional();
+ if(cur&&!cur.public&&!a.signed_in)return deny('로그인이 필요합니다','로그인 후 다시 접속해주세요.');
+ if(cur&&!can(cur,a))return deny('접근 권한 없음','이 페이지는 현재 계정 권한으로 이용할 수 없습니다.');
+ render(a);
+ if(!sensitive&&a.__loadOptional)a.__loadOptional().then(()=>render(a)).catch(()=>{});
+}catch(e){deny('권한 확인 실패',e.message||String(e));}}
 document.readyState==='loading'?document.addEventListener('DOMContentLoaded',init,{once:true}):init();
 window.addEventListener('storage',e=>{if(e.key?.endsWith('-auth-token'))init();});
 })();

@@ -58,7 +58,10 @@
    expires_in:Math.max(0,Math.floor((expiry-Date.now())/1000)),user};
  };
  async function csrf(){
-  const session=await realSession(true);
+  // The gateway independently validates the session and CSRF on EVERY write.
+  // Reuse the short-lived, in-tab verification result rather than making an
+  // extra network round-trip just to read the same CSRF token per mutation.
+  const session=await realSession();
   if(!session||typeof session.csrf_token!=="string")throw Error("secure_session_required");
   return session.csrf_token;
  }

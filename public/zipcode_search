@@ -4614,6 +4614,8 @@
             : [];
           let detailProgressSignature = null;
           let detailStallRounds = 0;
+          let detailLastProgressAt = Date.now();
+          const DETAIL_STALL_GRACE_MS = 12 * 60 * 1000;
           for (
             let detailRound = 0;
             data?.requiresDetailContinuation === true;
@@ -4622,12 +4624,34 @@
             const progress = data?.progress || data?.detailContinuation || {};
             const processed = Number(progress.processedParcelCount || detailEvidence.length || 0);
             const remaining = Number(progress.remainingParcelCount || 0);
-            const progressSignature = `${processed}:${remaining}`;
+            // A single parcel can be thousands of source pages. The parcel counter
+            // remains unchanged while the backend advances persisted page checkpoints.
+            const source = progress.sourceProgress || data?.sourceProgress || data?.detailContinuation?.sourceProgress || {};
+            const progressSignature = [processed,remaining,
+              source.parcelKey || "",source.phase || "",
+              source.nextPage || "",source.pages || "",source.receivedRows || ""
+            ].join(":");
             if (detailProgressSignature === progressSignature) detailStallRounds += 1;
-            else detailStallRounds = 0;
+            else {
+              detailStallRounds = 0;
+              detailLastProgressAt = Date.now();
+            }
             detailProgressSignature = progressSignature;
-            if (detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS) {
+            if (detailStallRounds >= 60 || (detailStallRounds >= BUILDING_CONTINUATION_MAX_STALL_ROUNDS && Date.now() - detailLastProgressAt >= DETAIL_STALL_GRACE_MS)) {
+              recordBuildingRequestLog({
+                zipcode:zip,stage:"detail_continuation",event:"stalled",
+                kind:"no_progress",attempt:detailStallRounds,message:"detail source checkpoint stopped: "+progressSignature
+              });
               throw new Error(`상세 필지 조회 진행이 멈췄습니다. 처리 ${processed.toLocaleString("ko-KR")}건 / 남은 ${remaining.toLocaleString("ko-KR")}건`);
+            }
+            // Do not hammer a busy provider when a continuation returns without progress.
+            if (detailStallRounds >= 2) {
+              state.buildingStatusByZip.set(zip, {
+                state:"loading",
+                message:"원천 데이터 수집을 이어받는 중입니다. 처리 "+processed+"건 / 남은 "+remaining+"건"
+              });
+              renderTerrainList();
+              await new Promise(resolve=>setTimeout(resolve,Math.min(15000,2000*detailStallRounds)));
             }
             const total = Number(progress.totalDetailParcelCount || processed + remaining || 0);
             state.buildingStatusByZip.set(zip, {

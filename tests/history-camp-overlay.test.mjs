@@ -29,9 +29,10 @@ const context={window:{MARUWELL_CONFIG:{}},location:{search:"?zips=14000&camp=%E
 vm.runInNewContext(js,context);
 assert.equal(typeof context.window.MW_CAMP_OVERLAY_BOOT,"function");
 await context.window.MW_CAMP_OVERLAY_BOOT({panTo(){},getLevel(){return 5},setLevel(){}},null);
-const panel=wrap.children[0],list=panel.children[1];
-assert.equal(list.children.length,6,"all 4 mobile camps plus main and SH in panel");
-assert.equal(added,2,"all MB camps share the main camp location, with separate SH location");
-assert(list.children.some(r=>r.children[1].children[0].textContent.includes("AYG1_SH")));
-assert(nodes.some(n=>n.className?.includes("mwCampPin")&&n.children.some(x=>x.textContent?.includes("관양동"))));
+assert.equal(wrap.children.length,0,"no bottom panel or toggle controls");
+assert.equal(added,2,"all MB camps share main camp location; SH has separate overlay");
+const pins=nodes.filter(n=>n.className?.includes("mwCampPin"));
+assert.equal(pins.length,6,"all 6 camp labels stay on the map");
+assert(pins.some(n=>n.children.some(x=>x.textContent?.includes("AYG1_SH"))));
+assert(!js.includes("if(!visible)"),"no condition may hide camp markers");
 console.log("PASS: camp URL, 6 rows, mobile markers, linked SH and coordinate sharing");

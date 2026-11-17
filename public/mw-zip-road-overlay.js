@@ -45,34 +45,47 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   if (!map || !document.getElementById("terrainSection") || !window.turf || !window.kakao?.maps) return null;
   const turf = window.turf;
   const css = [
-    "#mwRoadPanel{margin:11px 0 0;padding:12px;border:1px solid #cbd9e6;border-radius:13px;background:#f8fbff}",
-    ".mwRoadHead{display:flex;justify-content:space-between;align-items:center;gap:9px}",
+    "#mwRoadPanel{position:absolute;left:14px;bottom:18px;z-index:35;width:min(252px,calc(100% - 28px));max-height:min(52vh,480px);display:flex;flex-direction:column;padding:10px;border:1px solid rgba(129,149,164,.55);border-radius:12px;background:rgba(255,255,255,.94);box-shadow:0 5px 20px rgba(26,45,66,.18);backdrop-filter:blur(5px);pointer-events:auto;color:#25394e}",
+    "#mwRoadPanel[hidden]{display:none!important}",
+    ".mwRoadHead{display:flex;align-items:center;justify-content:space-between;gap:7px;padding-bottom:5px;border-bottom:1px solid #e4ebf0}",
     ".mwRoadHead strong{font-size:12px;font-weight:900;color:#26374b}",
-    ".mwRoadToggle{font-size:11px!important;border:1px solid #90b5cf;border-radius:8px;padding:7px 10px;background:#e9f3fa;color:#27516c;font-weight:800;white-space:nowrap;cursor:pointer}",
-    ".mwRoadToggle[aria-pressed=true]{background:#d7e9df;color:#245e44;border-color:#87b69c}",
-    ".mwRoadHint{font-size:10px;color:#697b8e;line-height:1.55;margin:7px 0 0}",
-    ".mwRoadStatus{font-size:11px;color:#455c72;line-height:1.5;margin-top:8px}",
-    ".mwRoadLegend{max-height:255px;overflow-y:auto;margin-top:9px;display:flex;flex-direction:column;gap:5px}",
+    ".mwRoadToggle{font-size:11px!important;border:1px solid #90b5cf!important;border-radius:8px!important;padding:7px 10px!important;background:#e9f3fa!important;color:#27516c!important;font-weight:800!important;white-space:nowrap;cursor:pointer}",
+    ".mwRoadToggle[aria-pressed=true]{background:#d7e9df!important;color:#245e44!important;border-color:#87b69c!important}",
+    ".mwRoadHint{font-size:10px;color:#697b8e;line-height:1.4;margin:7px 0 0}",
+    ".mwRoadStatus{font-size:10px;color:#455c72;line-height:1.35;margin:5px 0;overflow-wrap:anywhere}",
+    ".mwRoadLegend{min-height:0;max-height:min(35vh,332px);overflow:auto;margin-top:5px;display:flex;flex-direction:column;gap:3px;overscroll-behavior:contain}",
     ".mwRoadLegend[hidden]{display:none!important}",
-    ".mwRoadRow{display:flex;align-items:center;text-align:left;gap:8px;width:100%;padding:7px 8px;border:1px solid #dce5ed;background:#fff;border-radius:8px;cursor:pointer}",
+    ".mwRoadRow{display:flex;align-items:center;text-align:left;gap:7px;width:100%;min-height:29px;padding:5px 7px;border:1px solid #e1e9ef;background:#fff;border-radius:7px;cursor:pointer}",
     ".mwRoadRow[data-selected=true]{border-color:#3e6d88;box-shadow:0 0 0 1px #3e6d88}",
     ".mwRoadSwatch{flex:0 0 13px;width:13px;height:13px;border-radius:3px;border:1px solid}",
     ".mwRoadName{flex:1;min-width:0;color:#24394e;font-weight:800;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-    ".mwRoadCount{color:#6a7a8b;font-size:10px;white-space:nowrap}",
+    ".mwRoadCount{color:#31475d;font-size:11px;font-weight:850;white-space:nowrap;font-variant-numeric:tabular-nums}",
+    "@media(max-width:720px){#mwRoadPanel{left:8px;bottom:8px;width:min(205px,calc(100% - 16px));max-height:38vh;padding:8px}.mwRoadLegend{max-height:25vh}.mwRoadRow{min-height:26px;padding:3px 5px}}",
     ".mwRoadLabel{pointer-events:none;white-space:nowrap;padding:3px 7px;border:1px solid #7895a8;background:rgba(255,255,255,.96);border-radius:6px;color:#22394b;font-size:10px;font-weight:850;box-shadow:0 1px 5px rgba(29,46,67,.16)}",
     ".mwBuildingPopup{padding:9px 12px;border:1px solid #9eb5c4;border-radius:9px;background:#fff;box-shadow:0 2px 10px #182f4940;color:#25394a;font-size:11px;max-width:280px}",
     ".mwBuildingPopup strong{display:block;font-size:12px;margin-bottom:5px;color:#133954}",
     ".mwBuildingPopup button{float:right;font-size:12px;margin-left:5px;border:0;background:transparent;cursor:pointer}"
   ].join("");
   const style=document.createElement("style");style.textContent=css;document.head.appendChild(style);
-  const host=document.getElementById("terrainSection");
-  const panel=document.createElement("section");panel.id="mwRoadPanel";
-  panel.innerHTML='<div class="mwRoadHead"><strong>건물별 도로명 분포</strong><button class="mwRoadToggle" type="button" aria-pressed="false">건물별 표시</button></div>'+
-    '<div class="mwRoadHint">공식 건물 외곽선 기준으로 각 건물을 색칠합니다. 도로명은 건물 주소 자료 기준이며 정확한 도로 구역의 경계는 아닙니다.</div>'+
-    '<div class="mwRoadStatus" aria-live="polite">우편번호를 지도에 표시한 뒤 건물별 표시를 누르세요.</div>'+
-    '<div class="mwRoadLegend" hidden></div>';
-  host.parentNode.insertBefore(panel,host);
-  const button=panel.querySelector(".mwRoadToggle");
+  const wrap=document.getElementById("mapWrap");
+  const shareButton=document.getElementById("shareMapBtn");
+  if(!wrap||!shareButton)return null;
+  const button=document.createElement("button");
+  button.className="mwRoadToggle";
+  button.type="button";
+  button.textContent="건물별 표시";
+  button.setAttribute("aria-pressed","false");
+  button.title="도로명별 건물 외곽선 표시";
+  shareButton.insertAdjacentElement("afterend",button);
+  const panel=document.createElement("section");
+  panel.id="mwRoadPanel";
+  panel.hidden=true;
+  panel.setAttribute("aria-label","지도 도로명별 건물 범례");
+  panel.innerHTML='<div class="mwRoadHead"><strong>도로명별 건물</strong><span style="font-size:10px;color:#64748b">개수</span></div>'+
+    '<div class="mwRoadStatus" aria-live="polite">도로명 건물 조회 중…</div>'+
+    '<div class="mwRoadLegend" hidden></div>'+
+    '<div class="mwRoadHint">실제 건물 외곽선 · 도로명별 색상</div>';
+  wrap.appendChild(panel);
   const status=panel.querySelector(".mwRoadStatus");
   const legend=panel.querySelector(".mwRoadLegend");
   const cache=new Map();
@@ -227,7 +240,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
       const name=document.createElement("span");name.className="mwRoadName";
       name.textContent=(selected.length>1?zip+" · ":"")+group.road;
       const qty=document.createElement("span");qty.className="mwRoadCount";
-      qty.textContent=group.placed.length+"동";
+      qty.textContent=String(group.placed.length);
       item.append(swatch,name,qty);
       item.onclick=()=>{if(selectedRoad===group.road&&selectedZip===zip){selectedRoad="";selectedZip="";}else{selectedRoad=group.road;selectedZip=zip;}render();};
       legend.appendChild(item);
@@ -262,10 +275,10 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   }
   function off(){
     enabled=false;seq++;selectedRoad="";selectedZip="";
-    button.setAttribute("aria-pressed","false");button.textContent="건물별 표시";
+    button.setAttribute("aria-pressed","false");button.textContent="건물별 표시";panel.hidden=true;
     stopShapes();legend.hidden=true;showMessage("건물별 레이어가 꺼져 있습니다.");
   }
-  button.onclick=()=>{if(enabled){off();return;}enabled=true;button.setAttribute("aria-pressed","true");button.textContent="건물별 숨기기";schedule();};
+  button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="건물별 숨기기";schedule();};
   if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels(zips().flatMap(zip=>(cache.get(zip)?.groups||[]).map(group=>({zip,group}))));});
   return {
     onZipLoaded(zip){if(enabled&&!cache.has(zip))schedule();},

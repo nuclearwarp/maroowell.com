@@ -30,6 +30,8 @@ jobs:
           node --check .diagnostics/building_v754/reconcile_v755.js
           python -m py_compile .diagnostics/building_v754/patch_v755.py .diagnostics/building_v754/deploy_v755.py
           node tests/building-v755-exclusive-dedupe.test.mjs
+          python -m py_compile .diagnostics/building_v754/patch_v757.py .diagnostics/building_v754/deploy_v757.py
+          node tests/building-v757-kapt-endpoints.test.mjs
       - name: Full Worker regression validation and guarded deployment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -50,11 +52,16 @@ jobs:
           else
             python .diagnostics/building_v754/deploy_v755.py
           fi
-      - name: Inspect current K-APT source routing (no credentials printed)
+      - name: Deploy current K-APT v4/v5 official API routing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CHECK_ONLY: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
         run: |
-          python .diagnostics/building_v754/inspect_live_kapt.py
+          if [ "$CHECK_ONLY" = "true" ]; then
+            python .diagnostics/building_v754/deploy_v757.py --check
+          else
+            python .diagnostics/building_v754/deploy_v757.py
+          fi
       - name: Keep validation results and rollback snapshot
         if: always()
         uses: actions/upload-artifact@v4

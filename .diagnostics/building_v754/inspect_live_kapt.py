@@ -13,6 +13,10 @@ for part in msg.iter_parts():
     if part.get_param('name',header='content-disposition')=='worker.js':src=(part.get_payload(decode=True) or b'').decode('utf-8')
 if not src:raise RuntimeError('worker not found')
 print("WORKER SHA",hashlib.sha256(src.encode()).hexdigest())
+for const_name in ['KAPT_LEGAL_DONG_LIST_URL','KAPT_BASIC_INFO_URL','KAPT_DETAIL_INFO_URL','KAPT_BASIC_INFO_V3_URL','KAPT_DETAIL_INFO_V3_URL','BUILDING_HUB_TITLE_URL']:
+    match=re.search(r'(?m)^const '+const_name+r'\s*=\s*[\s\S]{1,450}?;',src)
+    if match:print("CONSTANT",const_name,match.group(0)[:450].replace("\n"," "))
+
 keys=['KAPT','kapt','AptList','AptBasis','getLegaldong','getBrTitle','getBrRecap']
 lines=src.splitlines()
 for n,line in enumerate(lines):
@@ -24,7 +28,7 @@ names=[
 "v60EnsureKaptRegionLists","v60KaptCandidateRows","v60BuildKaptMatches",
 "v60FetchKaptRegion","v60FetchKaptRegionList","v60FetchKaptLegalDong",
 "v60EnsureScopeTitles","v60TitleRowsByParcel","v60DetermineDetailParcels",
-"v60FetchBuildingHubTitlePage","fetchBuildingHubTitlePage"
+"v60FetchBuildingHubTitlePage","fetchBuildingHubTitlePage","kaptRegionCodeVariants","v60BestScopeKaptMatch","v60FetchExactTitleParcel","v60FetchKaptComplexInfo","v60EnsureKaptComplexInfo"
 ]
 for name in names:
     m=re.search(r'(?m)^(?:async )?function '+re.escape(name)+r'\(',src)

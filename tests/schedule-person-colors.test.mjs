@@ -13,7 +13,7 @@ const clean=v=>String(v??"").trim();
 const keyOf=v=>clean(v).replace(/\s+/g,"").toUpperCase();
 const state={personColorMap:new Map()};
 const f=new Function("state","keyOf","clean","resolveAccount","LIGHT_PALETTE",
- html.slice(start,end)+";return {assignColorKey,colorForValue,textColorForBg,personColorPattern,personCellStyle};"
+ html.slice(start,end)+";return {assignColorKey,colorForValue,textColorForBg,personCellStyle};"
 )(state,keyOf,clean,v=>({colorKey:v}),palette);
 const names=[...Array(30)].map((_,i)=>"기사"+String(i).padStart(2,"0")).concat(["최영하","이병훈"]);
 const owners=[...names].sort((a,b)=>a.localeCompare(b,"ko"));
@@ -33,11 +33,14 @@ for(const bg of palette){
  const fg=f.textColorForBg(bg);
  const contrast=(Math.max(luminance(bg),luminance(fg))+.05)/(Math.min(luminance(bg),luminance(fg))+.05);
  assert(contrast>=4.5,"contrast of "+bg+" "+contrast);
- assert(f.personCellStyle(bg).includes("background-image:"));
+ assert(f.personCellStyle(bg).includes("background-image:none"));
 }
 assert(html.includes("const colorOwners=[...new Set(drivers.map"),"roster preseed");
-assert(html.includes('input.style.setProperty("background-image", personColorPattern(bg), "important")'),"input recolors");
-assert(html.includes('div.style.setProperty("background-image",personColorPattern(bg)'),"image output pattern");
+assert(html.includes('input.style.setProperty("background-image", "none", "important")'),"solid input colors");
+assert(html.includes('div.style.setProperty("background-image","none","important")'),"solid image output");
+assert(!html.includes("repeating-linear-gradient("),"no distracting stripe pattern");
+assert(html.includes('isOff ? "#dce3eb" : colorForValue(value)'),"rest row uses neutral color");
+assert.notEqual(f.colorForValue("이병훈"), f.colorForValue("한재봉2"),"two different drivers must not share color");
 const scripts=[...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)];
 for(const m of scripts)if(m[1].trim())new Function(m[1]);
-console.log("PASS: high-contrast palette, 32 distinct owners, stable identities, script syntax and export");
+console.log("PASS: soft solid palette, 32 distinct owners, stable identities, script syntax and export");

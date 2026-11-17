@@ -2136,8 +2136,8 @@
       // coupangRouteMap V62와 동일한 건물 분석 프론트 설정.
       // 180초는 목표 시간이 아니라 Worker continuation 요청의 safety timeout이다.
       const BUILDING_STATS_FETCH_TIMEOUT_MS = 180000;
-      const BUILDING_STATS_FETCH_RETRY_COUNT = 0;
-      const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 900;
+      const BUILDING_STATS_FETCH_RETRY_COUNT = 2;
+      const BUILDING_STATS_FETCH_RETRY_DELAY_MS = 15000;
       const BUILDING_FRONT_DISCOVERY_VERSION = "V63_DENSE_PARCEL_BACKFILL";
 
       const BUILDING_GEOCODE_CONCURRENCY = 3;
@@ -4150,11 +4150,72 @@
           /invalid or expired login session|jwt[^a-z0-9]*(?:expired|invalid)|(?:access|auth|login)[^\n]{0,24}(?:token|session)[^\n]{0,24}(?:expired|invalid)|token[^\n]{0,24}expired/i.test(text);
       }
 
+      // Each browser retains the last 400 building requests, with no JWT, address or response body.
+      // The backend stores provider-level request outcomes in mw_building_provider_gate.
+      const BUILDING_DIAG_KEY = "mw_building_request_log_v1";
+      function readBuildingRequestLog() {
+        try { const parsed=JSON.parse(localStorage.getItem(BUILDING_DIAG_KEY)||"[]"); return Array.isArray(parsed)?parsed:[]; }
+        catch { return []; }
+      }
+      function recordBuildingRequestLog(entry) {
+        try {
+          const rows=readBuildingRequestLog();
+          rows.push({
+            at:new Date().toISOString(),
+            zipcode:String(entry.zipcode||"").slice(0,5),
+            stage:String(entry.stage||"").slice(0,36),
+            attempt:Number(entry.attempt||0),
+            event:String(entry.event||"").slice(0,22),
+            kind:String(entry.kind||"").slice(0,32),
+            httpStatus:Number(entry.httpStatus||0),
+            retryAfterSeconds:Number(entry.retryAfterSeconds||0),
+            elapsedMs:Number(entry.elapsedMs||0),
+            message:String(entry.message||"").slice(0,360)
+          });
+          localStorage.setItem(BUILDING_DIAG_KEY,JSON.stringify(rows.slice(-400)));
+        }catch {}
+      }
+      function buildingRequestStage(payload){
+        if(payload?.cacheOnly||payload?.cache_only)return "cache_probe";
+        if(payload?.detailEvidence)return "detail_continuation";
+        if(payload?.kaptInfoEvidence)return "kapt_continuation";
+        if(payload?.scopeTitleEvidence)return "title_continuation";
+        if(payload?.buildingLocations)return "geocode_continuation";
+        if(payload?.scopeParcels)return "scope_parcels";
+        return "initial";
+      }
+      function transientBuildingResponse(error) {
+        const status=Number(error?.httpStatus||0),msg=String(error?.message||"");
+        if(isBuildingAuthRejected(status,msg))return false;
+        if(/invalid.*(?:geometry|polygon|postal|postcode)|SOURCE_MALFORMED|SOURCE_PAGE_MISMATCH|SOURCE_REPEATED_PAGE|SOURCE_INCOMPLETE|SOURCE_LIMIT_EXCEEDED|INVALID_PARCEL/i.test(msg))return false;
+        return error?.name==="AbortError"||status===408||status===429||status>=500
+          ||/Building HUB.*(?:empty body|\[05\]|응답 시간초과|연결실패)|SOURCE_PROVIDER_BUSY|SOURCE_BUSY|failed to fetch|network|timeout|cors|err_failed/i.test(msg);
+      }
+      function buildingRetryDelay(error,attempt) {
+        const data=error?.responseData||{};
+        const hint=Number(data.retryAfterSeconds||data.retry_after_seconds||data?.diagnostics?.retryAfterSeconds||0);
+        const backoff=BUILDING_STATS_FETCH_RETRY_DELAY_MS*Math.pow(3,attempt);
+        // Allow the server-side pageRecovery checkpoint (15s, 45s, ...) to expire first.
+        return Math.min(120000,Math.max(15000,backoff,Number.isFinite(hint)?hint*1000:0));
+      }
+      function downloadBuildingRequestLog() {
+        const text=JSON.stringify({format:"mw-building-diagnostics-v1",exportedAt:new Date().toISOString(),records:readBuildingRequestLog()},null,2);
+        const blob=new Blob([text],{type:"application/json;charset=utf-8"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url;a.download="maroowell-building-diagnostics.json";a.hidden=true;
+        document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+      }
+
       async function postBuildingStats(session, payload) {
         let lastError = null;
+        const zipcode=String(payload?.zipcode||"").slice(0,5);
+        const stage=buildingRequestStage(payload);
         let authRetried = false;
 
         for (let attempt = 0; attempt <= BUILDING_STATS_FETCH_RETRY_COUNT; attempt++) {
+          const startedAt=Date.now();
           try {
             let currentSession = await getCurrentSession(false).catch(() => session || null);
             if (!currentSession?.access_token) throw new Error("로그인 세션을 확인하지 못했습니다. 새로고침 후 다시 시도해주세요.");
@@ -4200,23 +4261,30 @@
               throw error;
             }
 
+            recordBuildingRequestLog({zipcode,stage,attempt:attempt+1,event:"success",httpStatus:result.res.status,elapsedMs:Date.now()-startedAt});
             return result.data || {};
           } catch (error) {
-            lastError = error;
-            const status = Number(error?.httpStatus || 0);
-            const message = String(error?.message || error || "");
-            const transient = (
-              status === 0 ||
-              status === 408 ||
-              status === 429 ||
-              status >= 500 ||
-              /failed to fetch|network|timeout|cors|err_failed/i.test(message)
-            );
+            lastError=error;
+            const status=Number(error?.httpStatus||0);
+            const message=String(error?.message||error||"");
+            const retryable=transientBuildingResponse(error);
+            const willRetry=retryable && !(payload?.cacheOnly||payload?.cache_only) && attempt<BUILDING_STATS_FETCH_RETRY_COUNT;
+            const delayMs=willRetry?buildingRetryDelay(error,attempt):0;
+            recordBuildingRequestLog({
+              zipcode,stage,attempt:attempt+1,event:willRetry?"retry_wait":"failure",
+              kind:/empty body/i.test(message)?"empty_http_200":/\[05\]|시간초과|연결실패/i.test(message)?"provider_05":error?.name==="AbortError"?"timeout":retryable?"transient":"terminal",
+              httpStatus:status,elapsedMs:Date.now()-startedAt,retryAfterSeconds:Math.ceil(delayMs/1000),message
+            });
+            if(!willRetry)throw error;
+            if(state.selectedZips.has(zipcode)){
+              state.buildingStatusByZip.set(zipcode,{
+                state:"loading",
+                message:"공공데이터 응답이 불안정하여 "+Math.ceil(delayMs/1000)+"초 후 자동으로 이어받습니다. ("+(attempt+2)+"/"+(BUILDING_STATS_FETCH_RETRY_COUNT+1)+"회)"
+              });
+              renderTerrainList();
+            }
+            await new Promise(resolve=>setTimeout(resolve,delayMs));
 
-            if (!transient || attempt >= BUILDING_STATS_FETCH_RETRY_COUNT) throw error;
-            await new Promise((resolve) =>
-              setTimeout(resolve, BUILDING_STATS_FETCH_RETRY_DELAY_MS * (attempt + 1))
-            );
           }
         }
 
@@ -4762,7 +4830,8 @@
               <div class="buildingStatsMessage">${escapeTerrainHtml(buildingStatus.message || "세대수 데이터를 확인하고 있습니다.")}</div>`;
           } else if (buildingStatus?.state === "error") {
             buildingHtml = `
-              <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "배송 호수 분석 실패")}</div>`;
+              <div class="buildingStatsMessage error">${escapeTerrainHtml(buildingStatus.message || "배송 호수 분석 실패")}</div>
+               <button class="terrainRetry" type="button" data-building-log="${safeZip}">진단 로그 내려받기</button>`;
           } else if (building) {
             const calculatedText = building.calculatedAt
               ? new Date(building.calculatedAt).toLocaleString("ko-KR")
@@ -4892,6 +4961,13 @@
               return;
             }
             void fetchTerrainForZip(zip, feature, true);
+          });
+        });
+
+        list.querySelectorAll("[data-building-log]").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            downloadBuildingRequestLog();
           });
         });
 

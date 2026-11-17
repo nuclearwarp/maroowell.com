@@ -13,8 +13,8 @@ for(const [name,html] of [["route",route],["zipcode",zipcode]]) {
   }
 }
 assert(route.includes("mw-route-road-overlay.js?v=20261117-2"),"route module included");
-assert(route.includes("mw-zip-road-overlay.js?v=20261117-6"),"road hash shared across pages");
-assert(zipcode.includes("mw-zip-road-overlay.js?v=20261117-6"));
+assert(route.includes("mw-zip-road-overlay.js?v=20261117-7"),"road hash shared across pages");
+assert(zipcode.includes("mw-zip-road-overlay.js?v=20261117-7"));
 assert(route.includes('id="routeGeometryToggle"'));
 assert(zipcode.includes('id="zipGeometryToggle"'));
 assert(route.includes("poly.setMap(routeBoundariesVisible ? map : null)"));

@@ -142,6 +142,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   const cache=new Map();
   const drawings=[],labels=[];
   let currentPopup=null,enabled=false,seq=0,selectedRoads=new Set(),queue=Promise.resolve();
+  let renderedRoadGroups=[]; // aggregated per-road data for map idle label refresh
   const showMessage=txt=>{status.textContent=txt;status.hidden=!txt;};
   const zips=()=>[...getSelectedZips()].filter(z=>getFeature(z)).slice(0,MAX_ZIPS);
 
@@ -242,17 +243,18 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     labels.length=0;
     if(Number(map.getLevel?.()||7)>5)return;
     const used=[],projection=map.getProjection?.();
-    for(const e of entries){
-      if(e.group.placed.length===0||e.group.road==="도로명 미확인")continue;
-      const point=e.group.placed[Math.floor(e.group.placed.length/2)].point;
-      if(!point)continue;
+    for(const e of entries || []){
+      const group=e?.group;
+      if(!group || !Array.isArray(group.placed) || group.placed.length===0 || group.road==="도로명 미확인")continue;
+      const point=group.placed[Math.floor(group.placed.length/2)]?.point;
+      if(!Array.isArray(point) || point.length<2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1]))continue;
       const pos=new kakao.maps.LatLng(point[1],point[0]);
       if(projection?.containerPointFromCoords){
         const pt=projection.containerPointFromCoords(pos);
         if(used.some(x=>Math.abs(x.x-pt.x)<118&&Math.abs(x.y-pt.y)<32))continue;
         used.push(pt);
       }
-      const label=document.createElement("div");label.className="mwRoadLabel";label.textContent=e.group.road;label.style.borderColor=e.group.color[1];
+      const label=document.createElement("div");label.className="mwRoadLabel";label.textContent=group.road;label.style.borderColor=group.color[1];
       const overlay=new kakao.maps.CustomOverlay({map,position:pos,content:label,yAnchor:.5,zIndex:12,clickable:false});
       labels.push(overlay);
     }
@@ -311,7 +313,8 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     clearSelection.disabled=selectedRoads.size===0;
     if(allGroups.length)showMessage("");
     else showMessage("해당 구역에서 표시 가능한 건물 주소가 없습니다.");
-    drawLabels(allGroups.map(group=>({group})));
+    renderedRoadGroups=allGroups.map(group=>({group}));
+    drawLabels(renderedRoadGroups);
   }
   clearSelection.onclick=()=>{selectedRoads.clear();render();};
   async function run(token){
@@ -339,12 +342,12 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     });
   }
   function off(){
-    enabled=false;seq++;selectedRoads.clear();
+    enabled=false;seq++;selectedRoads.clear();renderedRoadGroups=[];
     button.setAttribute("aria-pressed","false");button.textContent="건물별 표시";panel.hidden=true;
     stopShapes();legend.hidden=true;showMessage("건물별 레이어가 꺼져 있습니다.");
   }
   button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="건물별 숨기기";schedule();};
-  if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels([...new Map(zips().flatMap(zip=>(cache.get(zip)?.groups||[]).map(group=>[group.road,group]))).values()].map(group=>({group})));});
+  if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels(renderedRoadGroups);});
   return {
     onZipLoaded(zip){if(enabled&&!cache.has(zip))schedule();},
     onZipRemoved(zip){cache.delete(zip);if(enabled)schedule();},

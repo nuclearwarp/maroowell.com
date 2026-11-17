@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const patch=readFileSync(".diagnostics/building_v754/patch_v758.py","utf8");
+assert(patch.includes("V758_KAPT_COMPLEX_NAME_CANDIDATES"));
+const match=patch.match(/NEW=.*?if \(\/(.*?)\/\.test\(name/);
+assert(match,"candidate pattern in source");
+const pattern=new RegExp(match[1]);
+for(const name of ["상암월드컵파크7단지","상암월드컵파크12단지","월드컵파크11단지","래미안1단지","푸르지오"]) assert(pattern.test(name),name);
+for(const name of ["상암고등학교","철도차량기지","자동차차고지","창고시설"]) assert(!pattern.test(name),name);
+console.log("PASS: K-APT complex names without 아파트 are included, unrelated facilities excluded");

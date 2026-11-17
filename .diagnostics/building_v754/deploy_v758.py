@@ -48,8 +48,14 @@ def main():
     raw,_=call('?bindings_inherit=strict','PUT',body,{'Content-Type':'multipart/form-data; boundary='+boundary})
     if not json.loads(raw).get('success'):raise RuntimeError('Worker deployment was not accepted')
     expected=hashlib.sha256(after.encode()).hexdigest()
-    for attempt in range(12):
-        deployed=source()
+    for attempt in range(18):
+        try:
+            deployed=source()
+        except RuntimeError as exc:
+            if "Cloudflare request failed: HTTP 404" in str(exc) and attempt < 17:
+                time.sleep(3)
+                continue
+            raise
         observed=hashlib.sha256(deployed.encode()).hexdigest()
         if observed==expected:break
         if MARKER in deployed and all(url in deployed for url in (

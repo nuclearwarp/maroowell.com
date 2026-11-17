@@ -1,36 +1,36 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import {readFileSync} from "node:fs";
 import vm from "node:vm";
+const moduleSource=readFileSync("public/mw-zip-road-overlay.js","utf8");
 const html=readFileSync("public/zipcode_search","utf8");
-const js=readFileSync("public/mw-zip-road-overlay.js","utf8");
-assert(html.includes("/mw-zip-road-overlay.js?v=20261117-1"));
-assert(html.includes("window.MW_ROAD_OVERLAY_BOOT({"));
-assert(html.includes("state.roadOverlay?.onZipLoaded(zip)"));
-assert(html.includes("state.roadOverlay?.onZipRemoved(zip)"));
-assert(html.includes("state.roadOverlay?.reset()"));
-for(const [,source] of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)){if(source.trim())new Function(source)}
-const ctx={window:{},console,Math,Number,String,Set,Map};
-vm.runInNewContext(js,ctx);
-const {extractRoadName,groupRoadSamples,selectEvenly}=ctx.window.MW_ROAD_OVERLAY_TOOLS;
-assert.equal(extractRoadName({roadAddress:"서울특별시 영등포구 도림천로13길 12"}),"도림천로13길");
-assert.equal(extractRoadName({roadAddress:"서울특별시 영등포구 도림천로11길 8"}),"도림천로11길");
-assert.equal(extractRoadName({roadAddress:"서울특별시 영등포구 선유로 3"}),"선유로");
-assert.equal(extractRoadName({roadAddress:"서울특별시 영등포구 당산동 123"}),"");
-const items=[
- {lng:126.90,lat:37.50,roadAddress:"서울특별시 영등포구 도림천로13길 12"},
- {lng:126.91,lat:37.51,roadAddress:"서울특별시 영등포구 도림천로13길 13"},
- {lng:126.92,lat:37.52,roadAddress:"서울특별시 영등포구 도림천로11길 8"},
- {lng:126.93,lat:37.53,roadAddress:"서울특별시 영등포구 도림천로13길 12"},
-];
-const groups=groupRoadSamples(items);
-assert.equal(groups.length,2);
-assert.equal(groups[0].name,"도림천로13길");
-assert.equal(groups[0].samples.length,3);
-assert.equal(groups[0].addresses.size,2);
-assert.equal(groups[1].name,"도림천로11길");
-assert.notEqual(groups[0].color.fill,groups[1].color.fill);
-assert.equal(selectEvenly(items,2).length,2);
-assert.equal(selectEvenly([{lat:null,lng:Infinity},...items],2).length,2);
-assert(js.includes("turf.intersect(turf.polygon([corners]), feature)"),"drawings must be clipped inside zipcode polygon");
-assert(js.includes("String(result.zonecode) !== zip"),"exclude reverse-geocoded mismatching postal codes");
-console.log("PASS: editor wiring, scripts syntax, road extraction, sample groups, soft colors, polygon clipping and zip guards");
+const server=readFileSync("worker.js","utf8");
+new Function(moduleSource);
+new Function(server.replace(/^export default \{/m,"const worker={"));
+for (const [,source] of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if(source.trim())new Function(source);
+assert(html.includes("mw-zip-road-overlay.js?v=20261117-2"));
+assert(html.includes("onBuildingClick: () => { state.selectionClickGuardUntil = Date.now() + 400"));
+assert(server.includes('path === "/building-footprints"'));
+assert(server.includes("MOIS_KR_Buildings_v2/FeatureServer/0/query"));
+assert(server.includes("bsi_zon_no = '"));
+assert(server.includes("resultOffset: String(offset)"));
+assert(server.includes('outSR: "4326"'));
+const ctx={window:{},console,Math,Map,Set};
+vm.runInNewContext(moduleSource,ctx);
+const {toBuilding,grouping,roadName}=ctx.window.MW_ROAD_OVERLAY_TOOLS;
+const xy=[126.8974,37.4924];
+const one={type:"Feature",id:10,properties:{objectid:10,building_id:"012345",street_name:"도림천로13길",house_number:"10",bsi_zon_no:"07420"},geometry:{type:"Polygon",coordinates:[[[xy[0],xy[1]],[xy[0]+.0001,xy[1]],[xy[0]+.0001,xy[1]+.0001],[xy[0],xy[1]]]]}};
+const two=JSON.parse(JSON.stringify(one));two.id=11;two.properties.objectid=11;two.properties.building_id="012345";two.properties.street_name="도림천로11길";
+const three=JSON.parse(JSON.stringify(one));three.id=12;three.properties.objectid=12;three.properties.street_name="";
+const buildings=[one,two,three].map(toBuilding);
+assert.equal(buildings.length,3);
+assert.equal(new Set(buildings.map(x=>x.id)).size,3,"different building objectids must remain distinct");
+assert.equal(buildings[0].managementId,"012345");
+assert.equal(roadName(one.properties),"도림천로13길");
+assert.equal(grouping(buildings).length,3);
+assert(grouping(buildings).some(g=>g.road==="도로명 미확인"));
+assert(!moduleSource.includes("clipSquare"),"old sampled rectangles removed");
+assert(!moduleSource.includes("buildScopeDiscoveryPoints"),"old random sample allocation removed");
+assert(moduleSource.includes("turf.intersect(footprint,feature)"),"exact footprint clipped to ZIP polygon");
+assert(moduleSource.includes("kakao.maps.Polygon"),"one polygon per actual building");
+assert(moduleSource.includes("if(!data.hasMore)break"),"paginated to completion");
+console.log("PASS: each building footprint, address grouping, separate object IDs, full paging, source proxy and ZIP clipping");

@@ -135,6 +135,10 @@ export default {
         return cors(json({ error: "Method Not Allowed" }, 405));
       }
 
+      if (path === "/building-footprints" && request.method === "GET") {
+        return cors(await handleBuildingFootprintsGet(url));
+      }
+
       if (path === "/osm" && request.method === "GET") {
         return cors(await handleOsmGet(url));
       }
@@ -2161,6 +2165,41 @@ async function handleShareHtml(request, url, env) {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+
+// Building-by-building road name overlay, from public MOIS building footprint layer.
+// Fixed upstream host and strict zipcode/pagination validation prevent arbitrary proxying.
+const MOIS_BUILDING_FEATURE_URL = "https://portal.esrikr.com/arcgis/rest/services/MOIS_KR_Buildings_v2/FeatureServer/0/query";
+async function handleBuildingFootprintsGet(url) {
+  const zipcode = String(url.searchParams.get("zipcode") || "").trim();
+  if (!/^\d{5}$/.test(zipcode)) return json({ error: "Five-digit zipcode required" }, 400);
+  const offset = Number(url.searchParams.get("offset") || 0);
+  const requestedLimit = Number(url.searchParams.get("limit") || 200);
+  if (!Number.isInteger(offset) || offset < 0 || offset > 10000 || !Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 350) {
+    return json({ error: "Invalid page offset or limit" }, 400);
+  }
+  const query = new URL(MOIS_BUILDING_FEATURE_URL);
+  const params = {
+    f: "geojson", where: `bsi_zon_no = '${zipcode}'`,
+    outFields: "objectid,bul_man_no,building_id,building_name,buld_nm_dc,street_name,house_number,bsi_zon_no",
+    outSR: "4326", orderByFields: "objectid ASC",
+    resultOffset: String(offset), resultRecordCount: String(requestedLimit)
+  };
+  for (const [key, value] of Object.entries(params)) query.searchParams.set(key, value);
+  let response;
+  try { response = await fetch(query.toString(), { signal: AbortSignal.timeout(20000), headers: { Accept: "application/geo+json,application/json" } }); }
+  catch (error) { return json({ error: "Building footprint source unavailable", detail: String(error?.name || "fetch_failed") }, 502); }
+  if (!response.ok) return json({ error: "Building footprint upstream HTTP " + response.status }, 502);
+  let data;
+  try { data = await response.json(); } catch { return json({ error: "Invalid building footprint response" }, 502); }
+  if (data?.error || data?.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+    return json({ error: "Building footprint source returned an error", code: data?.error?.code || null }, 502);
+  }
+  const features = data.features.filter((item) => item?.geometry && item?.properties && String(item.properties.bsi_zon_no || "").padStart(5,"0") === zipcode);
+  if (features.length !== data.features.length) return json({ error: "Building footprint source zipcode mismatch" }, 502);
+  const hasMore = data.features.length === requestedLimit || data.exceededTransferLimit === true;
+  return json({ ok: true, zipcode, features, offset, count: features.length, hasMore, nextOffset: offset + data.features.length, source: "MOIS_KR_Buildings_v2" }, 200, { "Cache-Control": "public, max-age=900" });
 }
 
 // ---------- /osm ----------

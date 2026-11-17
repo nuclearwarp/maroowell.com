@@ -12,9 +12,9 @@ for(const [name,html] of [["route",route],["zipcode",zipcode]]) {
     if(src.trim())assert.doesNotThrow(()=>new Function(src),name+" inline Javascript syntax");
   }
 }
-assert(route.includes("mw-route-road-overlay.js?v=20261117-1"),"route module included");
-assert(route.includes("mw-zip-road-overlay.js?v=20261117-5"),"road hash shared across pages");
-assert(zipcode.includes("mw-zip-road-overlay.js?v=20261117-5"));
+assert(route.includes("mw-route-road-overlay.js?v=20261117-2"),"route module included");
+assert(route.includes("mw-zip-road-overlay.js?v=20261117-6"),"road hash shared across pages");
+assert(zipcode.includes("mw-zip-road-overlay.js?v=20261117-6"));
 assert(route.includes('id="routeGeometryToggle"'));
 assert(zipcode.includes('id="zipGeometryToggle"'));
 assert(route.includes("poly.setMap(routeBoundariesVisible ? map : null)"));
@@ -27,6 +27,12 @@ assert(route.includes("getPacks: () => routePacksForTerrain()"));
 assert(module.includes("getGeometryHash(geometry)"));
 assert(module.includes("routeCache.set(cacheKey,record)"));
 assert(module.includes("tools.colorForRoad(name)"));
+assert(module.includes('selectedRoads=new Set()'));
+assert(module.includes('clearSelection.onclick=()=>{selectedRoads.clear();render(visibleRows);}'));
+assert(module.includes('const key=building.id;'));
+assert(!module.includes('focusedRoad'));
+assert(module.includes('group.entries.length'));
+
 assert(route.includes("getToken: () => getTerrainAccessToken()"),"internal-only JWT auth");
 assert(module.includes("ENDPOINT = \"https://purple-river-0717.brain-0f6.workers.dev/building-footprints/geometry\""));
 const ctx={window:{},console,Math,Map,Set};

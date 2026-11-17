@@ -6,10 +6,36 @@ const PAGE_SIZE = 200;
 const MAX_FEATURES_PER_ZIP = 8000; // Refuse silent truncation; report if unusually large.
 const MAX_ZIPS = 4;
 const PALETTE = [
-  ["#8fcddc","#246f83"],["#a4d3b1","#38785b"],["#cab7e6","#75559e"],
-  ["#ecc2a2","#9e693f"],["#b2c9e9","#426d9c"],["#e6d69b","#887232"],
-  ["#e1b9cb","#994c71"],["#94d1c6","#327b70"],["#c7d6a6","#6a8046"],
-  ["#d6c4b3","#816b58"],["#a6c8d2","#477682"],["#d9c3df","#845b8e"]
+  ["#90c1da","#2c84af"],
+  ["#6666db","#19199a"],
+  ["#db6666","#9a1919"],
+  ["#dbdb66","#9a9a19"],
+  ["#e387e3","#bd1fbd"],
+  ["#e3a687","#bd531f"],
+  ["#7dc57d","#2e842e"],
+  ["#9090da","#2c2caf"],
+  ["#a8ebd5","#28a078"],
+  ["#b466db","#6f199a"],
+  ["#deb5de","#9e409e"],
+  ["#c57dad","#842e68"],
+  ["#e4d2af","#937028"],
+  ["#87e387","#288e28"],
+  ["#c5897d","#843d2e"],
+  ["#66dbc8","#198e84"],
+  ["#b3a8eb","#5c40aa"],
+  ["#d0c071","#8f7d24"],
+  ["#db66c8","#9a1984"],
+  ["#d199b5","#a2396e"],
+  ["#ebeba8","#8e8e24"],
+  ["#7da1c5","#2e5984"],
+  ["#a2d199","#4b8039"],
+  ["#9171d0","#47248f"],
+  ["#a8d5eb","#328ca5"],
+  ["#debcb5","#986045"],
+  ["#b587e3","#6e1fbd"],
+  ["#7dc5ad","#2e8468"],
+  ["#b3eba8","#489f2c"],
+  ["#7181d0","#24368f"],
 ];
 const UNKNOWN = ["#d4dbe2","#6b7c8b"];
 const clean = value => String(value ?? "").trim();
@@ -21,11 +47,18 @@ function canonicalRoad(value) {
 function colorForRoad(value) {
   const road = canonicalRoad(value);
   if (!road || road === "도로명미확인") return UNKNOWN;
-  let h = 2166136261;
+  let h = 2166136261 ^ 1218;
   for (const codePoint of road) {
     h ^= codePoint.codePointAt(0);
     h = Math.imul(h, 16777619);
   }
+  // Mix high and low hash bits so similar road names (e.g. 13/15) do not
+  // systematically choose nearby colors in this 30-color categorical set.
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
   return PALETTE[(h >>> 0) % PALETTE.length];
 }
 function roadName(props) {
@@ -66,6 +99,9 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     ".mwRoadToggle{font-size:11px!important;border:1px solid #90b5cf!important;border-radius:8px!important;padding:7px 10px!important;background:#e9f3fa!important;color:#27516c!important;font-weight:800!important;white-space:nowrap;cursor:pointer}",
     ".mwRoadToggle[aria-pressed=true]{background:#d7e9df!important;color:#245e44!important;border-color:#87b69c!important}",
     ".mwRoadHint{font-size:10px;color:#697b8e;line-height:1.4;margin:7px 0 0}",
+    ".mwRoadClear{font-size:10px;border:1px solid #c8d6e1;border-radius:7px;padding:4px 7px;background:#fff;color:#325371;font-weight:800;cursor:pointer;white-space:nowrap}",
+    ".mwRoadClear:disabled{opacity:.45;cursor:default}",
+    ".mwRoadStatus[hidden]{display:none!important}",
     ".mwRoadStatus{font-size:10px;color:#455c72;line-height:1.35;margin:5px 0;overflow-wrap:anywhere}",
     ".mwRoadLegend{min-height:0;max-height:min(35vh,332px);overflow:auto;margin-top:5px;display:flex;flex-direction:column;gap:3px;overscroll-behavior:contain}",
     ".mwRoadLegend[hidden]{display:none!important}",
@@ -95,17 +131,18 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   panel.id="mwRoadPanel";
   panel.hidden=true;
   panel.setAttribute("aria-label","지도 도로명별 건물 범례");
-  panel.innerHTML='<div class="mwRoadHead"><strong>도로명별 건물</strong><span style="font-size:10px;color:#64748b">개수</span></div>'+
-    '<div class="mwRoadStatus" aria-live="polite">도로명 건물 조회 중…</div>'+
+  panel.innerHTML='<div class="mwRoadHead"><strong>도로명별 건물</strong><button type="button" class="mwRoadClear">선택 해제</button></div>'+
+    '<div class="mwRoadStatus" aria-live="polite" hidden></div>'+
     '<div class="mwRoadLegend" hidden></div>'+
     '<div class="mwRoadHint">실제 건물 외곽선 · 도로명별 색상</div>';
   wrap.appendChild(panel);
   const status=panel.querySelector(".mwRoadStatus");
   const legend=panel.querySelector(".mwRoadLegend");
+  const clearSelection=panel.querySelector(".mwRoadClear");
   const cache=new Map();
   const drawings=[],labels=[];
-  let currentPopup=null,enabled=false,seq=0,selectedRoad="",selectedZip="",queue=Promise.resolve();
-  const showMessage=txt=>{status.textContent=txt};
+  let currentPopup=null,enabled=false,seq=0,selectedRoads=new Set(),queue=Promise.resolve();
+  const showMessage=txt=>{status.textContent=txt;status.hidden=!txt;};
   const zips=()=>[...getSelectedZips()].filter(z=>getFeature(z)).slice(0,MAX_ZIPS);
 
   async function fetchBuildings(zip,token) {
@@ -224,45 +261,59 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     if(!enabled)return;
     stopShapes();
     legend.replaceChildren();
-    let total=0,placed=0,skipped=0,all=[];
-    const selected=zips();
-    for (const zip of selected) {
+    const grouped=new Map();
+    const seenBuildings=new Set();
+    for(const zip of zips()){
       const record=cache.get(zip),feature=getFeature(zip);
       if(!record||!feature)continue;
-      total+=record.buildings.length;
       for(const group of record.groups){
-        group.placed=[];
-        for(const b of group.buildings){
-          const clipped=clipToZip(b,feature);
-          if(!clipped){skipped++;continue;}
+        const road=group.road;
+        if(!grouped.has(road))grouped.set(road,{road,color:colorForRoad(road),placed:[]});
+        const entry=grouped.get(road);
+        for(const building of group.buildings){
+          // The same source object may occur in overlapping ZIP sources;
+          // it represents one building, even when shown by multiple polygons.
+          if(seenBuildings.has(building.id))continue;
+          const clipped=clipToZip(building,feature);
+          if(!clipped)continue;
+          seenBuildings.add(building.id);
           let center=null;
           try{center=turf.centerOfMass(clipped).geometry.coordinates;}catch{}
-          const dim=selectedRoad && (selectedRoad!==group.road||selectedZip!==zip);
-          const cnt=renderShape(clipped,b,group.color,dim);
-          if(cnt){placed++;group.placed.push({building:b,point:center});}else skipped++;
+          entry.placed.push({building,geometry:clipped,point:center});
         }
-        all.push({zip,group});
       }
     }
-    legend.hidden=all.length===0;
-    for(const e of all){
-      const {group,zip}=e,key=zip+"|"+group.road;
-      const item=document.createElement("button");item.type="button";item.className="mwRoadRow";
-      item.dataset.selected=String(selectedRoad===group.road&&selectedZip===zip);
+    const allGroups=[...grouped.values()].filter(g=>g.placed.length)
+      .sort((a,b)=>b.placed.length-a.placed.length||a.road.localeCompare(b.road,"ko"));
+    legend.hidden=!allGroups.length;
+    const available=new Set(allGroups.map(g=>g.road));
+    for(const road of selectedRoads)if(!available.has(road))selectedRoads.delete(road);
+    for(const group of allGroups){
+      const dim=selectedRoads.size>0&&!selectedRoads.has(group.road);
+      for(const entry of group.placed)renderShape(entry.geometry,entry.building,group.color,dim);
+      const item=document.createElement("button");
+      item.type="button";
+      item.className="mwRoadRow";
+      item.dataset.selected=String(selectedRoads.has(group.road));
+      item.setAttribute("aria-pressed",String(selectedRoads.has(group.road)));
       const swatch=document.createElement("span");swatch.className="mwRoadSwatch";
       swatch.style.background=group.color[0];swatch.style.borderColor=group.color[1];
-      const name=document.createElement("span");name.className="mwRoadName";
-      name.textContent=(selected.length>1?zip+" · ":"")+group.road;
-      const qty=document.createElement("span");qty.className="mwRoadCount";
-      qty.textContent=String(group.placed.length);
+      const name=document.createElement("span");name.className="mwRoadName";name.textContent=group.road;
+      const qty=document.createElement("span");qty.className="mwRoadCount";qty.textContent=String(group.placed.length);
       item.append(swatch,name,qty);
-      item.onclick=()=>{if(selectedRoad===group.road&&selectedZip===zip){selectedRoad="";selectedZip="";}else{selectedRoad=group.road;selectedZip=zip;}render();};
+      item.onclick=()=>{
+        if(selectedRoads.has(group.road))selectedRoads.delete(group.road);
+        else selectedRoads.add(group.road);
+        render();
+      };
       legend.appendChild(item);
     }
-    if(total===0)showMessage("원본에 등록된 건물이 없습니다. 임의의 네모를 그리지 않습니다.");
-    else showMessage("건물 "+placed+"/"+total+"개 외곽선 표시 · 도로명 "+all.length+"개"+(skipped?" · 폴리곤 교차/도형 오류 "+skipped+"개 제외":"")+" (개별 건물 기준)");
-    drawLabels(all);
+    clearSelection.disabled=selectedRoads.size===0;
+    if(allGroups.length)showMessage("");
+    else showMessage("해당 구역에서 표시 가능한 건물 주소가 없습니다.");
+    drawLabels(allGroups.map(group=>({group})));
   }
+  clearSelection.onclick=()=>{selectedRoads.clear();render();};
   async function run(token){
     if(!enabled||token!==seq)return;
     const requested=zips();
@@ -288,12 +339,12 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     });
   }
   function off(){
-    enabled=false;seq++;selectedRoad="";selectedZip="";
+    enabled=false;seq++;selectedRoads.clear();
     button.setAttribute("aria-pressed","false");button.textContent="건물별 표시";panel.hidden=true;
     stopShapes();legend.hidden=true;showMessage("건물별 레이어가 꺼져 있습니다.");
   }
   button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="건물별 숨기기";schedule();};
-  if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels(zips().flatMap(zip=>(cache.get(zip)?.groups||[]).map(group=>({zip,group}))));});
+  if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels([...new Map(zips().flatMap(zip=>(cache.get(zip)?.groups||[]).map(group=>[group.road,group]))).values()].map(group=>({group})));});
   return {
     onZipLoaded(zip){if(enabled&&!cache.has(zip))schedule();},
     onZipRemoved(zip){cache.delete(zip);if(enabled)schedule();},

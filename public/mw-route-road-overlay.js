@@ -17,6 +17,9 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     "#mwRouteRoadLegend{position:absolute;bottom:14px;left:14px;z-index:40;width:min(258px,calc(100% - 28px));max-height:51vh;display:flex;flex-direction:column;padding:11px;border:1px solid #c4d4df;border-radius:11px;background:rgba(255,255,255,.95);color:#1f3448;box-shadow:0 3px 14px #263f5a25;backdrop-filter:blur(4px)}",
     "#mwRouteRoadLegend[hidden]{display:none!important}",
     ".mwRouteRoadHeader{display:flex;justify-content:space-between;border-bottom:1px solid #e1e7eb;padding-bottom:6px;font-weight:800;font-size:12px}",
+    ".mwRouteRoadClear{font:inherit;font-size:10px;color:#325371;border:1px solid #c8d6e1;border-radius:7px;padding:4px 7px;background:#fff;cursor:pointer;font-weight:800}",
+    ".mwRouteRoadClear:disabled{opacity:.45;cursor:default}",
+    ".mwRouteRoadStatus[hidden]{display:none!important}",
     ".mwRouteRoadStatus{font-size:10px;color:#53687a;line-height:1.45;margin:5px 0;overflow-wrap:anywhere}",
     ".mwRouteRoadList{display:flex;flex-direction:column;gap:3px;overflow:auto;max-height:36vh;overscroll-behavior:contain}",
     ".mwRouteRoadItem{font:inherit;font-size:11px;color:#283e50;display:flex;align-items:center;gap:7px;text-align:left;background:#fff;border:1px solid #dfe8ee;border-radius:7px;padding:6px;cursor:pointer}",
@@ -34,12 +37,14 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   btn.setAttribute("aria-pressed","false");
   share.insertAdjacentElement("afterend",btn);
   const panel=document.createElement("div");panel.id="mwRouteRoadLegend";panel.hidden=true;
-  panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별 건물</span><span>개수</span></div><div class="mwRouteRoadStatus" aria-live="polite">조회 준비</div><div class="mwRouteRoadList"></div>';
+  panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별 건물</span><button type="button" class="mwRouteRoadClear">선택 해제</button></div>'+
+    '<div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
   wrap.append(panel);
   const status=panel.querySelector(".mwRouteRoadStatus"),list=panel.querySelector(".mwRouteRoadList");
+  const clearSelection=panel.querySelector(".mwRouteRoadClear");
   const displayShapes=[],labelLayers=[];
   const routeCache=new Map();
-  let on=false,epoch=0,focusedRoad="",loadedGroups=[],lastPacksKey="",pending=null;
+  let on=false,epoch=0,selectedRoads=new Set(),loadedGroups=[],lastPacksKey="",pending=null;
 
   function cleanup(){
     for (const shape of displayShapes)shape.setMap(null);
@@ -47,7 +52,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     displayShapes.length=0;labelLayers.length=0;
     list.replaceChildren();
   }
-  function statusText(s){ status.textContent=s; }
+  function statusText(s){ status.textContent=s;status.hidden=!s; }
   async function apiCall(polygon, token, offset=0){
     const response=await fetch(ENDPOINT,{
       method:"POST",
@@ -143,14 +148,16 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
       labelLayers.push(layer);
     }
   }
+  let visibleRows=[];
   function render(rows) {
+    visibleRows=rows;
     cleanup();
     const grouped=new Map();let total=0;
     const dedupe=new Set();
     for(const item of rows) {
       const rec=item.record;
       for(const building of rec.buildings){
-        const key=rec.hash+":"+building.id;
+        const key=building.id;
         if(dedupe.has(key))continue;
         dedupe.add(key);
         const within=clipped(building.raw,rec.geometry);
@@ -164,19 +171,25 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     }
     loadedGroups=[...grouped.values()].sort((a,b)=>b.entries.length-a.entries.length||a.name.localeCompare(b.name,"ko"));
     for(const group of loadedGroups){
-      const selected=!focusedRoad||focusedRoad===group.name;
+      const selected=selectedRoads.size===0||selectedRoads.has(group.name);
       for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,selected))total++;
-      const button=document.createElement("button");button.type="button";button.className="mwRouteRoadItem";button.setAttribute("aria-pressed",String(focusedRoad===group.name));
+      const button=document.createElement("button");button.type="button";button.className="mwRouteRoadItem";button.setAttribute("aria-pressed",String(selectedRoads.has(group.name)));
       const swatch=document.createElement("span");swatch.className="mwRouteRoadSwatch";swatch.style.background=group.color[0];swatch.style.borderColor=group.color[1];
       const name=document.createElement("span");name.className="mwRouteRoadName";name.textContent=group.name;
       const count=document.createElement("span");count.className="mwRouteRoadCount";count.textContent=String(group.entries.length);
       button.append(swatch,name,count);
-      button.onclick=()=>{focusedRoad=focusedRoad===group.name?"":group.name;render(rows);};
+      button.onclick=()=>{
+        if(selectedRoads.has(group.name))selectedRoads.delete(group.name);
+        else selectedRoads.add(group.name);
+        render(rows);
+      };
       list.append(button);
     }
-    statusText("실제 건물 "+total+"개 · 도로명 "+loadedGroups.length+"개");
+    clearSelection.disabled=selectedRoads.size===0;
+    statusText(loadedGroups.length?"":"표시 가능한 건물 주소가 없습니다.");
     drawLabels();
   }
+  clearSelection.onclick=()=>{selectedRoads.clear();render(visibleRows);};
   async function load() {
     const generation=++epoch;
     pending=Promise.resolve();
@@ -199,7 +212,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     load().catch(err=>{statusText("조회 실패: "+String(err?.message||err));});
   }
   function reset(){
-    on=false;epoch++;focusedRoad="";loadedGroups=[];cleanup();panel.hidden=true;
+    on=false;epoch++;selectedRoads.clear();loadedGroups=[];visibleRows=[];cleanup();panel.hidden=true;
     btn.setAttribute("aria-pressed","false");btn.textContent="건물별 표시";
   }
   btn.onclick=()=>{

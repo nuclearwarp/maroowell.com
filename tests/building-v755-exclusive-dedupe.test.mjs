@@ -8,13 +8,13 @@ function sample(expos,res,commercial,unknown){
   const classified=res+commercial;
   return {residentialUnitCount:res+1036,commercialUnitCount:commercial+25,
     unclassifiedUnitCount:unknown,deliveryUnitCount:res+1036+commercial+25+unknown,
-    exclusiveUnitRecordCount:2*expos,confirmedElevatorUnitCount:res+commercial+unknown+1036,
+    exclusiveUnitRecordCount:res+commercial+unknown,confirmedElevatorUnitCount:res+commercial+unknown+1036,
     noElevatorUnitCount:25,unknownElevatorUnitCount:0,
     breakdown:{contributions:[
       {source:"DETAIL_EXCLUSIVE",buildingKey:"abc",meta:{parcelKey:"p"},bucket:"residential",units:res,elevatorStatus:"yes"},
       {source:"DETAIL_EXCLUSIVE",buildingKey:"abc",meta:{parcelKey:"p"},bucket:"commercial",units:commercial,elevatorStatus:"yes"},
       {source:"DETAIL_EXCLUSIVE",buildingKey:"abc",meta:{parcelKey:"p"},bucket:"unclassified",units:unknown,elevatorStatus:"yes"}],
-      source:{unitDiagnostics:{exposRows:expos,candidateUnits:2*expos}},
+      source:{unitDiagnostics:{exposRows:expos,candidateUnits:res+commercial+unknown}},
       dataQuality:{deliveryUnitCount:res+1036+commercial+25+unknown},
       elevator:{unitCounts:{confirmed:res+commercial+unknown+1036,none:25,unknown:0}},
       algorithm:{rules:{}}}};

@@ -8,9 +8,9 @@ function v755ReconcileExclusiveBuckets(aggregate) {
   if (!Array.isArray(contributions) || !source) return aggregate;
   const receivedRows = Number(source.exposRows || 0);
   const countedRows = Number(aggregate.exclusiveUnitRecordCount || 0);
-  // Evidence for a duplicated pass, NOT a generic subtraction of all unknown units.
+  // Require bucket-overlap proof at the same parent; partial duplicate passes are valid.
   if (!Number.isSafeInteger(receivedRows) || receivedRows <= 0 ||
-      countedRows !== receivedRows * 2) return aggregate;
+      countedRows <= receivedRows || countedRows > receivedRows * 2) return aggregate;
   const groups = new Map();
   for (const row of contributions) {
     if (row.source !== 'DETAIL_EXCLUSIVE' || !row.buildingKey) continue;
@@ -35,7 +35,8 @@ function v755ReconcileExclusiveBuckets(aggregate) {
     removed += unknownTotal;
     kept.add(row);
   }
-  if (!removed || removed > Number(aggregate.unclassifiedUnitCount || 0)) return aggregate;
+  if (!removed || removed > Number(aggregate.unclassifiedUnitCount || 0) ||
+      countedRows - removed !== receivedRows) return aggregate;
   const nextConfirmed = Number(aggregate.confirmedElevatorUnitCount || 0) - removalsByElevator.yes;
   const nextNo = Number(aggregate.noElevatorUnitCount || 0) - removalsByElevator.no;
   const nextUnknown = Number(aggregate.unknownElevatorUnitCount || 0) - removalsByElevator.unknown;

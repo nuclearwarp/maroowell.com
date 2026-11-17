@@ -2,11 +2,19 @@
 from pathlib import Path
 import re,sys,hashlib
 HERE=Path(__file__).parent
-MARKER='V755_EXCLUSIVE_BUCKET_DEDUPE'
+MARKER='V756_EXCLUSIVE_BUCKET_PARTIAL_DEDUPE'
 
 def patch(source):
     if MARKER in source:
         return source
+    if 'V755_EXCLUSIVE_BUCKET_DEDUPE' in source:
+        func='function v755ReconcileExclusiveBuckets(aggregate) {'
+        begin=source.find(func)
+        if begin<0:raise ValueError('Old deduplication function missing')
+        prefix=source[:begin]
+        if source[begin:].count(func)!=1:raise ValueError('Ambiguous old helper')
+        helper=(HERE/'reconcile_v755.js').read_text(encoding='utf-8')
+        return prefix.rstrip()+'\n\n// '+MARKER+'\n'+helper+'\n'
     if "buildingTransportPolicy: 'SHARED_SERIAL_PACED_V75_4'" not in source:
         raise ValueError("Expected audited V75.4 backend; refusing to change another worker")
     start=source.find('const aggregate = v60AggregateBuildingStats({')

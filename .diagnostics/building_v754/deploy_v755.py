@@ -24,7 +24,7 @@ def main():
         raise RuntimeError('worker.js module missing')
     before=source();digest=hashlib.sha256(before.encode()).hexdigest();print('Live source SHA256',digest)
     if MARKER in before:
-        print('V75.5 already present; source not overwritten');return
+        print('V75.6 already present; source not overwritten');return
     if "buildingTransportPolicy: 'SHARED_SERIAL_PACED_V75_4'" not in before:raise RuntimeError('V75.4 base marker missing')
     after=patch(before);OUT.mkdir(exist_ok=True)
     (OUT/'base.mjs').write_text(before,encoding='utf-8');(OUT/'candidate.mjs').write_text(after,encoding='utf-8')
@@ -53,7 +53,7 @@ def main():
     (OUT/'manifest.json').write_text(json.dumps({'base':digest,'deployed':expected,'bindings_preserved':sorted(b['name'] for b in bindings),'algorithm_version_unchanged':True,'dedupe_patch':'V75.5'},indent=2))
     # Health is access-controlled (403 for anonymous callers). Source SHA and
     # deployed marker verification above are authoritative for this Worker.
-    if MARKER not in deployed:raise RuntimeError('Verified source lacks V75.5 marker')
-    print('V75.5 deployed source verified; health endpoint is access-controlled')
+    if MARKER not in deployed:raise RuntimeError('Verified source lacks V75.6 marker')
+    print('V75.6 deployed source verified; health endpoint is access-controlled')
     return
 if __name__=='__main__':main()

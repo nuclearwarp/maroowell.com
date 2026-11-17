@@ -84,13 +84,15 @@ async function ownRoutes(){
     url.searchParams.set("select","id,camp,route_code,route_norm,polygon_wgs84");
     url.searchParams.set("camp","eq."+dbCamp);
     url.searchParams.set("is_active","eq.true");
-    if(r)url.searchParams.set("or","(route_code.eq."+r+",route_norm.eq."+r+")");
+    if(r)url.searchParams.set("or","(route_code.eq."+r+",route_norm.eq."+r+",route_code.like."+r+"*,route_norm.like."+r+"*)");
     url.searchParams.set("limit","150");
     const res=await fetch(url,{headers:{apikey:cfg.SUPABASE_ANON_KEY,Authorization:"Bearer "+await token(),Accept:"application/json"}});
     if(!res.ok)throw Error("마루웰 서서브 조회 오류 ("+res.status+")");
     return res.json();
   }));
-  return [...new Map(results.flat().map(x=>[x.id,x])).values()].map(x=>({label:x.route_code||x.route_norm||"",geometry:x.polygon_wgs84}));
+  return [...new Map(results.flat().map(x=>[x.id,x])).values()]
+    .filter(x=>!routes.length||routes.some(r=>(x.route_code||x.route_norm||"").toUpperCase().startsWith(r)))
+    .map(x=>({label:x.route_code||x.route_norm||"",geometry:x.polygon_wgs84}));
 }
 async function externalRoutes(){
   const endpoint="https://purple-river-0717.brain-0f6.workers.dev/route";

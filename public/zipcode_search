@@ -1728,6 +1728,7 @@
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
 <script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
+<script src="/mw-zip-road-overlay.js?v=20261117-1"></script>
 </head>
 
 <body>
@@ -2228,6 +2229,7 @@
         buildingReverseAddressCache: new Map(),
         buildingRegionCodeCache: new Map(),
         scopeParcelsByZip: new Map(),
+        roadOverlay: null,
         apartmentMarkersByZip: new Map(),        apartmentPopup: null,
         apartmentPopupRequestSeq: 0,
         buildingQueue: Promise.resolve(),
@@ -2339,6 +2341,15 @@
         });
 
         enableMobileMapInteractions();
+        if (window.MW_ROAD_OVERLAY_BOOT) {
+          state.roadOverlay = window.MW_ROAD_OVERLAY_BOOT({
+            map: state.map,
+            getSelectedZips: () => [...state.selectedZips],
+            getFeature: (zip) => state.geoByZip.get(zip),
+            sampleFeature: (feature) => buildScopeDiscoveryPoints(feature),
+            reverseLookup: (lng, lat) => reverseAddressMetaFromPoint(lng, lat)
+          });
+        }
         if(window.MW_CAMP_OVERLAY_BOOT)window.MW_CAMP_OVERLAY_BOOT(state.map,state.kakaoGeocoder);
 
         window.addEventListener("resize", () => {
@@ -2845,6 +2856,7 @@
         });
 
         renderTerrainList();
+        state.roadOverlay?.onSelectionChange();
       }
 
 
@@ -5123,6 +5135,7 @@
         }
 
         state.geoByZip.delete(zip);
+        state.roadOverlay?.onZipRemoved(zip);
         state.areaByZip.delete(zip);
         state.terrainByZip.delete(zip);
         state.terrainStatusByZip.delete(zip);
@@ -5382,6 +5395,7 @@
                 state.areaByZip.set(zip, areaSquareMeters);
               }
               drawZipMultiPolygon(zip, wgs);
+              state.roadOverlay?.onZipLoaded(zip);
               void fetchTerrainForZip(zip, feature);
               void queueBuildingStatsForZip(zip, feature);
             } catch (err) {
@@ -6458,6 +6472,7 @@
 
 
       function clearAll() {
+        state.roadOverlay?.reset();
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
         for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
 

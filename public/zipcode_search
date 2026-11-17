@@ -1728,7 +1728,7 @@
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
 <script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
-<script src="/mw-zip-road-overlay.js?v=20261117-3"></script>
+<script src="/mw-zip-road-overlay.js?v=20261117-5"></script>
 </head>
 
 <body>
@@ -1787,6 +1787,7 @@
           <button id="saveBtn" type="button">저장</button>
           <button id="clearBtn" class="danger" type="button">초기화</button>
           <button id="shareMapBtn" type="button" title="최고관리자 전용 · 72시간 만료 지도 공유 링크 생성">지도 공유</button>
+          <button id="zipGeometryToggle" type="button" aria-pressed="false" title="지도 위 우편번호 구역만 숨깁니다. 건물별 도로명 색상은 유지합니다.">구역 숨기기</button>
         </div>
 
         <div class="list" id="zipList"></div>
@@ -2230,6 +2231,7 @@
         buildingRegionCodeCache: new Map(),
         scopeParcelsByZip: new Map(),
         roadOverlay: null,
+        boundariesVisible: true,
         apartmentMarkersByZip: new Map(),        apartmentPopup: null,
         apartmentPopupRequestSeq: 0,
         buildingQueue: Promise.resolve(),
@@ -5149,9 +5151,22 @@
       }
 
       function setOriginalVisible(on) {
-        const map = on ? state.map : null;
+        const map = on && state.boundariesVisible ? state.map : null;
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(map));
         for (const arr of state.labels.values()) arr.forEach(l => l.setMap(map));
+      }
+
+      function setZipBoundaryVisible(visible) {
+        state.boundariesVisible = !!visible;
+        setOriginalVisible(!state.mergeMode);
+        const target = state.boundariesVisible && state.mergeMode ? state.map : null;
+        for (const poly of state.mergedPolygons) poly.setMap(target);
+        for (const line of state.mergedOutlinePolylines) line.setMap(target);
+        const btn = document.getElementById("zipGeometryToggle");
+        if (btn) {
+          btn.textContent = state.boundariesVisible ? "구역 숨기기" : "구역 보이기";
+          btn.setAttribute("aria-pressed", String(!state.boundariesVisible));
+        }
       }
 
       function centroidOfLngLatRing(ringLngLat) {
@@ -5288,7 +5303,7 @@
           const pathForKakao = ringsLatLng.length === 1 ? ringsLatLng[0] : ringsLatLng;
 
           const poly = new kakao.maps.Polygon({
-            map: state.map,
+            map: state.boundariesVisible ? state.map : null,
             path: pathForKakao,
             strokeWeight: 3,
             strokeColor: color,
@@ -5311,7 +5326,7 @@
 
           if (center) {
             const ov = createZipLabelOverlay(zip, color, center);
-            ov.setMap(state.map);
+            ov.setMap(state.boundariesVisible ? state.map : null);
             overlays.push(ov);
           }
         }
@@ -6124,6 +6139,7 @@
             });
 
             state.mergedPolygons.push(poly);
+            if (!state.boundariesVisible) poly.setMap(null);
           }
 
           for (const ring of res.outlineRings) {
@@ -6139,6 +6155,7 @@
               strokeStyle: "solid"
             });
             state.mergedOutlinePolylines.push(line);
+            if (!state.boundariesVisible) line.setMap(null);
           }
 
           setOriginalVisible(false);
@@ -6474,6 +6491,7 @@
 
       function clearAll() {
         state.roadOverlay?.reset();
+        setZipBoundaryVisible(true);
         for (const arr of state.polygons.values()) arr.forEach(p => p.setMap(null));
         for (const arr of state.labels.values()) arr.forEach(l => l.setMap(null));
 
@@ -6537,6 +6555,7 @@
         $("#saveBtn").onclick = openSaveModal;
         $("#clearBtn").onclick = clearAll;
         $("#shareMapBtn").onclick = createMapShareLink;
+        $("#zipGeometryToggle").onclick = () => setZipBoundaryVisible(!state.boundariesVisible);
 
         $("#toggleMapType").onclick = () => setMapTypeSatellite(!state.isSatellite);
         $("#toggleRoadview").onclick = () => setRoadviewOn(!state.roadviewOn);

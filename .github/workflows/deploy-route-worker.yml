@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'worker.js'
+      - 'geo_building_service.js'
+      - 'tests/geo-building-cache-api.test.mjs'
+      - 'tests/route-building-layer.test.mjs'
       - 'wrangler.toml'
       - '.github/workflows/deploy-route-worker.yml'
   workflow_dispatch:
@@ -28,6 +31,9 @@ jobs:
         run: |
           set -euo pipefail
           node --check worker.js
+          node --check geo_building_service.js
+          node tests/geo-building-cache-api.test.mjs
+          node tests/route-building-layer.test.mjs
           node tests/vendor-access-regression.mjs
           grep -Fq 'MW_ROUTE_WRITE_AUTH_V1' worker.js
           grep -Fq 'requireRouteWriteAccess(request, env)' worker.js
@@ -96,6 +102,9 @@ jobs:
           vendor_delete=$(curl -sS -o /tmp/vendor-delete -w '%{http_code}' -X DELETE "$BASE/vendors/$fake_vendor")
           cat /tmp/vendor-delete
           test "$vendor_delete" = '401'
+
+          geo_unauthorized=$(curl -sS -o /tmp/geo-auth -w '%{http_code}' "$BASE/api/v1/buildings?zipcode=07420")
+          test "$geo_unauthorized" = '401'
 
           external_vendor=$(curl -sS -o /tmp/external-vendor -w '%{http_code}' "$BASE/api/v1/vendors?limit=1")
           cat /tmp/external-vendor

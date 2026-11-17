@@ -1,3 +1,5 @@
+import { handleGeoBuildingsApi } from "./geo_building_service.js";
+
 /**
  * Cloudflare Worker - route API (+ camps 기반 입차지 매핑, zipcode API)
  *
@@ -133,6 +135,16 @@ export default {
           return cors(await handleVendorDelete(request, env, vendorId));
         }
         return cors(json({ error: "Method Not Allowed" }, 405));
+      }
+
+      // Signed-in map clients use the same PostGIS/tile cache as the external API.
+      // Never accept the service role or external API key from browser JavaScript.
+      if (path === "/building-footprints/geometry") {
+        await routeAuthUser(request, env);
+        return cors(await handleGeoBuildingsApi({
+          request, url: new URL("/api/v1/buildings/query",url.origin),
+          env, database:supabaseFetch, key:{id:"map-session",client_code:"maroowell-map"}
+        }));
       }
 
       if (path === "/building-footprints" && request.method === "GET") {
@@ -439,6 +451,13 @@ async function handleApiSubsubroutePatch(request, env, id) {
 
 async function handleExternalApi(request, url, env) {
   const path = url.pathname;
+  // Shared PostGIS geometry source for Maroowell / Chunwoo / Heroes.
+  if (path === "/api/v1/buildings" || path === "/api/v1/buildings/query" || path === "/api/v1/buildings/route") {
+    const key = await requireExternalApiKey(request, env, "buildings.read");
+    if(path === "/api/v1/buildings/route")await requireExternalApiKey(request, env, "subsubroutes.read");
+    return handleGeoBuildingsApi({request,url,env,database:supabaseFetch,key,audit:apiAudit});
+  }
+
 
   if (path === "/api/v1/camps/batch") {
     if (request.method === "POST") {

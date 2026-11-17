@@ -13,8 +13,23 @@ const PALETTE = [
 ];
 const UNKNOWN = ["#d4dbe2","#6b7c8b"];
 const clean = value => String(value ?? "").trim();
+function canonicalRoad(value) {
+  return clean(value).normalize("NFKC").replace(/\s+/g, "");
+}
+// Stable road-name color across different ZIP polygons, route maps, and lookup order.
+// Same canonical road => same palette entry, even after refresh or another selection.
+function colorForRoad(value) {
+  const road = canonicalRoad(value);
+  if (!road || road === "도로명미확인") return UNKNOWN;
+  let h = 2166136261;
+  for (const codePoint of road) {
+    h ^= codePoint.codePointAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return PALETTE[(h >>> 0) % PALETTE.length];
+}
 function roadName(props) {
-  return clean(props?.street_name || props?.streetName) || "도로명 미확인";
+  return canonicalRoad(props?.street_name || props?.streetName) || "도로명 미확인";
 }
 function toBuilding(feature) {
   const p = feature?.properties || {};
@@ -33,13 +48,12 @@ function grouping(buildings) {
     groups.get(building.road).buildings.push(building);
   }
   const items = [...groups.values()].sort((a,b) => b.buildings.length-a.buildings.length || a.road.localeCompare(b.road,"ko"));
-  let colorIndex = 0;
   for (const item of items) {
-    item.color = item.road === "도로명 미확인" ? UNKNOWN : PALETTE[(colorIndex++) % PALETTE.length];
+    item.color = colorForRoad(item.road);
   }
   return items;
 }
-window.MW_ROAD_OVERLAY_TOOLS = Object.freeze({ roadName, toBuilding, grouping, colors: PALETTE });
+window.MW_ROAD_OVERLAY_TOOLS = Object.freeze({ roadName, toBuilding, grouping, canonicalRoad, colorForRoad, colors: PALETTE });
 
 window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildingClick}) {
   if (!map || !document.getElementById("terrainSection") || !window.turf || !window.kakao?.maps) return null;

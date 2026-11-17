@@ -2038,6 +2038,8 @@
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
 <script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
+<script src="/mw-zip-road-overlay.js?v=20261117-5"></script>
+<script src="/mw-route-road-overlay.js?v=20261117-1"></script>
 </head>
 
 <body>
@@ -2083,6 +2085,7 @@
       <div style="height:8px"></div>
       <div class="row">
         <button id="shareBtn" class="btn ok" style="width:100%;flex:1;" type="button">🔗 공유 링크 생성</button>
+        <button id="routeGeometryToggle" class="btn" type="button" aria-pressed="false" style="flex:1;white-space:nowrap" title="노선 폴리곤과 노선 라벨만 숨깁니다">구역 숨기기</button>
       </div>
     </div>
 
@@ -2691,6 +2694,20 @@
   let roadview=null, roadviewClient=null, roadviewOn=false, roadviewWalkerV64=null;
 
   let routeLabelOn = true;
+  let routeBoundariesVisible = true;
+  let routeRoadOverlay = null;
+  function setRouteBoundaryVisible(visible) {
+    routeBoundariesVisible = !!visible;
+    for (const pack of overlayById.values()) {
+      for (const poly of pack.polygons || []) poly.setMap(routeBoundariesVisible ? map : null);
+      for (const label of pack.labels || []) label.setMap(routeBoundariesVisible ? map : null);
+    }
+    const control = document.getElementById("routeGeometryToggle");
+    if (control) {
+      control.textContent = routeBoundariesVisible ? "구역 숨기기" : "구역 보이기";
+      control.setAttribute("aria-pressed",String(!routeBoundariesVisible));
+    }
+  }
   let vendorLabelOn = false;
 
   let routeRows = [];
@@ -3012,7 +3029,7 @@
       const pts = polygonPathToArray(poly);
       if (pts.length < 3) continue;
       const lb = makeLabelOverlay(pack.row, centroid(pts));
-      lb.setMap(map);
+      lb.setMap(routeBoundariesVisible ? map : null);
       pack.labels.push(lb);
     }
   }
@@ -3029,6 +3046,7 @@
   }
 
   function enterEditMode(){
+    setRouteBoundaryVisible(true);
     if (!selectedRouteId){ setStatus("선택된 라우트가 없습니다.", "WARN"); return; }
     const pack = overlayById.get(selectedRouteId);
     if (!pack || !pack.polygons.length){ setStatus("편집할 폴리곤이 없습니다.", "WARN"); return; }
@@ -3103,6 +3121,7 @@
   }
 
   function beginDraw(mode){
+    setRouteBoundaryVisible(true);
     if (!selectedRouteId){ setStatus("먼저 라우트를 선택하세요.", "WARN"); return; }
     stopEditMode();
     stopDrawMode(true);
@@ -3529,6 +3548,7 @@
   }
 
   function clearOverlays(){
+    routeRoadOverlay?.reset();
     stopEditMode();
     stopDrawMode(true);
     for (const pack of overlayById.values()){
@@ -3798,7 +3818,7 @@
           fillOpacity: 0.22,
           zIndex: 1
         });
-        polygon.setMap(map);
+        polygon.setMap(routeBoundariesVisible ? map : null);
         bindPolygonEvents(polygon, id);
 
         pack.polygons.push(polygon);
@@ -3811,6 +3831,7 @@
 
     if (any) map.setBounds(bounds);
     rebuildAllLabels();
+    routeRoadOverlay?.onRoutesChange();
 
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
@@ -6183,6 +6204,9 @@
     setStatus("초기화 완료","OK");
   });
   shareBtn.addEventListener("click", generateShareLink);
+  document.getElementById("routeGeometryToggle")?.addEventListener("click", () => {
+    setRouteBoundaryVisible(!routeBoundariesVisible);
+  });
   terrainRefreshBtn?.addEventListener("click", ()=>{
     terrainResultByRouteKey.clear();
     loadTerrainForCurrentScope(true).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
@@ -6213,6 +6237,15 @@
     map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5665,126.9780), level: 7 });
     geocoder = new kakao.maps.services.Geocoder();
     places = new kakao.maps.services.Places(map);
+    if (window.MW_ROUTE_ROAD_BOOT) {
+      routeRoadOverlay = window.MW_ROUTE_ROAD_BOOT({
+        map,
+        getPacks: () => routePacksForTerrain(),
+        getGeometry: pack => terrainGeometryFromPack(pack),
+        getToken: () => getTerrainAccessToken(),
+        getGeometryHash: geometry => sha256Hex(JSON.stringify(geometry))
+      });
+    }
 
     let isSatellite=false;
     toggleMapTypeBtn.addEventListener("click", ()=> {

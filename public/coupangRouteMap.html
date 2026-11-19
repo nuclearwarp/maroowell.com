@@ -2031,7 +2031,35 @@
     #terrainInfoGroup .analysisCalculatedAt{font-size:10.5px !important;font-weight:650 !important;}
     #terrainInfoGroup .terrainTargetText{font-size:11.5px !important;line-height:1.45 !important;}
 
-  </style>
+  
+/* APP ROUTE LOOKUP - reuse the complete coupangRouteMap renderer in read-only mode */
+html.mw-app-route-mode .left,html.mw-app-route-mode #sidebarFabBtn{display:none!important}
+html.mw-app-route-mode .wrap{height:100dvh!important;min-height:0}
+html.mw-app-route-mode .map{position:relative!important;min-width:0;width:100%;height:100%}
+html.mw-app-route-mode .map-controls{top:calc(64px + env(safe-area-inset-top));right:8px;gap:5px}
+html.mw-app-route-mode .map-controls button{padding:7px 10px;font-size:11px}
+html.mw-app-route-mode .gps-control{bottom:calc(15px + env(safe-area-inset-bottom))}
+#appRouteBar{display:none}
+html.mw-app-route-mode #appRouteBar{display:flex;position:absolute;z-index:130;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;flex-direction:column;gap:6px;pointer-events:none}
+#appRouteBar .appRouteActions{display:flex;gap:5px;align-items:center;pointer-events:auto}
+#appRouteBar .appRouteActions button{min-width:0;min-height:38px;border-radius:12px;border:1px solid #cad5df;background:#fff;color:#24384b;font-size:11px;font-weight:850;padding:5px 8px;box-shadow:0 2px 10px rgba(10,26,44,.16);white-space:nowrap;cursor:pointer}
+#appRouteBar .appRouteActions button[aria-pressed="true"]{background:#fef4c6;border-color:#f0cb66}
+#appRouteBar #roadToggleHost{flex:1;min-width:0;display:flex}
+#appRouteBar #mwRouteRoadToggle{flex:1!important;min-height:38px;min-width:0!important;font-size:11px!important;padding:5px 4px!important}
+#appRouteBar #appGeometryToggle{flex:1}
+#appRouteBar #appRouteSearchToggle{flex:1}
+#appRouteBar #appRouteSearchPanel{pointer-events:auto;max-width:min(420px,calc(100vw - 16px));border:1px solid #d2dde7;border-radius:14px;padding:10px;background:#ffffffef;box-shadow:0 3px 14px rgba(10,26,44,.2);display:flex;flex-direction:column;gap:8px}
+#appRouteBar #appRouteSearchPanel[hidden]{display:none!important}
+#appRouteBar .appRouteFormRow{display:flex;align-items:center;gap:6px}
+#appRouteBar .appRouteFormRow input{min-width:0;width:100%;height:37px;border:1px solid #cbd5e1;border-radius:10px;font-size:13px;padding:6px 9px;background:#fff;color:#172b42}
+#appRouteBar #appRouteSearchBtn{background:#2674b5;color:#fff;border:0;border-radius:10px;font-weight:900;padding:9px 12px;min-height:37px}
+#appRouteBar #appRouteSource{font-size:11px;font-weight:750;color:#5b7186}
+#appRouteBar #appRouteStatus{max-width:min(460px,100%);font-size:11px;font-weight:750;color:#24435f;background:#fffffff0;border:1px solid #d6e1ec;border-radius:10px;padding:6px 9px;pointer-events:auto;line-height:1.35}
+#appRouteBar #appRouteStatus[hidden]{display:none!important}
+html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + env(safe-area-inset-bottom))!important;max-height:47vh!important;width:min(235px,calc(100% - 16px))!important}
+@media(max-width:360px){html.mw-app-route-mode #appRouteBar .appRouteActions button{font-size:10px;padding:5px 4px}}
+
+</style>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
@@ -2040,6 +2068,7 @@
 <script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
 <script src="/mw-zip-road-overlay.js?v=20261117-7"></script>
 <script src="/mw-route-road-overlay.js?v=20261117-2"></script>
+<script>if(new URLSearchParams(location.search).get("mw_app")==="1"){document.documentElement.classList.add("mw-app-route-mode")}</script>
 </head>
 
 <body>
@@ -2182,6 +2211,20 @@
   </div>
 
   <div class="map">
+    <div id="appRouteBar" aria-label="입차 라우트 지도 조회">
+      <div class="appRouteActions">
+        <button id="appRouteSearchToggle" type="button" aria-expanded="false">라우트 조회</button>
+        <span id="roadToggleHost"></span>
+        <button id="appGeometryToggle" type="button" aria-pressed="false">구역 숨기기</button>
+      </div>
+      <div id="appRouteSearchPanel" hidden>
+        <span id="appRouteSource"></span>
+        <div class="appRouteFormRow"><input id="appRouteCamp" aria-label="캠프" placeholder="캠프 이름"></div>
+        <div class="appRouteFormRow"><input id="appRouteCodes" aria-label="라우트 코드" placeholder="라우트 코드 (여러 개 가능)">
+          <button id="appRouteSearchBtn" type="button">지도 조회</button></div>
+      </div>
+      <div id="appRouteStatus" role="status" hidden></div>
+    </div>
     <button id="sidebarFabBtn" class="sidebar-fab" type="button" title="메뉴 접기">메뉴 접기</button>
 
     <div id="mapWrap">
@@ -2282,6 +2325,11 @@
   "use strict";
   if (window.__mwRouteFixInit) return;
   window.__mwRouteFixInit = true;
+  const appRouteParams = new URLSearchParams(location.search);
+  const isAppRouteViewer = appRouteParams.get("mw_app") === "1";
+  const appRouteSource = appRouteParams.get("source") === "dragon_car" ? "dragon_car" : "maroowell";
+  const appInitialCamp = String(appRouteParams.get("camp") || "").replace(/^용차\s*[·:]\s*/, "").trim();
+  const appInitialCodes = String(appRouteParams.get("routes") || "").replace(/,/g," ").trim();
 
   const { SUPABASE_URL, SUPABASE_ANON_KEY, PATHS } = (window.MARUWELL_CONFIG || {});
   const LOGIN_PATH = (PATHS?.login || "/");
@@ -2621,11 +2669,17 @@
 
   function parsePolygonWgs84(v){
     if (!v) return null;
-    if (Array.isArray(v)) return v;
     if (typeof v === "string"){
-      try{ const p = JSON.parse(v); return Array.isArray(p) ? p : null; }catch{ return null; }
+      try { v = JSON.parse(v); } catch { return null; }
     }
-    return null;
+    if (v && v.type === "Feature") return parsePolygonWgs84(v.geometry);
+    // MAROOWELL sub-sub route polygons use GeoJSON objects, whereas external
+    // Coupang route polygons use ring arrays. Support BOTH in one map renderer.
+    if (v && v.type === "Polygon")
+      return Array.isArray(v.coordinates?.[0]) ? [v.coordinates[0]] : null;
+    if (v && v.type === "MultiPolygon")
+      return Array.isArray(v.coordinates) ? v.coordinates.map(poly=>poly?.[0]).filter(Array.isArray) : null;
+    return Array.isArray(v) ? v : null;
   }
   function normalizeRings(p){
     if (!Array.isArray(p) || p.length === 0) return [];
@@ -3738,6 +3792,38 @@
     setStatus(reason, "OK");
   }
 
+  async function loadAppOwnRoutes(targetCamp, targetCodes){
+    const token = await getRouteWriteAccessToken();
+    if (!token) throw new Error("마루웰 앱 로그인이 필요합니다.");
+    const aliases=[targetCamp];
+    if (/^M_/.test(targetCamp)) aliases.push(targetCamp.replace(/^M_/,"M"));
+    if (/^M[^_]/.test(targetCamp)) aliases.push(targetCamp.replace(/^M/,"M_"));
+    const patterns=targetCodes.map(code=>code.toUpperCase());
+    const rows=[];
+    for(const name of [...new Set(aliases)]){
+      const url=new URL(SUPABASE_URL+"/rest/v1/maroowell_sub_sub_route");
+      url.searchParams.set("select","id,camp,route_code,route_norm,polygon_wgs84,is_active");
+      url.searchParams.set("camp","eq."+name);
+      url.searchParams.set("is_active","eq.true");
+      url.searchParams.set("limit","1000");
+      const response=await fetch(url,{headers:{
+        apikey:SUPABASE_ANON_KEY,Authorization:"Bearer "+token,Accept:"application/json"
+      }});
+      if(!response.ok)throw new Error("마루웰 서서브라우트 조회 실패 (HTTP "+response.status+")");
+      const found=await response.json();
+      const matched=(found||[]).filter(row=>{
+        const code=String(row.route_code||row.route_norm||"").toUpperCase().trim();
+        return code && (!patterns.length||patterns.some(prefix=>code.startsWith(prefix)));
+      });
+      rows.push(...matched);
+      if(matched.length)break;
+    }
+    return [...new Map(rows.map(row=>[String(row.id),{
+      id:row.id,camp:row.camp,full_code:row.route_code||row.route_norm,
+      code:row.route_code||row.route_norm,polygon_wgs84:row.polygon_wgs84
+    }])).values()];
+  }
+
   async function loadRoutes(){
     stopEditMode();
     stopDrawMode(true);
@@ -3770,8 +3856,16 @@
     async function fetchAllForCamp(targetCamp){
       all.length = 0;
       seen.clear();
-      if (codes.length === 0) await fetchOne("", targetCamp);
-      else for (const c of codes){ try{ await fetchOne(c, targetCamp); }catch(e){ log(`조회 실패(${c}): ${e.message}`); } }
+      if (isAppRouteViewer && appRouteSource === "maroowell"){
+        const owned=await loadAppOwnRoutes(targetCamp,codes);
+        for(const row of owned){
+          const id=row.id ?? `${row.camp||""}/${row.full_code||row.code||""}`;
+          if(!seen.has(id)){seen.add(id);all.push(row);}
+        }
+      } else {
+        if (codes.length === 0) await fetchOne("", targetCamp);
+        else for (const c of codes){ try{ await fetchOne(c, targetCamp); }catch(e){ log(`조회 실패(${c}): ${e.message}`); } }
+      }
     }
 
     await fetchAllForCamp(resolvedCamp);
@@ -3835,8 +3929,10 @@
 
     campDirty=false; codeDirty=false;
     setStatus(`로드 완료: ${routeRows.length}개`, "OK");
-    loadTerrainForCurrentScope(false).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
-    loadBuildingForCurrentScope(false).catch(e=>setBuildingStatus(`배송호수·엘리베이터 조회 실패: ${e.message}`, "error"));
+    if (!isAppRouteViewer){
+      loadTerrainForCurrentScope(false).catch(e=>setTerrainStatus(`지형 정보 조회 실패: ${e.message}`, "error"));
+      loadBuildingForCurrentScope(false).catch(e=>setBuildingStatus(`배송호수·엘리베이터 조회 실패: ${e.message}`, "error"));
+    }
     if (mqMobile.matches) setSidebarHidden(true);
   }
 
@@ -6233,6 +6329,66 @@
   deliveryClearBtn.addEventListener("click", ()=> saveDelivery(true).catch(err=>setStatus(err.message,"ERR")));
   deliveryShowBtn.addEventListener("click", showDeliveryPin);
 
+
+  function appRouteStatus(message,error=false){
+    const el=document.getElementById("appRouteStatus");
+    if(!el)return;
+    el.hidden=!message;
+    el.textContent=message||"";
+    el.style.color=error?"#b91c1c":"#24435f";
+  }
+  async function appRouteLookup(){
+    if(!isAppRouteViewer)return;
+    const name=document.getElementById("appRouteCamp")?.value?.trim() || "";
+    const codes=document.getElementById("appRouteCodes")?.value?.trim() || "";
+    if(!name||!codes){appRouteStatus("캠프와 라우트 코드를 입력해주세요.",true);return;}
+    campInput.value=name;
+    codeInput.value=codes;
+    campDirty=true; codeDirty=true;
+    appRouteStatus("라우트 폴리곤 조회 중…");
+    try{
+      await loadRoutesAsLookup();
+      if(!routeRows.length){appRouteStatus("조회된 라우트가 없습니다. 캠프·코드를 확인해주세요.",true);return;}
+      appRouteStatus("라우트 "+routeRows.length+"개 조회 완료 · 지도에서 라우트를 선택하거나 도로명별 건물을 켜세요.");
+      const panel=document.getElementById("appRouteSearchPanel");
+      panel.hidden=true;
+      document.getElementById("appRouteSearchToggle")?.setAttribute("aria-expanded","false");
+    }catch(e){appRouteStatus("조회 실패: "+String(e?.message||e),true);}
+  }
+  function initAppRouteViewer(){
+    if(!isAppRouteViewer)return;
+    for(const id of ["drawNewBtn","drawAddBtn","saveBtn","deletePolyBtn","vendorSaveBtn","vendorClearBtn","deliverySaveBtn","deliveryClearBtn"]){
+      const b=document.getElementById(id);if(b)b.disabled=true;
+    }
+    const panel=document.getElementById("appRouteSearchPanel");
+    const toggle=document.getElementById("appRouteSearchToggle");
+    toggle?.addEventListener("click",()=>{panel.hidden=!panel.hidden;toggle.setAttribute("aria-expanded",String(!panel.hidden));});
+    document.getElementById("appRouteSource").textContent =
+      "조회 데이터: "+(appRouteSource==="dragon_car"?"용차 · coupangRouteMap":"마루웰 · 서서브라우트");
+    const camp=document.getElementById("appRouteCamp"),codes=document.getElementById("appRouteCodes");
+    camp.value=appInitialCamp;
+    codes.value=appInitialCodes;
+    document.getElementById("appRouteSearchBtn")?.addEventListener("click",appRouteLookup);
+    for(const input of [camp,codes])input?.addEventListener("keydown",e=>{
+      if(e.key==="Enter"&&!e.isComposing){e.preventDefault();appRouteLookup();}
+    });
+    const geometry=document.getElementById("appGeometryToggle");
+    geometry?.addEventListener("click",()=>{
+      document.getElementById("routeGeometryToggle")?.click();
+      geometry.textContent=routeBoundariesVisible?"구역 숨기기":"구역 보이기";
+      geometry.setAttribute("aria-pressed",String(!routeBoundariesVisible));
+    });
+    campInput.value=appInitialCamp;
+    codeInput.value=appInitialCodes;
+    if(!appInitialCamp||!appInitialCodes){
+      panel.hidden=false;toggle?.setAttribute("aria-expanded","true");
+      appRouteStatus("캠프와 라우트 코드를 입력해 지도를 조회하세요.");
+    } else {
+      // The Kakao map/roadview/road overlay are all initialized inside this callback.
+      setTimeout(()=>{appRouteLookup();},0);
+    }
+  }
+
   kakao.maps.load(()=> {
     map = new kakao.maps.Map($("map"), { center: new kakao.maps.LatLng(37.5665,126.9780), level: 7 });
     geocoder = new kakao.maps.services.Geocoder();
@@ -6353,6 +6509,7 @@
 
     setStatus("지도 로드 완료", "OK");
     applySidebarPref();
+    initAppRouteViewer();
   });
 
 })();

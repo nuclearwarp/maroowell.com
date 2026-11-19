@@ -23,6 +23,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     ".mwRouteRoadClear:disabled{opacity:.45;cursor:default}",
     ".mwRouteRoadHeaderActions{display:flex;gap:4px;align-items:center}",
     ".mwRouteRoadHide{font:inherit;font-size:10px;color:#325371;border:1px solid #c8d6e1;border-radius:7px;padding:4px 7px;background:#fff;cursor:pointer;font-weight:800}",
+    ".mwRouteRoadTotals{font-size:10.5px;color:#274862;font-weight:800;line-height:1.55;padding:5px 2px 6px;border-bottom:1px solid #e0e8ef;white-space:normal}",
     ".mwRouteRoadStatus[hidden]{display:none!important}",
     ".mwRouteRoadStatus{font-size:10px;color:#53687a;line-height:1.45;margin:5px 0;overflow-wrap:anywhere}",
     ".mwRouteRoadList{display:flex;flex-direction:column;gap:3px;overflow:auto;max-height:36vh;overscroll-behavior:contain}",
@@ -38,8 +39,8 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   ].join("");
   document.head.append(style);
   const btn=document.createElement("button");
-  const labelOff=appMode?"건물별 표시":"도로명 확인";
-  const labelOn=appMode?"건물별 숨기기":"도로명 숨기기";
+  const labelOff="도로명 조회";
+  const labelOn="도로명 숨기기";
   const labelList=appMode?"목록 보기":"도로명 목록 보기";
   btn.type="button";btn.id="mwRouteRoadToggle";btn.className="btn";btn.textContent=labelOff;
   btn.setAttribute("aria-pressed","false");
@@ -62,9 +63,9 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   }
   const panel=document.createElement("div");panel.id="mwRouteRoadLegend";panel.hidden=true;
   panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별</span><div class="mwRouteRoadHeaderActions"><button type="button" class="mwRouteRoadClear">선택 해제</button></div></div>'+
-    '<div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
+    '<div class="mwRouteRoadTotals" aria-live="polite">전체 도로명 0개 · 객체 0개</div><div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
   wrap.append(panel);
-  const status=panel.querySelector(".mwRouteRoadStatus"),list=panel.querySelector(".mwRouteRoadList");
+  const status=panel.querySelector(".mwRouteRoadStatus"),list=panel.querySelector(".mwRouteRoadList"),totals=panel.querySelector(".mwRouteRoadTotals");
   const clearSelection=panel.querySelector(".mwRouteRoadClear");
   const displayShapes=[],labelLayers=[];
   const routeCache=new Map();
@@ -196,7 +197,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     loadedGroups=[...grouped.values()].sort((a,b)=>a.name.localeCompare(b.name,"ko-KR"));
     for(const group of loadedGroups){
       const selected=selectedRoads.size===0||selectedRoads.has(group.name);
-      if(selected)for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,true))total++;
+      for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,selected))total++;
       const button=document.createElement("button");button.type="button";button.className="mwRouteRoadItem";button.setAttribute("aria-pressed",String(selectedRoads.has(group.name)));
       const swatch=document.createElement("span");swatch.className="mwRouteRoadSwatch";swatch.style.background=group.color[0];swatch.style.borderColor=group.color[1];
       const name=document.createElement("span");name.className="mwRouteRoadName";name.textContent=group.name;
@@ -210,6 +211,10 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
       list.append(button);
     }
     clearSelection.disabled=selectedRoads.size===0;
+    const overallObjects=loadedGroups.reduce((sum,g)=>sum+g.entries.length,0);
+    const activeGroups=selectedRoads.size ? loadedGroups.filter(g=>selectedRoads.has(g.name)) : [];
+    const activeObjects=activeGroups.reduce((sum,g)=>sum+g.entries.length,0);
+    totals.textContent=`전체 도로명 ${loadedGroups.length}개 · 객체 ${overallObjects}개`+(selectedRoads.size ? ` / 선택 도로명 ${activeGroups.length}개 · 객체 ${activeObjects}개` : "");
     statusText(loadedGroups.length?"":"표시 가능한 건물 주소가 없습니다.");
     drawLabels();
   }
@@ -237,7 +242,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   }
   function reset(){
     on=false;epoch++;selectedRoads.clear();loadedGroups=[];visibleRows=[];cleanup();panel.hidden=true;
-    btn.setAttribute("aria-pressed","false");btn.textContent=labelOff;
+    totals.textContent="전체 도로명 0개 · 객체 0개";btn.setAttribute("aria-pressed","false");btn.textContent=labelOff;
   }
   btn.onclick=()=>{
     if(on){

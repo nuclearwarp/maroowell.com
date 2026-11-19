@@ -13,8 +13,8 @@ assert(moduleSource.includes('shareButton.insertAdjacentElement("afterend",butto
 assert(moduleSource.includes('wrap.appendChild(panel)'));
 assert(moduleSource.includes('qty.textContent=String(group.placed.length)+\"개\"'));
 assert(moduleSource.includes('selectedRoads=new Set()'));
-assert(moduleSource.includes('전체 도로명 ${allGroups.length}개'));
-assert(moduleSource.includes('선택 도로명 ${selectedGroups.length}개'));
+assert(moduleSource.includes('전체 도로명 ${allGroups.length}개 · 건물'));
+assert(moduleSource.includes('선택 도로명 ${selectedGroups.length}개 · 건물'));
 assert(moduleSource.includes('clearSelection.onclick=()=>{selectedRoads.clear();render();}'));
 assert(!moduleSource.includes('selectedZip'));
 assert(moduleSource.includes('panel.hidden=true'));

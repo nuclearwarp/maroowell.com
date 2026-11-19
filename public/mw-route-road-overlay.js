@@ -63,7 +63,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   }
   const panel=document.createElement("div");panel.id="mwRouteRoadLegend";panel.hidden=true;
   panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별</span><div class="mwRouteRoadHeaderActions"><button type="button" class="mwRouteRoadClear">선택 해제</button></div></div>'+
-    '<div class="mwRouteRoadTotals" aria-live="polite">전체 도로명 0개 · 객체 0개</div><div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
+    '<div class="mwRouteRoadTotals" aria-live="polite">전체 도로명 0개 · 건물 0개</div><div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
   wrap.append(panel);
   const status=panel.querySelector(".mwRouteRoadStatus"),list=panel.querySelector(".mwRouteRoadList"),totals=panel.querySelector(".mwRouteRoadTotals");
   const clearSelection=panel.querySelector(".mwRouteRoadClear");
@@ -214,7 +214,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     const overallObjects=loadedGroups.reduce((sum,g)=>sum+g.entries.length,0);
     const activeGroups=selectedRoads.size ? loadedGroups.filter(g=>selectedRoads.has(g.name)) : [];
     const activeObjects=activeGroups.reduce((sum,g)=>sum+g.entries.length,0);
-    totals.textContent=`전체 도로명 ${loadedGroups.length}개 · 객체 ${overallObjects}개`+(selectedRoads.size ? ` / 선택 도로명 ${activeGroups.length}개 · 객체 ${activeObjects}개` : "");
+    totals.textContent=`전체 도로명 ${loadedGroups.length}개 · 건물 ${overallObjects}개`+(selectedRoads.size ? ` / 선택 도로명 ${activeGroups.length}개 · 건물 ${activeObjects}개` : "");
     statusText(loadedGroups.length?"":"표시 가능한 건물 주소가 없습니다.");
     drawLabels();
   }
@@ -242,7 +242,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   }
   function reset(){
     on=false;epoch++;selectedRoads.clear();loadedGroups=[];visibleRows=[];cleanup();panel.hidden=true;
-    totals.textContent="전체 도로명 0개 · 객체 0개";btn.setAttribute("aria-pressed","false");btn.textContent=labelOff;
+    totals.textContent="전체 도로명 0개 · 건물 0개";btn.setAttribute("aria-pressed","false");btn.textContent=labelOff;
   }
   btn.onclick=()=>{
     if(on){

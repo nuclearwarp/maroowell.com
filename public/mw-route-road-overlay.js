@@ -16,7 +16,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   if (!wrap || (!host && !share)) return null;
   const style=document.createElement("style");
   style.textContent=[
-    "#mwRouteRoadLegend{position:absolute;bottom:14px;left:14px;z-index:40;width:min(258px,calc(100% - 28px));max-height:51vh;display:flex;flex-direction:column;padding:11px;border:1px solid #c4d4df;border-radius:11px;background:rgba(255,255,255,.95);color:#1f3448;box-shadow:0 3px 14px #263f5a25;backdrop-filter:blur(4px)}",
+    "#mwRouteRoadLegend{position:absolute;bottom:14px;left:14px;z-index:40;width:min(176px,calc(100% - 28px));max-height:51vh;display:flex;flex-direction:column;padding:11px;border:1px solid #c4d4df;border-radius:11px;background:rgba(255,255,255,.95);color:#1f3448;box-shadow:0 3px 14px #263f5a25;backdrop-filter:blur(4px)}",
     "#mwRouteRoadLegend[hidden]{display:none!important}",
     ".mwRouteRoadHeader{display:flex;justify-content:space-between;border-bottom:1px solid #e1e7eb;padding-bottom:6px;font-weight:800;font-size:12px}",
     ".mwRouteRoadClear{font:inherit;font-size:10px;color:#325371;border:1px solid #c8d6e1;border-radius:7px;padding:4px 7px;background:#fff;cursor:pointer;font-weight:800}",
@@ -26,14 +26,14 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     ".mwRouteRoadStatus[hidden]{display:none!important}",
     ".mwRouteRoadStatus{font-size:10px;color:#53687a;line-height:1.45;margin:5px 0;overflow-wrap:anywhere}",
     ".mwRouteRoadList{display:flex;flex-direction:column;gap:3px;overflow:auto;max-height:36vh;overscroll-behavior:contain}",
-    ".mwRouteRoadItem{font:inherit;font-size:11px;color:#283e50;display:flex;align-items:center;gap:7px;text-align:left;background:#fff;border:1px solid #dfe8ee;border-radius:7px;padding:6px;cursor:pointer}",
-    ".mwRouteRoadItem[aria-pressed=true]{border-color:#517b94;box-shadow:inset 0 0 0 1px #517b94}",
+    ".mwRouteRoadItem{font:inherit;font-size:11.5px;color:#283e50;display:flex;align-items:center;gap:7px;text-align:left;background:#fff;border:1px solid #dfe8ee;border-radius:7px;padding:6px;cursor:pointer}",
+    ".mwRouteRoadItem[aria-pressed=true]{border-color:#2563eb;background:#e6f1ff;box-shadow:inset 0 0 0 1px #2563eb;color:#17498c}",
     ".mwRouteRoadSwatch{width:12px;height:12px;flex:0 0 12px;border-radius:3px;border:1px solid}",
     ".mwRouteRoadName{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:750}",
     ".mwRouteRoadCount{font-variant-numeric:tabular-nums;font-weight:850}",
     ".mwRouteRoadMapLabel{font-size:10px;color:#213749;font-weight:800;background:#fffef7f0;border:1px solid #a8b5be;border-radius:6px;padding:3px 6px;pointer-events:none;white-space:nowrap}",
     "#mwRouteRoadToggle{flex:1 1 auto!important;min-width:0;white-space:nowrap}",
-    "@media(max-width:760px){#mwRouteRoadLegend{left:8px;bottom:8px;width:min(235px,calc(100% - 16px));max-height:48vh;padding:8px}.mwRouteRoadList{max-height:36vh}}"
+    "@media(max-width:760px){#mwRouteRoadLegend{left:8px;bottom:8px;width:min(164px,calc(100% - 16px));max-height:48vh;padding:8px}.mwRouteRoadList{max-height:36vh}}"
   ].join("");
   document.head.append(style);
   const btn=document.createElement("button");
@@ -60,12 +60,11 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     host.append(btn);
   }
   const panel=document.createElement("div");panel.id="mwRouteRoadLegend";panel.hidden=true;
-  panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별 건물</span><div class="mwRouteRoadHeaderActions"><button type="button" class="mwRouteRoadClear">선택 해제</button><button type="button" class="mwRouteRoadHide">숨기기</button></div></div>'+
+  panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별</span><div class="mwRouteRoadHeaderActions"><button type="button" class="mwRouteRoadClear">선택 해제</button></div></div>'+
     '<div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
   wrap.append(panel);
   const status=panel.querySelector(".mwRouteRoadStatus"),list=panel.querySelector(".mwRouteRoadList");
   const clearSelection=panel.querySelector(".mwRouteRoadClear");
-  const hidePanel=panel.querySelector(".mwRouteRoadHide");
   const displayShapes=[],labelLayers=[];
   const routeCache=new Map();
   let on=false,epoch=0,selectedRoads=new Set(),loadedGroups=[],lastPacksKey="",pending=null;
@@ -160,7 +159,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     const projection=map.getProjection?.(),positions=[];
     for(const entry of loadedGroups){
       const center=entry.points[Math.floor(entry.points.length/2)];
-      if(!center || entry.name==="도로명 미확인")continue;
+      if(!center || entry.name==="도로명 미확인" || (selectedRoads.size && !selectedRoads.has(entry.name)))continue;
       const pos=new kakao.maps.LatLng(center[1],center[0]);
       if(projection?.containerPointFromCoords){
         const pt=projection.containerPointFromCoords(pos);
@@ -196,11 +195,11 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     loadedGroups=[...grouped.values()].sort((a,b)=>a.name.localeCompare(b.name,"ko-KR"));
     for(const group of loadedGroups){
       const selected=selectedRoads.size===0||selectedRoads.has(group.name);
-      for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,selected))total++;
+      if(selected)for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,true))total++;
       const button=document.createElement("button");button.type="button";button.className="mwRouteRoadItem";button.setAttribute("aria-pressed",String(selectedRoads.has(group.name)));
       const swatch=document.createElement("span");swatch.className="mwRouteRoadSwatch";swatch.style.background=group.color[0];swatch.style.borderColor=group.color[1];
       const name=document.createElement("span");name.className="mwRouteRoadName";name.textContent=group.name;
-      const count=document.createElement("span");count.className="mwRouteRoadCount";count.textContent=String(group.entries.length);
+      const count=document.createElement("span");count.className="mwRouteRoadCount";count.textContent=String(group.entries.length)+"개";
       button.append(swatch,name,count);
       button.onclick=()=>{
         if(selectedRoads.has(group.name))selectedRoads.delete(group.name);
@@ -214,7 +213,6 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     drawLabels();
   }
   clearSelection.onclick=()=>{selectedRoads.clear();render(visibleRows);};
-  hidePanel.onclick=()=>{panel.hidden=true;btn.textContent=labelList;};
   async function load() {
     const generation=++epoch;
     pending=Promise.resolve();

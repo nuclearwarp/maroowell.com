@@ -33,6 +33,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     ".mwRouteRoadCount{font-variant-numeric:tabular-nums;font-weight:850}",
     ".mwRouteRoadMapLabel{font-size:10px;color:#213749;font-weight:800;background:#fffef7f0;border:1px solid #a8b5be;border-radius:6px;padding:3px 6px;pointer-events:none;white-space:nowrap}",
     "#mwRouteRoadToggle{flex:1 1 auto!important;min-width:0;white-space:nowrap}",
+    "@media(min-width:761px){#mwRouteRoadLegend{width:min(516px,calc(100% - 28px))}.mwRouteRoadList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}.mwRouteRoadItem{min-width:0}}",
     "@media(max-width:760px){#mwRouteRoadLegend{left:8px;bottom:8px;width:min(164px,calc(100% - 16px));max-height:48vh;padding:8px}.mwRouteRoadList{max-height:36vh}}"
   ].join("");
   document.head.append(style);

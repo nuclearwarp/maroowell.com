@@ -110,6 +110,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     ".mwRoadSwatch{flex:0 0 13px;width:13px;height:13px;border-radius:3px;border:1px solid}",
     ".mwRoadName{flex:1;min-width:0;color:#24394e;font-weight:800;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
     ".mwRoadCount{color:#31475d;font-size:11px;font-weight:850;white-space:nowrap;font-variant-numeric:tabular-nums}",
+    "@media(min-width:761px){#mwRoadPanel{width:min(504px,calc(100% - 28px))}.mwRoadLegend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}.mwRoadRow{min-width:0}}",
     "@media(max-width:720px){#mwRoadPanel{left:8px;bottom:8px;width:min(205px,calc(100% - 16px));max-height:38vh;padding:8px}.mwRoadLegend{max-height:25vh}.mwRoadRow{min-height:26px;padding:3px 5px}}",
     ".mwRoadLabel{pointer-events:none;white-space:nowrap;padding:3px 7px;border:1px solid #7895a8;background:rgba(255,255,255,.96);border-radius:6px;color:#22394b;font-size:10px;font-weight:850;box-shadow:0 1px 5px rgba(29,46,67,.16)}",
     ".mwBuildingPopup{padding:9px 12px;border:1px solid #9eb5c4;border-radius:9px;background:#fff;box-shadow:0 2px 10px #182f4940;color:#25394a;font-size:11px;max-width:280px}",

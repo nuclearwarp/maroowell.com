@@ -101,6 +101,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     ".mwRoadHint{font-size:10px;color:#697b8e;line-height:1.4;margin:7px 0 0}",
     ".mwRoadClear{font-size:10px;border:1px solid #c8d6e1;border-radius:7px;padding:4px 7px;background:#fff;color:#325371;font-weight:800;cursor:pointer;white-space:nowrap}",
     ".mwRoadClear:disabled{opacity:.45;cursor:default}",
+    ".mwRoadTotals{font-size:10.5px;color:#274862;font-weight:800;line-height:1.5;padding:6px 0;border-bottom:1px solid #e2e9ef;flex:none}",
     ".mwRoadStatus[hidden]{display:none!important}",
     ".mwRoadStatus{font-size:10px;color:#455c72;line-height:1.35;margin:5px 0;overflow-wrap:anywhere}",
     ".mwRoadLegend{min-height:0;max-height:min(35vh,332px);overflow:auto;margin-top:5px;display:flex;flex-direction:column;gap:3px;overscroll-behavior:contain}",
@@ -124,20 +125,22 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   const button=document.createElement("button");
   button.className="mwRoadToggle";
   button.type="button";
-  button.textContent="건물별 표시";
+  button.textContent="도로명 조회";
   button.setAttribute("aria-pressed","false");
-  button.title="도로명별 건물 외곽선 표시";
+  button.title="도로명별 건물 외곽선 조회";
   shareButton.insertAdjacentElement("afterend",button);
   const panel=document.createElement("section");
   panel.id="mwRoadPanel";
   panel.hidden=true;
   panel.setAttribute("aria-label","지도 도로명별 건물 범례");
   panel.innerHTML='<div class="mwRoadHead"><strong>도로명별 건물</strong><button type="button" class="mwRoadClear">선택 해제</button></div>'+
-    '<div class="mwRoadStatus" aria-live="polite" hidden></div>'+
+    '<div class="mwRoadTotals" aria-live="polite">전체 도로명 0개 · 객체 0개</div>'+ 
+    '<div class="mwRoadStatus" aria-live="polite" hidden></div>'+ 
     '<div class="mwRoadLegend" hidden></div>'+
     '<div class="mwRoadHint">실제 건물 외곽선 · 도로명별 색상</div>';
   wrap.appendChild(panel);
   const status=panel.querySelector(".mwRoadStatus");
+  const totals=panel.querySelector(".mwRoadTotals");
   const legend=panel.querySelector(".mwRoadLegend");
   const clearSelection=panel.querySelector(".mwRoadClear");
   const cache=new Map();
@@ -302,7 +305,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
       const swatch=document.createElement("span");swatch.className="mwRoadSwatch";
       swatch.style.background=group.color[0];swatch.style.borderColor=group.color[1];
       const name=document.createElement("span");name.className="mwRoadName";name.textContent=group.road;
-      const qty=document.createElement("span");qty.className="mwRoadCount";qty.textContent=String(group.placed.length);
+      const qty=document.createElement("span");qty.className="mwRoadCount";qty.textContent=String(group.placed.length)+"개";
       item.append(swatch,name,qty);
       item.onclick=()=>{
         if(selectedRoads.has(group.road))selectedRoads.delete(group.road);
@@ -312,6 +315,11 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
       legend.appendChild(item);
     }
     clearSelection.disabled=selectedRoads.size===0;
+    const objectTotal=allGroups.reduce((sum,g)=>sum+g.placed.length,0);
+    const selectedGroups=selectedRoads.size ? allGroups.filter(g=>selectedRoads.has(g.road)) : [];
+    const selectedObjects=selectedGroups.reduce((sum,g)=>sum+g.placed.length,0);
+    totals.textContent=`전체 도로명 ${allGroups.length}개 · 객체 ${objectTotal}개`+
+      (selectedRoads.size?` / 선택 도로명 ${selectedGroups.length}개 · 객체 ${selectedObjects}개`:"");
     if(allGroups.length)showMessage("");
     else showMessage("해당 구역에서 표시 가능한 건물 주소가 없습니다.");
     renderedRoadGroups=allGroups.map(group=>({group}));
@@ -344,10 +352,10 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   }
   function off(){
     enabled=false;seq++;selectedRoads.clear();renderedRoadGroups=[];
-    button.setAttribute("aria-pressed","false");button.textContent="건물별 표시";panel.hidden=true;
+    button.setAttribute("aria-pressed","false");button.textContent="도로명 조회";panel.hidden=true;totals.textContent="전체 도로명 0개 · 객체 0개";
     stopShapes();legend.hidden=true;showMessage("건물별 레이어가 꺼져 있습니다.");
   }
-  button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="건물별 숨기기";schedule();};
+  button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="도로명 숨기기";schedule();};
   if(kakao.maps.event?.addListener)kakao.maps.event.addListener(map,"idle",()=>{if(enabled)drawLabels(renderedRoadGroups);});
   return {
     onZipLoaded(zip){if(enabled&&!cache.has(zip))schedule();},

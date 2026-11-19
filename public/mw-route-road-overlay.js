@@ -174,7 +174,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
         try{group.points.push(turf.centerOfMass(within).geometry.coordinates);}catch{}
       }
     }
-    loadedGroups=[...grouped.values()].sort((a,b)=>b.entries.length-a.entries.length||a.name.localeCompare(b.name,"ko"));
+    loadedGroups=[...grouped.values()].sort((a,b)=>a.name.localeCompare(b.name,"ko-KR"));
     for(const group of loadedGroups){
       const selected=selectedRoads.size===0||selectedRoads.has(group.name);
       for(const entry of group.entries)if(addPolygon(entry.feature,entry.building,group.color,selected))total++;

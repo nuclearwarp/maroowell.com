@@ -134,7 +134,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   panel.hidden=true;
   panel.setAttribute("aria-label","지도 도로명별 건물 범례");
   panel.innerHTML='<div class="mwRoadHead"><strong>도로명별 건물</strong><button type="button" class="mwRoadClear">선택 해제</button></div>'+
-    '<div class="mwRoadTotals" aria-live="polite">전체 도로명 0개 · 객체 0개</div>'+ 
+    '<div class="mwRoadTotals" aria-live="polite">전체 도로명 0개 · 건물 0개</div>'+ 
     '<div class="mwRoadStatus" aria-live="polite" hidden></div>'+ 
     '<div class="mwRoadLegend" hidden></div>'+
     '<div class="mwRoadHint">실제 건물 외곽선 · 도로명별 색상</div>';
@@ -318,8 +318,8 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
     const objectTotal=allGroups.reduce((sum,g)=>sum+g.placed.length,0);
     const selectedGroups=selectedRoads.size ? allGroups.filter(g=>selectedRoads.has(g.road)) : [];
     const selectedObjects=selectedGroups.reduce((sum,g)=>sum+g.placed.length,0);
-    totals.textContent=`전체 도로명 ${allGroups.length}개 · 객체 ${objectTotal}개`+
-      (selectedRoads.size?` / 선택 도로명 ${selectedGroups.length}개 · 객체 ${selectedObjects}개`:"");
+    totals.textContent=`전체 도로명 ${allGroups.length}개 · 건물 ${objectTotal}개`+
+      (selectedRoads.size?` / 선택 도로명 ${selectedGroups.length}개 · 건물 ${selectedObjects}개`:"");
     if(allGroups.length)showMessage("");
     else showMessage("해당 구역에서 표시 가능한 건물 주소가 없습니다.");
     renderedRoadGroups=allGroups.map(group=>({group}));
@@ -352,7 +352,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
   }
   function off(){
     enabled=false;seq++;selectedRoads.clear();renderedRoadGroups=[];
-    button.setAttribute("aria-pressed","false");button.textContent="도로명 조회";panel.hidden=true;totals.textContent="전체 도로명 0개 · 객체 0개";
+    button.setAttribute("aria-pressed","false");button.textContent="도로명 조회";panel.hidden=true;totals.textContent="전체 도로명 0개 · 건물 0개";
     stopShapes();legend.hidden=true;showMessage("건물별 레이어가 꺼져 있습니다.");
   }
   button.onclick=()=>{if(enabled){off();return;}enabled=true;panel.hidden=false;button.setAttribute("aria-pressed","true");button.textContent="도로명 숨기기";schedule();};

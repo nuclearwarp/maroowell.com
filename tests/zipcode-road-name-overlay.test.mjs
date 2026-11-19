@@ -7,7 +7,7 @@ const server=readFileSync("worker.js","utf8");
 new Function(moduleSource);
 assert(server.includes('handleGeoBuildingsApi'));
 for (const [,source] of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if(source.trim())new Function(source);
-assert(html.includes("mw-zip-road-overlay.js?v=20261119-1"));
+assert(html.includes("mw-zip-road-overlay.js?v=20261119-3"));
 assert(html.includes("onBuildingClick: () => { state.selectionClickGuardUntil = Date.now() + 400"));
 assert(moduleSource.includes('shareButton.insertAdjacentElement("afterend",button)'));
 assert(moduleSource.includes('wrap.appendChild(panel)'));
@@ -17,7 +17,7 @@ assert(moduleSource.includes('clearSelection.onclick=()=>{selectedRoads.clear();
 assert(!moduleSource.includes('selectedZip'));
 assert(moduleSource.includes('panel.hidden=true'));
 assert(moduleSource.includes("@media(min-width:761px){#mwRoadPanel{width:min(504px,calc(100% - 28px))}"),"desktop ZIP legend expands to 504px");
-assert(moduleSource.includes("grid-template-columns:repeat(2,minmax(0,1fr))"),"desktop ZIP legend uses two columns");
+assert(moduleSource.includes("display:flex;flex-direction:column"),"desktop ZIP legend uses one item per row");
 assert(moduleSource.includes("@media(max-width:720px){#mwRoadPanel{left:8px;bottom:8px;width:min(205px"),"mobile ZIP legend retains original 205px width");
 
 assert(server.includes('path === "/building-footprints"'));

@@ -12,13 +12,13 @@ for(const [name,html] of [["route",route],["zipcode",zipcode]]) {
     if(src.trim())assert.doesNotThrow(()=>new Function(src),name+" inline Javascript syntax");
   }
 }
-assert(route.includes("mw-route-road-overlay.js?v=20261119-2"),"route module included");
+assert(route.includes("mw-route-road-overlay.js?v=20261119-3"),"route module included");
 assert(module.includes('const appMode=document.documentElement.classList.contains("mw-app-route-mode")'),"app/edit mode distinction required");
 assert(module.includes('actionRow.id="mwRouteRoadActionRow"'),"editor road-name control gets a visible sidebar row");
 assert(module.includes('shareRow.insertAdjacentElement("afterend",actionRow)'),"editor road-name control follows share actions");
 assert(module.includes('const labelOff=appMode?"건물별 표시":"도로명 확인"'),"editor road-name button remains identifiable");
-assert(route.includes("mw-zip-road-overlay.js?v=20261119-1"),"road hash shared across pages");
-assert(zipcode.includes("mw-zip-road-overlay.js?v=20261119-1"));
+assert(route.includes("mw-zip-road-overlay.js?v=20261119-3"),"road hash shared across pages");
+assert(zipcode.includes("mw-zip-road-overlay.js?v=20261119-3"));
 assert(route.includes('id="routeGeometryToggle"'));
 assert(zipcode.includes('id="zipGeometryToggle"'));
 assert(route.includes("poly.setMap(routeBoundariesVisible ? map : null)"));
@@ -32,7 +32,7 @@ assert(module.includes("getGeometryHash(geometry)"));
 assert(module.includes("routeCache.set(cacheKey,record)"));
 assert(module.includes("tools.colorForRoad(name)"));
 assert(module.includes("@media(min-width:761px){#mwRouteRoadLegend{width:min(516px,calc(100% - 28px))}"),"desktop route legend expands to 516px");
-assert(module.includes("grid-template-columns:repeat(2,minmax(0,1fr))"),"desktop route legend uses two columns");
+assert(module.includes("display:flex;flex-direction:column"),"desktop route legend uses one item per row");
 assert(module.includes("@media(max-width:760px){#mwRouteRoadLegend{left:8px;bottom:8px;width:min(164px"),"mobile route legend retains latest 164px width");
 
 assert(module.includes('selectedRoads=new Set()'));

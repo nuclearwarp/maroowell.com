@@ -2,152 +2,20 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<title>도로명 조회 · 마루웰</title>
-<script src="/config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
-<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&autoload=false&libraries=services"></script>
-<script src="/mw-zip-road-overlay.js?v=20261117-7"></script>
-<script src="/mw-route-road-overlay.js?v=20261117-3"></script>
-<style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:"Noto Sans KR",system-ui,sans-serif;color:#203247}
-#mapWrap{position:absolute;inset:0;background:#eaf0f5}#map{position:absolute;inset:0}
-#top{position:absolute;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;z-index:55;display:flex;flex-direction:column;gap:6px;pointer-events:none}
-#title{align-self:flex-start;background:#fffefaed;padding:6px 11px;border-radius:10px;font-size:12px;font-weight:850;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 2px 9px #24374f23}
-#buttons{display:flex;gap:6px;pointer-events:auto;flex-wrap:wrap}
-#buttons button{height:39px;flex:1 1 90px;font-weight:800;border:1px solid #cbd5e1;border-radius:12px;color:#1f3547;background:#fff;box-shadow:0 2px 8px #24374f22;font-size:12px}
-#buttons button[aria-pressed="true"]{background:#ffe58a;border-color:#e5bc33}
-#message{position:absolute;top:108px;left:50%;transform:translateX(-50%);z-index:40;background:#fffffff2;padding:10px 13px;border-radius:12px;border:1px solid #cfdae5;font-size:12px;font-weight:750;max-width:92%;box-shadow:0 4px 14px #33415520;text-align:center}
-#message[hidden]{display:none}#roadToggleHost{display:contents}
-#mwRouteRoadLegend{bottom:calc(12px + env(safe-area-inset-bottom))!important;left:9px!important;width:min(235px,calc(100% - 18px))!important;max-height:48vh!important}
-@media(max-width:380px){#buttons button{flex-basis:80px;font-size:11px}#mwRouteRoadLegend{width:min(220px,calc(100% - 18px))!important}}
-</style>
-</head>
-<body>
-<div id="mapWrap"><div id="map"></div></div>
-<div id="top"><div id="title">도로명 조회</div><div id="buttons"><span id="roadToggleHost"></span><button id="routeToggle" aria-pressed="true" type="button">구역 숨기기</button><button id="satellite" aria-pressed="false" type="button">위성</button></div></div>
-<div id="message">라우트 지도를 불러오는 중…</div>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>라우트 지도 연결 중 · 마루웰</title>
 <script>
-(async function(){
-"use strict";
-const qs=new URLSearchParams(location.search);
-const camp=(qs.get("camp")||"").trim();
-const source=(qs.get("source")==="dragon_car"||camp.startsWith("용차"))?"dragon_car":"maroowell";
-const originalCamp=camp.replace(/^용차\s*[·:]\s*/,"").trim();
-const routes=[...new Set((qs.get("routes")||"").split(",").map(r=>r.trim().toUpperCase().replace(/\s+/g,"")).filter(r=>r&&r!=="휴무"))].slice(0,35);
-const msg=document.getElementById("message"),title=document.getElementById("title");
-title.textContent=(source==="dragon_car"?"용차 · ":"마루웰 · ")+originalCamp+" · "+routes.join(", ");
-let map=null,roadOverlay=null,routeVisible=true,routePolygons=[];
-const packs=[];
-function status(message,error=false){msg.textContent=message;msg.hidden=!message;msg.style.color=error?"#b91c1c":"#203247";}
-const cfg=window.MARUWELL_CONFIG||{};
-function getSupabase(){if(!cfg.SUPABASE_URL||!cfg.SUPABASE_ANON_KEY||!window.supabase)throw Error("마루웰 로그인 설정을 확인해주세요");return window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY,{auth:{persistSession:true,storage:window.sessionStorage,autoRefreshToken:true,detectSessionInUrl:false}});}
-const client=getSupabase();
-async function token(){const result=await client.auth.getSession();if(result.error||!result.data.session?.access_token)throw Error("로그인이 만료되었습니다. 앱에서 다시 로그인해주세요.");return result.data.session.access_token;}
-function normalizePolygon(raw){
-  if(!raw)return[];
-  if(typeof raw==="string"){try{raw=JSON.parse(raw);}catch{return[];}}
-  if(Array.isArray(raw)){
-    if(raw[0]&&typeof raw[0][0]==="number")return [[raw]];
-    if(raw[0]&&typeof raw[0][0]?.[0]==="number")return raw.map(x=>[x]);
-    return raw;
+(function(){
+  "use strict";
+  const original = new URLSearchParams(location.search);
+  const next = new URL("/coupangRouteMap.html", location.origin);
+  next.searchParams.set("mw_app", "1");
+  for (const key of ["camp","routes","source"]) {
+    const value = original.get(key);
+    if (value) next.searchParams.set(key,value);
   }
-  if(raw.type==="Polygon")return [raw.coordinates];
-  if(raw.type==="MultiPolygon")return raw.coordinates||[];
-  if(raw.type==="Feature")return normalizePolygon(raw.geometry);
-  return [];
-}
-function validRing(r){return (r||[]).filter(p=>Array.isArray(p)&&p.length>=2&&Number.isFinite(+p[0])&&Number.isFinite(+p[1])&&Math.abs(+p[0])<=180&&Math.abs(+p[1])<=90);}
-function addGeometry(geometry,label){
-  const shape=normalizePolygon(geometry);
-  if(!shape.length)return;
-  const coords=[],features=[];
-  for(const polygon of shape){
-    const shell=validRing(polygon[0]);
-    if(shell.length<3)continue;
-    const rings=[shell,...polygon.slice(1).map(validRing).filter(r=>r.length>=3)];
-    features.push({type:"Polygon",coordinates:rings});
-    const paths=rings.map(r=>r.map(p=>new kakao.maps.LatLng(+p[1],+p[0])));
-    const polygonObject=new kakao.maps.Polygon({map:routeVisible?map:null,path:paths.length===1?paths[0]:paths,strokeWeight:2,strokeColor:"#2878b3",strokeOpacity:.85,fillColor:"#5daac9",fillOpacity:.12,zIndex:1});
-    routePolygons.push(polygonObject);
-    shell.forEach(p=>coords.push(new kakao.maps.LatLng(+p[1],+p[0])));
-  }
-  if(features.length) packs.push({row:{full_code:label},geometry:features.length===1?features[0]:{type:"MultiPolygon",coordinates:features.map(f=>f.coordinates)}});
-  return coords;
-}
-async function ownRoutes(){
-  const dbCamp=originalCamp.startsWith("M_")?originalCamp:/^M(?=[가-힣0-9])/.test(originalCamp)?"M_"+originalCamp.slice(1):originalCamp;
-  const requested=routes.length?routes:[""];
-  const results=await Promise.all(requested.map(async r=>{
-    const url=new URL(cfg.SUPABASE_URL+"/rest/v1/maroowell_sub_sub_route");
-    url.searchParams.set("select","id,camp,route_code,route_norm,polygon_wgs84");
-    url.searchParams.set("camp","eq."+dbCamp);
-    url.searchParams.set("is_active","eq.true");
-    if(r)url.searchParams.set("or","(route_code.eq."+r+",route_norm.eq."+r+",route_code.like."+r+"*,route_norm.like."+r+"*)");
-    url.searchParams.set("limit","150");
-    const res=await fetch(url,{headers:{apikey:cfg.SUPABASE_ANON_KEY,Authorization:"Bearer "+await token(),Accept:"application/json"}});
-    if(!res.ok)throw Error("마루웰 서서브 조회 오류 ("+res.status+")");
-    return res.json();
-  }));
-  return [...new Map(results.flat().map(x=>[x.id,x])).values()]
-    .filter(x=>!routes.length||routes.some(r=>(x.route_code||x.route_norm||"").toUpperCase().startsWith(r)))
-    .map(x=>({label:x.route_code||x.route_norm||"",geometry:x.polygon_wgs84}));
-}
-async function externalRoutes(){
-  const endpoint="https://purple-river-0717.brain-0f6.workers.dev/route";
-  const result=[];
-  for(const code of (routes.length?routes:[""])){
-    const url=new URL(endpoint);
-    url.searchParams.set("camp",originalCamp);
-    url.searchParams.set("mode","prefix");
-    if(code)url.searchParams.set("code",code);
-    const res=await fetch(url,{headers:{Authorization:"Bearer "+await token()}});
-    if(!res.ok)throw Error("용차 라우트 조회 오류 ("+res.status+")");
-    const data=await res.json();
-    result.push(...(data.rows||[]));
-  }
-  return [...new Map(result.map(x=>[x.id||x.full_code,x])).values()].filter(x=>!routes.length||routes.some(r=>(x.full_code||x.code||"").toUpperCase().startsWith(r))).map(x=>({label:x.full_code||x.code||"",geometry:x.polygon_wgs84}));
-}
-function boundsForCoordinates(pts){
-  if(!pts.length)return;
-  const bounds=new kakao.maps.LatLngBounds();
-  pts.forEach(p=>bounds.extend(p));
-  map.setBounds(bounds,20,20,20,20);
-}
-async function hash(value){
-  const bytes=new TextEncoder().encode(JSON.stringify(value));
-  const digest=await crypto.subtle.digest("SHA-256",bytes);
-  return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
-}
-function initControls(){
- const toggle=document.getElementById("routeToggle"),sat=document.getElementById("satellite");
- toggle.onclick=()=>{routeVisible=!routeVisible;routePolygons.forEach(p=>p.setMap(routeVisible?map:null));toggle.textContent=routeVisible?"구역 숨기기":"구역 보이기";toggle.setAttribute("aria-pressed",String(routeVisible));};
- sat.onclick=()=>{const on=sat.getAttribute("aria-pressed")!=="true";sat.setAttribute("aria-pressed",String(on));map.setMapTypeId(on?kakao.maps.MapTypeId.HYBRID:kakao.maps.MapTypeId.ROADMAP);sat.textContent=on?"일반":"위성";};
-}
-if(!camp||!routes.length){status("조회할 입차 캠프 또는 라우트가 없습니다.",true);return;}
-try{
- await token();
- await new Promise((resolve,reject)=>{if(!window.kakao?.maps){reject(Error("카카오 지도 SDK를 불러오지 못했습니다."));return;}kakao.maps.load(resolve);});
- map=new kakao.maps.Map(document.getElementById("map"),{center:new kakao.maps.LatLng(37.5665,126.978),level:7});
- initControls();
- const items=source==="dragon_car"?await externalRoutes():await ownRoutes();
- const points=[];items.forEach(r=>{const p=addGeometry(r.geometry,r.label);if(p)points.push(...p);});
- if(!packs.length){status("해당 라우트의 폴리곤을 찾지 못했습니다. 캠프 및 라우트 정보를 확인해주세요.",true);return;}
- boundsForCoordinates(points);
- roadOverlay=window.MW_ROUTE_ROAD_BOOT?.({
-   map,
-   getPacks:()=>packs,
-   getGeometry:p=>p.geometry,
-   getToken:token,
-   getGeometryHash:hash
- });
- if(!roadOverlay)throw Error("도로명 건물 표시 모듈을 불러오지 못했습니다.");
- status("");
- // Start the road display without requiring a second tap from the driver.
- document.getElementById("mwRouteRoadToggle")?.click();
-}catch(error){status("도로명 조회 실패: "+String(error?.message||error),true);}
+  location.replace(next.pathname + next.search);
 })();
 </script>
-</body>
+</head><body>라우트 지도로 이동 중입니다.</body>
 </html>

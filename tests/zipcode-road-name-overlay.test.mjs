@@ -34,7 +34,7 @@ assert.equal(new Set(buildings.map(x=>x.id)).size,3,"different building objectid
 assert.equal(buildings[0].managementId,"012345");
 assert.equal(roadName(one.properties),"도림천로13길");
 assert.equal(grouping(buildings).length,3);
-assert.deepEqual(grouping(buildings).map(g=>g.road), ["도로명 미확인","도림천로11길","도림천로13길"].sort((a,b)=>a.localeCompare(b,"ko-KR")), "ZIP road groups must be 가나다-ordered");
+assert.deepEqual(Array.from(grouping(buildings),g=>g.road), ["도로명 미확인","도림천로11길","도림천로13길"].sort((a,b)=>a.localeCompare(b,"ko-KR")), "ZIP road groups must be 가나다-ordered");
 assert(moduleSource.includes('a.road.localeCompare(b.road,"ko-KR")'),"both ZIP grouping and legend are 가나다-ordered");
 assert(grouping(buildings).some(g=>g.road==="도로명 미확인"));
 assert(moduleSource.includes("let renderedRoadGroups=[]"));

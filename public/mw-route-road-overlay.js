@@ -12,6 +12,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   const wrap=document.getElementById("mapWrap");
   const host=document.getElementById("roadToggleHost");
   const share=document.getElementById("shareBtn");
+  const appMode=document.documentElement.classList.contains("mw-app-route-mode");
   if (!wrap || (!host && !share)) return null;
   const style=document.createElement("style");
   style.textContent=[
@@ -36,10 +37,28 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   ].join("");
   document.head.append(style);
   const btn=document.createElement("button");
-  btn.type="button";btn.id="mwRouteRoadToggle";btn.className="btn";btn.textContent="건물별 표시";
+  const labelOff=appMode?"건물별 표시":"도로명 확인";
+  const labelOn=appMode?"건물별 숨기기":"도로명 숨기기";
+  const labelList=appMode?"목록 보기":"도로명 목록 보기";
+  btn.type="button";btn.id="mwRouteRoadToggle";btn.className="btn";btn.textContent=labelOff;
   btn.setAttribute("aria-pressed","false");
-  if(host)host.append(btn);
-  else share.insertAdjacentElement("afterend",btn);
+  // The app-only toolbar is hidden in the full route editor.
+  // Put the editor control in the visible left action section instead.
+  if(appMode&&host){
+    host.append(btn);
+  }else if(share){
+    const actionRow=document.createElement("div");
+    actionRow.id="mwRouteRoadActionRow";
+    actionRow.className="row";
+    actionRow.style.marginTop="8px";
+    const shareRow=share.closest(".row");
+    if(shareRow)shareRow.insertAdjacentElement("afterend",actionRow);
+    else share.insertAdjacentElement("afterend",actionRow);
+    btn.style.width="100%";
+    actionRow.append(btn);
+  }else if(host){
+    host.append(btn);
+  }
   const panel=document.createElement("div");panel.id="mwRouteRoadLegend";panel.hidden=true;
   panel.innerHTML='<div class="mwRouteRoadHeader"><span>도로명별 건물</span><div class="mwRouteRoadHeaderActions"><button type="button" class="mwRouteRoadClear">선택 해제</button><button type="button" class="mwRouteRoadHide">숨기기</button></div></div>'+
     '<div class="mwRouteRoadStatus" aria-live="polite" hidden></div><div class="mwRouteRoadList"></div>';
@@ -195,7 +214,7 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
     drawLabels();
   }
   clearSelection.onclick=()=>{selectedRoads.clear();render(visibleRows);};
-  hidePanel.onclick=()=>{panel.hidden=true;btn.textContent="목록 보기";};
+  hidePanel.onclick=()=>{panel.hidden=true;btn.textContent=labelList;};
   async function load() {
     const generation=++epoch;
     pending=Promise.resolve();
@@ -219,20 +238,20 @@ window.MW_ROUTE_ROAD_BOOT = function ({map,getPacks,getGeometry,getToken,getGeom
   }
   function reset(){
     on=false;epoch++;selectedRoads.clear();loadedGroups=[];visibleRows=[];cleanup();panel.hidden=true;
-    btn.setAttribute("aria-pressed","false");btn.textContent="건물별 표시";
+    btn.setAttribute("aria-pressed","false");btn.textContent=labelOff;
   }
   btn.onclick=()=>{
     if(on){
-      if(panel.hidden){panel.hidden=false;btn.textContent="건물별 숨기기";return;}
+      if(panel.hidden){panel.hidden=false;btn.textContent=labelOn;return;}
       reset();return;
     }
-    on=true;panel.hidden=false;btn.textContent="건물별 숨기기";btn.setAttribute("aria-pressed","true");
+    on=true;panel.hidden=false;btn.textContent=labelOn;btn.setAttribute("aria-pressed","true");
     refresh();
   };
   kakao.maps.event.addListener(map,"idle",()=>{if(on&&loadedGroups.length)drawLabels();});
   return {onRoutesChange:refresh,reset,isOn:()=>on,
-    showPanel:()=>{if(on){panel.hidden=false;btn.textContent="건물별 숨기기";}},
-    hidePanel:()=>{if(on){panel.hidden=true;btn.textContent="목록 보기";}}
+    showPanel:()=>{if(on){panel.hidden=false;btn.textContent=labelOn;}},
+    hidePanel:()=>{if(on){panel.hidden=true;btn.textContent=labelList;}}
   };
 };
 })();

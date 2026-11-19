@@ -12,7 +12,11 @@ for(const [name,html] of [["route",route],["zipcode",zipcode]]) {
     if(src.trim())assert.doesNotThrow(()=>new Function(src),name+" inline Javascript syntax");
   }
 }
-assert(route.includes("mw-route-road-overlay.js?v=20261117-2"),"route module included");
+assert(route.includes("mw-route-road-overlay.js?v=20261119-1"),"route module included");
+assert(module.includes('const appMode=document.documentElement.classList.contains("mw-app-route-mode")'),"app/edit mode distinction required");
+assert(module.includes('actionRow.id="mwRouteRoadActionRow"'),"editor road-name control gets a visible sidebar row");
+assert(module.includes('shareRow.insertAdjacentElement("afterend",actionRow)'),"editor road-name control follows share actions");
+assert(module.includes('const labelOff=appMode?"건물별 표시":"도로명 확인"'),"editor road-name button remains identifiable");
 assert(route.includes("mw-zip-road-overlay.js?v=20261117-7"),"road hash shared across pages");
 assert(zipcode.includes("mw-zip-road-overlay.js?v=20261117-7"));
 assert(route.includes('id="routeGeometryToggle"'));

@@ -80,7 +80,7 @@ function grouping(buildings) {
     if (!groups.has(building.road)) groups.set(building.road, { road: building.road, buildings: [], color:null });
     groups.get(building.road).buildings.push(building);
   }
-  const items = [...groups.values()].sort((a,b) => b.buildings.length-a.buildings.length || a.road.localeCompare(b.road,"ko"));
+  const items = [...groups.values()].sort((a,b) => a.road.localeCompare(b.road,"ko-KR"));
   for (const item of items) {
     item.color = colorForRoad(item.road);
   }
@@ -286,7 +286,7 @@ window.MW_ROAD_OVERLAY_BOOT = function ({map,getSelectedZips,getFeature,onBuildi
       }
     }
     const allGroups=[...grouped.values()].filter(g=>g.placed.length)
-      .sort((a,b)=>b.placed.length-a.placed.length||a.road.localeCompare(b.road,"ko"));
+      .sort((a,b)=>a.road.localeCompare(b.road,"ko-KR"));
     legend.hidden=!allGroups.length;
     const available=new Set(allGroups.map(g=>g.road));
     for(const road of selectedRoads)if(!available.has(road))selectedRoads.delete(road);

@@ -877,11 +877,21 @@ async function refreshMetaCollectorState(){
 }
 async function toggleMetaCollector(){
   const btn=$("metaCollectorToggle");
-  if(btn.dataset.paused==="unknown")return refreshMetaCollectorState();
-  const paused=btn.dataset.paused==="true";
-  if(!paused&&!confirm("META 실시간 현황 수집을 중지할까요? 기존 기록은 유지됩니다."))return;
+  // Open MFA synchronously for OFF. Awaiting a network request first would
+  // lose the user gesture and could trigger the browser popup blocker.
+  if(btn.dataset.paused==="true"){
+    const url="https://meta-direct-poc.brain-0f6.workers.dev/login-send-code";
+    const popup=window.open(url,"mwMetaVerification","popup=yes,width=620,height=780,scrollbars=yes,resizable=yes");
+    if(!popup)window.location.assign(url);else popup.focus();
+    $("metaCollectorState").textContent="META 로그인 인증 성공 후 수집이 다시 켜집니다.";
+    return;
+  }
+  await refreshMetaCollectorState();
+  if(btn.dataset.paused==="unknown")return;
+  if(btn.dataset.paused==="true")return;
+  if(!confirm("META 실시간 현황 수집을 중지할까요? 기존 기록은 유지됩니다."))return;
   btn.disabled=true;
-  try{const updated=await metaControlRequest("POST",!paused);paintMetaCollectorState(updated.paused);}
+  try{const updated=await metaControlRequest("POST",true);paintMetaCollectorState(updated.paused);}
   catch(error){$("metaCollectorState").textContent="변경 실패: "+(error?.message||String(error));btn.disabled=false;}
 }
 async function boot(){
@@ -899,6 +909,9 @@ async function boot(){
     control.hidden=false;
     control.style.display="";
     $("metaCollectorToggle").addEventListener("click",toggleMetaCollector);
+    window.addEventListener("focus",()=>{void refreshMetaCollectorState();});
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)void refreshMetaCollectorState();});
+    setInterval(()=>{if(!document.hidden)void refreshMetaCollectorState();},30000);
     await refreshMetaCollectorState();
     await queryAll();
     restartAuto();

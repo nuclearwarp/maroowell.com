@@ -747,40 +747,97 @@ async function logout(){
   }finally{location.replace("/")}
 }
 
+const META_COLLECTOR_CONTROL_API="https://purple-river-0717.brain-0f6.workers.dev/meta/collector-control";
+const META_LOGIN_URL="https://meta-direct-poc.brain-0f6.workers.dev/login-send-code";
+async function collectorControlRequest(paused) {
+  const {data:{session}}=await S.sb.auth.getSession();
+  if(!session?.access_token)throw new Error("관리자 로그인이 필요합니다.");
+  const response=await fetch(META_COLLECTOR_CONTROL_API,{
+    method:"POST",cache:"no-store",
+    headers:{Authorization:"Bearer "+session.access_token,"Content-Type":"application/json"},
+    body:JSON.stringify({paused})
+  });
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok || !result.ok)throw new Error(result.error||"수집 상태 변경 실패");
+  return result;
+}
+function openMetaCollectorLogin() {
+  // Synchronous user gesture: browsers will not block the OTP popup.
+  const popup=window.open(META_LOGIN_URL,"mwMetaVerification","popup=yes,width=620,height=780,scrollbars=yes,resizable=yes");
+  if(!popup)window.location.assign(META_LOGIN_URL);
+  else popup.focus();
+  return popup;
+}
 function renderCollectorState(){
   const b=$("collectorBtn");
   b.disabled=!S.isAdmin;
-  b.style.pointerEvents=S.isAdmin ? "auto" : "none";
-  if(["error","expired","missing"].includes(S.collectorState?.status)){
+  b.style.pointerEvents=S.isAdmin?"auto":"none";
+  if(S.collectorPaused===true){
+    b.className="btn collectorPaused";
+    b.textContent="자동 수집 OFF";
+    b.title="META 수집 중지 상태 · 클릭하면 로그인 인증 창이 열립니다.";
+  }else if(!S.collectorState || S.collectorState.status==="unknown"){
     b.className="btn collectorError";
-    b.textContent="자동 복구 중";
-    b.title=S.collectorState?.last_error||"백엔드에서 세션을 자동 복구합니다.";
+    b.textContent="수집 상태 확인";
+    b.title="서버의 수집 상태를 확인해야 합니다.";
+  }else if(["error","expired","missing"].includes(S.collectorState.status)){
+    b.className="btn collectorError";
+    b.textContent="자동 수집 ON · 인증 필요";
+    b.title=S.collectorState.last_error||"수집은 켜져 있으나 META 인증 상태를 확인해야 합니다.";
   }else{
     b.className="btn collectorOk";
     b.textContent="자동 수집 ON";
-    b.title=S.isAdmin?"연결 상태 확인 및 META 문자 인증창 열기":"백엔드 자동 수집 상태입니다.";
+    b.title="클릭하면 서버의 META 실시간 수집을 중지합니다.";
   }
 }
 async function loadCollectorState(){
   try{
-    const{data,error}=await S.sb.rpc("mw_meta_collector_state");
+    const {data,error}=await S.sb.rpc("mw_meta_collector_state");
     if(error)throw error;
-    S.collectorState=firstRow(data)||{};
-    S.collectorPaused=S.collectorState?.paused===true;
+    const state=firstRow(data);
+    if(!state || typeof state.paused!=="boolean")throw new Error("수집 상태 응답을 확인할 수 없습니다.");
+    S.collectorState=state;
+    S.collectorPaused=state.paused;
   }catch(e){
     console.warn("collector state",e);
-    S.collectorState={status:"error",last_error:String(e?.message||e)};
+    S.collectorState={status:"unknown",last_error:String(e?.message||e)};
+    S.collectorPaused=null;
   }
   renderCollectorState();
 }
 async function toggleCollector(){
-  // Admin-only authentication/connection check; never pause the collector.
   if(!S.isAdmin)return;
-  const url="https://meta-direct-poc.brain-0f6.workers.dev/login-send-code";
-  const popup=window.open(url,"mwMetaVerification","popup=yes,width=620,height=780,scrollbars=yes,resizable=yes");
-  if(!popup)location.assign(url);else popup.focus();
+  // OFF -> popup must open synchronously within the click (no await), or
+  // browsers will block the window as an unrequested popup.
+  if(S.collectorPaused===true){
+    openMetaCollectorLogin();
+    setStatus("META 로그인 인증 성공 후 자동 수집이 다시 켜집니다.");
+    return;
+  }
+  // ON -> fresh DB check before a destructive pause action.
+  await loadCollectorState();
+  if(S.collectorPaused===true){
+    setStatus("자동 수집은 이미 중지됐습니다. OFF 버튼을 눌러 로그인해주세요.");
+    return;
+  }
+  if(S.collectorPaused!==false){
+    setStatus("수집 상태 조회 실패 · 잠시 후 다시 시도하세요.",true);
+    return;
+  }
+  if(!window.confirm("META 자동 수집을 중지할까요? 기존 기록은 보존됩니다."))return;
+  const btn=$("collectorBtn");
+  btn.disabled=true;
+  try{
+    const updated=await collectorControlRequest(true);
+    S.collectorPaused=updated.paused;
+    S.collectorState={...S.collectorState,paused:updated.paused};
+    renderCollectorState();
+    setStatus(updated.paused?"META 자동 수집이 중지됐습니다.":"수집 상태가 변경되지 않았습니다.");
+  }catch(e){
+    setStatus("META 자동 수집 중지 실패: "+esc(e?.message||String(e)),true);
+    await loadCollectorState();
+  }
 }
-
 function buildFreshMaps(freshRows){
   const byPk=new Map(),byKey=new Map(),byCid=new Map(),byName=new Map();
   for(const f of freshRows||[]){
@@ -1036,6 +1093,9 @@ function bind(){
 
   $("queryBtn").addEventListener("click",queryAll);
   $("collectorBtn").addEventListener("click",toggleCollector);
+  window.addEventListener("focus",()=>{ if(S.sb)void loadCollectorState(); });
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden&&S.sb)void loadCollectorState(); });
+  window.setInterval(()=>{ if(!document.hidden&&S.sb)void loadCollectorState(); },30000);
   $("logoutBtn").addEventListener("click",logout);
 
   document.querySelectorAll("[data-copy-section]").forEach(b=>b.addEventListener("click",e=>{

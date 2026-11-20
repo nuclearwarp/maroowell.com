@@ -11,10 +11,14 @@ for(const [,js] of home.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)){
 }
 assert(home.includes('id="metaCollectorToggle"'));
 assert(home.includes("S.isAdmin"));
-assert(home.includes('metaControlRequest("POST",!paused)'));
+assert(home.includes('metaControlRequest("POST",true)'));
 assert(meta.includes('if ((await sessionState(env))?.collector_paused === true)'));
 assert(meta.includes('if (state?.collector_paused === true)'));
-assert(!meta.includes('collector_paused: false,'));
+const verifiedOtp=meta.indexOf('path === "/login-submit-code" && request.method === "POST" && response.ok');
+assert(verifiedOtp>0,"only verified OTP may restart");
+assert(meta.indexOf("collector_paused:false",verifiedOtp)>verifiedOtp,"OTP resumes collector");
+const collectorBody=meta.slice(meta.indexOf("async function runCollector("),meta.indexOf("export default {"));
+assert(!collectorBody.includes("collector_paused:false"),"regular collection must not clear pause");
 assert(api.includes('if (path === "/meta/collector-control")'));
 assert(api.includes('access.roleLevel<90'));
 assert(api.includes('select:"collector_paused,collector_paused_at"'));

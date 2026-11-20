@@ -951,6 +951,15 @@ export default {
       if (path.startsWith("/login-") || path === "/test-db" || path === "/auto-recover" || path === "/silent-renew") {
         const response = await authWorker.fetch(request, env);
         if (path === "/login-submit-code" && request.method === "POST" && response.ok) {
+          // A 200 from loginSubmitCode is only returned after MFA verification
+          // and a successful authenticated META API request. Resume server-side,
+          // never from the browser's popup-close event.
+          await sbPatch(env, "meta_backend_state?id=eq.1", {
+            collector_paused:false,
+            collector_paused_at:null,
+            collector_paused_by:null,
+            updated_at:new Date().toISOString()
+          });
           const resume = runCollector(env, true).catch(e => console.error("META resume failed:", e?.message));
           if (ctx?.waitUntil) ctx.waitUntil(resume); else await resume;
         }

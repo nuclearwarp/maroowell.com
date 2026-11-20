@@ -1,0 +1,14 @@
+"use strict";
+const assert=require("node:assert/strict");
+const fs=require("node:fs");
+const src=fs.readFileSync("workers/meta-collector/entry.js","utf8");
+assert(src.includes('meta_realtime_current'));
+assert(src.includes('rpc/meta_finalize_realtime_batch'));
+assert(!src.includes('sbUpsert(env, "meta_realtime_history"'),"A live collector must never persist minute snapshots");
+assert(src.includes('const freshbagPeakTotal = Math.max(0, Number(prev?.freshbag_peak_total || 0), Number(fb.total || 0))'),"Peak allocation must persist across later assignments");
+assert(src.includes('freshbag_peak_total: freshbagPeakTotal'));
+assert(src.includes('freshbag_peak_collection_rate: freshbagPeakRate'));
+assert(src.includes('round1_scan_started_at: rounds[1].scan'));
+assert(src.includes('round2_scan_started_at: rounds[2].scan'));
+assert(src.includes('round3_scan_started_at: rounds[3].scan'));
+console.log("PASS: final-only collector stores peak allocation and all round timestamps without minute history");

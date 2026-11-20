@@ -133,7 +133,6 @@ function addMinutesIso(v, minutes) {
   if (!Number.isFinite(x)) return null;
   return new Date(x + minutes * 60000).toISOString().slice(0, -1);
 }
-function sampleMinute(v) { return String(v || "").slice(0, 16) + ":00"; }
 function expectedRounds(batch) { return Math.max(1, Math.min(3, Number(batch?.expected_rounds || 2))); }
 function metricsCloseReached(batch) {
   const rawClose = batch?.metrics_close_at ? String(batch.metrics_close_at).replace(" ","T") : "";
@@ -625,6 +624,13 @@ async function processBatch(env, cookies, batch) {
       rounds[currentRound].method = "idle_30m";
     }
 
+    // A freshbag allocation can be reduced or reassigned later in the day.
+    // Preserve the largest observed allocation while keeping the latest collected count.
+    const freshbagPeakTotal = Math.max(0, Number(prev?.freshbag_peak_total || 0), Number(fb.total || 0));
+    const freshbagPeakRate = freshbagPeakTotal > 0
+      ? Math.round(Math.min(100, Math.max(0, Number(fb.collected || 0) / freshbagPeakTotal * 100)) * 100) / 100
+      : null;
+
     const deliveryRemaining = Math.max(0, d.scanned);
     const returnRemaining = batch.wave === "WAVE1" ? 0 : Math.max(0, ret?.pending || 0);
     const freshbagRemaining = Math.max(0, fb.pending || 0);
@@ -675,6 +681,7 @@ async function processBatch(env, cookies, batch) {
       return_total: ret?.total ?? null, return_attempt_rate: ret?.attemptRate ?? null, return_collection_rate: ret?.collectionRate ?? null,
       freshbag_pending: fb.pending, freshbag_collected: fb.collected, freshbag_uncollected: fb.uncollected,
       freshbag_total: fb.total, freshbag_attempt_rate: fb.attemptRate, freshbag_collection_rate: fb.collectionRate,
+      freshbag_peak_total: freshbagPeakTotal, freshbag_peak_collection_rate: freshbagPeakRate,
 
       current_round: currentRound, expected_rounds: expRounds,
       last_progress_at: lastProgressAt, last_scan_activity_at: lastScanActivityAt,
@@ -699,7 +706,7 @@ async function processBatch(env, cookies, batch) {
       raw_payload: { main: src, route_alerts: routeAlerts, share_candidate: routeAlerts.length > 0, collected_at: now, total_remaining: totalRemaining },
       updated_at: now
     };
-    // State transition events are infrequent; normal minute-by-minute samples stay in history.
+    // State transitions are logged selectively to diagnostics; minute snapshots stay only in current.
     if (currentRound !== Number(prev?.current_round||1) || (!!workCompletedAt !== !!prev?.work_completed_at) || (reopenedByScan && !!prev?.work_completed_at)) {
       await recordMetaDiagnostic(env,{
         event_type:reopenedByScan?"driver_reopened":workCompletedAt&&!prev?.work_completed_at?"driver_completed":"driver_round_changed",
@@ -730,31 +737,11 @@ async function processBatch(env, cookies, batch) {
   if (rows.length) await sbUpsert(env, "meta_realtime_current", rows, "batch_id,meta_worker_key");
 
   const freshRows = await storeFreshRows(env, batch, schedule, directory, fresh, now);
-  const freshMap = new Map((freshRows || []).map(r => [r.meta_worker_key, r]));
-  if (rows.length) {
-    const minute = sampleMinute(now);
-    const historyRows = rows.map(r => {
-      const fr = freshMap.get(r.meta_worker_key);
-      const deliveryRemaining = Math.max(0, Number(r.delivery_scanned || 0));
-      const totalRemaining = deliveryRemaining + (batch.wave === "WAVE1" ? 0 : Math.max(0, Number(r.return_pending || 0))) + Math.max(0, Number(r.freshbag_pending || 0));
-      return {
-        batch_id:r.batch_id,sampled_at:now,sample_minute:minute,schedule_date:r.schedule_date,meta_work_date:r.meta_work_date,
-        camp_code:r.camp_code,camp_name:r.camp_name,wave:r.wave,meta_worker_key:r.meta_worker_key,driver_pk:r.driver_pk,
-        coupang_id:r.coupang_id,driver_name:r.driver_name,current_round:r.current_round,expected_rounds:r.expected_rounds,
-        delivery_assigned:r.delivery_assigned,delivery_scanned:r.delivery_scanned,delivery_completed:r.delivery_completed,
-        delivery_impossible:r.delivery_impossible,delivery_pdd_miss:r.delivery_pdd_miss,delivery_total:r.delivery_total,delivery_complete_rate:r.delivery_complete_rate,
-        fresh_delivery_assigned:fr?.delivery_assigned ?? 0,fresh_delivery_scanned:fr?.delivery_scanned ?? 0,
-        fresh_delivery_completed:fr?.delivery_completed ?? 0,fresh_delivery_impossible:fr?.delivery_impossible ?? 0,
-        fresh_delivery_pdd_miss:fr?.delivery_pdd_miss ?? 0,fresh_delivery_total:fr?.delivery_total ?? 0,
-        fresh_delivery_complete_rate:fr?.delivery_complete_rate ?? 0,
-        return_pending:r.return_pending,return_collected:r.return_collected,
-        return_uncollected:Math.max(Number(r.return_uncollected_raw || 0),Number(r.return_absent_raw || 0)),return_total:r.return_total,
-        freshbag_pending:r.freshbag_pending,freshbag_collected:r.freshbag_collected,freshbag_uncollected:r.freshbag_uncollected,freshbag_total:r.freshbag_total,
-        delivery_remaining:deliveryRemaining,total_remaining:totalRemaining,actual_routes:r.actual_routes
-      };
-    });
-    await sbUpsert(env, "meta_realtime_history", historyRows, "batch_id,meta_worker_key,sample_minute");
-  }
+  // Minute-by-minute snapshots are intentionally NOT archived.
+  // meta_realtime_current holds one mutable row per active worker/batch;
+  // meta_finalize_realtime_batch copies it into one permanent final row.
+  // Preserve the historical table until outstanding days are backfilled
+  // and verified; stopping writes does not delete existing history.
 
   const stateRows = await sbGet(env, `meta_realtime_current?select=meta_worker_key,coupang_id,driver_name,work_completed_at,completion_method&batch_id=eq.${batch.id}`) || [];
   const expected = scheduledPeople(schedule);

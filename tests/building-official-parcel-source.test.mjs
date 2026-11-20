@@ -10,7 +10,7 @@ for(const [page,html] of [["route",route],["zip",zip]]){
   for(const [,js] of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)){
     if(js.trim())assert.doesNotThrow(()=>new Function(js),page+" embedded script must parse");
   }
-  assert(html.includes('mw-building-parcel-source.js?v=20261120-1'),page+" must load official parcels module");
+  assert(html.includes('mw-building-parcel-source.js?v=20261120-2'),page+" must load official parcels module");
   assert(html.includes('MOIS_BUILDING_MANAGEMENT_ID'),page+" payload must state exact source");
 }
 assert(!route.includes('const discovery=await discoverScopeParcelsForRoute(memoryKey,feature,force===true)'),"route must not use Kakao flood");
@@ -45,6 +45,12 @@ assert.equal(api.buildingParcelIdentity("1156013300108430005005891").parcelSubNo
 assert.equal(api.buildingParcelIdentity("no"),null);
 const parsed=api.buildParcels(f,{type:"Polygon",coordinates:[[[126.89,37.48],[126.91,37.48],[126.91,37.50],[126.89,37.48]]]},fakeTurf,"07420");
 assert.equal(parsed.parcels.length,2,"buildings on same parcel must deduplicate by legal parcel");
+assert.equal(parsed.diagnostics.sampleCount,undefined,"official building count must not be masqueraded as Kakao point sampling");
+assert.equal(parsed.diagnostics.reverseSuccessCount,undefined,"no reverse geocoding was performed");
+assert.equal(parsed.diagnostics.sourceCoverage,"complete","only fully cached geometry can be treated as authoritative");
+assert.equal(parsed.diagnostics.detectedBuildingCount,3,"real building count is retained separately");
+assert.equal(parsed.diagnostics.parcelCount,2,"true parcel count is retained separately");
+
 assert.equal(parsed.parcels[0].hitCount,2);
 assert.equal(parsed.parcels[0].key,"11560|13300|1|0843|0005");
 assert.equal(parsed.parcels[0].sourceType,"BUILDING_PARCEL");

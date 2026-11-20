@@ -85,11 +85,14 @@
       diagnostics:{
         source:"MOIS_BUILDING_GEOMETRY_DB",
         ...counters,parcelCount:parcels.size,
-        sampleCount:counters.rawBuildingCount,
-        reverseSuccessCount:counters.insideBuildingCount,
-        legalDongPointCount:counters.insideBuildingCount,
-        parcelKeyPointCount:counters.insideBuildingCount,
-        reverseCoveragePercent:100,
+        // This is an exhaustive coverage-verified building geometry query,
+        // NOT a point-sampling discovery. Legacy V62 backend interprets a
+        // positive sampleCount as the number of sampled points and rejects
+        // large polygons below a minimum of 408-500 points. Never label the
+        // number of buildings as the number of samples: omit that field.
+        discoveryMethod:"OFFICIAL_BUILDING_FOOTPRINT",
+        sourceCoverage:"complete",
+        detectedBuildingCount:counters.insideBuildingCount,
         areaM2:Math.round(Number(turfApi.area(scope)||0))
       }
     };

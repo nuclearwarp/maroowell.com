@@ -34,6 +34,16 @@ export default {
         return cors(await handleExternalApi(request, url, env));
       }
 
+      // META collector control: super-admin only.
+      if (path === "/meta/collector-control") {
+        const access=await requireRouteWriteAccess(request,env);
+        if (!access.isAdmin && access.roleLevel<90)
+          throw routeHttpError(403,"META 수집기 관리 권한이 필요합니다.");
+        if (request.method==="GET") return cors(await handleMetaCollectorControlGet(env));
+        if (request.method==="POST") return cors(await handleMetaCollectorControlPost(request,env,access.userId));
+        return cors(json({error:"Method Not Allowed"},405));
+      }
+
       // Route notes can contain access codes: never expose them on public /route.
       if (path === "/route/notes") {
         await requireRouteWriteAccess(request, env);
@@ -713,6 +723,31 @@ async function handleExternalApi(request, url, env) {
   }
 
   return json({ error: "Not Found" }, 404);
+}
+
+// Never return META session cookies or cookie jar to the UI.
+async function handleMetaCollectorControlGet(env) {
+  const q=new URLSearchParams({id:"eq.1",select:"collector_paused,collector_paused_at",limit:"1"});
+  const rows=await supabaseFetch(env,"/rest/v1/meta_backend_state?"+q.toString(),{method:"GET"});
+  const state=Array.isArray(rows)?rows[0]:null;
+  if (!state)return json({error:"Collector state unavailable"},503,{"Cache-Control":"no-store"});
+  return json({ok:true,paused:state.collector_paused===true,pausedAt:state.collector_paused_at||null},200,{"Cache-Control":"no-store"});
+}
+async function handleMetaCollectorControlPost(request,env,userId) {
+  const body=await readJson(request);
+  if (typeof body?.paused!=="boolean")return json({error:"paused must be boolean"},400,{"Cache-Control":"no-store"});
+  const paused=body.paused;
+  const q=new URLSearchParams({id:"eq.1",select:"collector_paused,collector_paused_at"});
+  const rows=await supabaseFetch(env,"/rest/v1/meta_backend_state?"+q.toString(),{
+    method:"PATCH",headers:{Prefer:"return=representation"},
+    body:JSON.stringify({
+      collector_paused:paused,collector_paused_at:paused?new Date().toISOString():null,
+      collector_paused_by:paused?userId:null,updated_at:new Date().toISOString()
+    })
+  });
+  const state=Array.isArray(rows)?rows[0]:null;
+  if(!state)return json({error:"Collector state unavailable"},503,{"Cache-Control":"no-store"});
+  return json({ok:true,paused:state.collector_paused===true,pausedAt:state.collector_paused_at||null},200,{"Cache-Control":"no-store"});
 }
 
 // MW_ROUTE_WRITE_AUTH_V1

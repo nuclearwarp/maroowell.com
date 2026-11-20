@@ -843,6 +843,9 @@ async function heartbeat(env, cookies, expectedGeneration = null) {
   return { ok: r.success, status: r.status };
 }
 async function runCollector(env, force = false) {
+  // An admin pause stops cron, manual runs and login-triggered resumes.
+  if ((await sessionState(env))?.collector_paused === true)
+    return {ok:true,skipped:"collector_paused"};
   const runToken = crypto.randomUUID();
   const runClaimed = await sbPost(env, "rpc/meta_claim_collector_run", { p_token: runToken, p_lease_seconds: 150 });
   if (!runClaimed) return { ok:false, skipped:"collector_run_locked" };
@@ -850,16 +853,9 @@ async function runCollector(env, force = false) {
     let state = await sessionState(env);
     if (!state?.cookie_bundle && !state?.cookie_jar) return { ok: false, error: "META_SESSION_MISSING" };
 
-    // Always-on collector: ignore stale pause flags and proactively renew the OAuth session.
-    if (state?.collector_paused === true) {
-      await sbPatch(env, "meta_backend_state?id=eq.1", {
-        collector_paused: false,
-        collector_paused_at: null,
-        collector_paused_by: null,
-        updated_at: new Date().toISOString()
-      });
-      state = { ...state, collector_paused: false };
-    }
+    // Recheck after lease acquisition to prevent automatic unpausing.
+    if (state?.collector_paused === true)
+      return {ok:true,skipped:"collector_paused"};
 
     if (state.status === "expired") {
       const recovered = await tryAutoRecover(env);
@@ -881,6 +877,10 @@ async function runCollector(env, force = false) {
     let successes = 0, failure = null;
 
     for (const batch of due) {
+      if ((await sessionState(env))?.collector_paused === true) {
+        results.push({skipped:"collector_paused"});
+        break;
+      }
       const lockToken = crypto.randomUUID();
       let claimed = false;
       try {

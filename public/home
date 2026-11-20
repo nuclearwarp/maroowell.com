@@ -154,6 +154,15 @@ button,input{font:inherit}
 <input id="scheduleDate" type="hidden">
 <div id="queryStatus" hidden></div>
 
+<section id="metaCollectorControl" class="card" hidden style="padding:14px 18px;margin-bottom:12px;display:none">
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div style="flex:1;min-width:170px"><strong style="font-size:15px">META 실시간 현황 수집</strong>
+      <div id="metaCollectorState" style="font-size:12px;color:#64748b;margin-top:4px" role="status">상태 확인 중…</div>
+    </div>
+    <button id="metaCollectorToggle" type="button" class="btn danger" disabled>상태 확인</button>
+  </div>
+</section>
+
 <section id="summarySection" class="card">
   <div class="sectionHead">
     <h2 id="summaryTitle">전체 실시간 현황</h2>
@@ -840,6 +849,41 @@ function bind(){
   });
 }
 
+const META_CONTROL_API="https://purple-river-0717.brain-0f6.workers.dev/meta/collector-control";
+async function metaControlRequest(method,paused){
+  const {data:{session}}=await S.sb.auth.getSession();
+  if(!session?.access_token)throw new Error("관리자 로그인이 필요합니다.");
+  const init={method,headers:{Authorization:"Bearer "+session.access_token,Accept:"application/json"},cache:"no-store"};
+  if(method==="POST"){init.headers["Content-Type"]="application/json";init.body=JSON.stringify({paused});}
+  const res=await fetch(META_CONTROL_API,init);
+  const result=await res.json().catch(()=>({}));
+  if(!res.ok||!result.ok)throw new Error(result.error||"수집기 설정 실패 (HTTP "+res.status+")");
+  return result;
+}
+function paintMetaCollectorState(paused){
+  const btn=$("metaCollectorToggle"),label=$("metaCollectorState");
+  label.textContent=paused?"수집 중지됨 · 기존 현황/최종 기록은 보존됩니다.":"수집 중 · 1분 간격으로 META 현황을 갱신합니다.";
+  label.style.color=paused?"#c2410c":"#15803d";
+  btn.textContent=paused?"실시간 수집 켜기":"실시간 수집 끄기";
+  btn.dataset.paused=String(paused);
+  btn.className=paused?"btn collectorOk":"btn danger";
+  btn.disabled=false;
+}
+async function refreshMetaCollectorState(){
+  const btn=$("metaCollectorToggle");
+  btn.disabled=true;
+  try{const status=await metaControlRequest("GET");paintMetaCollectorState(status.paused);}
+  catch(error){$("metaCollectorState").textContent=error?.message||String(error);btn.textContent="상태 재확인";btn.dataset.paused="unknown";btn.disabled=false;}
+}
+async function toggleMetaCollector(){
+  const btn=$("metaCollectorToggle");
+  if(btn.dataset.paused==="unknown")return refreshMetaCollectorState();
+  const paused=btn.dataset.paused==="true";
+  if(!paused&&!confirm("META 실시간 현황 수집을 중지할까요? 기존 기록은 유지됩니다."))return;
+  btn.disabled=true;
+  try{const updated=await metaControlRequest("POST",!paused);paintMetaCollectorState(updated.paused);}
+  catch(error){$("metaCollectorState").textContent="변경 실패: "+(error?.message||String(error));btn.disabled=false;}
+}
 async function boot(){
   bind();
   try{
@@ -851,6 +895,11 @@ async function boot(){
       for(const id of ["controlCard","summarySection","campSection","driverSection"]){const el=$(id);if(el)el.style.display="none";}
       return;
     }
+    const control=$("metaCollectorControl");
+    control.hidden=false;
+    control.style.display="";
+    $("metaCollectorToggle").addEventListener("click",toggleMetaCollector);
+    await refreshMetaCollectorState();
     await queryAll();
     restartAuto();
   }catch(e){

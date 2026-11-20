@@ -609,6 +609,7 @@ async function getAccess(env, user) {
       row.maroowell === true ||
       row.vendor_code === "MAROOWELL" ||
       row.vendor_code === "MARUL" ||
+      row.vendor_code === "MARWL" ||
       clean(row.vendor_name).includes("마루웰") ||
       scheduleAllowed
     ) {
@@ -1937,7 +1938,7 @@ function buildNativeMetaXlsx(rows,{camp,wave,phase}){
   const isOff=phase==="reset",status=isOff?"휴무":"출근";
   const rotation=wave==="WAVE1"?"D1,D2,F3":"1회전,2회전";
   const aoa=[headers,...rows.map(r=>[
-    r.date,"마루웰/MARUL",2591501828,campName,wave,r.name,r.id,status,
+    r.date,"주식회사 마루웰/MARWL",6128704101,campName,wave,r.name,r.id,status,
     isOff?"":rotation,isOff?"":r.routes.join(",")
   ])];
   const rowXml=aoa.map((row,ridx)=>`<row r="${ridx+1}">`+row.map((v,cidx)=>{

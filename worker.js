@@ -542,6 +542,24 @@ async function handleExternalApi(request, url, env) {
     return json({ error: "Method Not Allowed" }, 405);
   }
 
+  // Server-to-server private route note API. Never expose access-code-bearing
+  // notes through the public /route or /api/v1/subsubroutes response.
+  if (path === "/api/v1/route-notes") {
+    if (request.method === "GET") {
+      const key = await requireExternalApiKey(request, env, "route_notes.read");
+      const response = await handleRoutePrivateNotesGet(url, env);
+      await apiAudit(env, key, "route-notes", "read", request, response.status, url.searchParams.get("id"));
+      return response;
+    }
+    if (request.method === "POST") {
+      const key = await requireExternalApiKey(request, env, "route_notes.write");
+      const response = await handleRoutePrivateNotesPost(request, env);
+      await apiAudit(env, key, "route-notes", "write", request, response.status);
+      return response;
+    }
+    return json({error:"Method Not Allowed"},405);
+  }
+
   if (path === "/api/v1/subsubroutes") {
     if (request.method === "GET") {
       const key = await requireExternalApiKey(request, env, "subsubroutes.read");

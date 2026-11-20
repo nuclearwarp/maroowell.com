@@ -34,6 +34,13 @@ export default {
         return cors(await handleExternalApi(request, url, env));
       }
 
+      // Route notes can contain access codes: never expose them on public /route.
+      if (path === "/route/notes") {
+        await requireRouteWriteAccess(request, env);
+        if (request.method === "GET") return cors(await handleRoutePrivateNotesGet(url, env));
+        if (request.method === "POST") return cors(await handleRoutePrivateNotesPost(request, env));
+        return cors(json({ error: "Method Not Allowed" }, 405));
+      }
       if (path === "/route") {
         if (request.method === "GET") return cors(await handleRouteGet(url, env));
         if (request.method === "POST") {
@@ -418,7 +425,7 @@ async function handleApiSubsubrouteDelete(request, env, id) {
 
   const row = Array.isArray(rows) ? rows[0] : rows;
   if (!row) return json({ error: "Subsubroute not found" }, 404);
-  return json({ row: row, deleted: true }, 200, { "Cache-Control": "no-store" });
+  return json({ row: redactRouteMemo(row), deleted: true }, 200, { "Cache-Control": "no-store" });
 }
 
 async function handleApiSubsubroutePatch(request, env, id) {
@@ -446,7 +453,7 @@ async function handleApiSubsubroutePatch(request, env, id) {
   applyRouteDerivedFields(row);
   await enrichRowsWithVendorNames([row], env);
   await hydrateRouteRowsWithCamps([row], env);
-  return json({ row: row }, 200, { "Cache-Control": "no-store" });
+  return json({ row: redactRouteMemo(row) }, 200, { "Cache-Control": "no-store" });
 }
 
 async function handleExternalApi(request, url, env) {
@@ -1130,6 +1137,41 @@ async function hydrateRouteRowsWithCamps(rows, env) {
 }
 
 // ---------- /route ----------
+// Private route notes are accessible only to authorized route editors.
+function privateRouteId(value) {
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) throw routeHttpError(400, "유효한 노선 ID가 필요합니다.");
+  return id;
+}
+async function handleRoutePrivateNotesGet(url, env) {
+  const id = privateRouteId(url.searchParams.get("id"));
+  const q = new URLSearchParams({id:"eq."+id,select:"id,top_type,route_memo",limit:"1"});
+  const rows = await supabaseFetch(env, "/rest/v1/"+ROUTE_TABLE+"?"+q.toString(), {method:"GET"});
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return json({error:"노선을 찾을 수 없습니다."},404,{"Cache-Control":"no-store"});
+  return json({row},200,{"Cache-Control":"no-store"});
+}
+async function handleRoutePrivateNotesPost(request, env) {
+  const body = await readJson(request);
+  const id = privateRouteId(body?.id);
+  const valid = ["하이탑","정탑","로우탑"];
+  const top = body?.top_type == null ? "" : String(body.top_type).trim();
+  const memo = body?.route_memo == null ? "" : String(body.route_memo).trim();
+  if (top && !valid.includes(top)) return json({error:"탑유형은 하이탑, 정탑, 로우탑 중 하나여야 합니다."},400);
+  if (memo.length > 3000) return json({error:"특이사항은 3,000자 이하로 입력하세요."},400);
+  const q = new URLSearchParams({id:"eq."+id,select:"id,top_type,route_memo"});
+  const rows = await supabaseFetch(env,"/rest/v1/"+ROUTE_TABLE+"?"+q.toString(),{
+    method:"PATCH",headers:{Prefer:"return=representation"},
+    body:JSON.stringify({top_type:top || null,route_memo:memo || null,updated_at:new Date().toISOString()})
+  });
+  const row=Array.isArray(rows)?rows[0]:null;
+  if (!row) return json({error:"노선을 찾을 수 없습니다."},404,{"Cache-Control":"no-store"});
+  return json({row},200,{"Cache-Control":"no-store"});
+}
+function redactRouteMemo(row) {
+  if (row && typeof row==="object") delete row.route_memo;
+  return row;
+}
 async function handleRouteGet(url, env) {
   const camp = safeTrim(url.searchParams.get("camp"));
   const code = safeTrim(url.searchParams.get("code"));
@@ -1154,6 +1196,7 @@ async function handleRouteGet(url, env) {
   out.forEach(applyRouteDerivedFields);
   await enrichRowsWithVendorNames(out, env);
   await hydrateRouteRowsWithCamps(out, env);
+  out.forEach(redactRouteMemo);
 
   return json({ rows: out }, 200, { "Cache-Control": "no-store" });
 }
@@ -1257,7 +1300,7 @@ async function handleRoutePost(request, env) {
   await enrichRowsWithVendorNames([row], env);
   await hydrateRouteRowsWithCamps([row], env);
 
-  return json({ row }, 200, { "Cache-Control": "no-store" });
+  return json({ row: redactRouteMemo(row) }, 200, { "Cache-Control": "no-store" });
 }
 
 async function handleRouteDelete(request, env) {

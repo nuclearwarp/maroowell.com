@@ -2197,6 +2197,28 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
       </div>
     </div>
 
+    <div class="group sectionGroup" id="routeNotesGroup">
+      <button id="routeNotesToggleBtn" class="sectionHeaderBtn" type="button" aria-expanded="true">
+        <span>탑유형 · 특이사항</span><span class="sectionToggleText">접기</span>
+      </button>
+      <div id="routeNotesBody" class="sectionBody">
+        <div class="label">탑유형</div>
+        <select id="routeTopType" class="createInput" style="width:100%;color:#fff;background:#17243b">
+          <option value="">미지정</option>
+          <option value="하이탑">하이탑</option>
+          <option value="정탑">정탑</option>
+          <option value="로우탑">로우탑</option>
+        </select>
+        <div class="label" style="margin-top:10px">특이사항 메모</div>
+        <textarea id="routeSpecialMemo" maxlength="3000" rows="4" placeholder="현장 출입·주차·배송 관련 특이사항 (민감정보 입력 주의)" style="box-sizing:border-box;width:100%;min-height:100px;padding:10px;border-radius:10px;background:rgba(0,0,0,.2);color:#fff;border:1px solid rgba(255,255,255,.2);resize:vertical;font:inherit;font-size:12px"></textarea>
+        <div class="row" style="margin-top:10px;gap:8px">
+          <button id="routeNotesSaveBtn" class="btn ok" type="button">탑유형 · 메모 저장</button>
+          <span id="routeNotesStatus" style="font-size:11px;color:var(--muted);flex:1">라우트 선택 후 입력</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px">편집 권한이 있는 계정만 조회·수정할 수 있습니다. 공동현관 비밀번호 등 민감정보 취급에 주의하세요.</div>
+      </div>
+    </div>
+
     <div class="group sectionGroup" id="terrainInfoGroup">
       <button id="terrainInfoToggleBtn" class="sectionHeaderBtn" type="button" aria-expanded="true">
         <span>
@@ -2486,6 +2508,10 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
   const drawNewBtn = $("drawNewBtn");
   const drawAddBtn = $("drawAddBtn");
   const saveBtn = $("saveBtn");
+  const routeTopType = $("routeTopType");
+  const routeSpecialMemo = $("routeSpecialMemo");
+  const routeNotesSaveBtn = $("routeNotesSaveBtn");
+  const routeNotesStatus = $("routeNotesStatus");
   const deletePolyBtn = $("deletePolyBtn");
   const labelToggleBtn = $("labelToggleBtn");
   const vendorLabelToggleBtn = $("vendorLabelToggleBtn");
@@ -2578,6 +2604,7 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
   bindSectionToggle("terrainInfoGroup", "terrainInfoToggleBtn");
   bindSectionToggle("vendorInfoGroup", "vendorInfoToggleBtn");
   bindSectionToggle("deliveryInfoGroup", "deliveryInfoToggleBtn");
+  bindSectionToggle("routeNotesGroup", "routeNotesToggleBtn");
 
   async function doLogout(){
     try{ await mwSupabase?.auth?.signOut?.(); }catch{}
@@ -2652,6 +2679,60 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
     if (!r.ok) throw new Error(j?.error || j?.message || t || `HTTP ${r.status}`);
     return j;
   }
+
+  function clearRouteNotes(message="라우트 선택 후 입력"){
+    routeTopType.value="";
+    routeSpecialMemo.value="";
+    routeNotesStatus.textContent=message;
+    routeTopType.disabled=true;
+    routeSpecialMemo.disabled=true;
+    routeNotesSaveBtn.disabled=true;
+  }
+  async function fetchSelectedRouteNotes(id){
+    clearRouteNotes("특이사항 불러오는 중…");
+    const token=await getRouteWriteAccessToken();
+    if(!token){if(String(selectedRouteId)===String(id))clearRouteNotes("로그인이 필요합니다.");return;}
+    const url=new URL(API_BASE+"/route/notes");
+    url.searchParams.set("id",String(id));
+    const res=await fetch(url.toString(),{headers:{Authorization:"Bearer "+token,Accept:"application/json"},cache:"no-store"});
+    const data=await res.json().catch(()=>({}));
+    if(String(selectedRouteId)!==String(id))return;
+    if(!res.ok){clearRouteNotes(res.status===403?"편집 권한 없음":data.error||"특이사항 조회 실패");return;}
+    routeTopType.value=String(data.row?.top_type||"");
+    routeSpecialMemo.value=String(data.row?.route_memo||"");
+    routeTopType.disabled=false;
+    routeSpecialMemo.disabled=false;
+    routeNotesSaveBtn.disabled=isAppRouteViewer;
+    routeNotesStatus.textContent="변경 후 별도 저장";
+  }
+  async function saveSelectedRouteNotes(){
+    if(isAppRouteViewer)return;
+    if(!selectedRouteId){setStatus("라우트를 먼저 선택하세요.","WARN");return;}
+    const id=selectedRouteId;
+    routeNotesSaveBtn.disabled=true;
+    routeNotesStatus.textContent="저장 중…";
+    try {
+      const data=await apiJson("POST",API_BASE+"/route/notes",{
+        id:Number(id),
+        top_type:routeTopType.value||null,
+        route_memo:routeSpecialMemo.value||null
+      });
+      if(String(selectedRouteId)!==String(id))return;
+      const pack=overlayById.get(id);
+      if(pack?.row)pack.row.top_type=data.row?.top_type||null;
+      routeNotesStatus.textContent="저장 완료";
+      setStatus("탑유형·특이사항 저장 완료","OK");
+    }catch(error){
+      if(String(selectedRouteId)===String(id)){
+        routeNotesStatus.textContent=error.message||"저장 실패";
+        setStatus("탑유형·특이사항 저장 실패: "+(error.message||error),"ERR");
+      }
+    }finally{
+      if(String(selectedRouteId)===String(id))routeNotesSaveBtn.disabled=false;
+    }
+  }
+  routeNotesSaveBtn.addEventListener("click",()=>{saveSelectedRouteNotes().catch(error=>setStatus(String(error),"ERR"));});
+  clearRouteNotes();
 
   function openModal(el){ el.style.display="flex"; el.setAttribute("aria-hidden","false"); }
   function closeModal(el){ el.style.display="none"; el.setAttribute("aria-hidden","true"); }
@@ -3634,6 +3715,7 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
     overlayById.clear();
     routeRows=[];
     selectedRouteId=null;
+    clearRouteNotes();
     selectedInfo.textContent="선택: 없음";
     vendorWeekValue.textContent="-";
     vendorNightValue.textContent="-";
@@ -3764,6 +3846,13 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
     } = options;
 
     selectedRouteId=id;
+    if (!isAppRouteViewer) {
+      fetchSelectedRouteNotes(id).catch(error=>{
+        if(String(selectedRouteId)===String(id))clearRouteNotes("메모 조회 실패: "+String(error?.message||error));
+      });
+    } else {
+      clearRouteNotes();
+    }
 
     stopEditMode();
     stopDrawMode(true);
@@ -3800,6 +3889,7 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
 
   function clearSelection(reason="선택 해제"){
     selectedRouteId = null;
+    clearRouteNotes();
     stopEditMode();
     stopDrawMode(true);
     highlightSelection();
@@ -6383,6 +6473,7 @@ html.mw-app-route-mode #mwRouteRoadLegend{left:8px!important;bottom:calc(10px + 
   }
   function initAppRouteViewer(){
     if(!isAppRouteViewer)return;
+    document.getElementById("routeNotesGroup").style.display="none";
     for(const id of ["drawNewBtn","drawAddBtn","saveBtn","deletePolyBtn","vendorSaveBtn","vendorClearBtn","deliverySaveBtn","deliveryClearBtn"]){
       const b=document.getElementById(id);if(b)b.disabled=true;
     }

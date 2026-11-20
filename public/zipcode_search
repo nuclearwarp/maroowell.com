@@ -1728,6 +1728,7 @@
   <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=add4ce93b38c0ff9d9b9053728e067b3&libraries=services"></script>
   <link rel="stylesheet" href="/mw-global-font.css?v=20260925-2" />
 <script src="/mw-roadview-tracker.js?v=20261011-v1"></script>
+<script src="/mw-building-parcel-source.js?v=20261120-1"></script>
 <script src="/mw-zip-road-overlay.js?v=20261119-5"></script>
 </head>
 
@@ -4396,14 +4397,24 @@
             renderTerrainList();
           }
 
-          if (!state.kakaoGeocoder) {
-            throw new Error("카카오 주소 검색 라이브러리를 불러오지 못했습니다.");
+          // Derive the exact parcel identity from cached official building
+          // management numbers; do not perform dense Kakao reverse calls.
+          if (!window.MW_BUILDING_PARCEL_SOURCE) {
+            throw new Error("공용 건물 필지 모듈을 불러오지 못했습니다.");
           }
-
-          const legalDongCodes = await resolveLegalDongCodes(zip, feature);
-          if (!legalDongCodes.length) {
-            throw new Error("건축물 조회에 필요한 법정동 코드를 확인하지 못했습니다.");
-          }
+          state.buildingStatusByZip.set(zip,{state:"loading",message:"공용 건물 외곽선 DB에서 지번 확인 중…"});
+          renderTerrainList();
+          const official = await window.MW_BUILDING_PARCEL_SOURCE.load(feature.geometry,session.access_token,{
+            turf:window.turf,zipcode:zip,
+            onProgress:text=>{
+              state.buildingStatusByZip.set(zip,{state:"loading",message:text});
+              renderTerrainList();
+            }
+          });
+          const legalDongCodes = official.legalDongCodes.slice(0,BUILDING_MAX_LEGAL_DONG_CODES);
+          if (!legalDongCodes.length)throw new Error("건물관리번호에서 법정동 코드를 찾지 못했습니다.");
+          const officialDiscovery={parcels:official.parcels,diagnostics:official.diagnostics};
+          state.scopeParcelsByZip.set(zip,officialDiscovery);
 
           const basePayload = {
             zipcode: zip,
@@ -4429,7 +4440,7 @@
             });
             renderTerrainList();
 
-            scopeDiscovery = await discoverScopeParcels(zip, feature, force === true);
+            scopeDiscovery = officialDiscovery;
             if (!scopeDiscovery.parcels.length) {
               throw new Error(
                 `폴리곤 내부 필지를 확인하지 못했습니다. 표본 ${scopeDiscovery.diagnostics.sampleCount.toLocaleString("ko-KR")}개 / 역지오코딩 ${scopeDiscovery.diagnostics.reverseSuccessCount.toLocaleString("ko-KR")}건 / 법정동확인 ${scopeDiscovery.diagnostics.legalDongPointCount.toLocaleString("ko-KR")}건 / 필지키 ${scopeDiscovery.diagnostics.parcelKeyPointCount.toLocaleString("ko-KR")}건`
@@ -4442,7 +4453,7 @@
               force_refresh: false,
               scopeParcels: scopeDiscovery.parcels,
               scopeParcelDiscovery: scopeDiscovery.diagnostics,
-              locationSource: "KAKAO_POLYGON_REVERSE_PARCEL"
+              locationSource: "MOIS_BUILDING_MANAGEMENT_ID"
             });
           }
 
@@ -4481,7 +4492,7 @@
               scopeParcels: scopeDiscovery?.parcels || undefined,
               scopeParcelDiscovery: scopeDiscovery?.diagnostics || undefined,
               scopeTitleEvidence,
-              locationSource: "KAKAO_POLYGON_REVERSE_PARCEL"
+              locationSource: "MOIS_BUILDING_MANAGEMENT_ID"
             });
 
             if (Array.isArray(data?.scopeTitleContinuation?.evidence)) {

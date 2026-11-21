@@ -770,7 +770,7 @@ async function handleMetaCollectorControlPost(request,env,userId) {
 
 // MW_ROUTE_WRITE_AUTH_V1
 const ROUTE_WRITE_MIN_LEVEL = 60;
-const MAROOWELL_VENDOR_CODE = "bn_2591501828";
+const MAROOWELL_VENDOR_CODE = "bn_6128704101";
 
 function routeHttpError(status, message) {
   const err = new Error(message);

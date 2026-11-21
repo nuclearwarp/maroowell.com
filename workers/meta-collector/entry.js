@@ -950,7 +950,9 @@ export default {
       }
       if (path.startsWith("/login-") || path === "/test-db" || path === "/auto-recover" || path === "/silent-renew") {
         const response = await authWorker.fetch(request, env);
-        if (path === "/login-submit-code" && request.method === "POST" && response.ok) {
+        if ((path === "/login-submit-code" || path === "/login-send-code") &&
+            request.method === "POST" && response.ok &&
+            response.headers.get("x-mw-meta-auth-verified") === "1") {
           // A 200 from loginSubmitCode is only returned after MFA verification
           // and a successful authenticated META API request. Resume server-side,
           // never from the browser's popup-close event.

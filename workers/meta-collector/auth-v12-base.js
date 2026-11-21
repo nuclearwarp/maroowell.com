@@ -697,8 +697,10 @@ async function sendMfaCode(env) {
   const mfaForm = chooseMfaTypeForm(parseForms(cred.html, cred.url));
 
   if (!mfaForm) {
+    // No MFA form may mean credentials landed directly on the SPA shell.
+    // Do not assume authentication; verify actual account APIs before saving.
     return {
-      ok: false,
+      ok: false, stage: "no-mfa-form", jar,
       status: cred.response.status,
       url: cred.url,
       diagnostics: pageDiagnostics(cred.html, cred.url)
@@ -773,6 +775,102 @@ async function queryMeta(jar) {
   return { response: r, text, json, success };
 }
 
+// Isolated new-login verification: the old queryMeta, autoRecover,
+// silentRenew, session storage, and cookie rotation are unchanged.
+async function verifyNewLoginScope(jar) {
+  const vendorResponse = await requestWithJar(jar, "https://fly.coupang.com/v1/my-vendor", {
+    method: "GET", headers: {
+      accept: "application/json", "accept-language": "ko-KR",
+      referer: FLY_REALTIME, "x-coupang-accept-language": "ko-KR",
+      "x-requested-with": "XMLHttpRequest"
+    }
+  });
+  let vendorData = null;
+  try { vendorData = await vendorResponse.json(); } catch (_) {}
+  const rawCodes = vendorData?.data?.contractedCampCodes;
+  const codes = Array.isArray(rawCodes)
+    ? [...new Set(rawCodes.map(x => String(x || "").trim().toUpperCase()).filter(x => /^[A-Z0-9_]{2,32}$/.test(x)))]
+    : [];
+  if (vendorResponse.status !== 200 || codes.length < 1 || codes.length > 1000)
+    return { ok: false, stage: "vendor-scope-not-verified", httpStatus: vendorResponse.status };
+
+  const payload = {
+    campCodes: codes.slice(0, 6), page: 0, size: 50,
+    sortDirection: "ASC", sortType: "DELIVERY_COMPLETED_RATIO",
+    waveCode: "WAVE2", workDate: kstDate()
+  };
+  const metaResponse = await requestWithJar(jar, META_SEARCH_URL, {
+    method: "POST", headers: {
+      accept: "application/json", "accept-language": "ko-KR",
+      "content-type": "application/json;charset=UTF-8",
+      origin: "https://fly.coupang.com", referer: FLY_REALTIME,
+      "x-coupang-accept-language": "ko-KR", "x-requested-with": "XMLHttpRequest"
+    },
+    body: JSON.stringify(payload)
+  });
+  let metaData = null;
+  try { metaData = await metaResponse.json(); } catch (_) {}
+  const verified = metaResponse.status === 200 &&
+    (metaData?.message === "SUCCESS" || Array.isArray(metaData?.data?.content));
+  return { ok: verified, stage: verified ? "direct-login-verified" : "meta-api-not-verified",
+    httpStatus: metaResponse.status };
+}
+
+function verifiedLoginPage(message) {
+  const response = page(
+    '<!doctype html><html lang="ko"><meta charset="utf-8"><title>META LOGIN OK</title>' +
+    '<body style="font:16px system-ui,sans-serif;background:#f3f7fb;padding:32px">' +
+    '<main style="max-width:460px;margin:auto;padding:24px;border-radius:16px;background:white">' +
+    '<h2>META 로그인 완료</h2><p>' + esc(message) + '</p>' +
+    '<p>인증이 검증되었으므로 실시간 수집을 재개합니다.</p>' +
+    '<a href="https://maroowell.com/realtime">실시간 현황으로 돌아가기</a>' +
+    '</main></body></html>'
+  );
+  const headers = new Headers(response.headers);
+  headers.set("x-mw-meta-auth-verified", "1");
+  return new Response(response.body, { status: response.status, headers });
+}
+
+async function loginStartPage(env) {
+  const token = await sealState(env, {
+    purpose: "meta-login-start", createdAt: Date.now(),
+    nonce: bytesToB64Url(crypto.getRandomValues(new Uint8Array(16)))
+  });
+  return page(
+    '<!doctype html><html lang="ko"><meta charset="utf-8"><title>META LOGIN</title>' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<body style="font:16px system-ui,sans-serif;background:#f3f7fb;padding:32px">' +
+    '<main style="max-width:460px;margin:auto;padding:24px;border-radius:16px;background:white">' +
+    '<h2>META 로그인 인증</h2><p>기존 META 계정으로 로그인합니다. 필요하면 등록된 휴대전화로 인증번호가 발송됩니다.</p>' +
+    '<form method="post" action="/login-send-code">' +
+    '<input type="hidden" name="state" value="' + esc(token) + '">' +
+    '<button type="submit" style="padding:13px 20px;border:0;border-radius:9px;background:#15536f;color:white;font-weight:bold">로그인 및 인증번호 요청</button>' +
+    '</form><p style="color:#667;font-size:13px">로그인 검증이 완료될 때까지 자동 수집은 OFF 상태로 유지됩니다.</p>' +
+    '</main></body></html>'
+  );
+}
+
+async function assertLoginStart(request, env) {
+  const origin = request.headers.get("origin");
+  const site = request.headers.get("sec-fetch-site");
+  const here = new URL(request.url).origin;
+  if ((origin && origin !== "null" && origin !== here) ||
+      (site && site !== "same-origin"))
+    throw new Error("LOGIN_ORIGIN_NOT_ALLOWED");
+  const contentType = request.headers.get("content-type") || "";
+  if (!/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(contentType))
+    throw new Error("LOGIN_FORM_REQUIRED");
+  const fields = await request.formData();
+  const stateToken = String(fields.get("state") || "");
+  if (stateToken.length > 10000) throw new Error("LOGIN_STATE_INVALID");
+  const state = await openState(env, stateToken);
+  const age = Date.now() - Number(state?.createdAt);
+  if (state?.purpose !== "meta-login-start" ||
+      !Number.isFinite(age) || age < -30000 || age > 300000 ||
+      typeof state?.nonce !== "string" || state.nonce.length < 16)
+    throw new Error("LOGIN_STATE_EXPIRED");
+}
+
 function otpPage(masked, token) {
   return page(`<!doctype html>
 <html lang="ko">
@@ -804,9 +902,27 @@ button{width:100%;margin-top:14px;border:0;border-radius:12px;padding:15px;font-
 </html>`);
 }
 
-async function loginSendCode(env) {
+async function loginSendCode(request, env) {
+  try { await assertLoginStart(request, env); }
+  catch (_) {
+    return page('<h2>로그인 요청이 유효하지 않거나 만료되었습니다.</h2>' +
+      '<p><a href="/login-send-code">처음부터 다시 시작</a></p>', 403);
+  }
   const mfa = await sendMfaCode(env);
-  if (!mfa.ok) return out({ ok: false, stage: "mfa-send", ...mfa }, 422);
+  if (!mfa.ok) {
+    if (mfa.stage === "no-mfa-form" && mfa.jar) {
+      const verified = await verifyNewLoginScope(mfa.jar);
+      if (verified.ok) {
+        await replaceBackendSession(env, mfa.jar, 200);
+        return verifiedLoginPage("문자 인증 없이 META API 로그인 검증이 완료되었습니다.");
+      }
+    }
+    return page('<h2>META 로그인 확인 실패</h2>' +
+      '<p>쿠팡 인증 폼이나 계정별 META API 접근을 확인하지 못했습니다.</p>' +
+      '<p>단계: ' + esc(mfa.stage || "mfa-send") + ' / HTTP ' + esc(String(mfa.status || "unknown")) + '</p>' +
+      '<p>자동 수집 OFF 상태를 유지합니다.</p>' +
+      '<p><a href="/login-send-code">다시 시도하기</a></p>', 422);
+  }
 
   const state = {
     v: 1,
@@ -890,18 +1006,7 @@ async function loginSubmitCode(request, env) {
 
   await replaceBackendSession(env, jar, 200);
 
-  const names = jar.namesFor(META_SEARCH_URL);
-  return page(`<!doctype html><html lang="ko"><meta charset="utf-8"><title>META 성공</title>
-<body style="font-family:Arial;background:#f5f6f8;padding:40px 18px">
-<div style="max-width:650px;margin:auto;background:white;padding:28px;border-radius:18px;box-shadow:0 8px 30px rgba(0,0,0,.08)">
-<h1 style="margin-top:0">✅ 자동 로그인 + 문자 인증 + META 조회 성공</h1>
-<p><b>META HTTP:</b> 200</p>
-<p><b>message:</b> ${esc(meta.json?.message || "SUCCESS")}</p>
-<p><b>DB 저장:</b> meta_backend_state.cookie_bundle 갱신 완료</p>
-<p><b>FLY 쿠키:</b> ${esc(names.join(", "))}</p>
-<p>Login verified. Realtime collection restart requested.</p>
-<p><a href="https://maroowell.com/realtime">Return to MAROOWELL realtime</a></p>
-</div></body></html>`);
+  return verifiedLoginPage("문자 인증 및 META API 로그인 검증이 완료되었습니다.");
 }
 
 async function testDb(env) {
@@ -1058,7 +1163,10 @@ export default {
 
     try {
       if (path === "/login-send-code" && request.method === "GET") {
-        return await loginSendCode(env);
+        return await loginStartPage(env);
+      }
+      if (path === "/login-send-code" && request.method === "POST") {
+        return await loginSendCode(request, env);
       }
 
       if (path === "/login-submit-code" && request.method === "POST") {

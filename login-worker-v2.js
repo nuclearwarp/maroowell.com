@@ -29,7 +29,7 @@ var login_worker_v2_default = {
       if (path === "/") url.pathname = "/index.html";
       if (path === "/coupangRouteMap") url.pathname = "/coupangRouteMap.html";
       if (path === "/admin_access" || path === "/maroowell_access") url.pathname = "/admin_access.html";
-      if (path === "/coupang_camp_map") url.pathname = "/coupang_camp_map_v20260928_area2";
+      // /coupang_camp_map is the current public asset. Never route it to dated snapshots.
       let response = await env.ASSETS.fetch(new Request(url.toString(), request));
       // A browser-only compatibility shim. It is inert unless an explicit
       // server-cookie login is active in this tab. Native app WebViews retain
@@ -147,7 +147,11 @@ var login_worker_v2_default = {
       if (path === "/meta-connection.js" && response.ok) {
         return withNoStore(response, "application/javascript; charset=utf-8");
       }
-      if ((path === "/coupang_camp" || path === "/coupang_camp_map") && response.ok) {
+      if (path === "/coupang_camp_map" && response.ok) {
+        // Avoid retaining old map HTML across deployments.
+        return withNoStore(response, "text/html; charset=utf-8");
+      }
+      if (path === "/coupang_camp" && response.ok) {
         return withNoStore(response, "text/html; charset=utf-8", true);
       }
 

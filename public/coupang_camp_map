@@ -618,7 +618,7 @@
         ignoreMapClickUntil: 0,
         isRoadmap: true,
         isRoadviewOn: false,
-        roadviewOverlay: null,
+        roadviewRequestSeq: 0,
         roadview:null, roadviewClient:null, roadviewTracker:null,
         selectedTypes: new Set()
       };
@@ -2537,37 +2537,85 @@
           dom.mapType.textContent = state.isRoadmap ? "위성" : "일반지도";
         });
 
-        function ensureMwRoadview(){
-          if(state.roadview)return;
-          state.roadview=new kakao.maps.Roadview($("#mwRoadviewPanel"));
-          state.roadviewClient=new kakao.maps.RoadviewClient();
-          state.roadviewTracker=window.MWRoadviewTracker?.bind({map:state.map,roadview:state.roadview,isActive:()=>state.isRoadviewOn});
+        function ensureMwRoadviewClient(){
+          if(!state.roadviewClient)state.roadviewClient=new kakao.maps.RoadviewClient();
         }
-        function openMwRoadview(latlng){
-          ensureMwRoadview();
-          state.roadviewClient.getNearestPanoId(latlng,300,panoId=>{
-            if(panoId==null){showToast("가까운 로드뷰가 없습니다.",true);return}
-            $(".mapPane").classList.add("mw-roadview-open");
-            state.map.relayout();
-            state.roadview.relayout?.();
-            state.roadview.setPanoId(panoId,latlng);
+        function ensureMwRoadview(){
+          ensureMwRoadviewClient();
+          if(state.roadview)return;
+          // The viewer must be constructed only after its panel is visible.
+          state.roadview=new kakao.maps.Roadview($("#mwRoadviewPanel"));
+          state.roadviewTracker=window.MWRoadviewTracker?.bind({
+            map:state.map,roadview:state.roadview,isActive:()=>state.isRoadviewOn
           });
         }
+        function relayoutMwRoadview(position){
+          requestAnimationFrame(()=>{
+            if(!state.map)return;
+            state.map.relayout();
+            if(position)state.map.setCenter(position);
+            requestAnimationFrame(()=>{
+              if(!state.map)return;
+              state.map.relayout();
+              if(position)state.map.setCenter(position);
+              state.roadview?.relayout?.();
+            });
+          });
+        }
+        function openMwRoadview(latlng){
+          if(!state.isRoadviewOn||!latlng)return;
+          ensureMwRoadviewClient();
+          const requestId=++state.roadviewRequestSeq;
+          const radii=[80,200,500];
+          const find=(index)=>{
+            state.roadviewClient.getNearestPanoId(latlng,radii[index],panoId=>{
+              if(!state.isRoadviewOn||requestId!==state.roadviewRequestSeq)return;
+              if(panoId==null){
+                if(index<radii.length-1)return find(index+1);
+                showToast("가까운 로드뷰가 없습니다.",true);
+                return;
+              }
+              $(".mapPane").classList.add("mw-roadview-open");
+              requestAnimationFrame(()=>{
+                if(!state.isRoadviewOn||requestId!==state.roadviewRequestSeq)return;
+                ensureMwRoadview();
+                state.roadview.relayout?.();
+                state.roadview.setPanoId(panoId,latlng);
+                relayoutMwRoadview(latlng);
+              });
+            });
+          };
+          find(0);
+        }
         kakao.maps.event.addListener(state.map,"click",e=>{
-          if(state.isRoadviewOn && e?.latLng){openMwRoadview(e.latLng);state.ignoreMapClickUntil=Date.now()+300;}
+          if(state.isRoadviewOn&&e?.latLng){
+            state.ignoreMapClickUntil=Date.now()+300;
+            openMwRoadview(e.latLng);
+          }
         });
-        dom.roadview.addEventListener("click", () => {
-          if (!state.map || !state.roadviewOverlay) {
-            showToast("로드뷰 오버레이를 사용할 수 없습니다.", true);
+        dom.roadview.addEventListener("click",()=>{
+          if(!state.map)return;
+          state.isRoadviewOn=!state.isRoadviewOn;
+          ++state.roadviewRequestSeq;
+          try{
+            if(state.isRoadviewOn)state.map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+            else state.map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW);
+          }catch(error){
+            state.isRoadviewOn=false;
+            showToast("카카오 로드뷰 도로 표시를 시작할 수 없습니다.",true);
+            console.warn("로드뷰 오버레이 실패",error);
             return;
           }
-
-          state.isRoadviewOn = !state.isRoadviewOn;
-          state.roadviewOverlay.setMap(state.isRoadviewOn ? state.map : null);
-          if(!state.isRoadviewOn){$(".mapPane").classList.remove("mw-roadview-open");state.roadviewTracker?.hide();state.map.relayout();}else showToast("지도에서 파란 도로를 선택하면 로드뷰가 열립니다.");
+          if(!state.isRoadviewOn){
+            $(".mapPane").classList.remove("mw-roadview-open");
+            state.roadviewTracker?.hide();
+            relayoutMwRoadview();
+          }
           dom.roadview.textContent=state.isRoadviewOn?"로드뷰 종료":"로드뷰";
-          dom.roadview.classList.toggle("primary", state.isRoadviewOn);
-          showToast(state.isRoadviewOn ? "로드뷰 도로 표시 ON" : "로드뷰 도로 표시 OFF");
+          dom.roadview.classList.toggle("primary",state.isRoadviewOn);
+          showToast(state.isRoadviewOn
+            ?"파란 도로를 클릭하면 로드뷰가 열립니다."
+            :"로드뷰 종료");
         });
 
         dom.current.addEventListener("click", () => {
@@ -2801,13 +2849,6 @@
         });
 
         state.geocoder = new kakao.maps.services.Geocoder();
-
-        try {
-          state.roadviewOverlay = new kakao.maps.RoadviewOverlay();
-        } catch (error) {
-          console.warn("로드뷰 오버레이 초기화 실패", error);
-          state.roadviewOverlay = null;
-        }
 
         state.clusterer = new kakao.maps.MarkerClusterer({
           map: state.map,

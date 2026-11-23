@@ -2253,7 +2253,6 @@
         roadview: null,
         roadviewClient: null,
         roadviewClickHandler: null,
-        roadviewRequestSeq: 0,
         roadviewWalkerV64: null,
         colors: [
           "#ff4b4b","#22c55e","#fbbf24","#3b82f6",
@@ -2753,15 +2752,10 @@
           });
         });
       }
-      // Create the panorama only after its panel becomes visible.
-      // Constructing Kakao Roadview in display:none can leave a blank canvas.
-      function ensureRoadviewClient() {
-        if (!state.roadviewClient) state.roadviewClient = new kakao.maps.RoadviewClient();
-      }
       function ensureRoadview() {
-        ensureRoadviewClient();
-        if (state.roadview) return;
+        if (state.roadview && state.roadviewClient) return;
         state.roadview = new kakao.maps.Roadview($("#roadview"));
+        state.roadviewClient = new kakao.maps.RoadviewClient();
         kakao.maps.event.addListener(state.roadview, "init", () => {
           syncRoadviewWalkerV64();
           scheduleRoadviewMapLayout(state.roadview.getPosition?.());
@@ -2790,34 +2784,21 @@
       }
 
       function setRoadviewAt(latlng) {
-        if (!state.map || !state.roadviewOn || !latlng) return;
-        ensureRoadviewClient();
-        // Ignore responses from clicks made before closing or changing the panorama.
-        const requestId = ++state.roadviewRequestSeq;
+        ensureRoadview();
         const radii = [80, 200, 500, 1200];
 
         const tryFind = (i) => {
           state.roadviewClient.getNearestPanoId(latlng, radii[i], (panoId) => {
-            if (!state.roadviewOn || requestId !== state.roadviewRequestSeq) return;
             if (panoId === null || panoId === undefined) {
               if (i < radii.length - 1) return tryFind(i + 1);
               alert("이 위치 근처에는 로드뷰가 없습니다.");
               return;
             }
 
-            // Close search results and their marker only after a panorama is found.
-            // Keep the selected ZIP polygons and the user's other map data intact.
-            closeLocationSearch();
-            setPanelCollapsed(true);
             state.roadviewOpen = true;
             $("#mapWrap").classList.add("roadview-open");
-            requestAnimationFrame(() => {
-              if (!state.roadviewOn || requestId !== state.roadviewRequestSeq) return;
-              ensureRoadview();
-              state.roadview.relayout?.();
-              state.roadview.setPanoId(panoId, latlng);
-              scheduleRoadviewMapLayout(latlng);
-            });
+            scheduleRoadviewMapLayout(latlng);
+            state.roadview.setPanoId(panoId, latlng);
           });
         };
 
@@ -2825,7 +2806,6 @@
       }
 
       function setRoadviewOn(on) {
-        ++state.roadviewRequestSeq;
         state.roadviewOn = !!on;
         if (!state.roadviewOn) state.roadviewOpen = false;
 
